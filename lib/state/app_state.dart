@@ -4749,6 +4749,23 @@ class AppState extends ChangeNotifier {
   bool get alarmPending =>
       _alarm.isPending(DateTime.now().millisecondsSinceEpoch);
 
+  /// The grace window is spent but the strap is still connected and the
+  /// absolute deadline (grace + one retry window) hasn't passed — a slow
+  /// strap is latency, not failure (edge#332). The UI keeps the neutral
+  /// "Setting alarm…" presentation instead of flapping to "not confirmed"
+  /// while a late event 56 can still arrive.
+  bool get alarmStillConfirming {
+    final epoch = _savedAlarm;
+    if (epoch == null) return false;
+    return alarmStillConfirming(
+      _alarm,
+      epoch,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+      connected: isConnected,
+      absoluteDeadlineMs: 2 * _alarm.graceMs,
+    );
+  }
+
   Future<void> setAlarm(DateTime when) async {
     if (!isConnected) throw Exception('Connect to your strap first');
     // Pass the DateTime through so the engine computes REAL sub-seconds for the
@@ -4810,32 +4827,48 @@ class AppState extends ChangeNotifier {
     // A newer alarm was armed while this timer was pending — that set owns the
     // confirmation machine now; retrying the stale time would clobber it.
     if (_savedAlarm != epoch) return;
-    if (_alarmAutoRetried || !isConnected) {
-      notifyListeners();
-      unawaited(_notifyAlarmLatchFailed(epoch));
-      return;
+    // While STILL CONNECTED the expired grace is NOT a failure verdict: real
+    // straps emit event 56 tens of seconds to minutes after the SET write
+    // (observed in the field, see edge#332). Firing the critical
+    // latch-failed notification here called the band a failure before the
+    // truth arrived. Keep listening — a late 56 still flips confirmed — and
+    // only escalate when the link is gone (a dropped one-shot notification
+    // can no longer be superseded) or the retry budget is spent.
+    if (isConnected && !_alarmAutoRetried) {
+      _alarmAutoRetried = true;
+      var rearmed = false;
+      try {
+        rearmed = await engine.setAlarm(when) != null;
+      } catch (e) {
+        _log('[alarm] auto-retry re-arm failed: $e');
+      }
+      if (!rearmed) _alarmAutoRetried = false;
+      if (_disposed) return;
+      if (rearmed && _savedAlarm == epoch && !_alarm.confirmed) {
+        _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
+        _armAlarmGraceTimer(when);
+        return;
+      }
     }
-    _alarmAutoRetried = true;
-    var rearmed = false;
-    try {
-      // gen5 made setAlarm return the armed instant (null = the write never
-      // reached the band) where it used to return a bool. Same signal, so the
-      // retry bookkeeping below is unchanged.
-      rearmed = await engine.setAlarm(when) != null;
-    } catch (e) {
-      _log('[alarm] auto-retry re-arm failed: $e');
-    }
-    // The write itself never landed, so the one retry was not actually spent —
-    // give it back rather than latching this alarm out of any future retry.
-    if (!rearmed) _alarmAutoRetried = false;
-    // dispose() ran while the write was in flight — do NOT create a timer it
-    // no longer has any chance to cancel (it would keep poking a torn-down
-    // engine on every fire).
-    if (_disposed) return;
-    // Re-check staleness after the await for the same reason as above.
-    if (rearmed && _savedAlarm == epoch && !_alarm.confirmed) {
-      _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
+    // Still connected and the absolute deadline hasn't passed: keep waiting
+    // quietly (the strap is slow, not broken) — re-check on the next grace
+    // tick instead of firing the critical notification. Only a dead link or
+    // a deadline overrun escalates (edge#332, points 2/3).
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final stillConfirming = alarmStillConfirming(
+      _alarm,
+      epoch,
+      nowMs: nowMs,
+      connected: isConnected,
+      absoluteDeadlineMs: 2 * _alarm.graceMs,
+    );
+    if (stillConfirming) {
+      // Keep the machine listening — but bounded: `setAtMs` only restarts on
+      // the ONE retry above, so the `setAtMs + absoluteDeadlineMs` check in
+      // alarmStillConfirming eventually goes false and the next grace tick
+      // escalates. No re-stamp happens here, by design.
       _armAlarmGraceTimer(when);
+      notifyListeners();
       return;
     }
     notifyListeners();

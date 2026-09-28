@@ -244,7 +244,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
         yAxis: axis,
         xLabels: [
           for (var i = 6; i >= 0; i--)
-            _weekdayLetter(c, end.subtract(Motion.tick * 86400 * i)),
+            // CALENDAR days, matching _daySlot/lastSevenDays: the flat
+            // 86400 stamped the wrong weekday letter in a DST week.
+            _weekdayLetter(
+                c, DateTime(end.year, end.month, end.day - i)),
         ],
         footnote: (loc?.workoutTonnageFootnoteIntro ??
                 'Reps × load over the sets you logged with a weight. ') +
@@ -341,7 +344,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
               // place and its letter, and draws as the gap it is.
               xLabels: [
                 for (var i = 6; i >= 0; i--)
-                  _weekdayLetter(c, end.subtract(Motion.tick * 86400 * i)),
+                  // CALENDAR days, matching _daySlot/lastSevenDays: the flat
+                  // 86400 stamped the wrong weekday letter in a DST week.
+                  _weekdayLetter(
+                      c, DateTime(end.year, end.month, end.day - i)),
               ],
               footnote: (loc?.workoutDailyLoadFootnoteIntro ??
                       'Banister training impulse — minutes weighted by '
@@ -2070,7 +2076,10 @@ Future<_WorkoutData> _loadWorkoutData(AppState app) async {
       // Nobody lifting is the normal case; a partial sum is still honest.
     }
 
-    final weekStart = end.subtract(Motion.tick * 86400 * (end.weekday - 1));
+    // Local-midnight week start, not elapsed 86400s — a DST week is off
+    // by an hour, misclassifying a workout that starts right at midnight.
+    final weekStart =
+        DateTime(end.year, end.month, end.day - (end.weekday - 1));
     final thisWeek = [for (final w in past) if (w.start.isAfter(weekStart)) w];
 
     int? tracked;

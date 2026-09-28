@@ -66,7 +66,11 @@ class AlarmScreen extends StatelessWidget {
           ? AlarmArmState.none
           : app.alarmConfirmed
               ? AlarmArmState.confirmed
-              : app.alarmPending
+              // pending OR still-confirming share the neutral "Waiting"
+              // state: a slow-but-connected strap is latency, not failure
+              // (edge#332) — the row must not flap between "Waiting" and
+              // "Not confirmed" while a late event 56 is still possible.
+              : (app.alarmPending || app.alarmStillConfirming)
                   ? AlarmArmState.pending
                   : AlarmArmState.unknown,
       connected: app.isConnected,
