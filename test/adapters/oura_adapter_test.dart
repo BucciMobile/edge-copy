@@ -413,29 +413,26 @@ void main() {
     expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1));
   });
 
-  test('a reboot is a reboot however many bytes remain: a pure-replay batch '
-      'carrying the boot record strands the bookmark too', () async {
-    // The hardware-factory-reset shape (the dock procedure — the only path a
-    // ring that talks to NOTHING has left, verified on a Ring 4 by the
-    // open_oura project's factory-reset.md). The counter restarts NEAR ZERO
-    // and the ring's first act on the new boot is to emit its boot record
-    // (`ring_start`, tag 0x41) BEFORE it has accumulated any history, so the
-    // batch answering the stale pre-reboot bookmark can carry only replays
-    // and report ZERO bytes left. Ending quietly there is the permanent
-    // silent stall — every record that ring takes from then on stays below
-    // the bookmark forever. The boot record is the confirmation the plain
-    // replay cannot give: it is the ring itself saying its counter
-    // restarted, at a stamp nothing but a reboot can produce under a
-    // bookmark taken on the previous boot's uptime.
+  test('an old boot record in the replayed tail is not a new reboot', () async {
+    // THE FALSE TRIPWIRE. A boot record (`ring_start`, tag 0x41) stamped below
+    // the cursor is one a previous session already read and advanced past — a
+    // normal sync leaves the cursor at the newest event, and the replayed
+    // tail it serves on the next idle sync can carry that boot record
+    // indefinitely. Resetting on its presence would drop a VALID bookmark on
+    // every idle sync and re-read history forever. The boot record is an
+    // archived frame for a future decoder, not a reboot tripwire: the reset
+    // runs on `bytesLeft > 0` alone, the same signal the empty-batch branch
+    // runs on.
     final (events, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
       if (v.first == 0x10) {
         return [
-          // The new boot's records, all below the pre-reboot bookmark.
-          _event(OuraAdapter.kOuraEvtRingStart, 2743, _hex('0400000032020c03')),
+          // The pre-reboot boot record, below the bookmark a previous
+          // session already advanced past it.
+          _event(0x41, 2743, _hex('0400000032020c03')),
           _event(kOuraEvtTempPeriod, 2800, _hex('6c0d')),
-          // And nothing left — the ring has only just booted.
+          // And nothing left — an up-to-date cursor.
           _summary(2, 0),
         ];
       }
@@ -443,11 +440,13 @@ void main() {
     });
     expect(
       events.whereType<BandNote>().any((n) => n.key == 'oura_cursor_stranded'),
-      isTrue,
-      reason: 'a boot record below the bookmark is a confirmed counter '
-          'reset even with no bytes remaining',
+      isFalse,
+      reason: 'an up-to-date cursor must not be reset because its replayed '
+          'tail still carries the old boot record',
     );
+    expect(events.whereType<SampleBatch>(), isEmpty);
   });
+
 
   test('replays with bytes remaining strand the bookmark, not just an empty '
       'batch', () async {

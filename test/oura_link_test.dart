@@ -340,6 +340,33 @@ void main() {
     expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
   });
 
+  test('a stranded reset invalidates the stored time anchor too', () async {
+    // THE ANCHOR IS A (previous-boot ds, Unix) PAIR, and the reset means the
+    // boot it was measured on is gone. Left in storage, the next session's
+    // `_loadAnchor` hands it to the adapter, and readings from the new boot's
+    // first batches are stamped by extrapolating the OLD origin across the
+    // NEW uptime — plausible, wrong, and indistinguishable from a
+    // measurement downstream. The reset clears the durable anchor and the
+    // session copy both, so those readings wait for the new boot's own
+    // `time_sync` instead.
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
+    await LocalDb.setCursor('oura_anchor:$_deviceId', '4000,1782043215');
+    await OuraLink.instance.ingestForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 4096)];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
+    expect(await LocalDb.getCursor('oura_anchor:$_deviceId'), isNull,
+        reason: 'the anchor was measured on the boot the reset ended');
+  });
+
   test('the band-only readers cannot see a ring row', () async {
     await _run([
       [

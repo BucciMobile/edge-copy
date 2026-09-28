@@ -282,10 +282,28 @@ class OuraLink {
   /// yet consumed, and nothing queued after it can be refused against a stale
   /// mark either — an advance that arrives after a reset belongs to the new
   /// boot's uptime and must be able to land.
-  void _resetCursor() {
+  ///
+  /// THE ANCHOR GOES WITH IT, durable and in-session both. The reset means the
+  /// ring's decisecond counter restarted, and the stored anchor is a
+  /// `(previous-boot ds, Unix)` pair — two numbers whose pairing is exactly
+  /// what the restart destroyed. Left in place, the next session's
+  /// `_loadAnchor` hands it to `OuraAdapter`, and the first batch's readings
+  /// are stamped by extrapolating the OLD boot's origin across the NEW boot's
+  /// uptime: plausible-looking, wrong, and indistinguishable from a
+  /// measurement by anything downstream (the same hazard the anchor's own
+  /// header exists to stop — two origins for one physiological second).
+  /// Clearing it means those readings wait in `_held` for the new boot's own
+  /// `time_sync` to stamp them, which every connect writes — and a reading
+  /// held rather than wrongly stamped is the honest half of that trade. The
+  /// session anchor is nulled here too so an in-flight `_makeHost`
+  /// `extraCursors` read does not re-persist the stale pair in the very next
+  /// commit.
+  void _resetCursor(String deviceId) {
     _cursorWrites = _cursorWrites.then((_) {
       _cursorHighWater = null;
-      return _persistCursor(0);
+      _anchor = null;
+      return LocalDb.deleteCursor(_anchorItem(deviceId))
+          .then((_) => _persistCursor(0));
     }).catchError((_) {});
   }
 
@@ -452,7 +470,8 @@ class OuraLink {
         // refuse the very re-read this reset exists to start.
         debugPrint('[oura] the bookmark is past the end of the ring — '
             'dropping it so the next sync re-reads from the beginning.');
-        _resetCursor();
+        final deviceId = _deviceId;
+        if (deviceId != null) _resetCursor(deviceId);
       case 'battery':
         if (value is int) _batteryPct = value;
       case 'battery_mv':

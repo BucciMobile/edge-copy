@@ -152,22 +152,6 @@ class OuraAdapter extends BandAdapter {
   /// short one when the cursor is advanced.
   static const int _kMaxEventsPerBatch = 255;
 
-  /// The ring's boot record (`ring_start`). The ring emits it once on start-up,
-  /// so a stamp below the session's bookmark that carries one is the ring
-  /// itself confirming its decisecond counter restarted — the documented
-  /// post-reboot shape (the counter is an uptime, so a reboot puts every later
-  /// record below a bookmark taken on the previous boot's uptime).
-  ///
-  /// DEFINED HERE rather than in the protocol package, deliberately for now:
-  /// the package's Oura module names only the event tags it can say something
-  /// about (see its own header on `kOuraEvtTimeSync`'s provenance), and a tag
-  /// constant whose only claim is "this is a boot record" belongs there only
-  /// once a decoder for its body lands with it. The VALUE is not in question —
-  /// it is the first event tag the framing reserves (`kOuraFirstEventTag`) and
-  /// is documented with real captured bytes by the open_oura project, whose
-  /// `decode_ring_start` reads a reason word then the firmware/bootloader/API
-  /// versions from its body.
-  static const int kOuraEvtRingStart = 0x41;
 
   /// The (ring decisecond, Unix second) pair this session is stamping against.
   ///
@@ -335,25 +319,28 @@ class OuraAdapter extends BandAdapter {
         if (fresh.isEmpty && got.events.isNotEmpty) {
           link.log('oura: the ring replayed ${got.events.length} event(s) '
               'below the cursor; nothing new after $cursor.');
-          // AND A REBOOT IS A REBOOT HOWEVER MANY BYTES REMAIN. The rebooted-
-          // counter scenario does not need `bytesLeft > 0` to strand the
-          // bookmark: after a hardware factory reset (the dock procedure, the
-          // only path a ring that talks to nothing has left) the counter
-          // restarts near zero and the ring's first act is to emit its boot
-          // record — `ring_start`, tag `0x41` — BEFORE it has accumulated any
-          // history at all, so the batch that answers the stale bookmark can
-          // legitimately carry only replays and report zero bytes left. Every
-          // record that ring takes from here on stays below the bookmark
-          // forever, and a session that ends quietly here is the permanent
-          // silent stall the stranded remedy exists to fix. The boot record is
-          // the confirmation the empty-batch branch does not have: it is the
-          // ring itself saying its counter restarted, at a stamp nothing but a
-          // reboot can produce under a bookmark that was taken on the previous
-          // boot's uptime. A batch of replays WITHOUT a boot record and without
-          // bytes left is the ordinary tail (an up-to-date cursor the ring
-          // still answers with replays, 2026-09-24) and still ends quietly.
-          final rebooted = got.events.any((e) => e.tag == kOuraEvtRingStart);
-          if (got.summary.bytesLeft > 0 || rebooted) {
+          // A REPLAY WITH BYTES REMAINING IS A STRANDED BOOKMARK TOO. The
+          // rebooted-counter scenario lands here exactly the way it lands in
+          // the empty-batch branch above — everything the ring now holds is
+          // below a bookmark taken before the reboot — except this ring answers
+          // with its last few pre-reboot events instead of nothing. Same
+          // signal, same remedy: the bookmark is unanswerable and must be
+          // dropped, or the ring quietly fills up behind it forever.
+          //
+          // AND THE BOOT RECORD ALONE IS NOT EVIDENCE OF A NEW REBOOT. A boot
+          // record stamped below the cursor is by definition one a previous
+          // session already read and advanced past — a normal sync's replayed
+          // tail can carry it indefinitely, and treating it as a fresh reboot
+          // would reset a VALID bookmark on every idle sync and re-read
+          // history forever. The failure this guard exists for — a hardware
+          // factory reset leaving the counter restarted below a stale
+          // bookmark — is not distinguishable from the plain stranded case
+          // by the boot record's presence, only by the ring still holding
+          // something it could not deliver, which is the same `bytesLeft > 0`
+          // signal the empty-batch branch above runs on. So the reset runs on
+          // that signal alone, and the boot record stays what it is: an
+          // archived frame for a future decoder, not a reboot tripwire.
+          if (got.summary.bytesLeft > 0) {
             yield const BandNote('oura_cursor_stranded');
           }
           return;
