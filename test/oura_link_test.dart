@@ -368,6 +368,40 @@ void main() {
     expect(await OuraLink.instance.sync(), isFalse);
   });
 
+  test('a ring that answers below the bookmark never moves it', () async {
+    // DEFENCE IN DEPTH, pinned at the storage seam. A ring that answers a
+    // bookmark with events stamped below it is serving a replayed tail, and
+    // advancing on it would move the bookmark BACKWARDS — a busy loop on a
+    // live radio, re-reading the same window on every future sync. The
+    // adapter drops replays before they can earn a cursor advance (see the
+    // adapter tests), and the host's high-water mark refuses a regressing
+    // write outright; this pins the observable end state — the stored
+    // bookmark survives a below-the-cursor answer untouched — because a
+    // guarantee that lives in two files is only proven when the storage seam
+    // refuses the wrong write, not when each layer promises to.
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
+    await OuraLink.instance.ingestForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtTimeSync, 4000, _syncBody(1782043215)),
+            _event(kOuraEvtTempPeriod, 4100, _hex(_temp3436)),
+            _summary(2, 0),
+          ];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 5000);
+  });
+
+
+
   group('forgetRing', () {
     test('drops the device row', () async {
       await LocalDb.upsertDevice(

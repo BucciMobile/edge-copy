@@ -106,7 +106,12 @@ const String _kResetFirst =
     'factory reset, so reset it first and then pair here — that is the order, '
     'and resetting is what frees the ring from whatever set it up before. '
     'The ring has no reset button: open the Oura app and remove/unpair the '
-    'ring there, then fully close that app before pairing here.';
+    'ring there, then fully close that app before pairing here. If that app '
+    'cannot reach the ring either, the charging dock can factory-reset it '
+    'without any app: seat the ring on the dock, then flip the dock '
+    'upside-down and back upright, waiting for the LED to turn blue, then '
+    'red, then purple, then yellow — yellow means the reset has started, and '
+    'a blinking blue LED a few minutes later means it is done.';
 
 String _hex(List<int> b) =>
     b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
@@ -233,8 +238,29 @@ class OuraLink {
   /// event callback that nothing awaits, so fire-and-forget let a teardown run
   /// first — and `stop()` clears `_deviceId`, which made the write a silent
   /// no-op. It also let a stranded-bookmark RESET be overtaken by an ordinary
-  /// advance arriving after it, putting the useless bookmark straight back.
+  /// advance arriving after it, putting the useless bookmark straight back —
+  /// which is what the high-water mark below now refuses outright rather than
+  /// hoping the write order holds.
   Future<void> _cursorWrites = Future.value();
+
+  /// The highest cursor THIS SESSION has advanced past, or null at the start.
+  ///
+  /// A LOAD-BEARING guard on `_persistCursor`, not an optimisation. The ring's
+  /// `GetEvent` cursor is a timestamp on the ring's own decisecond UPTIME, and
+  /// the documented answer to a cursor past the newest event is not an empty
+  /// batch but the last few events AGAIN (a replayed tail, observed live by the
+  /// open_oura project on a Horizon, 2026-09-24, and re-confirmed against the
+  /// Ring 4 capture notes — see `adapters/oura.dart`'s own header on it). A
+  /// drain that somehow ADVANCED on such a batch would move the bookmark
+  /// backwards, and the next sync would then replay the same window again and
+  /// again — a busy loop on a live radio that no test without hardware can
+  /// catch. The adapter drops replays and never emits a regressing
+  /// `oura_cursor_ds` for them, so on the happy path this guard never fires; it
+  /// exists because "the adapter never sends it" is a property of one file
+  /// today, and a high-water mark is cheaper than proving it forever. It is
+  /// seeded from the STORED bookmark at the start of a session — never from a
+  /// zero — and CLEARED (not lowered) by the one legitimate reset below.
+  int? _cursorHighWater;
 
   void _writeCursor(int ds) {
     _cursorWrites =
@@ -279,6 +305,9 @@ class OuraLink {
     _deviceId = deviceId;
     await _loadAnchor(deviceId);
     final cursor = await LocalDb.getCursorInt(_cursorItem(deviceId)) ?? 0;
+    // Seeded from the STORED bookmark so the session's high-water guard starts
+    // from where the last session actually got to — see `_cursorHighWater`.
+    _cursorHighWater = cursor;
 
     try {
       // A cap on concurrent SECONDARY links (never the band's own connect —
@@ -393,8 +422,17 @@ class OuraLink {
         // re-read is idempotent here (`decoded_onehz` REPLACEs by second,
         // `raw_archive` dedups on the frame bytes). Leaving it costs every
         // record the ring takes from here on, silently.
+        //
+        // THE HIGH-WATER MARK GOES WITH IT, cleared rather than lowered: the
+        // reboot is exactly the event that makes yesterday's high-water mark
+        // meaningless — the counter it was taken on is gone — so a mark left
+        // standing would refuse the very re-read this reset exists to start.
+        // Cleared BEFORE the write is queued, so an advance arriving from a
+        // later batch in the same session still seeds itself from the reset
+        // rather than from the stale mark.
         debugPrint('[oura] the bookmark is past the end of the ring — '
             'dropping it so the next sync re-reads from the beginning.');
+        _cursorHighWater = null;
         _writeCursor(0);
       case 'battery':
         if (value is int) _batteryPct = value;
@@ -456,11 +494,28 @@ class OuraLink {
   Future<void> _persistCursor(int ds) async {
     final deviceId = _deviceId;
     if (deviceId == null) return;
-    // NOT MONOTONIC, and it must not be. 0 arrives here when the ring reports
-    // data remaining and answers this bookmark with nothing — a bookmark past
-    // the end, which only ever gets there by going BACKWARDS. A guard that
-    // refused to lower it would turn the one recoverable case into the
-    // permanent stall it exists to fix.
+    // MONOTONIC EXCEPT FOR THE ONE RESET, and the exception is named rather
+    // than smuggled. 0 arrives here only from the stranded-bookmark handler,
+    // which clears the high-water mark BEFORE queueing the write — so at this
+    // point a null mark is that reset in progress, and any other value below
+    // the mark is a REGRESSION the adapter was never supposed to emit (a
+    // replayed tail answered an old cursor and something advanced on it; see
+    // `adapters/oura.dart`'s own header). Persisting a regression would replay
+    // the same window on every future sync — a busy loop on a live radio —
+    // while the one write-ordering hazard this used to guard (a reset
+    // overtaken by an ordinary advance) is now refused structurally instead
+    // of by hoping the serialised chain delivered in the right order.
+    final mark = _cursorHighWater;
+    if (mark != null && ds < mark) {
+      debugPrint('[oura] refusing to move the bookmark backwards '
+          '($mark → $ds); the reset path clears the mark, everything else '
+          'advances.');
+      return;
+    }
+    // Re-armed on every accepted write, including the reset's own 0 — the
+    // mark is only ever null between the handler clearing it and that write
+    // landing, which is exactly the window the reset needs.
+    _cursorHighWater = ds;
     await LocalDb.setCursor(_cursorItem(deviceId), '$ds');
   }
 
@@ -536,6 +591,9 @@ class OuraLink {
     _deviceId = deviceId;
     await _loadAnchor(deviceId);
     final cursor = await LocalDb.getCursorInt(_cursorItem(deviceId)) ?? 0;
+    // Same seeding as `_sync()`, for the same reason — a replay must behave
+    // identically whether it entered through the radio or through here.
+    _cursorHighWater = cursor;
     final link = ReplayBandLink();
     final host = _makeHost(
       deviceId,
@@ -572,6 +630,7 @@ class OuraLink {
     _host = null;
     _anchor = null;
     _deviceId = null;
+    _cursorHighWater = null;
     return link;
   }
 }
