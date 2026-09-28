@@ -15,7 +15,8 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/ble/ble_state.dart';
-import 'package:openstrap_edge/state/alarm_schedule.dart' show alarmLatchFailed;
+import 'package:openstrap_edge/state/alarm_schedule.dart'
+    show alarmLatchFailed, alarmStillConfirming;
 import 'package:openstrap_edge/sync/sync_policy.dart' show ClockRef;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 
@@ -387,6 +388,37 @@ void main() {
       expect(alarmLatchFailed(a, 1750000000, enabled: true), isFalse);
     });
   });
+
+    test('alarmStillConfirming: a connected strap inside the absolute '
+        'deadline is latency, not failure (edge#332)', () {
+      // Grace (30 s) long spent, link alive, deadline (2 x grace) not yet.
+      final a = AlarmConfirmation()..set(1750000000, 0);
+      expect(
+        alarmStillConfirming(a, 1750000000,
+            nowMs: 45000, connected: true, absoluteDeadlineMs: 60000),
+        isTrue,
+        reason: 'the UI must keep the neutral waiting presentation while a '
+            'late event 56 can still arrive');
+      // Past the absolute deadline: escalate, even while connected.
+      expect(
+        alarmStillConfirming(a, 1750000000,
+            nowMs: 60000, connected: true, absoluteDeadlineMs: 60000),
+        isFalse,
+        reason: 'the deadline must bound the wait or a silent strap never '
+            'escalates');
+      // Link gone: never "still confirming".
+      expect(
+        alarmStillConfirming(a, 1750000000,
+            nowMs: 45000, connected: false, absoluteDeadlineMs: 60000),
+        isFalse,
+        reason: 'a dropped one-shot notification can no longer be superseded');
+      // A confirmed or superseded alarm is not "still confirming".
+      expect(
+        alarmStillConfirming(a, 1750000001,
+            nowMs: 45000, connected: true, absoluteDeadlineMs: 60000),
+        isFalse,
+        reason: 'only the machine\'s own current target counts');
+    });
 
 
   // the SET_ALARM_TIME reply carries a haptics/alarm

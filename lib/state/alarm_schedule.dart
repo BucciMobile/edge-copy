@@ -258,3 +258,21 @@ bool alarmArmsTonight(int? armedEpochSec, DateTime now) {
 /// unit-testable without a fake OS notification sink.
 bool alarmLatchFailed(AlarmConfirmation a, int epoch, {required bool enabled}) =>
     enabled && a.targetEpoch == epoch && !a.confirmed;
+
+/// Whether an armed-but-unconfirmed alarm should still be presented as
+/// "confirming" rather than "not confirmed": the grace window has elapsed, but
+/// the link is alive and the absolute deadline (grace + one retry window)
+/// has not passed. Field straps emit event 56 tens of seconds to minutes
+/// after the SET write (edge#332), so while the strap can still speak, an
+/// expired grace is latency, not failure. Pure — caller supplies [nowMs].
+bool alarmStillConfirming(
+  AlarmConfirmation a,
+  int epoch, {
+  required int nowMs,
+  required bool connected,
+  required int absoluteDeadlineMs,
+}) =>
+    a.targetEpoch == epoch &&
+    !a.confirmed &&
+    connected &&
+    nowMs < (a.setAtMs ?? 0) + absoluteDeadlineMs;

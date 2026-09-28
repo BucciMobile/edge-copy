@@ -4749,6 +4749,23 @@ class AppState extends ChangeNotifier {
   bool get alarmPending =>
       _alarm.isPending(DateTime.now().millisecondsSinceEpoch);
 
+  /// The grace window is spent but the strap is still connected and the
+  /// absolute deadline (grace + one retry window) hasn't passed — a slow
+  /// strap is latency, not failure (edge#332). The UI keeps the neutral
+  /// "Setting alarm…" presentation instead of flapping to "not confirmed"
+  /// while a late event 56 can still arrive.
+  bool get alarmStillConfirming {
+    final epoch = _savedAlarm;
+    if (epoch == null) return false;
+    return alarmStillConfirming(
+      _alarm,
+      epoch,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+      connected: isConnected,
+      absoluteDeadlineMs: 2 * _alarm.graceMs,
+    );
+  }
+
   Future<void> setAlarm(DateTime when) async {
     if (!isConnected) throw Exception('Connect to your strap first');
     // Pass the DateTime through so the engine computes REAL sub-seconds for the
@@ -4832,6 +4849,27 @@ class AppState extends ChangeNotifier {
         _armAlarmGraceTimer(when);
         return;
       }
+    }
+    // Still connected and the absolute deadline hasn't passed: keep waiting
+    // quietly (the strap is slow, not broken) — re-check on the next grace
+    // tick instead of firing the critical notification. Only a dead link or
+    // a deadline overrun escalates (edge#332, points 2/3).
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final stillConfirming = alarmStillConfirming(
+      _alarm,
+      epoch,
+      nowMs: nowMs,
+      connected: isConnected,
+      absoluteDeadlineMs: 2 * _alarm.graceMs,
+    );
+    if (stillConfirming) {
+      // Keep the machine listening — but bounded: `setAtMs` only restarts on
+      // the ONE retry above, so the `setAtMs + absoluteDeadlineMs` check in
+      // alarmStillConfirming eventually goes false and the next grace tick
+      // escalates. No re-stamp happens here, by design.
+      _armAlarmGraceTimer(when);
+      notifyListeners();
+      return;
     }
     notifyListeners();
     unawaited(_notifyAlarmLatchFailed(epoch));
