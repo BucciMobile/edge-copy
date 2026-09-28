@@ -1327,7 +1327,7 @@ class AlarmConfirmation {
   static const int kEvtHapticsFired = 60;
 
   final int graceMs;
-  AlarmConfirmation({this.graceMs = 6000});
+  AlarmConfirmation({this.graceMs = 30000});
 
   int? targetEpoch; // the scheduled wake time (unix sec), or null when off
   bool confirmed = false; // strap emitted ALARM_SET (56)

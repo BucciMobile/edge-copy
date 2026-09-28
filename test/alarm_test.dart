@@ -326,6 +326,26 @@ void main() {
       expect(a.confirmed, isFalse);
       expect(a.targetEpoch, 1750000000);
     });
+    test('default grace window covers the field-observed event-56 latency '
+        '(edge#332)', () {
+      // Observed in the field: the strap emits ALARM_SET (event 56) tens of
+      // seconds to minutes after the SET write, and the alarm fires correctly
+      // in the morning. A 6 s default called that band a failure before the
+      // truth arrived; the default must cover the routine case.
+      final a = AlarmConfirmation();
+      expect(a.graceMs, greaterThanOrEqualTo(30000),
+          reason: 'a shorter default re-introduces the false "not confirmed" '
+              'warning for every slow strap');
+      a.set(1750000000, 0);
+      expect(a.isPending(29999), isTrue,
+          reason: 'inside the grace window the alarm is still "setting", '
+              'not "unconfirmed"');
+      expect(a.isUnconfirmed(29999), isFalse);
+      // A late 56 arriving anywhere inside the window still confirms.
+      expect(a.onEvent(AlarmConfirmation.kEvtSet, 29999),
+          AlarmEffect.confirmed);
+      expect(a.confirmed, isTrue);
+    });
   });
 
   // The pure decision behind AppState._notifyAlarmLatchFailed (Feature 2.1):

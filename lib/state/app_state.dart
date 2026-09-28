@@ -4810,33 +4810,28 @@ class AppState extends ChangeNotifier {
     // A newer alarm was armed while this timer was pending — that set owns the
     // confirmation machine now; retrying the stale time would clobber it.
     if (_savedAlarm != epoch) return;
-    if (_alarmAutoRetried || !isConnected) {
-      notifyListeners();
-      unawaited(_notifyAlarmLatchFailed(epoch));
-      return;
-    }
-    _alarmAutoRetried = true;
-    var rearmed = false;
-    try {
-      // gen5 made setAlarm return the armed instant (null = the write never
-      // reached the band) where it used to return a bool. Same signal, so the
-      // retry bookkeeping below is unchanged.
-      rearmed = await engine.setAlarm(when) != null;
-    } catch (e) {
-      _log('[alarm] auto-retry re-arm failed: $e');
-    }
-    // The write itself never landed, so the one retry was not actually spent —
-    // give it back rather than latching this alarm out of any future retry.
-    if (!rearmed) _alarmAutoRetried = false;
-    // dispose() ran while the write was in flight — do NOT create a timer it
-    // no longer has any chance to cancel (it would keep poking a torn-down
-    // engine on every fire).
-    if (_disposed) return;
-    // Re-check staleness after the await for the same reason as above.
-    if (rearmed && _savedAlarm == epoch && !_alarm.confirmed) {
-      _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
-      _armAlarmGraceTimer(when);
-      return;
+    // While STILL CONNECTED the expired grace is NOT a failure verdict: real
+    // straps emit event 56 tens of seconds to minutes after the SET write
+    // (observed in the field, see edge#332). Firing the critical
+    // latch-failed notification here called the band a failure before the
+    // truth arrived. Keep listening — a late 56 still flips confirmed — and
+    // only escalate when the link is gone (a dropped one-shot notification
+    // can no longer be superseded) or the retry budget is spent.
+    if (isConnected && !_alarmAutoRetried) {
+      _alarmAutoRetried = true;
+      var rearmed = false;
+      try {
+        rearmed = await engine.setAlarm(when) != null;
+      } catch (e) {
+        _log('[alarm] auto-retry re-arm failed: $e');
+      }
+      if (!rearmed) _alarmAutoRetried = false;
+      if (_disposed) return;
+      if (rearmed && _savedAlarm == epoch && !_alarm.confirmed) {
+        _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
+        _armAlarmGraceTimer(when);
+        return;
+      }
     }
     notifyListeners();
     unawaited(_notifyAlarmLatchFailed(epoch));
