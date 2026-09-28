@@ -413,6 +413,42 @@ void main() {
     expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1));
   });
 
+  test('a reboot is a reboot however many bytes remain: a pure-replay batch '
+      'carrying the boot record strands the bookmark too', () async {
+    // The hardware-factory-reset shape (the dock procedure — the only path a
+    // ring that talks to NOTHING has left, verified on a Ring 4 by the
+    // open_oura project's factory-reset.md). The counter restarts NEAR ZERO
+    // and the ring's first act on the new boot is to emit its boot record
+    // (`ring_start`, tag 0x41) BEFORE it has accumulated any history, so the
+    // batch answering the stale pre-reboot bookmark can carry only replays
+    // and report ZERO bytes left. Ending quietly there is the permanent
+    // silent stall — every record that ring takes from then on stays below
+    // the bookmark forever. The boot record is the confirmation the plain
+    // replay cannot give: it is the ring itself saying its counter
+    // restarted, at a stamp nothing but a reboot can produce under a
+    // bookmark taken on the previous boot's uptime.
+    final (events, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+      if (v.first == 0x10) {
+        return [
+          // The new boot's records, all below the pre-reboot bookmark.
+          _event(OuraAdapter.kOuraEvtRingStart, 2743, _hex('0400000032020c03')),
+          _event(kOuraEvtTempPeriod, 2800, _hex('6c0d')),
+          // And nothing left — the ring has only just booted.
+          _summary(2, 0),
+        ];
+      }
+      return const [];
+    });
+    expect(
+      events.whereType<BandNote>().any((n) => n.key == 'oura_cursor_stranded'),
+      isTrue,
+      reason: 'a boot record below the bookmark is a confirmed counter '
+          'reset even with no bytes remaining',
+    );
+  });
+
   test('replays with bytes remaining strand the bookmark, not just an empty '
       'batch', () async {
     // The other shape the same ring hazard takes: after a REBOOT the ring's

@@ -300,6 +300,46 @@ void main() {
     }
   });
 
+  test('the stranded reset still lands when an advance is queued ahead of it',
+      () async {
+    // THE WRITE-ORDERING HOLE THE RESET OPERATION CLOSES. The stranded note
+    // can arrive while an ordinary `oura_cursor_ds` advance from an earlier
+    // batch is still queued (the note handler runs on the event stream, the
+    // writes run on the serialised chain). Clearing the high-water mark at
+    // note-arrival time let that queued advance run FIRST and re-arm the
+    // mark, so the reset's own write of 0 was then refused by the guard and
+    // the stranded bookmark stayed stored — the permanent stall the reset
+    // exists to fix. The reset now runs as its own operation in the queue and
+    // clears the mark when IT runs, so an advance queued ahead of it can
+    // re-arm the mark all it likes: the mark is null by the time the reset's
+    // own write is checked.
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
+    await OuraLink.instance.ingestForTest(
+      _deviceId,
+      _key,
+      // Batch 1 banks new data above the bookmark and emits a cursor advance;
+      // batch 2 comes back empty with bytes left — the stranded signal — so
+      // the advance's write and the reset's write are both in flight.
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first != 0x10) return const <List<int>>[];
+        final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
+        if (cursor == 0) {
+          return [
+            _event(kOuraEvtTimeSync, 5000, _syncBody(1782043215)),
+            _event(kOuraEvtTempPeriod, 5100, _hex(_temp3436)),
+            _summary(2, 512),
+          ];
+        }
+        return [_summary(0, 4096)];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    // The reset landed despite the advance queued ahead of it.
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
+  });
+
   test('the band-only readers cannot see a ring row', () async {
     await _run([
       [

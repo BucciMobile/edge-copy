@@ -108,10 +108,11 @@ const String _kResetFirst =
     'The ring has no reset button: open the Oura app and remove/unpair the '
     'ring there, then fully close that app before pairing here. If that app '
     'cannot reach the ring either, the charging dock can factory-reset it '
-    'without any app: seat the ring on the dock, then flip the dock '
-    'upside-down and back upright, waiting for the LED to turn blue, then '
-    'red, then purple, then yellow — yellow means the reset has started, and '
-    'a blinking blue LED a few minutes later means it is done.';
+    'without any app — four flips, each waiting for its LED colour: with the '
+    'ring seated, flip the dock upside-down and wait for blue, flip it back '
+    'upright and wait for red, upside-down again for purple, and upright a '
+    'final time for yellow — yellow means the reset has started, and a '
+    'blinking blue LED a few minutes later means it is done.';
 
 String _hex(List<int> b) =>
     b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
@@ -265,6 +266,27 @@ class OuraLink {
   void _writeCursor(int ds) {
     _cursorWrites =
         _cursorWrites.then((_) => _persistCursor(ds)).catchError((_) {});
+  }
+
+  /// Reset the bookmark through the SAME serialised queue, as its own
+  /// operation.
+  ///
+  /// THE ORDERING THE MARK CANNOT SURVIVE, made structural. Clearing the mark
+  /// at note-arrival time has a hole: an ordinary `oura_cursor_ds` advance
+  /// queued earlier but not yet executed runs FIRST, re-arms the mark with its
+  /// own value, and the reset's write of 0 is then refused by the guard in
+  /// `_persistCursor` — the stranded bookmark stays stored, exactly the stall
+  /// the reset exists to fix. Carrying the reset through the queue as a
+  /// distinct operation closes the hole: the mark is cleared WHEN THE RESET
+  /// RUNS, so nothing queued ahead of it can re-arm a mark the reset has not
+  /// yet consumed, and nothing queued after it can be refused against a stale
+  /// mark either — an advance that arrives after a reset belongs to the new
+  /// boot's uptime and must be able to land.
+  void _resetCursor() {
+    _cursorWrites = _cursorWrites.then((_) {
+      _cursorHighWater = null;
+      return _persistCursor(0);
+    }).catchError((_) {});
   }
 
   bool _busy = false;
@@ -423,17 +445,14 @@ class OuraLink {
         // `raw_archive` dedups on the frame bytes). Leaving it costs every
         // record the ring takes from here on, silently.
         //
-        // THE HIGH-WATER MARK GOES WITH IT, cleared rather than lowered: the
-        // reboot is exactly the event that makes yesterday's high-water mark
-        // meaningless — the counter it was taken on is gone — so a mark left
-        // standing would refuse the very re-read this reset exists to start.
-        // Cleared BEFORE the write is queued, so an advance arriving from a
-        // later batch in the same session still seeds itself from the reset
-        // rather than from the stale mark.
+        // THE HIGH-WATER MARK GOES WITH IT, cleared by the reset operation
+        // itself when it runs (see `_resetCursor`): the reboot is exactly the
+        // event that makes yesterday's high-water mark meaningless — the
+        // counter it was taken on is gone — so a mark left standing would
+        // refuse the very re-read this reset exists to start.
         debugPrint('[oura] the bookmark is past the end of the ring — '
             'dropping it so the next sync re-reads from the beginning.');
-        _cursorHighWater = null;
-        _writeCursor(0);
+        _resetCursor();
       case 'battery':
         if (value is int) _batteryPct = value;
       case 'battery_mv':
@@ -495,16 +514,16 @@ class OuraLink {
     final deviceId = _deviceId;
     if (deviceId == null) return;
     // MONOTONIC EXCEPT FOR THE ONE RESET, and the exception is named rather
-    // than smuggled. 0 arrives here only from the stranded-bookmark handler,
-    // which clears the high-water mark BEFORE queueing the write — so at this
-    // point a null mark is that reset in progress, and any other value below
-    // the mark is a REGRESSION the adapter was never supposed to emit (a
-    // replayed tail answered an old cursor and something advanced on it; see
-    // `adapters/oura.dart`'s own header). Persisting a regression would replay
-    // the same window on every future sync — a busy loop on a live radio —
-    // while the one write-ordering hazard this used to guard (a reset
-    // overtaken by an ordinary advance) is now refused structurally instead
-    // of by hoping the serialised chain delivered in the right order.
+    // than smuggled. 0 arrives here only through `_resetCursor`, which clears
+    // the high-water mark in the same queued operation immediately before
+    // this call — so at this point a null mark is that reset in progress, and
+    // any other value below the mark is a REGRESSION the adapter was never
+    // supposed to emit (a replayed tail answered an old cursor and something
+    // advanced on it; see `adapters/oura.dart`'s own header). Persisting a
+    // regression would replay the same window on every future sync — a busy
+    // loop on a live radio — while the one write-ordering hazard this used to
+    // guard (a reset overtaken by an ordinary advance) is closed by the reset
+    // running as its own operation in the serialised write chain.
     final mark = _cursorHighWater;
     if (mark != null && ds < mark) {
       debugPrint('[oura] refusing to move the bookmark backwards '
@@ -513,8 +532,8 @@ class OuraLink {
       return;
     }
     // Re-armed on every accepted write, including the reset's own 0 — the
-    // mark is only ever null between the handler clearing it and that write
-    // landing, which is exactly the window the reset needs.
+    // mark is only ever null inside the reset's queued operation, which is
+    // exactly the window the reset needs.
     _cursorHighWater = ds;
     await LocalDb.setCursor(_cursorItem(deviceId), '$ds');
   }
