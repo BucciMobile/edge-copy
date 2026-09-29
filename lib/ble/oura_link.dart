@@ -497,9 +497,12 @@ class OuraLink {
   }
 
   /// Bank one frame verbatim, decoded or not (owner rulings R1-R3): the beat
-  /// intervals, SpO2, the hypnogram and the steps are all in here undecoded
-  /// and the bytes are banked now so a decoder written when someone owns a
-  /// ring can be run over them.
+  /// intervals, SpO2 and the steps are all in here undecoded and the bytes
+  /// are banked now so a decoder written when someone owns a ring can be run
+  /// over them. The hypnogram is decoded in `adapters/oura.dart` now, and
+  /// its bytes are banked here too - the scalars that decode produces are
+  /// aggregates, and the epoch series itself stays in the archive for the
+  /// day a consumer for it exists.
   ArchiveRecord? _buildArchiveRow(List<int> bytes, int capturedAtMs) {
     final f = parseOuraFrame(bytes);
     if (f == null) return null;

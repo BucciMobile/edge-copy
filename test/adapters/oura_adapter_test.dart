@@ -24,6 +24,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/adapters/_registry.dart';
 import 'package:openstrap_edge/ble/adapters/adapter.dart';
 import 'package:openstrap_edge/ble/adapters/oura.dart';
+import 'package:openstrap_edge/data/observation.dart';
 import 'package:openstrap_protocol/openstrap_protocol.dart';
 
 /// Short enough that a deliberately-unanswered wait does not stall CI. The
@@ -515,5 +516,133 @@ void main() {
         .firstWhere((n) => n.key == 'oura_cursor_ds');
     expect(cursor.value, 1101);
     expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(2));
+  });
+
+  // ── The ring's own sleep staging, banked as vendor scalars ──────────────
+  //
+  // The decode itself is proven in `openstrap_protocol` (PR #71, against the
+  // open_oura project's pinned hardware vector). What is pinned here is the
+  // ADAPTER'S half: the per-stage minute counts it derives from the decoder's
+  // output, the anchor discipline it stamps them under, and the fact that the
+  // epoch series itself never leaves the raw archive — `observation` is
+  // scalars only, and a vendor hypnogram has no consumer yet.
+
+  /// One hypnogram event: 16 epochs, four per stage, so 2.0 min each.
+  ///
+  /// Body: header 0x00, then `00 55 aa ff` — MSB-first 2-bit codes give
+  /// deep x4, light x4, rem x4, awake x4. Constructed for this test rather
+  /// than lifted from the protocol package's own vector, because what is
+  /// pinned here is the AGGREGATE the adapter derives from the decode, not
+  /// the decode itself.
+  List<int> _hypnogramBody() => _hex('00' + '00' + '55' + 'aa' + 'ff');
+
+  test('a hypnogram event with an anchor banks per-stage minutes as vendor '
+      'scalars', () async {
+    // 1000 ds = 1782043215, and the hypnogram sits 20 seconds later.
+    final (events, _) = await _drive(
+      OuraAdapter(
+        key: _kKey,
+        anchor: (1000, 1782043215),
+        confirmTimeout: _kFast,
+        replyTimeout: _kFast,
+      ),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtSleepPhaseInformation, 1200, _hypnogramBody()),
+            _summary(1, 0),
+          ];
+        }
+        return const [];
+      },
+    );
+    final scalars = events.whereType<VendorScalars>().single;
+    expect(scalars.rows, hasLength(4));
+    // 16 epochs x 30 s = 8 min, four stages x 2.0 min each.
+    final byKey = {
+      for (final o in scalars.rows) o.vendorKey: o,
+    };
+    for (final stage in ['deep', 'light', 'rem', 'awake']) {
+      final o = byKey['sleep_${stage}_min']!;
+      expect(o.value, 2.0);
+      expect(o.unit, 'min');
+      expect(o.attribution, 'Oura');
+      expect(o.sourceKind, ObservationSource.vendor);
+      expect(o.key, isNull, reason: 'their staging, their name — vendorKey');
+    }
+    // Stamped on the event's own anchored second, not the arrival.
+    final at = byKey['sleep_deep_min']!.at;
+    expect(at.millisecondsSinceEpoch ~/ 1000, 1782043215 + 20);
+  });
+
+  test('a hypnogram decoded before any origin is held, then stamped by the '
+      'sync that finally carries one', () async {
+    // Same lifecycle as the held temperatures: the ring stamps on its own
+    // decisecond counter and there is no honest second without an origin.
+    // The hold only bites when the hypnogram arrives in an EARLIER batch
+    // than the sync — the anchor is applied to a batch before `_emit` decodes
+    // it, so a same-batch sync stamps directly and never exercises the hold.
+    // Two batches here: one hypnogram with bytes still left, then the
+    // measured bridge 100 ds after it.
+    // ONE session, two batches — the hold is state on this adapter instance,
+    // so a second `_drive` with a fresh adapter would prove nothing: its
+    // hold list is empty and there is nothing to stamp.
+    const syncUnix = 1782043215;
+    final (events, _) = await _drive(_adapter(), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+      if (v.first == 0x10) {
+        final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
+        if (cursor > 0) {
+          return [
+            // The measured bridge, 100 ds after the held hypnogram.
+            _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+            _summary(1, 0),
+          ];
+        }
+        return [
+          // Decoded with no origin and none in sight — held, not emitted.
+          _event(kOuraEvtSleepPhaseData, 900, _hypnogramBody()),
+          // Bytes still on the ring, so the drain asks again from 901.
+          _summary(1, 512),
+        ];
+      }
+      return const [];
+    });
+    // The first batch emitted nothing — held, not guessed at — and the second
+    // stamped all four rows the moment its sync gave the hold an origin.
+    final scalars = events.whereType<VendorScalars>().single;
+    expect(scalars.rows, hasLength(4));
+    // The anchor converts 900 ds to syncUnix minus 10 seconds, and every
+    // stage row carries that same honest second.
+    for (final o in scalars.rows) {
+      expect(o.at.millisecondsSinceEpoch ~/ 1000, syncUnix - 10);
+      expect(o.value, 2.0);
+    }
+  });
+
+  test('a hypnogram no origin ever reaches is dropped, not guessed', () async {
+    // No stored anchor, no time_sync in the drain. The aggregates vanish
+    // rather than take an arrival-stamped second: the row's identity is
+    // (device_id, ts_ms, source_kind, vendor_key), so a jittered arrival
+    // stamp does not just miss a night, it plants a made-up row that no
+    // re-read ever collapses. The frames stay in `raw` — banked, not lost.
+    final (events, _) = await _drive(_adapter(), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+      if (v.first == 0x10) {
+        return [
+          _event(kOuraEvtSleepPhaseDetails, 900, _hypnogramBody()),
+          _summary(1, 0),
+        ];
+      }
+      return const [];
+    });
+    expect(events.whereType<VendorScalars>(), isEmpty);
+    final batch = events.whereType<SampleBatch>().single;
+    expect(batch.raw, hasLength(1),
+        reason: 'the hypnogram frame itself is banked regardless');
   });
 }

@@ -43,6 +43,8 @@ import 'dart:typed_data';
 import 'package:openstrap_protocol/openstrap_protocol.dart';
 import 'package:pointycastle/export.dart' show AESEngine, ECBBlockCipher, KeyParameter;
 
+import '../../data/observation.dart'
+    show Observation, ObservationSource;
 import '_registry.dart';
 import 'adapter.dart';
 import 'signals.dart';
@@ -144,6 +146,12 @@ class OuraAdapter extends BandAdapter {
   /// per-family calibration that I8 exists to key does not apply. There is no
   /// member for absolute temperature and one should not be invented for a band
   /// nobody owns.
+  ///
+  /// Same ruling for the sleep-stage scalars `_emit` now emits: the decoder
+  /// exists (protocol PR #71) but no capture from a ring THIS project held has
+  /// met it, so [InputSignal.vendorScalars] stays undeclared too — the rows
+  /// land in `observation` either way, and a declared-but-unverified signal is
+  /// the permanently-empty card the header note above refuses.
   @override
   Map<InputSignal, Duration> get signals => const {};
 
@@ -177,6 +185,21 @@ class OuraAdapter extends BandAdapter {
   /// ever does, they are dropped: the frames are still handed over verbatim in
   /// every [SampleBatch], so nothing is lost that was not already banked.
   final List<(int ds, double tempC)> _held = [];
+
+  /// Hypnogram aggregates decoded before an origin could stamp them, as
+  /// `(ds, stage, minutes)`.
+  ///
+  /// Same lifecycle as [_held], and it exists for the same reason: the ring
+  /// stamps events on its own decisecond counter, and an observation row is
+  /// keyed `(device_id, ts_ms, source_kind, COALESCE(vendor_key, key))` — an
+  /// aggregate stamped on a WRONG second does not just miss a night, it
+  /// REPLACEs whatever row the right second would have produced and puts a
+  /// made-up number in its place. So the per-stage minute totals are held
+  /// until an origin can convert `ds` to a Unix second, and dropped at the
+  /// end of the drain when none ever could — the frames are still handed
+  /// over verbatim in every [SampleBatch], so nothing is lost that was not
+  /// already banked, and a later session with a stored anchor re-reads them.
+  final List<(int ds, OuraSleepPhase stage, double minutes)> _heldSleepStages = [];
 
   /// The Unix second [ds] falls on, or null when no origin is known.
   int? _anchorUnixFor(int ds) {
@@ -481,6 +504,67 @@ class OuraAdapter extends BandAdapter {
           if (d.text != null) link.log('oura fw: ${d.text}');
           if (d.batteryPct != null) yield BandNote('battery', d.batteryPct);
           if (d.batteryMv != null) yield BandNote('battery_mv', d.batteryMv);
+        case kOuraEvtSleepPhaseInformation:
+        case kOuraEvtSleepPhaseDetails:
+        case kOuraEvtSleepPhaseData:
+          // THE RING'S OWN SLEEP STAGING, banked as vendor scalars. This is
+          // the one event family whose payload is a CONCLUSION the hardware
+          // computed itself, not a signal to derive from — the native
+          // `SleepPhase_OSSAv1` classification, 30 s epochs, decoded by
+          // `decodeSleepPhases` in `openstrap_protocol` (PR #71, ported code
+          // for code from the open_oura project's Rust decoder, whose
+          // hardware provenance is a Gen 3 Horizon capture — R6: nothing here
+          // has met OUR ring).
+          //
+          // WHAT IS KEPT IS THE EVENT'S OWN DELIMITATION, not a night's. The
+          // wire hands over one hypnogram per event, and where a night's
+          // boundary sits is a judgement this file has no evidence for —
+          // `sleep_summary_1` (0x49) carries start/end as MINUTE OFFSETS that
+          // open_oura itself marks unvalidated, so rolling events up to a
+          // night would be inventing the one boundary that decides which
+          // minutes count. One event's stage totals are exactly what the ring
+          // claims, no more.
+          //
+          // THE PER-STAGE MINUTE COUNTS ARE THE SCALARS. The full epoch
+          // series is deliberately NOT written anywhere: `observation` is
+          // scalars only ("a vendor hypnogram ... has no consumer — give it
+          // a table of its own when something is actually going to read it",
+          // db.dart), the frames stay in `raw_archive` for the day a consumer
+          // exists, and durations are honest scalars — they are measurements
+          // of the ring's own classification, not scores out of 100.
+          //
+          // `vendorKey`, not `key`: deep/light/REM/awake minutes are THEIR
+          // stages under THEIR staging algorithm, a proprietary composite in
+          // exactly the sense `Observation`'s split exists to fence — the
+          // same `key` under two algorithms is the ambiguity the split
+          // stops, and our own `stages4` staging is a different algorithm
+          // answering the same question.
+          final hyp = decodeSleepPhases(e);
+          if (hyp == null) break;
+          final minutesPerStage = <OuraSleepPhase, int>{};
+          for (final phase in hyp.phases) {
+            if (phase == null) continue;
+            minutesPerStage.update(phase, (m) => m + 1, () => 1);
+          }
+          final at = _anchorUnixFor(e.tsDs);
+          if (at == null) {
+            for (final entry in minutesPerStage.entries) {
+              _heldSleepStages.add((e.tsDs, entry.key, entry.value * 0.5));
+            }
+            break;
+          }
+          final rows = [
+            for (final entry in minutesPerStage.entries)
+              Observation(
+                at: DateTime.fromMillisecondsSinceEpoch(at * 1000),
+                sourceKind: ObservationSource.vendor,
+                vendorKey: 'sleep_${entry.key.name}_min',
+                value: entry.value * 0.5,
+                unit: 'min',
+                attribution: 'Oura',
+              ),
+          ];
+          yield VendorScalars(rows);
       }
     }
     // Stamp everything an origin can now reach — this batch's readings and any
@@ -498,11 +582,29 @@ class OuraAdapter extends BandAdapter {
       ));
       return true;
     });
+    final stageRows = <Observation>[];
+    _heldSleepStages.removeWhere((h) {
+      final unix = _anchorUnixFor(h.$1);
+      if (unix == null) return false;
+      stageRows.add(Observation(
+        at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
+        sourceKind: ObservationSource.vendor,
+        vendorKey: 'sleep_${h.$2.name}_min',
+        value: h.$3,
+        unit: 'min',
+        attribution: 'Oura',
+      ));
+      return true;
+    });
+    if (stageRows.isNotEmpty) yield VendorScalars(stageRows);
     // EVERY event frame is archived, including the ones just decoded and every
-    // one that was not. Beat intervals, SpO2, the hypnogram and steps all live
-    // in here undecoded, and that is the point: the bytes are banked now so a
-    // decoder written when someone owns a ring can be run over them, instead of
-    // a guess being run over them today (owner rulings R1-R3).
+    // one that was not. Beat intervals, SpO2 and steps all live in here
+    // undecoded, and that is the point: the bytes are banked now so a decoder
+    // written when someone owns a ring can be run over them, instead of a
+    // guess being run over them today (owner rulings R1-R3). The hypnogram is
+    // decoded now, and its bytes are banked TOO - the scalars above are the
+    // aggregates, and the epoch series itself stays here for the day a
+    // consumer for it exists (`observation` is scalars only, db.dart).
     yield SampleBatch(samples, raw: got.raw);
   }
 }

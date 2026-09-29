@@ -255,7 +255,17 @@ dependencies:
       # `cmdAbortHistorical`). Also carries #70 (garmin/ultrahuman decode
       # fixes, unrelated but already an ancestor). Verified present:
       # `git show bc7d8d0:lib/src/labrador.dart | grep 'class LabradorR17'`.
-      ref: bc7d8d0df706e40a2546ffde4545263f09d0fecb
+      #
+      # REPIN (this branch): protocol PR #71 head @ 59b8ee1, six commits on
+      # top of that same bc7d8d0 tip - verified with
+      # `git merge-base --is-ancestor bc7d8d0 59b8ee1` on protocol, true - so
+      # nothing the pin already carried is lost by moving to it. PR#71 lands
+      # the Oura sleep-phase hypnogram decoder this branch's
+      # `lib/ble/adapters/oura.dart` `_emit` calls: `decodeSleepPhases`,
+      # `OuraSleepPhases`, `OuraSleepPhase` and the three
+      # `kOuraEvtSleepPhase*` tags. Verified present:
+      # `git show 59b8ee1:lib/src/oura.dart | grep 'OuraSleepPhases? decodeSleepPhases'`.
+      ref: 59b8ee115fec846df6302c14ff6eb656d7c64236
   openstrap_analytics:
     git:
       url: https://github.com/OpenStrap/analytics.git
