@@ -50,7 +50,10 @@ The argument for it, stated as strongly as it can be:
   can describe, and the `key`/`vendorKey` split exists to fence them. A
   hypnogram is different in kind: it is a **window claim plus a per-epoch
   classification**, the same shape as our own `stages4` staging. It is a
-  claim we can VALIDATE against our own staging, not a number we can only
+  claim we can CROSS-CHECK against our own staging — agreement is
+  evidence, not proof, since both algorithms can share the same error —
+  and ultimately validate only against an external reference (PSG), the
+  same way our own staging is validated. Not a number we can only
   display.
 - **The ring stages sleep ON the ring**, from its own multi-sensor array,
   with a firmware algorithm tuned by the vendor across their whole fleet.
