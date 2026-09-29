@@ -10,6 +10,7 @@ import 'l10n/app_localizations.dart';
 import 'notify/notification_service.dart';
 import 'notify/tap_router.dart';
 import 'state/app_state.dart';
+import 'state/clock_format.dart';
 import 'state/locale_controller.dart';
 import 'state/prefs.dart';
 import 'telemetry/telemetry_service.dart';
@@ -152,10 +153,56 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
         }
         return const Locale('en');
       },
-      builder: (context, child) =>
-          ThemeSwitchOverlay(key: themeSwitchKey, child: child!),
+      builder: (context, child) => _ClockScope(
+          child: ThemeSwitchOverlay(key: themeSwitchKey, child: child!)),
       navigatorObservers: [TelemetryNavigatorObserver()],
       home: const _Gate(),
+    );
+  }
+}
+
+/// Applies the user's 12/24-hour choice to the whole app.
+///
+/// Two halves, because the app formats clock times two ways. Flutter's own
+/// widgets (`showTimePicker`, `TimeOfDay.format`) read
+/// [MediaQueryData.alwaysUse24HourFormat], so that is overridden here. Every
+/// other time goes through the context-free `formatClock*` helpers in
+/// `state/clock_format.dart`, which no widget can depend on — so when the
+/// resolved format flips (the user's choice, or the OS setting under
+/// "System"), every element below is marked dirty once. Screens further down
+/// the navigator stack are rebuilt too; nothing is remounted, so no state or
+/// route is lost.
+class _ClockScope extends StatefulWidget {
+  const _ClockScope({required this.child});
+  final Widget child;
+
+  @override
+  State<_ClockScope> createState() => _ClockScopeState();
+}
+
+class _ClockScopeState extends State<_ClockScope> {
+  bool? _last;
+
+  @override
+  Widget build(BuildContext context) {
+    final use24 = context
+        .watch<ClockFormatController>()
+        .resolve24h(MediaQuery.alwaysUse24HourFormatOf(context));
+    if (_last != null && _last != use24) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        void mark(Element e) {
+          e.markNeedsBuild();
+          e.visitChildren(mark);
+        }
+
+        (context as Element).visitChildren(mark);
+      });
+    }
+    _last = use24;
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: use24),
+      child: widget.child,
     );
   }
 }
