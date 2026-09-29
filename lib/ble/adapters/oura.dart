@@ -132,13 +132,17 @@ class OuraAdapter extends BandAdapter {
 
   /// NOTHING, and that is the honest answer today rather than a placeholder.
   ///
-  /// The ring emits beat-to-beat intervals, SpO2 and a hypnogram, and this
-  /// adapter decodes none of them: their layouts are bit-packed and there is
-  /// not one captured byte of any of them to check a decoder against. A
-  /// declared-but-absent signal is WORSE than a missing one (see
-  /// [BandAdapter.signals]) — it turns a card that should delete itself into
-  /// one that is permanently empty — so nothing is claimed until a decoder
-  /// exists and a real capture has met it.
+  /// The ring emits beat-to-beat intervals and SpO2, and this adapter
+  /// decodes neither: their layouts are bit-packed and there is not one
+  /// captured byte of either to check a decoder against. The HYPNOGRAM is
+  /// decoded now (`_emit`, via protocol PR #71's `decodeSleepPhases`), and
+  /// what it produces is not a declared signal either — it banks per-stage
+  /// minute aggregates as undeclared vendor scalar observations while the
+  /// epoch series itself stays in `raw_archive`. A declared-but-absent
+  /// signal is WORSE than a missing one (see [BandAdapter.signals]) — it
+  /// turns a card that should delete itself into one that is permanently
+  /// empty — so nothing is claimed until a real capture from a ring this
+  /// project held has met the decoder.
   ///
   /// Temperature is emitted below and still not declared here, deliberately:
   /// [InputSignal.skinTempRaw] means RELATIVE ADC COUNTS (I8), and this ring
@@ -209,6 +213,17 @@ class OuraAdapter extends BandAdapter {
     // so the SPACING between records is exact however wrong the origin is.
     return a.$2 + (ds - a.$1) ~/ 10;
   }
+
+  /// NO SLEEP-STAGE ROW IS FROM THE FUTURE EITHER — the same bound the
+  /// host-side `_isPlausibleSecond` puts on a sample (`oura_link.dart`),
+  /// applied here because `VendorScalars` is banked OUTSIDE the commit path
+  /// (`host.dart`), so `_admitSample` never sees it. A stale anchor left
+  /// behind by a ring reboot extrapolates a record FORWARD past now — the
+  /// one reboot direction that can be bounded for free, same window (300 s
+  /// ahead) and same lower bound (an absolute Unix second in this decade) as
+  /// the link's, so the two checks cannot disagree about the same second.
+  bool _isPlausibleStageSecond(int unix) =>
+      unix <= nowSeconds() + 300 && unix >= 1700000000;
 
   @override
   Stream<BandEvent> run(BandLink link) async* {
@@ -553,6 +568,11 @@ class OuraAdapter extends BandAdapter {
             }
             break;
           }
+          // The plausibility bound is checked at STAMP time, not at hold
+          // time: the hold keeps `(ds, stage, minutes)` precisely because a
+          // later, better origin may make an implausible-looking ds honest
+          // after all — the one an origin from the SAME session cannot.
+          if (!_isPlausibleStageSecond(at)) break;
           final rows = [
             for (final entry in minutesPerStage.entries)
               Observation(
@@ -585,7 +605,11 @@ class OuraAdapter extends BandAdapter {
     final stageRows = <Observation>[];
     _heldSleepStages.removeWhere((h) {
       final unix = _anchorUnixFor(h.$1);
-      if (unix == null) return false;
+      // DROPPED, NOT GUESSED, for the same reason it was held at all: a
+      // plausibility failure here means no honest second exists for this
+      // aggregate, and holding it forever would only ever re-derive the
+      // same wrong stamp from the same wrong origin.
+      if (unix == null || !_isPlausibleStageSecond(unix)) return true;
       stageRows.add(Observation(
         at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
         sourceKind: ObservationSource.vendor,

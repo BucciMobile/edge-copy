@@ -623,6 +623,42 @@ void main() {
     }
   });
 
+  test('a hypnogram stamped in the future is dropped, not banked', () async {
+    // A stale anchor from before a ring reboot extrapolates a record
+    // FORWARD past now — the one direction that can be bounded for free,
+    // and the same bound the link's `_isPlausibleSecond` puts on a sample.
+    // `VendorScalars` is banked OUTSIDE the commit path, so the host's
+    // `_admitSample` never sees these rows: the adapter applies the bound
+    // itself, at stamp time, on both the immediate and the held-release
+    // path. 1000 ds = 1782043215 and the hypnogram sits at 9200 ds — a
+    // million seconds from the injected now, far past the 300 s window.
+    final (events, _) = await _drive(
+      OuraAdapter(
+        key: _kKey,
+        anchor: (1000, 1782043215),
+        confirmTimeout: _kFast,
+        replyTimeout: _kFast,
+        nowSeconds: () => 1782043215,
+      ),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtSleepPhaseInformation, 9200, _hypnogramBody()),
+            _summary(1, 0),
+          ];
+        }
+        return const [];
+      },
+    );
+    expect(events.whereType<VendorScalars>(), isEmpty,
+        reason: 'no sleep-stage row is from the future');
+    final batch = events.whereType<SampleBatch>().single;
+    expect(batch.raw, hasLength(1),
+        reason: 'the frame is banked regardless, like every other one');
+  });
+
   test('a hypnogram no origin ever reaches is dropped, not guessed', () async {
     // No stored anchor, no time_sync in the drain. The aggregates vanish
     // rather than take an arrival-stamped second: the row's identity is
