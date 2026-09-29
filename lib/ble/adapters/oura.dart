@@ -605,11 +605,18 @@ class OuraAdapter extends BandAdapter {
     final stageRows = <Observation>[];
     _heldSleepStages.removeWhere((h) {
       final unix = _anchorUnixFor(h.$1);
+      // STILL HELD, exactly like the temperatures above: null means no
+      // origin CAN reach this ds yet, and the hold exists so a LATER batch
+      // carrying a `time_sync` can stamp it. Removing it here would empty
+      // the hold in the same `_emit` call that filled it — the first
+      // pairing would lose its earliest stage minutes to a no-origin batch
+      // that a sync ten seconds later could have stamped.
+      if (unix == null) return false;
       // DROPPED, NOT GUESSED, for the same reason it was held at all: a
-      // plausibility failure here means no honest second exists for this
+      // plausibility failure means no honest second exists for this
       // aggregate, and holding it forever would only ever re-derive the
       // same wrong stamp from the same wrong origin.
-      if (unix == null || !_isPlausibleStageSecond(unix)) return true;
+      if (!_isPlausibleStageSecond(unix)) return true;
       stageRows.add(Observation(
         at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
         sourceKind: ObservationSource.vendor,

@@ -300,31 +300,36 @@ class OuraLink {
   /// commit.
   void _resetCursor(String deviceId) {
     // The captured [deviceId], not the mutable session `_deviceId`, and
-    // that is load-bearing twice over. This operation runs LATER than the
-    // note that queued it — anything from a teardown (`stop()` nulls
-    // `_deviceId`, making a plain `_persistCursor` read a silent no-op) to a
-    // second session for a DIFFERENT ring landing in between — so reading
-    // session state at run time would either skip the reset or write it
-    // under the wrong device.
+    // that is load-bearing: this operation runs LATER than the note that
+    // queued it — anything from a teardown (`stop()` nulls `_deviceId`,
+    // making a plain `_persistCursor` read a silent no-op) to a second
+    // session for a DIFFERENT ring landing in between — so reading session
+    // state at run time would either skip the reset or write it under the
+    // wrong device.
     //
-    // AND THE ANCHOR CLEANUP CANNOT GATE THE RESET. Chained as
-    // `deleteCursor().then((_) => _persistCursor(0))`, a failure in the
-    // anchor delete swallowed the whole chain — the stranded bookmark
-    // stayed stored, which is the exact permanent stall the reset exists
-    // to fix, now caused by the fix itself. The anchor is cleaned up
-    // best-effort (a stale anchor costs some held readings one session;
-    // a stranded bookmark costs every record the ring takes, forever) and
-    // the cursor reset runs regardless.
+    // THE ANCHOR DELETE AND THE CURSOR RESET ARE ALL-OR-NOTHING, and the
+    // order is the load-bearing half: the anchor goes FIRST, and a failure
+    // there ABORTS the whole reset. The two earlier shapes this replaced
+    // each failed one way — `deleteCursor().then(reset)` swallowed the
+    // reset on a delete failure (the stall stayed), while a best-effort
+    // delete that pressed on regardless produced something worse: cursor 0
+    // stored with the OLD anchor still loadable. The next session then
+    // re-reads everything — the reset DID run — and stamps the batches
+    // before the new `time_sync` by extrapolating the DEAD boot's origin
+    // across the new boot's uptime, which the plausibility bound cannot
+    // catch because a rebooted ring's early seconds are all in the past.
+    // A reset that stays incomplete is safe precisely because the
+    // stranded bookmark it leaves behind reads NOTHING, and the next
+    // session's stranded note re-runs the whole idempotent reset.
     _cursorWrites = _cursorWrites.then((_) async {
       _cursorHighWater = null;
       _anchor = null;
-      try {
-        await LocalDb.deleteCursor(_anchorItem(deviceId));
-      } catch (e) {
-        debugPrint('[oura] anchor cleanup failed during reset: $e');
-      }
+      await LocalDb.deleteCursor(_anchorItem(deviceId));
       await _persistCursor(0, deviceId);
-    }).catchError((_) {});
+    }).catchError((e) {
+      debugPrint('[oura] stranded reset incomplete; the bookmark stays and '
+          'the next sync re-runs it: $e');
+    });
   }
 
   bool _busy = false;
