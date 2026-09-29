@@ -1315,7 +1315,11 @@
   "healthBlurbNapMin": "Sommeil détecté en dehors de la nuit principale",
   "healthBlurbRespRate": "Respirations par minute, déduites du rythme cardiaque",
   "healthBlurbBrv": "À quel point ce rythme varie au cours de la nuit",
-  "healthBlurbSteps": "Comptés par un podomètre, jamais modélisés",
+    "healthBlurbSpo2": "Valeur propre de WHOOP, reprise d'une importation",
+  "@healthBlurbSpo2": {
+    "description": "Description du catalogue Explore : oxygène sanguin importé"
+  },
+"healthBlurbSteps": "Comptés par un podomètre, jamais modélisés",
   "healthBlurbActiveMin": "Minutes de volume de mouvement, pas de déplacement",
   "healthBlurbCalories": "Énergie active calculée à partir de la fréquence cardiaque et de votre profil",
   "healthBlurbStrain": "Charge cardiovasculaire sur la journée, sur une échelle de 0 à 21",

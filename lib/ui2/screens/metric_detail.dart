@@ -310,6 +310,34 @@ const _specs = <String, MetricSpec>{
     citation: 'Within-user dispersion',
     requires: {InputSignal.rrIntervals},
   ),
+  // Blood oxygen, as WHOOP'S OWN DERIVED VALUE from a CSV export — never as
+  // a measurement this app made. The band's raw red/IR ADCs are refused as an
+  // SpO2 source PERMANENTLY (see `kSpo2Refusal` in onehz_pipeline.dart: within
+  // a capture session `ir - red` is a fixed offset, so every ratio built from
+  // them measures baseline drift, not oxygenation). What survives is the
+  // vendor's own number, and only on days the WHOOP importer wrote
+  // (`series: {'spo2': ...}` in whoop_import.dart — DerivationEngine's own
+  // series map does NOT list the key, so a band re-derive can never fabricate
+  // one). SUPPRESSED rather than charted for the same reason skin_temp is:
+  // a chart mixes band-derived and vendor-imported points under one line with
+  // no provenance axis, and WHOOP's calibration is not this app's to audit.
+  'spo2': MetricSpec(
+    chartKey: 'spo2',
+    title: 'Blood oxygen',
+    unit: '%',
+    color: C.pink,
+    icon: LucideIcons.droplet,
+    higherBetter: true,
+    suppress: 'Not measured by this app. WHOOP\'s own derived value, carried '
+        'verbatim from an imported export — never computed from the band\'s '
+        'raw signals, whose red/IR pair cannot yield a saturation.',
+    method: 'Nothing is computed here. The nightly mean saturation is '
+        'WHOOP\'s own derived number, read from the `blood oxygen %` column '
+        'of an imported export and stored as-is with '
+        '`inputs_used: [whoop_export]`.',
+    citation: 'Vendor-derived, imported',
+    requires: {},
+  ),
   // Both of these were written to `metric_series` on every derive since v55 and
   // had no spec, so nothing could open them — `specOf` fell through to a
   // generic entry titled "nap min". They are 17/17 on real data.
