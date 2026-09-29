@@ -150,6 +150,32 @@ class Sample {
   /// [tempCh2C] and [dynAccelG].
   final int? bandSleepState;
 
+  /// The gen5 v18 SpO2 estimate/status byte, RAW — GEN5/MG ONLY, null on gen4.
+  ///
+  /// STORED, NEVER INTERPRETED. This is Option A of the SpO2 capture plan: the
+  /// band emits this byte every second whether or not anyone listens, and the
+  /// app threw it away. It is zero in ~99% of records, nonzero only while the
+  /// band's own sleep state reads `sleep`, and clusters at 95-99 — consistent
+  /// with a scheduled overnight sampling cadence. But the ENCODING is not
+  /// pinned (protocol refuses to publish a percentage from it; values above
+  /// 128 decompose as `128 + <a value from the low set>`, so bit 7 looks like
+  /// a flag), there is no validity flag to say which nonzero values are real,
+  /// and wrist reflectance oximetry is not cleared as a pulse oximeter for any
+  /// vendor. Persisting the raw byte claims none of that — it makes the data
+  /// exist, so the day the encoding is pinned against a real capture the
+  /// history is already there instead of starting then.
+  ///
+  /// The band-raw REFUSAL (`kSpo2Refusal`) is untouched: that governs gen4's
+  /// red/IR ADC pair (one signal — `ir − red` constant within a session) and
+  /// any DERIVED metric built from it. This field is the band's own computed
+  /// byte, stored unread. Nothing downstream consumes it; no metric, tier or
+  /// card may be built on it until the encoding is proven.
+  ///
+  /// 0 IS THE BAND'S "NO SAMPLE THIS SECOND", NOT A READING — and since the
+  /// byte is `required int` on the protocol record (never null), null here
+  /// means "not a gen5 v18 record". The raw 0 is preserved verbatim on gen5.
+  final int? spo2CandidateRaw;
+
   Sample({
     required this.tsEpoch,
     required this.counter,
@@ -175,6 +201,7 @@ class Sample {
     this.dynAccelG,
     this.tsSubsec,
     this.bandSleepState,
+    this.spo2CandidateRaw,
   });
 
   /// Copy with an overridden [tsEpoch] — used by the clock-offset salvage path
@@ -206,6 +233,7 @@ class Sample {
     dynAccelG: dynAccelG,
     tsSubsec: tsSubsec,
     bandSleepState: bandSleepState,
+    spo2CandidateRaw: spo2CandidateRaw,
   );
 
   bool get hasDecodedOneHz =>
@@ -251,6 +279,7 @@ class Sample {
       dynAccelG: (m['dyn_accel_g'] as num?)?.toDouble(),
       tsSubsec: (m['ts_subsec'] as num?)?.toInt(),
       bandSleepState: (m['band_sleep_state'] as num?)?.toInt(),
+      spo2CandidateRaw: (m['spo2_candidate_raw'] as num?)?.toInt(),
     );
   }
 }
