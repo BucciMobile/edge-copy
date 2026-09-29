@@ -334,10 +334,12 @@ class _Cat {
 /// The families, in the order a person looks for them.
 ///
 /// What is deliberately NOT here:
-/// - SpO2, ODI and anything apnea-shaped. Refused outright — a capability this
+/// - ODI and anything apnea-shaped. Refused outright — a capability this
 ///   app does not produce has no entry, no card and no key, and an index that
 ///   listed them to explain their absence would be the exact thing the
-///   absent-forever rule forbids.
+///   absent-forever rule forbids. (`spo2` is NOT in this bucket: it is a real
+///   `metric_series` key the WHOOP importer writes, so it has a row — with a
+///   spec that says whose number it is and why it is suppressed.)
 /// - Cycle. It is a Wellness tab with its own door and its own on/off switch;
 ///   a second entrance from Health would be a duplicate route, not a feature.
 /// - `rmssd_whole`, `stress_si`, `brv_slope`. Real numbers, but single-night
@@ -346,6 +348,16 @@ class _Cat {
 ///   `stress` and `brv` below are the charted forms of two of the three.
 /// - Body clock, zones, Nerd stats. Each already has a door at the same depth
 ///   as this one; adding a second is navigation debt.
+/// Every metric key the Explore catalogue lists, in display order.
+///
+/// Public so a test can pin the index without importing a private const —
+/// and so anything that needs "the keys this screen considers metrics"
+/// reads the SAME list the screen renders, not a second copy of it.
+final Set<String> catalogueKeys = {
+  for (final f in _catalogue)
+    for (final r in f.rows) r.key,
+};
+
 const _catalogue = <_Cat>[
   _Cat('Heart & rhythm', [
     _CatRow('resting_hr', 'rhr', 'The lowest sustained rate of the night'),
@@ -365,6 +377,7 @@ const _catalogue = <_Cat>[
   _Cat('Breathing', [
     _CatRow('resp_rate', 'resp_rate', 'Breaths per minute, recovered from beat timing'),
     _CatRow('brv', 'brv_cv', 'How much that rate varies across the night'),
+    _CatRow('spo2', 'spo2', "WHOOP's own derived value, carried from an import"),
   ]),
   _Cat('Movement & load', [
     _CatRow('steps', 'steps', 'Counted by a pedometer, never modelled'),
@@ -407,6 +420,7 @@ String _rowBlurb(AppLocalizations? l, String key, String blurb) =>
       'nap_min' => l?.healthBlurbNapMin ?? blurb,
       'resp_rate' => l?.healthBlurbRespRate ?? blurb,
       'brv' => l?.healthBlurbBrv ?? blurb,
+      'spo2' => l?.healthBlurbSpo2 ?? blurb,
       'steps' => l?.healthBlurbSteps ?? blurb,
       'active_min' => l?.healthBlurbActiveMin ?? blurb,
       'calories' => l?.healthBlurbCalories ?? blurb,
