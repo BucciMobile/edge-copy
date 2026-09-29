@@ -1082,9 +1082,9 @@
   "metricDetailRange6Months": "6 महीने",
   "metricDetailRangeYear": "साल",
   "metricDetailLockedNote": "{label} के लिए {needed} दिनों का इतिहास चाहिए। आपके पास {have} है।",
-    "metricDetailImportedTableTitle": "आूंत मान",
+    "metricDetailImportedTableTitle": "आयातित मान",
   "@metricDetailImportedTableTitle": {
-    "description": "सप्रेड की गई, वेंडर-आfातत मेट्रिक (रक्त ऑक्सीजन) के दिनांकित आयातत मान।"
+    "description": "दबाई गई, विक्रेता-आयातित मीट्रिक (रक्त ऑक्सीजन) के दिनांकित आयातित मान।"
   },
 "metricDetailNotShownTitle": "ट्रेंड के रूप में नहीं दिखाया गया",
   "metricDetailNothingRecordedToday": "आज कुछ भी दर्ज नहीं हुआ",

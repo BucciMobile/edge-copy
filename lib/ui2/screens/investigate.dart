@@ -129,7 +129,7 @@ class InvestigateData {
     final seriesPoints = spec.suppress != null && !spec.importedValues
         ? const <ChartPoint>[]
         : pointsOf(await repo.getChart(spec.chartKey));
-    final series = seriesOf({'points': seriesPoints});
+    final series = [for (final p in seriesPoints) p.v];
     final hrvish = key == 'hrv';
     final dc = hrvish
         ? pointsOf(await repo.getChart('prsa_dc'))
