@@ -1082,7 +1082,11 @@
   "metricDetailRange6Months": "6 Monate",
   "metricDetailRangeYear": "Jahr",
   "metricDetailLockedNote": "{label} benötigt {needed} Tage Verlauf. Du hast {have}.",
-  "metricDetailNotShownTitle": "Nicht als Trend angezeigt",
+    "metricDetailImportedTableTitle": "Importierte Werte",
+  "@metricDetailImportedTableTitle": {
+    "description": "Datierte importierte Werte einer unterdrückten, hersteller-importierten Metrik (Blutsauerstoff)."
+  },
+"metricDetailNotShownTitle": "Nicht als Trend angezeigt",
   "metricDetailNothingRecordedToday": "Heute nichts aufgezeichnet",
   "metricDetailNoHistoryYet": "Noch kein Verlauf für {metric}",
   "metricDetailNoValueYet": "Für heute liegt noch kein Wert vor.",

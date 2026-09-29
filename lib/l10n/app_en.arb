@@ -5433,7 +5433,11 @@
       }
     }
   },
-  "metricDetailNotShownTitle": "Not shown as a trend",
+    "metricDetailImportedTableTitle": "Imported values",
+  "@metricDetailImportedTableTitle": {
+    "description": "Dated imported values for a suppressed, vendor-imported metric (blood oxygen)."
+  },
+"metricDetailNotShownTitle": "Not shown as a trend",
   "@metricDetailNotShownTitle": {
     "description": "StatusCard title for a metric that cannot be charted as a trend (e.g. skin temperature)."
   },

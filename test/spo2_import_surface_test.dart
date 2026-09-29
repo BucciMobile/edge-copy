@@ -19,7 +19,9 @@ import 'package:openstrap_edge/compute/substrate.dart' show localDateLabel;
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/import/whoop_import.dart';
 import 'package:openstrap_edge/ui2/screens/health_screen.dart' show catalogueKeys;
-import 'package:openstrap_edge/ui2/screens/metric_detail.dart' show specOf;
+import 'package:openstrap_edge/data/local_repository_impl.dart';
+import 'package:openstrap_edge/ui2/screens/metric_detail.dart'
+    show MetricData, specOf;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io';
 import 'dart:convert';
@@ -72,5 +74,41 @@ void main() {
     expect(scalars['spo2'], 96.4);
     expect(
         (payload['flags'] as List).contains('IMPORTED_WHOOP_BETA'), isTrue);
+  });
+
+  // The point of the imported-values surface (CodeRabbit, OpenStrap/edge#472):
+  // a suppressed spec used to load NO series at all, so the catalogue row was
+  // a door that opened onto a bare wall — the imported numbers were stored
+  // and nobody could see them. `importedValues` is the flag that lets the
+  // suppressed spec load its series without ever charting it.
+  test('a suppressed imported spec still loads its stored series', () async {
+    final spec = specOf('spo2');
+    expect(spec.importedValues, isTrue,
+        reason: 'the spec must load its imported series despite suppression');
+    final dir = await Directory.systemTemp.createTemp('spo2_visible');
+    addTearDown(() => dir.delete(recursive: true));
+    const wake = '2026-03-10 07:15:00';
+    final f = File('${dir.path}/day.csv');
+    f.writeAsStringSync(
+      'Cycle start time,Wake onset,Sleep onset,Blood oxygen %\n'
+      '$wake,$wake,2026-03-09 23:10:00,95.1\n',
+    );
+    final res = await WhoopImporter.importFiles([f.path]);
+    expect(res.days, 1);
+    final repo = LocalRepositoryImpl(
+      getProfileMap: () => const <String, dynamic>{},
+    );
+    final d = await MetricData.load(repo, 'spo2');
+    expect(d.series, isNotEmpty,
+        reason: 'the imported values must be loadable for the dated table, '
+            'else the catalogue row cannot show what the importer wrote');
+    expect(d.series.last.v, 95.1);
+    // skin_temp is suppressed WITHOUT imported values — its load must stay
+    // empty; the flag must not leak suppression's refusal of the chart into
+    // other suppressed specs' data.
+    final skin = await MetricData.load(repo, 'skin_temp');
+    expect(skin.series, isEmpty,
+        reason: 'plain suppressed specs load nothing; only the imported '
+            'scalar spec has values worth loading');
   });
 }

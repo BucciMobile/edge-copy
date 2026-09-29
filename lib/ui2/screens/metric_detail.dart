@@ -55,6 +55,12 @@ class MetricSpec {
   /// reason, shown as a `StatusCard` in place of the chart.
   final String? suppress;
   final String? suppressFix;
+  /// True when the suppressed metric still has imported values worth
+  /// SHOWING. A suppressed spec loads no series at all — the chart is the
+  /// thing suppression refuses — but a vendor-imported scalar that IS the
+  /// metric deserves its values on screen, as a dated table with provenance
+  /// instead of a trend line. Data-loading flag, not a rendering one.
+  final bool importedValues;
 
   /// How it is computed, and who published the method. Rendered by Nerd stats.
   final String method;
@@ -83,6 +89,7 @@ class MetricSpec {
     this.higherBetter = true,
     this.suppress,
     this.suppressFix,
+    this.importedValues = false,
     this.method = '',
     this.citation = '',
     this.requires = const {},
@@ -336,6 +343,7 @@ const _specs = <String, MetricSpec>{
         'of an imported export and stored as-is with '
         '`inputs_used: [whoop_export]`.',
     citation: 'Vendor-derived, imported',
+    importedValues: true,
     requires: {},
   ),
   // Both of these were written to `metric_series` on every derive since v55 and
@@ -516,7 +524,9 @@ class MetricData {
     List<DeviceOption> candidates = const [],
   }) async {
     final spec = specOf(key);
-    if (spec.suppress != null) return const MetricData();
+    if (spec.suppress != null && !spec.importedValues) {
+      return const MetricData();
+    }
     final chart = await repo.getChart(
       spec.chartKey,
       signals: {for (final s in spec.requires) s.name},
@@ -880,6 +890,21 @@ class _MetricDetailState extends State<MetricDetail> {
           icon: spec.icon,
         ),
         const SizedBox(height: S.x5),
+        // The imported values themselves, as a dated table rather than a
+        // trend: suppression refuses the LINE (a chart would sit these
+        // vendor-derived points under the same maths as the band's own), not
+        // the numbers, which are the metric's only content. Newest first, so
+        // the latest import reads without scrolling.
+        if (d.series.isNotEmpty) ...[
+          MonoTable(
+            l?.metricDetailImportedTableTitle ?? 'Imported values',
+            [
+              for (final p in d.series.reversed.take(30))
+                (axisDay(p.t), '${p.v.toStringAsFixed(1)} ${spec.unit}'),
+            ],
+          ),
+          const SizedBox(height: S.x5),
+        ],
         investigateRow(c, () => go(c, Investigate(widget.metricKey))),
       ] else if (vals.isEmpty) ...[
         _ranges(c, d, spec.color),

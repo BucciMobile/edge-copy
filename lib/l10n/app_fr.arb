@@ -1082,7 +1082,11 @@
   "metricDetailRange6Months": "6 mois",
   "metricDetailRangeYear": "Année",
   "metricDetailLockedNote": "{label} nécessite {needed} jours d’historique. Vous en avez {have}.",
-  "metricDetailNotShownTitle": "Non affiché sous forme de tendance",
+    "metricDetailImportedTableTitle": "Valeurs importées",
+  "@metricDetailImportedTableTitle": {
+    "description": "Valeurs importées datées pour une métrique supprimée et importée du fournisseur (oxygène sanguin)."
+  },
+"metricDetailNotShownTitle": "Non affiché sous forme de tendance",
   "metricDetailNothingRecordedToday": "Rien d’enregistré aujourd’hui",
   "metricDetailNoHistoryYet": "Pas encore d’historique pour {metric}",
   "metricDetailNoValueYet": "Aujourd’hui n’a pas encore produit de valeur.",
