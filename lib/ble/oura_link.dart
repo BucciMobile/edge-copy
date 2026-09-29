@@ -299,11 +299,31 @@ class OuraLink {
   /// `extraCursors` read does not re-persist the stale pair in the very next
   /// commit.
   void _resetCursor(String deviceId) {
-    _cursorWrites = _cursorWrites.then((_) {
+    // The captured [deviceId], not the mutable session `_deviceId`, and
+    // that is load-bearing twice over. This operation runs LATER than the
+    // note that queued it — anything from a teardown (`stop()` nulls
+    // `_deviceId`, making a plain `_persistCursor` read a silent no-op) to a
+    // second session for a DIFFERENT ring landing in between — so reading
+    // session state at run time would either skip the reset or write it
+    // under the wrong device.
+    //
+    // AND THE ANCHOR CLEANUP CANNOT GATE THE RESET. Chained as
+    // `deleteCursor().then((_) => _persistCursor(0))`, a failure in the
+    // anchor delete swallowed the whole chain — the stranded bookmark
+    // stayed stored, which is the exact permanent stall the reset exists
+    // to fix, now caused by the fix itself. The anchor is cleaned up
+    // best-effort (a stale anchor costs some held readings one session;
+    // a stranded bookmark costs every record the ring takes, forever) and
+    // the cursor reset runs regardless.
+    _cursorWrites = _cursorWrites.then((_) async {
       _cursorHighWater = null;
       _anchor = null;
-      return LocalDb.deleteCursor(_anchorItem(deviceId))
-          .then((_) => _persistCursor(0));
+      try {
+        await LocalDb.deleteCursor(_anchorItem(deviceId));
+      } catch (e) {
+        debugPrint('[oura] anchor cleanup failed during reset: $e');
+      }
+      await _persistCursor(0, deviceId);
     }).catchError((_) {});
   }
 
@@ -532,8 +552,8 @@ class OuraLink {
     );
   }
 
-  Future<void> _persistCursor(int ds) async {
-    final deviceId = _deviceId;
+  Future<void> _persistCursor(int ds, [String? forDevice]) async {
+    final deviceId = forDevice ?? _deviceId;
     if (deviceId == null) return;
     // MONOTONIC EXCEPT FOR THE ONE RESET, and the exception is named rather
     // than smuggled. 0 arrives here only through `_resetCursor`, which clears
