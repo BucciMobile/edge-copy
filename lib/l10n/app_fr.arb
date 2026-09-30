@@ -2414,6 +2414,10 @@
   "@devicesWornBicepSub": {
     "description": "Step calibration wearing-location setting"
   },
+  "devicesWornUnknown": "Inconnu",
+  "@devicesWornUnknown": {
+    "description": "Détail de l'appareil : l'emplacement enregistré n'est pas connu par cette version"
+  },
   "devicesWornOtherSub": "Une poche ou un sac. Le bandeau y voit mal la marche.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"

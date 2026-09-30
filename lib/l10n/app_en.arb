@@ -12474,6 +12474,10 @@
   "@devicesWornBicepSub": {
     "description": "Step calibration wearing-location setting"
   },
+  "devicesWornUnknown": "Unknown",
+  "@devicesWornUnknown": {
+    "description": "Device detail: the stored wearing code is not one this build knows"
+  },
   "devicesWornOtherSub": "A pocket or bag. The band cannot see gait well there.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"

@@ -2414,6 +2414,10 @@
   "@devicesWornBicepSub": {
     "description": "Step calibration wearing-location setting"
   },
+  "devicesWornUnknown": "अज्ञात",
+  "@devicesWornUnknown": {
+    "description": "डिवाइस विवरण: सहेजी गई पहनने की जगह इस बिल्ड को ज्ञात नहीं है"
+  },
   "devicesWornOtherSub": "जेब या बैग। बैंड वहाँ चाल अच्छे से नहीं देख सकता।",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"

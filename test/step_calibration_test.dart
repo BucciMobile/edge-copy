@@ -59,6 +59,20 @@ void main() {
       expect(p.nDays, 0);
       expect(p.isCalibrated, isFalse);
     });
+    test('a learned factor of exactly 1.0 is still calibrated', () {
+      // Phone and counter agree across three admitted days: the fitted
+      // factor lands exactly on the prior. That is a LEARNED 1.0 with days
+      // of evidence, not the cold-start prior — it must disclose its
+      // calibration and earn its confidence.
+      final p = estimateStepCalibration('gen5', Wearing.wrist, [
+        _day(5000, 5000),
+        _day(4000, 4000),
+        _day(6000, 6000),
+      ]);
+      expect(p.factor, 1.0);
+      expect(p.nDays, 3);
+      expect(p.isCalibrated, isTrue);
+    });
     test('the estimate is a ratio of sums, weighted by evidence', () {
       // A heavy day (10k ref, 20k ticks) plus two light days (1k ref, 1k
       // ticks each) — a mean of ratios would say 0.75; the ratio of sums

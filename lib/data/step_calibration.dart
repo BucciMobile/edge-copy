@@ -109,10 +109,14 @@ class StepCalibrationProfile {
       );
 
   /// True when this profile has any learned content. A profile with nDays 0
-  /// and factor 1.0 must read as "not calibrated" in the UI, not as
-  /// "calibrated to exactly 1.0" — those are different claims about the
-  /// data.
-  bool get isCalibrated => nDays > 0 && factor != 1.0;
+  /// must read as "not calibrated" in the UI, not as "calibrated to exactly
+  /// 1.0" — those are different claims about the data. The fitted factor is
+  /// NOT part of this test on purpose: a ratio-of-sums that lands exactly on
+  /// 1.0 (phone and counter agreeing across the admitted days) is still a
+  /// LEARNED 1.0 with days of evidence behind it — it must emit its
+  /// `counter_calibration` disclosure and earn its confidence bump, not be
+  /// demoted to the cold-start prior.
+  bool get isCalibrated => nDays > 0;
 }
 
 /// Version of the estimation code itself. Bump ONLY when the math changes in

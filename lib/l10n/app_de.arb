@@ -2414,6 +2414,10 @@
   "@devicesWornBicepSub": {
     "description": "Step calibration wearing-location setting"
   },
+  "devicesWornUnknown": "Unbekannt",
+  "@devicesWornUnknown": {
+    "description": "Gerätedetail: gespeicherter Trageort ist diesem Build nicht bekannt"
+  },
   "devicesWornOtherSub": "Eine Tasche oder ein Beutel. Das Band sieht dort das Gehen schlecht.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"

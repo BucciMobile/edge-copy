@@ -2414,6 +2414,10 @@
   "@devicesWornBicepSub": {
     "description": "Step calibration wearing-location setting"
   },
+  "devicesWornUnknown": "未知",
+  "@devicesWornUnknown": {
+    "description": "设备详情：此版本无法识别已保存的佩戴位置"
+  },
   "devicesWornOtherSub": "口袋或包里。手环在那里很难看清步伐。",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"

@@ -1949,6 +1949,18 @@ class LocalDb {
     return row == null ? null : Wearing.parse(row['wearing']);
   }
 
+  /// The RAW `device.wearing` integer, before [Wearing.parse] — null only
+  /// when there is no device row. Unlike [deviceWearing] this distinguishes
+  /// "no row yet" (null) from "a future build wrote a code this build does
+  /// not know" (a non-null integer outside `Wearing.known`): the derivation
+  /// path refuses the calibration profile on the latter and defaults to
+  /// wrist only on the former, because [deviceWearing]'s single null cannot
+  /// carry both meanings.
+  static Future<int?> deviceWearingRaw([String id = kPrimaryDeviceId]) async {
+    final row = await deviceRow(id);
+    return (row?['wearing'] as num?)?.toInt();
+  }
+
   /// The stored profile for a (family, wearing) pair, or null when none was
   /// learned or the stored version is not this code's.
   static Future<StepCalibrationProfile?> stepCalibrationProfile(

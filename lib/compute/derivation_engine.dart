@@ -4210,13 +4210,27 @@ class DerivationEngine {
     ];
     // The step-counter calibration, read HERE — the DB lives on this isolate
     // and the pipeline input is frozen data. Keyed by (family, wearing): the
-    // user's wearing statement routes which profile applies, and an unknown
-    // wearing code (future build) refuses to wrist rather than guessing.
-    final counterWearing = await LocalDb.deviceWearing() ?? Wearing.wrist;
-    final counterProfile = daySub.deviceFamily == null
+    // user's wearing statement routes which profile applies. Distinct
+    // three-valued semantics, deliberately NOT coalesced:
+    //   null, no row    = no device row yet -> wrist, the column DEFAULT,
+    //                     identical to every pre-v98 day
+    //   null, raw>0    = a code THIS build does not know (a future build wrote
+    //                     it) -> REFUSE the profile lookup, never fall to
+    //                     wrist: a wrist-learned factor applied to an unnamed
+    //                     placement would mis-correct silently.
+    // `deviceWearing()` alone cannot distinguish the two nulls, so the raw
+    // column is read once alongside it.
+    final rawWearing = await LocalDb.deviceWearingRaw();
+    final counterWearing =
+        rawWearing == null ? Wearing.wrist : (Wearing.parse(rawWearing) ?? Wearing.wrist);
+    final counterWearingUnknown =
+        rawWearing != null && !Wearing.known.contains(rawWearing);
+    final counterProfile = counterWearingUnknown
         ? null
-        : await LocalDb.stepCalibrationProfile(
-            daySub.deviceFamily!, counterWearing);
+        : daySub.deviceFamily == null
+            ? null
+            : await LocalDb.stepCalibrationProfile(
+                daySub.deviceFamily!, counterWearing);
     final input = DayBundleInput(
       date: day.date,
       dayTsSec: daySub.tsSec,

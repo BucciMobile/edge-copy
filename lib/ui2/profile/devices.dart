@@ -1824,7 +1824,11 @@ class _DeviceDetailState extends State<DeviceDetail> {
   Map<String, dynamic>? _health;
   /// The user's wearing statement, loaded once like `_health`. Held so a
   /// rebuild does not re-read the device row on every connection tick.
+  /// Non-null but OUTSIDE `Wearing.known` when a future build wrote a code
+  /// this one cannot name — the row then shows "Unknown" instead of lying
+  /// "Wrist", and `_pickWearing` overwrites it on the next choice.
   int? _wornOn;
+  bool _wornOnUnknown = false;
 
   /// The same projection the overnight charge warning fires on, read here
   /// rather than recomputed: this screen is where someone asks "how long have I
@@ -1844,8 +1848,12 @@ class _DeviceDetailState extends State<DeviceDetail> {
     LocalDb.batteryHealth().then((h) {
       if (mounted) setState(() => _health = h);
     }).catchError((_) {});
-    LocalDb.deviceWearing().then((w) {
-      if (mounted) setState(() => _wornOn = w);
+    LocalDb.deviceWearingRaw().then((raw) {
+      if (!mounted) return;
+      setState(() {
+        _wornOnUnknown = raw != null && !Wearing.known.contains(raw);
+        _wornOn = _wornOnUnknown ? raw : Wearing.parse(raw);
+      });
     }).catchError((_) {});
     _loadForecast();
   }
@@ -1890,7 +1898,18 @@ class _DeviceDetailState extends State<DeviceDetail> {
       s,
       status: app?.engine.bandStatus,
       wornOn: _wornOn,
-      onWearing: () => _pickWearing(c),
+      wornOnUnknown: _wornOnUnknown,
+      onWearing: () async {
+        final w = await _pickWearing(c);
+        // Refresh the row from what the picker SAVED, not from a stale
+        // screen-local cache — and only while this screen is still on top.
+        if (w != null && mounted) {
+          setState(() {
+            _wornOn = w;
+            _wornOnUnknown = false;
+          });
+        }
+      },
       health: _health,
       forecast: _forecast,
       onFind: app?.buzzBand,
@@ -2543,9 +2562,16 @@ class DeviceDetailView extends StatelessWidget {
   final BandStatus? status;
 
   /// The user's wearing-location statement, read from `device.wearing` by
-  /// the screen that owns the DB. Null means "not loaded / unknown code" —
-  /// the row then shows wrist, the column's own DEFAULT, without writing it.
+  /// the screen that owns the DB. Null means "not loaded" — the row then
+  /// shows wrist, the column's own DEFAULT, without writing it. A code this
+  /// build does not know can never reach here (parsed on load), so
+  /// `wornName` never claims "Wrist" for a placement it cannot name.
   final int? wornOn;
+
+  /// True when the stored code is outside `Wearing.known` (a future build
+  /// wrote it). The row then shows "Unknown" — never "Wrist" — and the
+  /// derivation path refuses the calibration profile for it.
+  final bool wornOnUnknown;
   /// Open the wearing-location sheet. Null for a non-band source.
   final VoidCallback? onWearing;
   /// `LocalDb.batteryHealth()` — the recent `band_battery` series, which is the
@@ -2566,6 +2592,7 @@ class DeviceDetailView extends StatelessWidget {
       this.liveHr,
       this.status,
       this.wornOn,
+      this.wornOnUnknown = false,
       this.onWearing,
       this.health,
       this.forecast});
@@ -2721,7 +2748,9 @@ class DeviceDetailView extends StatelessWidget {
                       // profile is keyed to this answer.
                       SetRow(LucideIcons.personStanding, C.teal,
                           l?.devicesWornOn ?? 'Worn on',
-                          value: wornName(c, wornOn ?? Wearing.wrist),
+                          value: wornOnUnknown
+                              ? (l?.devicesWornUnknown ?? 'Unknown')
+                              : wornName(c, wornOn ?? Wearing.wrist),
                           sub: l?.devicesWornOnSub ??
                               'Where the band sits. Step calibration is '
                               'learned per location.',
@@ -2864,9 +2893,9 @@ String wornName(BuildContext c, int w) {
 
 /// The wearing-location sheet: three options, one tap, saved immediately —
 /// freely reversible, so no confirmation; each option's sub line says what
-/// it means for steps. After the save the sheet's caller refreshes, so the
-/// row shows the new location without a rebuild of the whole screen.
-Future<void> _pickWearing(BuildContext c) async {
+/// it means for steps. Returns the chosen code so the caller can show the
+/// new location in the row without waiting for an unrelated rebuild.
+Future<int?> _pickWearing(BuildContext c) async {
   final p = P.of(c);
   final l = AppLocalizations.of(c);
   final chosen = await showModalBottomSheet<int>(
@@ -2912,8 +2941,9 @@ Future<void> _pickWearing(BuildContext c) async {
       ),
     ),
   );
-  if (chosen == null) return;
+  if (chosen == null) return null;
   await LocalDb.setDeviceWearing(chosen);
+  return chosen;
 }
 
 /// "Thu 4 Sep, 07:12" — local, which is what every day label in this app is.

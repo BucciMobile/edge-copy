@@ -2443,6 +2443,10 @@
   "@devicesWornBicepSub": {
     "description": "Step calibration wearing-location setting"
   },
+  "devicesWornUnknown": "Desconocido",
+  "@devicesWornUnknown": {
+    "description": "Detalle del dispositivo: la ubicación guardada no es conocida por esta versión"
+  },
   "devicesWornOtherSub": "Un bolsillo o bolso. La banda no ve bien la marcha ahí.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
