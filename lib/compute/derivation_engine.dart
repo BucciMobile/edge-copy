@@ -6234,7 +6234,7 @@ class DerivationEngine {
       dynFloorG,
       dynHistoryDays,
       counterProfile: counterProfile,
-      counterWearing: counterWearingRouted,
+      counterWearing: counterWearing,
     );
     // `_stepsAndEnergy` just wrote `steps` — REAL pedometer counts from
     // `live_coverage`, band 100 Hz or phone, never an estimate. `wake` was
