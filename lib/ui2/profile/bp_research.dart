@@ -129,6 +129,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
   @override
   Widget build(BuildContext c) {
     final l = AppLocalizations.of(c);
+    final p = P.of(c);
     return Scaffold(
       appBar: AppBar(
         title: Text(l?.bpResearchTitle ?? 'BP research capture'),
@@ -144,7 +145,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                 'this app. Nothing here is a health feature, nothing here '
                 'feeds any score, and nothing here is ever blended with what '
                 'the band measured.',
-            style: c.textTheme.bodySmall,
+            style: F.cap.copyWith(color: p.ink2, height: 1.5),
           ),
           const SizedBox(height: S.x4),
           TextField(
@@ -194,7 +195,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
           const SizedBox(height: S.x6),
           if (_rows.isNotEmpty) ...[
             Text(l?.bpResearchHistory ?? 'Captures',
-                style: c.textTheme.titleMedium),
+                style: F.head),
             const SizedBox(height: S.x2),
             for (final r in _rows)
               ListTile(
@@ -219,7 +220,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                   'Export all captures as CSV from Your data › Export CSV '
                   '(set “BP research captures”). Research data — it never '
                   'leaves the phone except through that file.',
-              style: c.textTheme.bodySmall,
+              style: F.cap.copyWith(color: p.ink2, height: 1.5),
             ),
           ],
         ],
@@ -235,12 +236,13 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     final beats = r['rr_beats'];
     final hr = r['hr_mean'];
     final rmssd = r['rmssd_ms'];
+
     if (onehz == null && beats == null) {
       return 'No band data in the window — stored as-is.';
     }
     final parts = <String>[];
-    if (hr != null) parts.add('HR ${hr.toStringAsFixed(0)} bpm');
-    if (rmssd != null) parts.add('RMSSD ${rmssd.toStringAsFixed(0)} ms');
+    if (hr is num) parts.add('HR ${hr.toStringAsFixed(0)} bpm');
+    if (rmssd is num) parts.add('RMSSD ${rmssd.toStringAsFixed(0)} ms');
     parts.add('${onehz ?? 0} 1 Hz rows, ${beats ?? 0} beats');
     return parts.join(' · ');
   }

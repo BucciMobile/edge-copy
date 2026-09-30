@@ -33,7 +33,7 @@ import '../import/import_container.dart';
 import 'coverage_resolver.dart' show CoverageInterval;
 import 'day_label.dart';
 import 'journal_fields.dart';
-import '../health/bp_research_capture.dart'
+import '../health/bp_research_capture.dart';
 import 'live_coverage_policy.dart';
 import 'med_store.dart';
 import 'models.dart';
