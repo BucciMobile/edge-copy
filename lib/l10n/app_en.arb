@@ -12441,5 +12441,57 @@
         "type": "int"
       }
     }
+  },
+  "settingsBpResearchRowTitle": "BP research capture",
+  "@settingsBpResearchRowTitle": {
+    "description": "Developer settings row title for the experimental blood-pressure research capture screen"
+  },
+  "settingsBpResearchRowSub": "EXPERIMENTAL. Pair a cuff reading with the band data of the same instant, for comparison outside this app. Never a health feature",
+  "@settingsBpResearchRowSub": {
+    "description": "Developer settings row subtitle for the BP research capture screen"
+  },
+  "bpResearchTitle": "BP research capture",
+  "@bpResearchTitle": {
+    "description": "Title of the experimental BP research capture screen"
+  },
+  "bpResearchIntro": "EXPERIMENTAL. Take a cuff reading, type the pair in, press capture. The band data of the ±2 minutes around that instant is frozen next to it — for you to compare outside this app. Nothing here is a health feature, nothing here feeds any score, and nothing here is ever blended with what the band measured.",
+  "@bpResearchIntro": {
+    "description": "Intro text of the BP research capture screen"
+  },
+  "bpResearchSystolic": "Systolic (mmHg)",
+  "@bpResearchSystolic": {
+    "description": "Text field label for the systolic reference value"
+  },
+  "bpResearchDiastolic": "Diastolic (mmHg)",
+  "@bpResearchDiastolic": {
+    "description": "Text field label for the diastolic reference value"
+  },
+  "bpResearchDevice": "Cuff device (optional)",
+  "@bpResearchDevice": {
+    "description": "Text field label for the cuff device name"
+  },
+  "bpResearchPosture": "Posture (optional)",
+  "@bpResearchPosture": {
+    "description": "Text field label for the posture during the reading"
+  },
+  "bpResearchConditions": "Conditions (optional)",
+  "@bpResearchConditions": {
+    "description": "Text field label for measurement conditions"
+  },
+  "bpResearchCapture": "Capture now",
+  "@bpResearchCapture": {
+    "description": "Button label to store one capture"
+  },
+  "bpResearchHistory": "Captures",
+  "@bpResearchHistory": {
+    "description": "Section header for the stored capture list"
+  },
+  "bpResearchBadValue": "That pair is not a blood pressure — check the numbers and try again. Nothing was stored.",
+  "@bpResearchBadValue": {
+    "description": "Snackbar text for an out-of-bounds reference pair, which is rejected, never clamped"
+  },
+  "bpResearchExportHint": "Export all captures as CSV from Your data › Export CSV (set \"BP research captures\"). Research data — it never leaves the phone except through that file.",
+  "@bpResearchExportHint": {
+    "description": "Hint under the capture list explaining the CSV export path"
   }
 }
