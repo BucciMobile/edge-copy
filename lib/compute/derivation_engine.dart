@@ -4225,21 +4225,22 @@ class DerivationEngine {
         rawWearing == null ? Wearing.wrist : (Wearing.parse(rawWearing) ?? Wearing.wrist);
     final counterWearingUnknown =
         rawWearing != null && !Wearing.known.contains(rawWearing);
-    // A day that ENDED before the user last changed their wearing statement
-    // may have been worn at the PREVIOUS location: learning it under the
-    // current profile would train bicep data with wrist days, and applying
-    // the current profile's factor would mis-correct it. Refuse both — the
-    // conservative arm of the alternative ("exclude rather than assign").
-    // Null stamp = the statement predates this feature (v54 rows): always
-    // valid, because the wrist default never changed under it.
+    // A day is only safe under the CURRENT wearing statement when the
+    // statement predates the day's FIRST sample. A change made MID-day
+    // leaves the day's first half worn at the previous location — such a
+    // day is refused for both learning and profile application, exactly
+    // like a fully-past day. Refusing on the day's END would let the
+    // switch day itself through, half-worn at the old location. This is
+    // the conservative arm of the alternative ("exclude rather than
+    // assign"). Null stamp = the statement predates this feature (v54
+    // rows): always valid, because the wrist default never changed under
+    // it.
     final wearingSetTs = await LocalDb.deviceWearingSetTs();
-    final dayEndTs = daySub.tsSec.isEmpty
-        ? null
-        : daySub.tsSec.last + 1;
+    final dayStartTs = daySub.tsSec.isEmpty ? null : daySub.tsSec.first;
     final counterWearingStale = !counterWearingUnknown &&
         wearingSetTs != null &&
-        dayEndTs != null &&
-        dayEndTs <= wearingSetTs;
+        dayStartTs != null &&
+        dayStartTs < wearingSetTs;
     final counterProfile = (counterWearingUnknown || counterWearingStale)
         ? null
         : daySub.deviceFamily == null

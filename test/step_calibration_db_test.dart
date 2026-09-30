@@ -78,9 +78,18 @@ void main() {
     expect(await LocalDb.deviceWearingSetTs(), isNull); // never re-stamped
     expect(await LocalDb.setDeviceWearing(Wearing.bicep), 1);
     expect(await LocalDb.deviceWearing(), Wearing.bicep);
-    expect(await LocalDb.deviceWearingSetTs(), isNotNull);
+    final firstStamp = await LocalDb.deviceWearingSetTs();
+    expect(firstStamp, isNotNull);
+    // Re-selecting the SAME location is a no-op for the stamp: a fresh stamp
+    // would deactivate the learned profile for the whole history.
+    expect(await LocalDb.setDeviceWearing(Wearing.bicep), 1);
+    expect(await LocalDb.deviceWearingSetTs(), firstStamp);
     expect(await LocalDb.setDeviceWearing(Wearing.other), 1);
     expect(await LocalDb.deviceWearing(), Wearing.other);
+    expect(
+      await LocalDb.deviceWearingSetTs(),
+      predicate<int?>((t) => t == null || t >= firstStamp!),
+    );
     await LocalDb.close();
   });
 

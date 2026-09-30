@@ -1952,14 +1952,25 @@ class LocalDb {
   /// change (they may have been worn at the previous location).
   /// Returns the number of rows updated: ZERO means the device row is gone
   /// (an unpair racing the picker) — the caller must not report a save.
+  /// Re-selecting the SAME location must not re-stamp: a fresh stamp would
+  /// mark every existing day as predating a "change" that never happened,
+  /// silently deactivating the learned profile until three new days are
+  /// collected. Only a real CHANGE moves the stamp.
   static Future<int> setDeviceWearing(
     int wearing, [
     String id = kPrimaryDeviceId,
   ]) async {
     final db = await instance;
     return db.rawUpdate(
-      'UPDATE device SET wearing = ?, wearing_set_ts = ? WHERE id = ?',
-      [wearing, DateTime.now().millisecondsSinceEpoch ~/ 1000, id],
+      'UPDATE device SET wearing = ?, wearing_set_ts = '
+      'CASE WHEN wearing = ? THEN wearing_set_ts ELSE ? END '
+      'WHERE id = ?',
+      [
+        wearing,
+        wearing,
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        id,
+      ],
     );
   }
 
