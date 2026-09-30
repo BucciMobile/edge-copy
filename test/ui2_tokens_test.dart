@@ -271,6 +271,11 @@ const _notComponents = {
   // Where the hydration notification lands: a Scaffold route that reads and
   // writes the day's journal metrics. The one control on it — FieldStepper —
   // IS in the gallery.
+  // The BP research capture route: a Scaffold that reads and writes its own
+  // research table (never the health stores) and only exists behind the dev
+  // toggle. A gallery case would have to mock the database; the capture flow
+  // is what bp_research_capture_test.dart covers on the data side.
+  'BpResearchScreen',
   // The coach chat and its BYOK setup: Scaffold routes that own an engine, a
   // 120 s network call and the keychain. `CoachFigure` — the part a gallery can
   // actually hold — IS in it.
