@@ -33,6 +33,7 @@ import '../import/import_container.dart';
 import 'coverage_resolver.dart' show CoverageInterval;
 import 'day_label.dart';
 import 'journal_fields.dart';
+import '../health/bp_research_capture.dart'
 import 'live_coverage_policy.dart';
 import 'med_store.dart';
 import 'models.dart';
@@ -349,7 +350,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 54;
+  static const int schemaVersion = 55;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -461,6 +462,7 @@ class LocalDb {
         await _createNotifFired(db);
         await _createNotifSlots(db);
         await _createAlarmSchedule(db);
+        await _createBpResearch(db);
         await _ensureCoachViews(db);
       },
       onUpgrade: (db, oldV, newV) async {
@@ -1073,6 +1075,18 @@ class LocalDb {
           // next free rung rather than collide with any of them.
           await _createEcgTables(db);
         }
+        if (oldV < 55) {
+          // BP research capture: paired cuff reference readings plus the
+          // band's own decoded 1 Hz / R-R window frozen around the
+          // measurement instant, for out-of-app comparison only. Two new
+          // tables, CREATE TABLE IF NOT EXISTS and NOTHING else — no
+          // backfill, no rewrite, no ADD COLUMN — so a throw here has
+          // nothing to roll back onto (invariant 11). Ships without a
+          // kAlgoVersion bump: nothing derived moves, and nothing derived
+          // may ever read these (see the guard comment in
+          // [_createBpResearch]).
+          await _createBpResearch(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1579,6 +1593,146 @@ class LocalDb {
     await db.execute(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_notif_slots_owner '
       'ON notif_slots(category, slot)',
+    );
+  }
+
+
+  /// BP research capture store (schema rung 55).
+  ///
+  /// EXPERIMENTAL, DEVELOPER-ONLY, and it stays that way. A cuff reading the
+  /// user types in next to the band data of the same instant is exactly the
+  /// pairing the `imported_measurement` guard exists to prevent becoming an
+  /// input: the moment a wrist series and a cuff series are regressed against
+  /// each other ON DEVICE, this app is making a cuffless-blood-pressure
+  /// claim from an uncleared device. So this is a SEPARATE store, read by
+  /// exactly one dev screen and one CSV export, and — like
+  /// `imported_measurement` and `observation` — the isolation is structural:
+  /// nothing in `compute/`, nothing that feeds `day_result` or
+  /// `metric_series`, and nothing that writes to HealthKit / Health Connect
+  /// may name either table. `bp_research_isolation_test.dart` fails the moment
+  /// anyone does.
+  ///
+  /// Captures are idempotent on `(measured_at_ms, device)`: retaking the same
+  /// cuff reading at the same instant re-states the window rather than
+  /// duplicating it. Legitimate repeat measurements minutes apart are
+  /// different instants and both stay.
+  static Future<void> _createBpResearch(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS bp_research_reference (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        measured_at_ms INTEGER NOT NULL,
+        device TEXT,
+        posture TEXT,
+        conditions TEXT,
+        systolic_mmhg REAL NOT NULL,
+        diastolic_mmhg REAL NOT NULL,
+        captured_at_ms INTEGER NOT NULL,
+        UNIQUE (measured_at_ms, device)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS bp_research_window (
+        reference_id INTEGER NOT NULL PRIMARY KEY
+          REFERENCES bp_research_reference(id) ON DELETE CASCADE,
+        window_start_ms INTEGER NOT NULL,
+        window_end_ms INTEGER NOT NULL,
+        -- NULL-safe by design: the band may have had nothing to say at that
+        -- instant (not worn, not synced yet), and a missing window is recorded
+        -- as missing — never as zeroes.
+        onehz_rows INTEGER,
+        rr_beats INTEGER,
+        hr_mean REAL,
+        rr_ms_mean REAL,
+        rr_ms_min REAL,
+        rr_ms_max REAL,
+        rmssd_ms REAL,
+        meta_json TEXT
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_bp_research_reference_at '
+      'ON bp_research_reference(measured_at_ms)',
+    );
+  }
+
+  /// Insert one cuff reference reading plus its frozen band window.
+  ///
+  /// Pure write; the caller computes the window stats (see
+  /// `lib/health/bp_research_capture.dart`). Idempotent on
+  /// `(measured_at_ms, device)`: `INSERT OR REPLACE` on the reference, then
+  /// the window row is restated in the same transaction so a retake can never
+  /// leave an old window under a new reference.
+  static Future<void> putBpResearchCapture(BpResearchCapture c) async {
+    final db = await instance;
+    await db.transaction((txn) async {
+      final id = await txn.rawInsert(
+        'INSERT OR REPLACE INTO bp_research_reference '
+        '(measured_at_ms, device, posture, conditions, systolic_mmhg, '
+        'diastolic_mmhg, captured_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [
+          c.measuredAtMs,
+          c.device,
+          c.posture,
+          c.conditions,
+          c.systolicMmHg,
+          c.diastolicMmHg,
+          c.capturedAtMs,
+        ],
+      );
+      // A capture with no band data stores NO window row — the LEFT JOIN in
+      // [bpResearchCaptures] renders it as an empty window, and `NOT NULL`
+      // on the window bounds is what keeps a half-written window out of the
+      // store. A retake that now finds band data replaces the absent row.
+      final w = c.window;
+      if (w == null) {
+        await txn.rawDelete(
+          'DELETE FROM bp_research_window WHERE reference_id = ?', [id]);
+        return;
+      }
+      await txn.rawInsert(
+        'INSERT OR REPLACE INTO bp_research_window '
+        '(reference_id, window_start_ms, window_end_ms, onehz_rows, '
+        'rr_beats, hr_mean, rr_ms_mean, rr_ms_min, rr_ms_max, rmssd_ms, '
+        'meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          id,
+          w.windowStartMs,
+          w.windowEndMs,
+          w.onehzRows,
+          w.rrBeats,
+          w.hrMean,
+          w.rrMsMean,
+          w.rrMsMin,
+          w.rrMsMax,
+          w.rmssdMs,
+          w.metaJson,
+        ],
+      );
+    });
+  }
+
+  /// All captures, newest first, for the dev screen and the CSV export.
+  static Future<List<Map<String, Object?>>> bpResearchCaptures() async {
+    final db = await instance;
+    return db.rawQuery('''
+      SELECT r.id, r.measured_at_ms, r.device, r.posture, r.conditions,
+             r.systolic_mmhg, r.diastolic_mmhg, r.captured_at_ms,
+             w.window_start_ms, w.window_end_ms, w.onehz_rows, w.rr_beats,
+             w.hr_mean, w.rr_ms_mean, w.rr_ms_min, w.rr_ms_max, w.rmssd_ms,
+             w.meta_json
+      FROM bp_research_reference r
+      LEFT JOIN bp_research_window w ON w.reference_id = r.id
+      ORDER BY r.measured_at_ms DESC
+    ''');
+  }
+
+  /// Delete one capture (dev screen). The window cascades.
+  static Future<void> deleteBpResearchCapture(int id) async {
+    final db = await instance;
+    await db.delete(
+      'bp_research_reference',
+      where: 'id = ?',
+      whereArgs: [id],
     );
   }
 
