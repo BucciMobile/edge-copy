@@ -1739,6 +1739,20 @@ import 'substrate.dart';
 //   3. `confidence` on a strap_counter day is now earned (0.9 uncalibrated
 //      up to 0.98 with days of evidence) rather than the constant 0.9.
 //
+// GENERATIONS, and what each one gets out of this bump:
+//   - gen4 gains NOTHING and loses nothing: it has no on-chip counter
+//      (verified in the protocol R24 decode), so it is not in
+//      `_stepCounterModulus`, its days keep resolving through the source
+//      ladder exactly as before, and the calibration tables simply never
+//      see a gen4 counter day. Absence stays absence — never 0.
+//   - gen5 is the only family with a VERIFIED counter and the full
+//      beneficiary: calibration, coverage disclosure, earned confidence.
+//   - MG rides gen5's path on an ASSUMPTION (same fd4b/Maverick offload,
+//      same `stepMotionCounter`); if an MG export proves the field absent,
+//      the counter path silently degrades to the gen4 behaviour (absent,
+//      ladder fallback) and can never fabricate steps. See
+//      `_stepCounterModulus` for the full evidence status per family.
+//
 // `band_measured` stays the RAW counter ticks and `counter_calibration`
 // discloses the applied factor, so corrected vs raw is auditable without
 // re-deriving. Schema 55 carries the two learning tables.
@@ -4901,6 +4915,23 @@ class DerivationEngine {
   /// factor over the banked days. Fire-and-forget-safe (all writes are
   /// idempotent keyed replaces) and never throws into the derive: a
   /// calibration failure must not cost the day its result.
+  ///
+  /// WHAT THIS LEARNS FROM, and what it refuses:
+  ///   - Reference = the phone's own pedometer total for the day
+  ///     (`liveSteps.phone`), banked ONLY when > 0. A day the phone did not
+  ///     cover banks null — "phone absent" must not masquerade as "user
+  ///     walked nowhere", or the estimator would read a real walking day
+  ///     as counter-overcount and pull the factor down.
+  ///   - Ticks = this day's counter deltas via [counterDeltasFromSubstrate].
+  ///     Gen4 has no counter, so its days bank absent ticks and can never
+  ///     enter a profile — the learning set is gen5(-stamped) only, which
+  ///     includes MG under the fd4b assumption (see `_stepCounterModulus`).
+  ///   - The fit itself (which days are admissible, shrinkage, clamping)
+  ///     lives in step_calibration.dart; this method only banks and refits.
+  ///     A day that fails the estimator's evidence gates still gets banked —
+  ///     the gate is re-evaluated on every refit, so a profile activates
+  ///     the moment the third admissible day exists, without re-deriving
+  ///     the days that supplied the evidence.
   Future<void> _updateStepCalibration(
     String date,
     Substrate daySub,
@@ -6381,6 +6412,21 @@ class DerivationEngine {
   /// [hardwareStepsFromCounter]) — a genuine on-wrist gait counter, not a 1 Hz
   /// inference, so it outranks the phone. Null on every gen4 day, and on a gen5
   /// day whose records predate schema v34; that is the absent case, not zero.
+  ///
+  /// v98 PARAMETERS, and what each one decides:
+  ///   - [counter] replaces the bare [bandSteps] integer with the full
+  ///     [CounterDeltas] walk: the total that feeds the ladder, plus the
+  ///     gap/reset disclosure (`counter_coverage`) that keeps a half-synced
+  ///     day honest. Null = this family has no counter (gen4, or MG if the
+  ///     fd4b assumption fails) — the strap rung is then simply not offered.
+  ///   - [profile] is the (family × wearing) calibration factor learned from
+  ///     the user's own phone-covered days (see `_updateStepCalibration`).
+  ///     Null or uncalibrated means factor 1.0 — the published number is the
+  ///     raw counter total, exactly what v97 published.
+  ///   - [wearing] routes WHICH profile applies (the user's own statement,
+  ///     `device.wearing`). It is carried here so the applied factor and the
+  ///     wearing it was learned for land in the SAME bundle — a bicep factor
+  ///     audited against a wrist profile would be untraceable.
   static void _writeSteps(
     Map<String, dynamic> bundle,
     Map<String, dynamic>? scMap,
@@ -7410,6 +7456,27 @@ class DerivationEngine {
   /// off a resetting counter loses the day's whole pre-sync prefix, and it
   /// cannot be told apart from a wrap afterwards. See
   /// [hardwareStepsFromCounter].
+  ///
+  /// GENERATION COVERAGE, with evidence status:
+  ///   - gen4: VERIFIED ABSENT. The R24 record has no pedometer field
+  ///     (protocol gen4 decoder), so gen4 is deliberately NOT a key here —
+  ///     an absent counter must surface as "no band steps", never as 0.
+  ///     Gen4 days keep resolving through the existing source ladder
+  ///     (phone pedometer / live session / 1 Hz movement), unchanged by v98.
+  ///   - gen5: VERIFIED PRESENT. `stepMotionCounter` (u16, cumulative,
+  ///     wraps at 65536, no midnight reset) decoded in protocol
+  ///     gen5_records.dart; the entry below is that fact.
+  ///   - MG: ASSUMED PRESENT, NOT YET VERIFIED. MG offloads through the same
+  ///     fd4b/Maverick record path as gen5, so the working assumption is that
+  ///     the same counter arrives and is stamped family 'gen5' — but no MG
+  ///     history export has been inspected to confirm the field is populated.
+  ///     Consequence if the assumption is WRONG: `counterDeltasFromSubstrate`
+  ///     sees no counter samples (`!seen`), returns absent, and the day falls
+  ///     back through the source ladder exactly like gen4 — it can never
+  ///     fabricate steps. To verify: decode an MG export through the gen5
+  ///     records path and check for non-absent stepMotionCounter samples.
+  ///     If MG is ever given its own family stamp, its verified modulus goes
+  ///     here — until then it inherits gen5's entry only via that stamp.
   static const Map<String, int> _stepCounterModulus = {'gen5': 65536};
 
   static const Map<String, double> _quietEnmoCutG = {
