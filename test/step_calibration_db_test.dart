@@ -67,15 +67,19 @@ void main() {
     await LocalDb.instance;
     // No device row yet: the reader refuses rather than inventing wrist.
     expect(await LocalDb.deviceWearing(), isNull);
-    // Writing without a row is a no-op UPDATE, still safe.
-    await LocalDb.setDeviceWearing(Wearing.bicep);
+    // Writing without a row is a no-op UPDATE that reports zero rows —
+    // the picker must not claim a save for it.
+    expect(await LocalDb.setDeviceWearing(Wearing.bicep), 0);
     expect(await LocalDb.deviceWearing(), isNull);
-    // A device row appears (as pairing creates it), the write lands.
+    // A device row appears (as pairing creates it), the write lands and
+    // stamps when it was set.
     await LocalDb.upsertDevice(adapterId: 'gen5');
     expect(await LocalDb.deviceWearing(), Wearing.wrist); // column DEFAULT
-    await LocalDb.setDeviceWearing(Wearing.bicep);
+    expect(await LocalDb.deviceWearingSetTs(), isNull); // never re-stamped
+    expect(await LocalDb.setDeviceWearing(Wearing.bicep), 1);
     expect(await LocalDb.deviceWearing(), Wearing.bicep);
-    await LocalDb.setDeviceWearing(Wearing.other);
+    expect(await LocalDb.deviceWearingSetTs(), isNotNull);
+    expect(await LocalDb.setDeviceWearing(Wearing.other), 1);
     expect(await LocalDb.deviceWearing(), Wearing.other);
     await LocalDb.close();
   });

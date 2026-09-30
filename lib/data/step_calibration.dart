@@ -223,5 +223,9 @@ double stepCounterConfidence(StepCalibrationProfile? profile) {
 String wearingName(int w) => switch (w) {
       Wearing.wrist => 'wrist',
       Wearing.bicep => 'bicep',
-      _ => 'other',
+      Wearing.other => 'other',
+      // 0 is the pipeline's refused/absent marker, not a wearing code —
+      // callers gate on it and never reach this arm, but the switch must
+      // not silently name a placement for a value outside the key space.
+      _ => throw ArgumentError.value(w, 'wearing', 'not a wearing code'),
     };

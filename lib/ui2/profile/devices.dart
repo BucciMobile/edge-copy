@@ -2942,8 +2942,13 @@ Future<int?> _pickWearing(BuildContext c) async {
     ),
   );
   if (chosen == null) return null;
-  await LocalDb.setDeviceWearing(chosen);
-  return chosen;
+  final saved = await LocalDb.setDeviceWearing(chosen);
+  // Zero rows updated = the device row is gone — an unpair was racing this
+  // picker on a detail route still open. Report NOT saved: the caller would
+  // otherwise show the new location while nothing was persisted, and
+  // re-creating the row here (upsertDevice) would resurrect a device the
+  // user is currently removing.
+  return saved > 0 ? chosen : null;
 }
 
 /// "Thu 4 Sep, 07:12" — local, which is what every day label in this app is.

@@ -2386,7 +2386,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "बैंड कहाँ है। कदम कैलिब्रेशन हर जगह से सीखा जाता है।",
+  "devicesWornOnSub": "बैंड कहाँ है। कदम कैलिब्रेशन हर पहनने की जगह के लिए अलग से सीखा जाता है।",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },

@@ -197,6 +197,10 @@ class LocalDb {
     'metric_series',
     'metric_series_version',
     'baselines',
+    // Step-calibration learning tables — the day observations are the
+    // estimator's input, unrecoverable once the substrate is pruned.
+    'step_calibration',
+    'step_calibration_day',
     'raw_archive',
     'device_coverage',
     'signal_priority',
@@ -1083,6 +1087,16 @@ class LocalDb {
           // one. No backfill: every existing row already says wrist, which is
           // what a WHOOP on the wrist means and what the column default
           // asserted all along.
+          //
+          // `wearing_set_ts` stamps WHEN the current wearing statement was
+          // made. A day derived BEFORE that stamp may have been worn at the
+          // PREVIOUS location — the calibration must not learn such a day
+          // under the new location's profile, nor apply the new profile's
+          // factor to it. NULL means "set before this feature existed" —
+          // treated as always-valid, because the wrist default never changed.
+          await _addColumnIfMissing(
+            db, 'device', 'wearing_set_ts', 'INTEGER',
+          );
           await _createStepCalibration(db);
         }
       },
@@ -1175,6 +1189,9 @@ class LocalDb {
       'INTEGER NOT NULL DEFAULT 0',
     );
     await _createEcgTables(db);
+    await _addColumnIfMissing(
+      db, 'device', 'wearing_set_ts', 'INTEGER',
+    );
     await _createStepCalibration(db);
     // Views LAST — they depend on metric_series / day_result / baselines / sessions
     // / notifications all existing. DROP+CREATE so a shape change takes effect.
@@ -1929,14 +1946,20 @@ class LocalDb {
   /// The user's statement of where the band sits: `Wearing.wrist` (1),
   /// `Wearing.bicep` (2), `Wearing.other` (3). The column has existed since
   /// the v51 rung with DEFAULT 1 and no writer; this is its first.
-  static Future<void> setDeviceWearing(
+  /// Sets the wearing location and stamps WHEN the statement was made —
+  /// the derive path compares a day's timestamp against this stamp and
+  /// refuses to learn or apply a profile for days that PRECEDE a location
+  /// change (they may have been worn at the previous location).
+  /// Returns the number of rows updated: ZERO means the device row is gone
+  /// (an unpair racing the picker) — the caller must not report a save.
+  static Future<int> setDeviceWearing(
     int wearing, [
     String id = kPrimaryDeviceId,
   ]) async {
     final db = await instance;
-    await db.rawUpdate(
-      'UPDATE device SET wearing = ? WHERE id = ?',
-      [wearing, id],
+    return db.rawUpdate(
+      'UPDATE device SET wearing = ?, wearing_set_ts = ? WHERE id = ?',
+      [wearing, DateTime.now().millisecondsSinceEpoch ~/ 1000, id],
     );
   }
 
@@ -1959,6 +1982,15 @@ class LocalDb {
   static Future<int?> deviceWearingRaw([String id = kPrimaryDeviceId]) async {
     final row = await deviceRow(id);
     return (row?['wearing'] as num?)?.toInt();
+  }
+
+  /// The epoch-second stamp of the LAST wearing change, or null when the
+  /// statement predates the stamp (v54 rows) or there is no device row.
+  /// Null is treated as always-valid: the wrist default never changed, so
+  /// pre-stamp rows assert nothing new to invalidate.
+  static Future<int?> deviceWearingSetTs([String id = kPrimaryDeviceId]) async {
+    final row = await deviceRow(id);
+    return (row?['wearing_set_ts'] as num?)?.toInt();
   }
 
   /// The stored profile for a (family, wearing) pair, or null when none was
@@ -8837,6 +8869,14 @@ class LocalDb {
       'sessions',
       'notifications',
       'baselines',
+      // The step-calibration learning tables. `step_calibration_day` is the
+      // estimator's persisted input, NOT data rebuilt from `day_result` —
+      // after the substrate is pruned a lost observation cannot be
+      // reconstructed, only re-collected over ≥3 new days. Parent before
+      // child: a merge cut short must not add day observations for a
+      // profile row that did not make it.
+      'step_calibration',
+      'step_calibration_day',
       // The devices this phone knows about — so a SECONDARY device's identity
       // survives a backup/restore round trip rather than leaving its rows in
       // `decoded_onehz` pointing at a `device_id` nothing can name. The PRIMARY

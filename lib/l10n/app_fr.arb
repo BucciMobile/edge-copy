@@ -2386,7 +2386,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "Où se trouve le bandeau. L'étalonnage des pas s'apprend par position.",
+  "devicesWornOnSub": "Où se trouve le bracelet. L'étalonnage des pas s'apprend séparément pour chaque position.",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },

@@ -2423,7 +2423,7 @@
   "@devicesWornWrist": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornBicep": "Brazo",
+  "devicesWornBicep": "Parte superior del brazo",
   "@devicesWornBicep": {
     "description": "Step calibration wearing-location setting"
   },

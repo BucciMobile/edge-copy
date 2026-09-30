@@ -4225,12 +4225,33 @@ class DerivationEngine {
         rawWearing == null ? Wearing.wrist : (Wearing.parse(rawWearing) ?? Wearing.wrist);
     final counterWearingUnknown =
         rawWearing != null && !Wearing.known.contains(rawWearing);
-    final counterProfile = counterWearingUnknown
+    // A day that ENDED before the user last changed their wearing statement
+    // may have been worn at the PREVIOUS location: learning it under the
+    // current profile would train bicep data with wrist days, and applying
+    // the current profile's factor would mis-correct it. Refuse both — the
+    // conservative arm of the alternative ("exclude rather than assign").
+    // Null stamp = the statement predates this feature (v54 rows): always
+    // valid, because the wrist default never changed under it.
+    final wearingSetTs = await LocalDb.deviceWearingSetTs();
+    final dayEndTs = daySub.tsSec.isEmpty
+        ? null
+        : daySub.tsSec.last + 1;
+    final counterWearingStale = !counterWearingUnknown &&
+        wearingSetTs != null &&
+        dayEndTs != null &&
+        dayEndTs <= wearingSetTs;
+    final counterProfile = (counterWearingUnknown || counterWearingStale)
         ? null
         : daySub.deviceFamily == null
             ? null
             : await LocalDb.stepCalibrationProfile(
                 daySub.deviceFamily!, counterWearing);
+    // Carried to the pipeline as 0 when the wearing statement was REFUSED
+    // for this day — 0 is not a wearing code, it is the pipeline's absent
+    // marker: the bundle then omits `counter_wearing` rather than naming
+    // 'wrist' for a routing decision that never happened (see _writeSteps).
+    final counterWearingRouted =
+        (counterWearingUnknown || counterWearingStale) ? 0 : counterWearing;
     final input = DayBundleInput(
       date: day.date,
       dayTsSec: daySub.tsSec,
@@ -4260,7 +4281,7 @@ class DerivationEngine {
       sleepSource: day.sleepSource,
       counterProfileFactor: counterProfile?.factor,
       counterProfileNDays: counterProfile?.nDays,
-      counterWearing: counterWearing,
+      counterWearing: counterWearingRouted,
     );
     final withHistory = _attachHistory(input, history);
 
@@ -4571,7 +4592,7 @@ class DerivationEngine {
         liveStepsFromStrap: liveSteps.strap,
         counterProfileFactor: counterProfile?.factor,
         counterProfileNDays: counterProfile?.nDays,
-        counterWearing: counterWearing,
+        counterWearing: counterWearingRouted,
         // The same resolution's credited spans, so the walking-cadence term
         // prices exactly the steps the day's total already counted — never a
         // raw row the ladder took back.
@@ -4916,12 +4937,28 @@ class DerivationEngine {
     // (phone total, counter ticks) — the estimate runs on the banked rows,
     // never on this pass's in-memory bundle, so a re-derive cannot double-
     // count a day the table already holds.
-    await _updateStepCalibration(
-      day.date,
-      daySub,
-      counterWearing,
-      phoneReference: liveSteps.phone,
-    );
+    //
+    // SKIPPED for unknown wearing codes (banking an unnamed placement
+    // under `Wearing.wrist` would corrupt the wrist profile) and for days
+    // that predate the last wearing change (they may have been worn at
+    // the previous location — see the stale check at the input build).
+    if (!counterWearingUnknown && !counterWearingStale) {
+      // MIXED days are excluded from learning: `liveSteps.phone` is the
+      // CREDITED total after the ladder, and on a day where band spans
+      // claimed windows the phone figure is no longer an independent
+      // full-day reference — the ratio against counter ticks would
+      // mis-learn (the reference excludes exactly the steps the band
+      // covered). An independent phone total is not read here today; a
+      // clean phone-only day is the admissible reference.
+      if (!liveSteps.mixed) {
+        await _updateStepCalibration(
+          day.date,
+          daySub,
+          counterWearing,
+          phoneReference: liveSteps.phone,
+        );
+      }
+    }
   }
 
   /// One day's contribution to the (family × wearing) step-calibration
@@ -6197,7 +6234,7 @@ class DerivationEngine {
       dynFloorG,
       dynHistoryDays,
       counterProfile: counterProfile,
-      counterWearing: counterWearing,
+      counterWearing: counterWearingRouted,
     );
     // `_stepsAndEnergy` just wrote `steps` — REAL pedometer counts from
     // `live_coverage`, band 100 Hz or phone, never an estimate. `wake` was
@@ -6494,8 +6531,12 @@ class DerivationEngine {
       // The wearing location the profile was keyed to. Absent when no
       // counter ran (there is nothing to calibrate); 'wrist' when the user
       // never said otherwise, which is what the device.wearing default has
-      // always meant.
-      if (counter != null) 'counter_wearing': wearingName(wearing),
+      // always meant; and ABSENT (not 'wrist') when the wearing statement
+      // was refused for this day — an unknown code this build cannot name,
+      // or a day that predates the last wearing change. Naming 'wrist' there
+      // would disclose a routing decision the derive never made.
+      if (counter != null && wearing != 0)
+        'counter_wearing': wearingName(wearing),
       // The calibration actually applied, when one was learned. Absent
       // (not 1.0) when the profile is pure prior — a factor of exactly 1.0
       // published as "calibrated" would claim learning that never happened.
