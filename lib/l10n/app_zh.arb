@@ -2381,5 +2381,41 @@
   "ecgProgress": "已完成 {pct}%",
   "ecgWaveformEmpty": "此读数未保存波形。",
   "ecgWaveformLabel": "接受的波形，单位为手环发送的微伏。空隙为缺失的秒。",
-  "ecgSampleNote": "{rate} Hz 下 {count} 个样本，已滤波，输入参考 µV。不声明导联或极性。"
+  "ecgSampleNote": "{rate} Hz 下 {count} 个样本，已滤波，输入参考 µV。不声明导联或极性。",
+  "devicesWornOn": "佩戴位置",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "手环戴在哪里。步数校准按位置分别学习。",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "手腕",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "上臂",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "其他位置",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "你戴在哪里？",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "默认位置。手环能给出的最佳步数精度。",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "步数会偏少——上臂摆动比手腕少。",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOtherSub": "口袋或包里。手环在那里很难看清步伐。",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }

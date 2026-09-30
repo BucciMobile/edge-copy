@@ -2410,5 +2410,41 @@
   "ecgProgress": "{pct}% completado",
   "ecgWaveformEmpty": "No se guardó ninguna onda con esta lectura.",
   "ecgWaveformLabel": "Onda aceptada en microvoltios tal como la envió la banda. Los huecos son segundos faltantes.",
-  "ecgSampleNote": "{count} muestras a {rate} Hz, filtradas, µV referidos a la entrada. No se afirma derivación ni polaridad."
+  "ecgSampleNote": "{count} muestras a {rate} Hz, filtradas, µV referidos a la entrada. No se afirma derivación ni polaridad.",
+  "devicesWornOn": "Lo llevas en",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "Dónde está la banda. La calibración de pasos se aprende por posición.",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "Muñeca",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "Brazo",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "Otro sitio",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "¿Dónde lo llevas?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "El valor por defecto. La mejor precisión de pasos que la banda puede dar.",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "Cuenta menos pasos: el brazo se balancea menos que la muñeca.",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOtherSub": "Un bolsillo o bolso. La banda no ve bien la marcha ahí.",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }

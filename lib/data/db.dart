@@ -34,6 +34,7 @@ import 'coverage_resolver.dart' show CoverageInterval;
 import 'day_label.dart';
 import 'journal_fields.dart';
 import 'live_coverage_policy.dart';
+import 'step_calibration.dart';
 import 'med_store.dart';
 import 'models.dart';
 import 'nutrition_store.dart';
@@ -349,7 +350,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 54;
+  static const int schemaVersion = 55;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -1073,6 +1074,17 @@ class LocalDb {
           // next free rung rather than collide with any of them.
           await _createEcgTables(db);
         }
+        if (oldV < 55) {
+          // Step calibration profiles: one row per (device_family, wearing).
+          // CREATE TABLE IF NOT EXISTS and nothing else — same shape contract
+          // as the ECG rung above. The wearing LOCATION itself needs no
+          // migration: `device.wearing` has existed since the v51 rung with
+          // DEFAULT 1 (wrist) and no writer; this feature gives it its first
+          // one. No backfill: every existing row already says wrist, which is
+          // what a WHOOP on the wrist means and what the column default
+          // asserted all along.
+          await _createStepCalibration(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1163,6 +1175,7 @@ class LocalDb {
       'INTEGER NOT NULL DEFAULT 0',
     );
     await _createEcgTables(db);
+    await _createStepCalibration(db);
     // Views LAST — they depend on metric_series / day_result / baselines / sessions
     // / notifications all existing. DROP+CREATE so a shape change takes effect.
     await _ensureCoachViews(db);
@@ -1834,6 +1847,172 @@ class LocalDb {
       'CREATE INDEX IF NOT EXISTS idx_ecg_raw_packet_strap '
       'ON ecg_raw_packet(strap_seconds)',
     );
+  }
+
+  /// Step calibration profiles, one row per (device_family, wearing) pair.
+  ///
+  /// Written by the derivation pass after a day is derived (the estimator
+  /// needs the day's phone-covered reference and the counter's ticks in one
+  /// place), read by the steps rung before it publishes a counter total.
+  /// Versioned by [kStepCalibrationVersion] in step_calibration.dart: a
+  /// version the current code does not recognise is IGNORED (reads back
+  /// null), never re-applied — a factor learned by different math is not a
+  /// factor this math may use.
+  static Future<void> _createStepCalibration(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS step_calibration (
+        device_family TEXT NOT NULL,
+        wearing       INTEGER NOT NULL,
+        factor        REAL NOT NULL,
+        n_days        INTEGER NOT NULL,
+        version       INTEGER NOT NULL,
+        updated_ts    INTEGER NOT NULL,
+        PRIMARY KEY (device_family, wearing)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS step_calibration_day (
+        day           TEXT NOT NULL,
+        device_family TEXT NOT NULL,
+        wearing       INTEGER NOT NULL,
+        reference_steps INTEGER,
+        counter_ticks   INTEGER,
+        PRIMARY KEY (day, device_family, wearing)
+      )
+    ''');
+  }
+
+  /// Bank one day's calibration observation. Written once per derived day,
+  /// idempotent by key. NULL reference_steps means "the phone did not cover
+  /// this day" — the row still lands so the estimator can see the day
+  /// happened, but it admits nothing (see stepCalibrationDayAdmissible).
+  static Future<void> putStepCalibrationDay({
+    required String day,
+    required String deviceFamily,
+    required int wearing,
+    int? referenceSteps,
+    int? counterTicks,
+  }) async {
+    final db = await instance;
+    await db.insert(
+      'step_calibration_day',
+      {
+        'day': day,
+        'device_family': deviceFamily,
+        'wearing': wearing,
+        'reference_steps': referenceSteps,
+        'counter_ticks': counterTicks,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// The observed days for one (family, wearing) pair, most recent first.
+  /// The estimator reads this, not day_result payloads: the payload's shape
+  /// moves on every kAlgoVersion bump and a calibration must not be hostage
+  /// to bundle internals.
+  static Future<List<Map<String, Object?>>> stepCalibrationDays(
+    String deviceFamily,
+    int wearing, {
+    int limit = 30,
+  }) async {
+    final db = await instance;
+    return db.query(
+      'step_calibration_day',
+      where: 'device_family = ? AND wearing = ?',
+      whereArgs: [deviceFamily, wearing],
+      orderBy: 'day DESC',
+      limit: limit,
+    );
+  }
+
+  /// The user's statement of where the band sits: `Wearing.wrist` (1),
+  /// `Wearing.bicep` (2), `Wearing.other` (3). The column has existed since
+  /// the v51 rung with DEFAULT 1 and no writer; this is its first.
+  static Future<void> setDeviceWearing(
+    int wearing, [
+    String id = kPrimaryDeviceId,
+  ]) async {
+    final db = await instance;
+    await db.rawUpdate(
+      'UPDATE device SET wearing = ? WHERE id = ?',
+      [wearing, id],
+    );
+  }
+
+  /// [Wearing.parse] of the stored value — null when this build does not
+  /// know the code (future version) or there is no device row yet. Null is a
+  /// refusal: the calibration profile falls back to wrist ONLY on an actual
+  /// wrist row, never on an unknown one.
+  static Future<int?> deviceWearing([String id = kPrimaryDeviceId]) async {
+    final row = await deviceRow(id);
+    return row == null ? null : Wearing.parse(row['wearing']);
+  }
+
+  /// The stored profile for a (family, wearing) pair, or null when none was
+  /// learned or the stored version is not this code's.
+  static Future<StepCalibrationProfile?> stepCalibrationProfile(
+    String deviceFamily,
+    int wearing,
+  ) async {
+    final db = await instance;
+    final r = await db.query(
+      'step_calibration',
+      where: 'device_family = ? AND wearing = ?',
+      whereArgs: [deviceFamily, wearing],
+      limit: 1,
+    );
+    if (r.isEmpty) return null;
+    final row = r.first;
+    final version = (row['version'] as num?)?.toInt() ?? 0;
+    if (version != kStepCalibrationVersion) return null;
+    return StepCalibrationProfile(
+      deviceFamily: deviceFamily,
+      wearing: wearing,
+      factor: (row['factor'] as num?)?.toDouble() ?? 1.0,
+      nDays: (row['n_days'] as num?)?.toInt() ?? 0,
+      version: version,
+    );
+  }
+
+  /// Upsert one profile. The estimator is the only writer and always writes
+  /// a complete row, so this is a plain replace keyed by the pair.
+  static Future<void> putStepCalibrationProfile(
+    StepCalibrationProfile p,
+  ) async {
+    final db = await instance;
+    await db.insert(
+      'step_calibration',
+      {
+        'device_family': p.deviceFamily,
+        'wearing': p.wearing,
+        'factor': p.factor,
+        'n_days': p.nDays,
+        'version': p.version,
+        'updated_ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Every stored profile — the estimator's re-fit reads them all so a
+  /// re-derivation keeps learned factors rather than forgetting them per
+  /// day. Rows with a foreign version are filtered by the reader, not here:
+  /// this returns the TABLE, and the table is append-history, not truth.
+  static Future<List<StepCalibrationProfile>> stepCalibrationProfiles() async {
+    final db = await instance;
+    final rows = await db.query('step_calibration');
+    return [
+      for (final row in rows)
+        if ((row['version'] as num?)?.toInt() == kStepCalibrationVersion)
+          StepCalibrationProfile(
+            deviceFamily: row['device_family'] as String? ?? '',
+            wearing: (row['wearing'] as num?)?.toInt() ?? 0,
+            factor: (row['factor'] as num?)?.toDouble() ?? 1.0,
+            nDays: (row['n_days'] as num?)?.toInt() ?? 0,
+            version: kStepCalibrationVersion,
+          ),
+    ];
   }
 
   /// Persist one accepted reading and its packets ATOMICALLY. Throws on any

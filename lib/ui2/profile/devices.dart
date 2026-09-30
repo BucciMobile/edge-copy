@@ -111,6 +111,7 @@ import '../../ble/zetime_link.dart' show ZeTimeLink, pairZeTime;
 import '../../ble/band_status_l10n.dart' show localizedBandStatus;
 import '../../ble/ble_state.dart' show BandStatus, kMaxConcurrentSecondaryLinks;
 import '../../data/db.dart' show LocalDb;
+import '../../data/step_calibration.dart';
 import '../../l10n/app_localizations.dart';
 import '../../notify/battery_forecast.dart';
 import '../../state/prefs.dart' show Prefs;
@@ -1821,6 +1822,9 @@ class _DeviceDetailState extends State<DeviceDetail> {
   /// a fresh `batteryHealth()` on every build would rescan the sample table on
   /// every connection tick.
   Map<String, dynamic>? _health;
+  /// The user's wearing statement, loaded once like `_health`. Held so a
+  /// rebuild does not re-read the device row on every connection tick.
+  int? _wornOn;
 
   /// The same projection the overnight charge warning fires on, read here
   /// rather than recomputed: this screen is where someone asks "how long have I
@@ -1839,6 +1843,9 @@ class _DeviceDetailState extends State<DeviceDetail> {
     _liveHrOwner = context.read<AppState>()..retainLiveHrView();
     LocalDb.batteryHealth().then((h) {
       if (mounted) setState(() => _health = h);
+    }).catchError((_) {});
+    LocalDb.deviceWearing().then((w) {
+      if (mounted) setState(() => _wornOn = w);
     }).catchError((_) {});
     _loadForecast();
   }
@@ -1882,6 +1889,8 @@ class _DeviceDetailState extends State<DeviceDetail> {
     return DeviceDetailView(
       s,
       status: app?.engine.bandStatus,
+      wornOn: _wornOn,
+      onWearing: () => _pickWearing(c),
       health: _health,
       forecast: _forecast,
       onFind: app?.buzzBand,
@@ -2533,6 +2542,12 @@ class DeviceDetailView extends StatelessWidget {
   /// The band's own state, from `bandStatusFor`. Null for a non-band source.
   final BandStatus? status;
 
+  /// The user's wearing-location statement, read from `device.wearing` by
+  /// the screen that owns the DB. Null means "not loaded / unknown code" —
+  /// the row then shows wrist, the column's own DEFAULT, without writing it.
+  final int? wornOn;
+  /// Open the wearing-location sheet. Null for a non-band source.
+  final VoidCallback? onWearing;
   /// `LocalDb.batteryHealth()` — the recent `band_battery` series, which is the
   /// one table nothing prunes. Null until it loads, and on a non-band source.
   final Map<String, dynamic>? health;
@@ -2550,6 +2565,8 @@ class DeviceDetailView extends StatelessWidget {
       this.onRename,
       this.liveHr,
       this.status,
+      this.wornOn,
+      this.onWearing,
       this.health,
       this.forecast});
 
@@ -2697,6 +2714,19 @@ class DeviceDetailView extends StatelessWidget {
                           chevron: onRename != null,
                           onTap: onRename),
                       Divider(color: p.line, height: 1),
+                      // Where the band sits — the one thing about step
+                      // accuracy only the user knows. Not a "sensor
+                      // setting": the bicep and the wrist are different
+                      // measurement contexts, and the step calibration
+                      // profile is keyed to this answer.
+                      SetRow(LucideIcons.personStanding, C.teal,
+                          l?.devicesWornOn ?? 'Worn on',
+                          value: wornName(c, wornOn ?? Wearing.wrist),
+                          sub: l?.devicesWornOnSub ??
+                              'Where the band sits. Step calibration is '
+                              'learned per location.',
+                          chevron: onWearing != null, onTap: onWearing),
+                      Divider(color: p.line, height: 1),
                       SetRow(LucideIcons.batteryMedium, C.green,
                           l?.devicesBattery ?? 'Battery',
                           value: battery == null ? '' : '${battery.round()}%',
@@ -2819,6 +2849,71 @@ String? _chargeHistory(Map<String, dynamic>? h) {
   final mv = (h?['full_charge_mv'] as num?)?.toInt();
   return '$cycles charge${cycles == 1 ? '' : 's'} logged'
       '${mv == null ? '' : ', up to $mv mV'}';
+}
+
+/// The wearing location as the row shows it. Presentation only: it names
+/// what the user chose, not what any profile is keyed to.
+String wornName(BuildContext c, int w) {
+  final l = AppLocalizations.of(c);
+  return switch (w) {
+    Wearing.bicep => l?.devicesWornBicep ?? 'Upper arm',
+    Wearing.other => l?.devicesWornOther ?? 'Somewhere else',
+    _ => l?.devicesWornWrist ?? 'Wrist',
+  };
+}
+
+/// The wearing-location sheet: three options, one tap, saved immediately —
+/// freely reversible, so no confirmation; each option's sub line says what
+/// it means for steps. After the save the sheet's caller refreshes, so the
+/// row shows the new location without a rebuild of the whole screen.
+Future<void> _pickWearing(BuildContext c) async {
+  final p = P.of(c);
+  final l = AppLocalizations.of(c);
+  final chosen = await showModalBottomSheet<int>(
+    context: c,
+    backgroundColor: p.card,
+    showDragHandle: true,
+    builder: (sheet) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(S.x4, 0, S.x4, S.x4),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(l?.devicesWornSheetTitle ?? 'Where do you wear it?',
+              style: F.t2.copyWith(color: p.ink)),
+          const SizedBox(height: S.x3),
+          for (final (code, title, sub) in [
+            (
+              Wearing.wrist,
+              l?.devicesWornWrist ?? 'Wrist',
+              l?.devicesWornWristSub ??
+                  'The default. Best step accuracy the band can give.'
+            ),
+            (
+              Wearing.bicep,
+              l?.devicesWornBicep ?? 'Upper arm',
+              l?.devicesWornBicepSub ??
+                  'Under-counts steps — the arm swings less than the wrist.'
+            ),
+            (
+              Wearing.other,
+              l?.devicesWornOther ?? 'Somewhere else',
+              l?.devicesWornOtherSub ??
+                  'A pocket or bag. The band cannot see gait well there.'
+            ),
+          ])
+            Padding(
+              padding: const EdgeInsets.only(bottom: S.x2),
+              child: Surface(
+                onTap: () => Navigator.of(sheet).pop(code),
+                child: SetRow(LucideIcons.personStanding, C.teal, title,
+                    sub: sub, chevron: false),
+              ),
+            ),
+        ]),
+      ),
+    ),
+  );
+  if (chosen == null) return;
+  await LocalDb.setDeviceWearing(chosen);
 }
 
 /// "Thu 4 Sep, 07:12" — local, which is what every day label in this app is.

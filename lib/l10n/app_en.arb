@@ -12441,5 +12441,41 @@
         "type": "int"
       }
     }
+  },
+  "devicesWornOn": "Worn on",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "Where the band sits. Step calibration is learned per location.",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "Wrist",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "Upper arm",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "Somewhere else",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "Where do you wear it?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "The default. Best step accuracy the band can give.",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "Under-counts steps — the arm swings less than the wrist.",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOtherSub": "A pocket or bag. The band cannot see gait well there.",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
   }
 }
