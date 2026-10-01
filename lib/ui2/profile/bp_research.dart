@@ -21,7 +21,6 @@
 //   · Nothing here is exported to HealthKit / Health Connect.
 // A window with no band data is stored as a capture with an EMPTY window —
 // missing is missing, never zero.
-import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -35,8 +34,8 @@ class BpResearchScreen extends StatefulWidget {
   const BpResearchScreen({super.key});
 
   @visibleForTesting
-  static String windowSummary(Map<String, Object?> r) =>
-      _BpResearchScreenState._windowSummary(r);
+  static String windowSummary(Map<String, Object?> r, [AppLocalizations? l]) =>
+      _BpResearchScreenState._windowSummary(r, l);
 
   @override
   State<BpResearchScreen> createState() => _BpResearchScreenState();
@@ -152,11 +151,12 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     if (measuredAt == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Could not read the measurement time \u2014 use HH:MM or '
-              'YYYY-MM-DD HH:MM, or leave it empty for "now". Nothing was '
-              'stored.',
+              l?.bpResearchBadTime ??
+                  'Could not read the measurement time \u2014 use HH:MM or '
+                      'YYYY-MM-DD HH:MM, or leave it empty for "now". Nothing was '
+                      'stored.',
             ),
           ),
         );
@@ -168,11 +168,12 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     if (measuredAtMs > enteredAtMs + 60 * 1000) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'The measurement time lies in the future \u2014 the window '
-              'would pair the reference with data that does not exist yet. '
-              'Nothing was stored.',
+              l?.bpResearchFutureTime ??
+                  'The measurement time lies in the future \u2014 the window '
+                      'would pair the reference with data that does not exist yet. '
+                      'Nothing was stored.',
             ),
           ),
         );
@@ -326,13 +327,15 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
           TextField(
             controller: _measuredAt,
             keyboardType: TextInputType.datetime,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText:
+                  l?.bpResearchMeasuredAt ??
                   'Measurement time (HH:MM or YYYY-MM-DD HH:MM; empty = now)',
               helperText:
-                  'Back-date to the actual cuff reading \u2014 the band '
-                  'window is frozen around THAT instant, not around typing '
-                  'it in. Minute precision; empty = taken just now.',
+                  l?.bpResearchMeasuredAtHint ??
+                  'Back-date to the actual cuff reading \u2014 the 5-minute '
+                      'band window covers the rest time BEFORE that reading, not '
+                      'the typing-in. Minute precision; empty = taken just now.',
             ),
           ),
           const SizedBox(height: S.x2),
@@ -345,11 +348,12 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
           const SizedBox(height: S.x2),
           TextField(
             controller: _sessionId,
-            decoration: const InputDecoration(
-              labelText: 'Session id (optional)',
+            decoration: InputDecoration(
+              labelText: l?.bpResearchSessionId ?? 'Session id (optional)',
               helperText:
+                  l?.bpResearchSessionIdHint ??
                   'Group readings of one sitting \u2014 they are not '
-                  'independent states, and an analysis must be able to tell.',
+                      'independent states, and an analysis must be able to tell.',
             ),
           ),
           const SizedBox(height: S.x2),
@@ -383,7 +387,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                   '${r['systolic_mmhg']}/${r['diastolic_mmhg']} mmHg \u2014 '
                   '${formatDayTime(DateTime.fromMillisecondsSinceEpoch(r['measured_at_ms'] as int), l)}',
                 ),
-                subtitle: Text(_windowSummary(r)),
+                subtitle: Text(_windowSummary(r, l)),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -394,7 +398,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                     // window end). Reference values are never touched.
                     IconButton(
                       icon: const Icon(LucideIcons.refreshCw, size: 18),
-                      tooltip: 'Refresh band window',
+                      tooltip:
+                          l?.bpResearchRefreshTooltip ?? 'Refresh band window',
                       onPressed: () async {
                         await LocalDb.reprocessBpResearchCapture(
                           r['id'] as int,
@@ -439,7 +444,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
   /// can never be misread as a final verdict; whatever HAS arrived is
   /// still shown honestly alongside the hint. A non-medical, non-claiming
   /// message.
-  static String _windowSummary(Map<String, Object?> r) {
+  static String _windowSummary(Map<String, Object?> r, AppLocalizations? l) {
     final onehz = r['onehz_rows'];
     final beats = r['rr_beats'];
     final hr = r['hr_mean'];
@@ -449,7 +454,9 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
       // Not final YET — never "no band data". Show whatever has arrived
       // (partial data is honest data), plus the sync hint.
       final parts = <String>[
-        'Band data is still syncing — refresh this window after sync.',
+        l?.bpResearchPendingSync ??
+            'Band data is still syncing — refresh this window after '
+                'sync.',
       ];
       if (hr is num) parts.add('HR ${hr.toStringAsFixed(0)} bpm');
       if (rmssd is num) parts.add('RMSSD ${rmssd.toStringAsFixed(0)} ms');
@@ -459,7 +466,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
       return parts.join(' · ');
     }
     if (onehz == null && beats == null) {
-      return 'No band data in the window — stored as-is.';
+      return l?.bpResearchNoData ??
+          'No band data in the window — stored as-is.';
     }
     final parts = <String>[];
     if (hr is num) parts.add('HR ${hr.toStringAsFixed(0)} bpm');

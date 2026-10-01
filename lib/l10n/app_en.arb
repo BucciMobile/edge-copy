@@ -12446,7 +12446,7 @@
   "@settingsBpResearchRowTitle": {
     "description": "Developer settings row title for the experimental blood-pressure research capture screen"
   },
-  "settingsBpResearchRowSub": "EXPERIMENTAL. Pair a cuff reading with the band data of the same instant, for comparison outside this app. Never a health feature",
+  "settingsBpResearchRowSub": "EXPERIMENTAL. Pair a cuff reading with the 5 minutes of band rest data right before it, for comparison outside this app. Never a health feature",
   "@settingsBpResearchRowSub": {
     "description": "Developer settings row subtitle for the BP research capture screen"
   },
@@ -12454,7 +12454,7 @@
   "@bpResearchTitle": {
     "description": "Title of the experimental BP research capture screen"
   },
-  "bpResearchIntro": "EXPERIMENTAL. Take a cuff reading, type the pair in, press capture. The band data of the ±2 minutes around that instant is frozen next to it — for you to compare outside this app. Nothing here is a health feature, nothing here feeds any score, and nothing here is ever blended with what the band measured.",
+  "bpResearchIntro": "EXPERIMENTAL. Take a cuff reading, type the pair in, press capture. The 5 minutes of band data right before that reading are frozen next to it — for you to compare outside this app. Nothing here is a health feature, nothing here feeds any score, and nothing here is ever blended with what the band measured.",
   "@bpResearchIntro": {
     "description": "Intro text of the BP research capture screen"
   },
@@ -12486,7 +12486,7 @@
   "@bpResearchMeasuredAt": {
     "description": "Optional back-dating field: when the cuff reading was actually taken"
   },
-  "bpResearchMeasuredAtHint": "Back-date to the actual cuff reading \u2014 the band window is frozen around THAT instant, not around typing it in.",
+  "bpResearchMeasuredAtHint": "Back-date to the actual cuff reading \u2014 the 5-minute band window covers the rest time BEFORE that reading, not the typing-in. Your entry is minute-precise; the stored timestamp is the technical pairing anchor.",
   "@bpResearchMeasuredAtHint": {
     "description": "Helper text under the measurement-time field"
   },
@@ -12497,6 +12497,26 @@
   "bpResearchSessionIdHint": "Group readings of one sitting \u2014 they are not independent states, and an analysis must be able to tell.",
   "@bpResearchSessionIdHint": {
     "description": "Helper text under the session-id field"
+  },
+  "bpResearchBadTime": "Could not read the measurement time — use HH:MM or YYYY-MM-DD HH:MM, or leave it empty for \"now\". Nothing was stored.",
+  "@bpResearchBadTime": {
+    "description": "Snackbar text for an unparseable measurement-time entry, which is rejected, never guessed"
+  },
+  "bpResearchFutureTime": "The measurement time lies in the future — the window would pair the reference with data that does not exist yet. Nothing was stored.",
+  "@bpResearchFutureTime": {
+    "description": "Snackbar text rejecting a future measurement time"
+  },
+  "bpResearchRefreshTooltip": "Refresh band window",
+  "@bpResearchRefreshTooltip": {
+    "description": "Tooltip of the developer-mode button that re-reads the current local data for this capture's original window bounds"
+  },
+  "bpResearchPendingSync": "Band data is still syncing — refresh this window after sync.",
+  "@bpResearchPendingSync": {
+    "description": "Window summary hint for a pending window: the local sync provably does not reach the window end yet, so the missing tail may still arrive; not a data-quality verdict"
+  },
+  "bpResearchNoData": "No band data in the window — stored as-is.",
+  "@bpResearchNoData": {
+    "description": "Window summary text for a final window that provably holds no band data"
   },
   "bpResearchHistory": "Captures",
   "@bpResearchHistory": {
