@@ -8870,8 +8870,21 @@ class LocalDb {
       final info = await db.rawQuery('PRAGMA table_info($t)');
       return {for (final c in info) (c['name'] as String)};
     }
+    Future<bool> srcHasTable(String t, Database s) async {
+      // A salvage source may predate the window table; `SELECT *` on a
+      // missing table throws, so probe for its existence first.
+      final rows = await s.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
+        [t],
+      );
+      return rows.isNotEmpty;
+    }
 
     final counts = <String, int>{};
+    // SOURCE→DEST id map for the BP research reference merge below: the
+    // window rows of a foreign export name their reference by the SOURCE
+    // database's AUTOINCREMENT id, which is meaningless here.
+    final bpIdMap = <int, int>{};
     // DISTINCT DAYS ACTUALLY WRITTEN — the number the caller reports as
     // "N days imported".
     //
@@ -8929,6 +8942,96 @@ class LocalDb {
             // outcome, so anything that is not a missing table now propagates.
             if (e.isNoSuchTableError()) continue;
             rethrow;
+          }
+          // BP RESEARCH CAPTURES MERGE BY NATURAL KEY, NOT BY SOURCE ID. The
+          // reference's `id` is a device-local AUTOINCREMENT and the window's
+          // `reference_id` names it, so the generic REPLACE-by-PK path would
+          // let a foreign export's id=1 eat this install's id=1 capture. Both
+          // tables are hand-typed and tiny (nothing writes them but the dev
+          // screen), so a dedicated two-query merge beats threading a special
+          // case through the paged loop: the reference REPLACEs on its natural
+          // UNIQUE (measured_at_ms, device) key, the window follows onto the
+          // DESTINATION id, and a capture whose incoming window is absent
+          // keeps the window it already had. Re-import converges.
+          if (t == 'bp_research_reference' || t == 'bp_research_window') {
+            // The reference pass builds the id map; the window pass that
+            // follows (references merge first) only consumes it.
+            try {
+              final refCols = await destCols('bp_research_reference');
+              final winCols = await destCols('bp_research_window');
+              final srcRefs = t == 'bp_research_reference'
+                  ? await src.rawQuery('SELECT * FROM bp_research_reference')
+                  : const <Map<String, Object?>>[];
+              final srcWins = t == 'bp_research_window' &&
+                      await srcHasTable('bp_research_window', src)
+                  ? await src.rawQuery('SELECT * FROM bp_research_window')
+                  : const <Map<String, Object?>>[];
+              await db.transaction((txn) async {
+                for (final r in srcRefs) {
+                  final row = <String, Object?>{
+                    for (final e in r.entries)
+                      if (refCols.contains(e.key)) e.key: e.value,
+                  };
+                  final srcId = row.remove('id');
+                  final destId = await txn.rawInsert(
+                    'INSERT OR REPLACE INTO bp_research_reference '
+                    '(measured_at_ms, device, posture, conditions, '
+                    'systolic_mmhg, diastolic_mmhg, captured_at_ms) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                    [
+                      row['measured_at_ms'],
+                      (row['device'] as String?) ?? '',
+                      row['posture'],
+                      row['conditions'],
+                      row['systolic_mmhg'],
+                      row['diastolic_mmhg'],
+                      row['captured_at_ms'],
+                    ],
+                  );
+                  if (srcId is num) {
+                    bpIdMap[srcId.toInt()] = destId;
+                  }
+                }
+                for (final w in srcWins) {
+                  final row = <String, Object?>{
+                    for (final e in w.entries)
+                      if (winCols.contains(e.key)) e.key: e.value,
+                  };
+                  final destRef = row.remove('reference_id');
+                  final mapped = destRef is num
+                      ? bpIdMap[destRef.toInt()]
+                      : null;
+                  if (mapped == null) continue;
+                  await txn.rawInsert(
+                    'INSERT OR REPLACE INTO bp_research_window '
+                    '(reference_id, window_start_ms, window_end_ms, '
+                    'onehz_rows, rr_beats, hr_mean, rr_ms_mean, rr_ms_min, '
+                    'rr_ms_max, rmssd_ms, meta_json) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [
+                      mapped,
+                      row['window_start_ms'],
+                      row['window_end_ms'],
+                      row['onehz_rows'],
+                      row['rr_beats'],
+                      row['hr_mean'],
+                      row['rr_ms_mean'],
+                      row['rr_ms_min'],
+                      row['rr_ms_max'],
+                      row['rmssd_ms'],
+                      row['meta_json'],
+                    ],
+                  );
+                }
+              });
+              counts[t] = t == 'bp_research_reference'
+                  ? srcRefs.length
+                  : srcWins.length;
+            } catch (_) {
+              if (!tolerant) rethrow;
+              counts[t] = 0;
+            }
+            continue;
           }
           if (t == 'day_result') importedDays = <String>{};
           if (firstPage.isEmpty) {

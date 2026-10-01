@@ -128,4 +128,122 @@ void main() {
       lessThan(posOf(LocalDb.salvageTablesForTest, 'bp_research_window')),
     );
   });
+
+  // A foreign export's AUTOINCREMENT ids are meaningless on this install:
+  // its id=1 must never REPLACE an unrelated local capture that happens to
+  // hold id=1. The merge keys references on (measured_at_ms, device) and
+  // remaps each window onto the DESTINATION reference id.
+  test('restore merges captures by natural key, never by source id',
+      () async {
+    // Start from a clean store: earlier tests in this file leave rows
+    // behind, and this one asserts exact row sets.
+    final db0 = await LocalDb.instance;
+    await db0.delete('bp_research_window');
+    await db0.delete('bp_research_reference');
+    // Local state: one capture (id=1 by AUTOINCREMENT) plus its window.
+    await LocalDb.putBpResearchCapture(_capture(_at, device: 'local'));
+    // A foreign export whose DIFFERENT capture also carries id=1.
+    final srcPath =
+        p.join(await databaseFactory.getDatabasesPath(), 'bp_foreign.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+        'CREATE TABLE bp_research_reference ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'measured_at_ms INTEGER NOT NULL, '
+        'device TEXT, posture TEXT, conditions TEXT, '
+        'systolic_mmhg REAL NOT NULL, diastolic_mmhg REAL NOT NULL, '
+        'captured_at_ms INTEGER NOT NULL, '
+        'UNIQUE (measured_at_ms, device))');
+    await src.execute(
+        'CREATE TABLE bp_research_window ('
+        'reference_id INTEGER NOT NULL PRIMARY KEY, '
+        'window_start_ms INTEGER NOT NULL, window_end_ms INTEGER NOT NULL, '
+        'onehz_rows INTEGER, rr_beats INTEGER, hr_mean REAL, rr_ms_mean REAL, '
+        'rr_ms_min REAL, rr_ms_max REAL, rmssd_ms REAL, meta_json TEXT)');
+    await src.insert('bp_research_reference', {
+      'id': 1, // deliberately collides with the local capture's id
+      'measured_at_ms': _at + 60000,
+      'device': 'local',
+      'posture': 'sitting',
+      'conditions': 'rest',
+      'systolic_mmhg': 130,
+      'diastolic_mmhg': 85,
+      'captured_at_ms': _at + 60000,
+    });
+    await src.insert('bp_research_window', {
+      'reference_id': 1,
+      'window_start_ms': _at + 60000 - 120000,
+      'window_end_ms': _at + 60000 + 120000,
+      'onehz_rows': 240,
+      'rr_beats': 200,
+      'hr_mean': 71.0,
+    });
+    await src.close();
+
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    expect(counts['bp_research_reference'], 1);
+    expect(counts['bp_research_window'], 1);
+
+    final db = await LocalDb.instance;
+    // Both captures survive: the foreign id=1 did not eat the local one.
+    final refs = await db.rawQuery(
+        'SELECT measured_at_ms, systolic_mmhg FROM bp_research_reference '
+        'ORDER BY measured_at_ms');
+    expect(refs, hasLength(2));
+    expect(refs[0]['measured_at_ms'], _at);
+    expect(refs[0]['systolic_mmhg'], 120.0);
+    expect(refs[1]['measured_at_ms'], _at + 60000);
+    expect(refs[1]['systolic_mmhg'], 130.0);
+    // The imported window rides the imported reference's DESTINATION id,
+    // and no window is orphaned.
+    final orphaned = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_window '
+      'WHERE reference_id NOT IN (SELECT id FROM bp_research_reference)',
+    );
+    expect(orphaned.first['c'], 0);
+    final importedWin = await db.rawQuery(
+        'SELECT hr_mean FROM bp_research_window w '
+        'JOIN bp_research_reference r ON r.id = w.reference_id '
+        'WHERE r.measured_at_ms = ?', [_at + 60000]);
+    expect(importedWin.first['hr_mean'], 71.0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('a re-import of the same export converges (idempotent merge)',
+      () async {
+    final db0 = await LocalDb.instance;
+    await db0.delete('bp_research_window');
+    await db0.delete('bp_research_reference');
+    final srcPath =
+        p.join(await databaseFactory.getDatabasesPath(), 'bp_foreign2.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+        'CREATE TABLE bp_research_reference ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'measured_at_ms INTEGER NOT NULL, '
+        'device TEXT, posture TEXT, conditions TEXT, '
+        'systolic_mmhg REAL NOT NULL, diastolic_mmhg REAL NOT NULL, '
+        'captured_at_ms INTEGER NOT NULL, '
+        'UNIQUE (measured_at_ms, device))');
+    await src.insert('bp_research_reference', {
+      'id': 1,
+      'measured_at_ms': _at + 120000,
+      'device': '',
+      'systolic_mmhg': 118,
+      'diastolic_mmhg': 76,
+      'captured_at_ms': _at + 120000,
+    });
+    await src.close();
+
+    await LocalDb.importFromDbFile(srcPath);
+    await LocalDb.importFromDbFile(srcPath);
+    final db = await LocalDb.instance;
+    final n = (await db.rawQuery(
+        'SELECT COUNT(*) c FROM bp_research_reference '
+        'WHERE measured_at_ms = ?', [_at + 120000])).first['c'];
+    expect(n, 1);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
 }
