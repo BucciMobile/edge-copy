@@ -36,6 +36,8 @@ import 'package:openstrap_edge/ui2/ui2.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../tool/wger_weightlifting_selection.dart';
+
 // ── deterministic fixtures ─────────────────────────────────────────────────
 
 final _start = DateTime(2026, 5, 20, 7, 15);
@@ -236,7 +238,12 @@ void main() {
     test('the offline strength catalogue keeps old keys and wger provenance',
         () {
       expect(coreExerciseCount, 18);
-      expect(wgerExerciseCount, greaterThanOrEqualTo(800));
+      expect(wgerExerciseCount, wgerWeightliftingSelection.length);
+      expect(
+          {for (final e in exerciseLibrary.where((e) => e.fromWger))
+            e.sourceId: e.label},
+          wgerWeightliftingSelection,
+          reason: 'only explicitly reviewed lifting additions may ship');
       expect(exerciseLibrary, hasLength(coreExerciseCount + wgerExerciseCount));
       expect(exerciseLibrary.map((e) => e.key).toSet(),
           hasLength(exerciseLibrary.length),
@@ -272,6 +279,23 @@ void main() {
                       allowedLicenses[credit.licenseName] ==
                       credit.licenseUrl)),
           isTrue);
+    });
+
+    test('the lifting catalogue excludes other workouts and mobility drills', () {
+      final labels = exerciseLibrary.map((e) => e.label).toSet();
+      for (final excluded in [
+        'Walking', 'Cycling', 'Zone 2 Running', 'Treadmill Cardio',
+        'Cool-Down Swim', 'Guided or free meditation', '90/90 Breathing',
+        'Cobra Stretch', 'Yoga exercise: Cow-cat',
+      ]) {
+        expect(labels, isNot(contains(excluded)), reason: excluded);
+      }
+      expect(exerciseLibrary.any((e) => e.category == 'Cardio'), isFalse);
+      expect(labels, containsAll([
+        'Bench press', 'Back squat', 'Deadlift', 'Arnold Shoulder Press',
+        'Dumbbell Romanian Deadlift', 'Leg Extension', 'Cable Curls',
+        'Barbell Lunges Walking',
+      ]));
     });
 
     test('kcal is MET × 3.5 × kg / 200 × min, and null without a weight', () {
@@ -316,6 +340,15 @@ void main() {
       for (final arch in Arch.values) {
         expect(liveFor(_first(arch)), isA<Widget>());
       }
+    });
+
+    test('other workout types keep their own live screens', () {
+      expect(liveFor(activityByName('weight_training')!), isA<LiveStrength>());
+      expect(liveFor(activityByName('running')!), isA<LiveMeasured>());
+      expect(liveFor(activityByName('cycling')!), isA<LiveMeasured>());
+      expect(liveFor(activityByName('swimming')!), isA<LiveSwim>());
+      expect(liveFor(activityByName('yoga')!), isA<LiveFlow>());
+      expect(liveFor(activityByName('hiit')!), isA<LiveInterval>());
     });
 
     test('there is no power archetype, and the machines that claimed it are '
@@ -1446,6 +1479,12 @@ void main() {
       await tester.tap(find.widgetWithText(BigButton, 'Choose exercise'));
       await tester.pumpAndSettle();
 
+      expect(find.text('Cardio'), findsNothing);
+      for (final query in ['Treadmill Cardio', '90/90 Breathing', 'Cobra Stretch']) {
+        await tester.enterText(find.byType(TextField), query);
+        await tester.pumpAndSettle();
+        expect(find.text('No exercises match that'), findsOneWidget);
+      }
       await tester.enterText(find.byType(TextField), 'Arnold Shoulder Press');
       await tester.pumpAndSettle();
       expect(find.text('Arnold Shoulder Press'), findsNWidgets(2),

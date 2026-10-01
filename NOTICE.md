@@ -26,6 +26,11 @@ Edge adapts the source by selecting fields, normalizing whitespace, sorting
 records, and omitting descriptions, notes, images, and videos. No exercise
 content is fetched while the app is running.
 
+The imported additions are a reviewed selection of weightlifting movements
+listed in `tool/wger_weightlifting_selection.dart`. Cardio, stretching, yoga,
+and breathing entries are not imported. Refreshes cannot automatically expand
+this selection. The app's separate workout/activity catalogue is unchanged.
+
 The generated dataset is separate from Edge's MIT-licensed application code.
 Refresh it with `dart run tool/update_wger_exercises.dart`; the importer rejects
 an unfamiliar license rather than silently shipping it.

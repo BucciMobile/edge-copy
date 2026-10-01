@@ -11,6 +11,6 @@
 *.dart diff
 
 # Rebuilt from wger by tool/update_wger_exercises.dart. GitHub keeps generated
-# data available but collapses its 20k+ lines so the importer remains the review
+# data available but collapses it so the selection and importer remain the review
 # surface.
 lib/ui2/activity/wger_exercises.g.dart linguist-generated=true

@@ -12,6 +12,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'wger_weightlifting_selection.dart';
+
 const _source =
     'https://wger.de/api/v2/exerciseinfo/?limit=200&language__code=en';
 const _licenseSource = 'https://wger.de/api/v2/license/?limit=100';
@@ -54,6 +56,41 @@ final _uuid = RegExp(
   caseSensitive: false,
 );
 
+/// Select only reviewed lifting movements. Categories alone are not sufficient:
+/// wger includes stretches, breathing and other workouts under muscle groups.
+/// Missing or reclassified records require review instead of a partial refresh.
+List<Map<String, Object?>> selectWeightliftingExercises(List<Object?> raw) {
+  const categories = {
+    'Abs',
+    'Arms',
+    'Back',
+    'Calves',
+    'Chest',
+    'Legs',
+    'Shoulders',
+  };
+  final selected = <Map<String, Object?>>[];
+  final seen = <String>{};
+  for (final value in raw) {
+    final map = (value as Map).cast<String, Object?>();
+    final id = _clean(map['uuid']).toLowerCase();
+    if (!wgerWeightliftingSelection.containsKey(id)) continue;
+    if (!seen.add(id)) throw StateError('Duplicate selected wger UUID: $id');
+    final category = _clean((map['category'] as Map?)?['name']);
+    if (!categories.contains(category)) {
+      throw StateError(
+        'Review the category for selected wger exercise $id: $category',
+      );
+    }
+    selected.add(map);
+  }
+  final missing = wgerWeightliftingSelection.keys.toSet().difference(seen);
+  if (missing.isNotEmpty) {
+    throw StateError('Missing reviewed weightlifting exercises: $missing');
+  }
+  return selected;
+}
+
 Future<void> main() async {
   final client = HttpClient()
     ..userAgent = 'OpenStrap exercise catalogue updater';
@@ -76,10 +113,15 @@ Future<void> main() async {
     final raw = await _fetchAll(client, Uri.parse(_source), minimumCount: 800);
 
     final rows = <_Exercise>[];
-    for (final value in raw) {
-      final map = (value as Map).cast<String, Object?>();
+    for (final map in selectWeightliftingExercises(raw)) {
       final row = _Exercise.fromJson(map, licenses);
       if (_legacySourceIds.contains(row.uuid)) continue;
+      if (row.label != wgerWeightliftingSelection[row.uuid]) {
+        throw StateError(
+          'Review the renamed weightlifting exercise '
+          '${row.uuid}: ${row.label}',
+        );
+      }
       rows.add(row);
     }
     rows.sort((a, b) {
@@ -114,6 +156,7 @@ Future<void> main() async {
       ..writeln('// GENERATED FILE — DO NOT EDIT.')
       ..writeln('// Refresh with: dart run tool/update_wger_exercises.dart')
       ..writeln('// Source: $_source')
+      ..writeln('// Selection: tool/wger_weightlifting_selection.dart')
       ..writeln('//')
       ..writeln('// Base data and translations retain their Creative Commons')
       ..writeln('// credits. See NOTICE.md and docs/notice.html.')
@@ -154,7 +197,9 @@ Future<void> main() async {
     if (formatted.exitCode != 0) {
       throw StateError('dart format failed: ${formatted.stderr}');
     }
-    stdout.writeln('Wrote ${rows.length} wger exercises to $_output.');
+    stdout.writeln(
+      'Wrote ${rows.length} reviewed wger weightlifting exercises to $_output.',
+    );
   } finally {
     client.close(force: true);
   }
