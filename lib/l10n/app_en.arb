@@ -12486,11 +12486,11 @@
   "@bpResearchHistory": {
     "description": "Section header for the stored capture list"
   },
-  "bpResearchBadValue": "That pair is not a blood pressure — check the numbers and try again. Nothing was stored.",
+  "bpResearchBadValue": "That pair is outside the range this app supports (systolic 50–300, diastolic 20–200 mmHg, diastolic below systolic) — it was not saved. Check the numbers and try again.",
   "@bpResearchBadValue": {
     "description": "Snackbar text for an out-of-bounds reference pair, which is rejected, never clamped"
   },
-  "bpResearchExportHint": "Export all captures as CSV from Your data › Export CSV (set \"BP research captures\"). Research data — it never leaves the phone except through that file.",
+  "bpResearchExportHint": "Export all captures as CSV from Your data › Export CSV (set \"BP research captures\"). This is the dedicated export for BP research data; a full-database backup or an opt-in health share also contains it.",
   "@bpResearchExportHint": {
     "description": "Hint under the capture list explaining the CSV export path"
   }

@@ -167,6 +167,8 @@ class LocalDb {
   /// flash as we ACK, so in practice this is the only copy of those days too.
   static const _salvageTables = [
     // Hand-entered. The only copy that exists anywhere.
+    'bp_research_reference',
+    'bp_research_window',
     'journal',
     'journal_metric',
     'journal_field_def',
@@ -1665,13 +1667,30 @@ class LocalDb {
   static Future<void> putBpResearchCapture(BpResearchCapture c) async {
     final db = await instance;
     await db.transaction((txn) async {
+      // NULL never equals NULL in a UNIQUE constraint, so a retake with no
+      // device text would duplicate the reference instead of replacing it.
+      // Normalizing to '' keeps (measured_at_ms, device) unique either way,
+      // and the window of the row being replaced is deleted explicitly —
+      // without PRAGMA foreign_keys the ON DELETE CASCADE never runs, and
+      // INSERT OR REPLACE assigns a fresh id that would orphan it.
+      await txn.rawDelete(
+        'DELETE FROM bp_research_window WHERE reference_id IN '
+        '(SELECT id FROM bp_research_reference '
+        'WHERE measured_at_ms = ? AND device = ?)',
+        [c.measuredAtMs, c.device ?? ''],
+      );
+      await txn.rawDelete(
+        'DELETE FROM bp_research_reference '
+        'WHERE measured_at_ms = ? AND device = ?',
+        [c.measuredAtMs, c.device ?? ''],
+      );
       final id = await txn.rawInsert(
-        'INSERT OR REPLACE INTO bp_research_reference '
+        'INSERT INTO bp_research_reference '
         '(measured_at_ms, device, posture, conditions, systolic_mmhg, '
         'diastolic_mmhg, captured_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [
           c.measuredAtMs,
-          c.device,
+          c.device ?? '',
           c.posture,
           c.conditions,
           c.systolicMmHg,
@@ -1729,11 +1748,20 @@ class LocalDb {
   /// Delete one capture (dev screen). The window cascades.
   static Future<void> deleteBpResearchCapture(int id) async {
     final db = await instance;
-    await db.delete(
-      'bp_research_reference',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    // No PRAGMA foreign_keys here, so the window's ON DELETE CASCADE is
+    // inert — the delete has to take the window row explicitly.
+    await db.transaction((txn) async {
+      await txn.delete(
+        'bp_research_window',
+        where: 'reference_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete(
+        'bp_research_reference',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    });
   }
 
   /// Atomically claim [key] for a one-time OS notification fire.
@@ -8744,6 +8772,8 @@ class LocalDb {
       // banked. They were also simply MISSING here until now — nutrition,
       // medication, strength sets, symptoms and routes did not survive a
       // backup/restore round trip at all, the same omission `wipeAll` documents.
+      'bp_research_reference',
+      'bp_research_window',
       'journal',
       'journal_metric',
       'journal_field_def',

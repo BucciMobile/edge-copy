@@ -72,7 +72,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
         sys < kResearchSystolicBounds.$1 ||
         sys > kResearchSystolicBounds.$2 ||
         dia < kResearchDiastolicBounds.$1 ||
-        dia > kResearchDiastolicBounds.$2) {
+        dia > kResearchDiastolicBounds.$2 ||
+        dia >= sys) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(l?.bpResearchBadValue ??
@@ -83,6 +84,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
       return;
     }
     setState(() => _busy = true);
+    var stored = false;
     try {
       final now = DateTime.now();
       final start = now.millisecondsSinceEpoch - kBpResearchWindowPreMs;
@@ -118,9 +120,18 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
             _conditions.text.trim().isEmpty ? null : _conditions.text.trim(),
         window: window,
       ));
+      stored = true;
       _sys.clear();
       _dia.clear();
       await _refresh();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(stored
+              ? 'Capture saved, but refreshing the history failed. ($e)'
+              : 'Capture failed \u2014 nothing was stored. ($e)'),
+        ));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }
