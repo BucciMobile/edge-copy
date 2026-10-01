@@ -9118,6 +9118,19 @@ class LocalDb {
     // features were computed from conflicts with the destination's local
     // revision — a window may never point at a foreign snapshot.
     var skippedWindows = 0;
+    // Of those, the split by REASON — surfaced as extra import-count keys
+    // so a restore can be audited: a skipped window is either a snapshot
+    // CONTENT conflict or a snapshot the source backup simply does not
+    // carry.
+    var skippedWindowsSnapshotConflict = 0;
+    var skippedWindowsMissingSnapshot = 0;
+    // Rows skipped because their SOURCE reference did not map (dangling
+    // source rows) — reported separately from content conflicts.
+    var skippedSnapshotsDanglingReference = 0;
+    var skippedWindowsDanglingReference = 0;
+    // Source snapshots already present HERE byte-identically — idempotent
+    // re-imports, not new imports; the count must not claim them.
+    var skippedSnapshotsIdentical = 0;
     // DISTINCT DAYS ACTUALLY WRITTEN — the number the caller reports as
     // "N days imported".
     //
@@ -9190,26 +9203,32 @@ class LocalDb {
           if (t == 'bp_research_reference' ||
               t == 'bp_research_window' ||
               t == 'bp_research_snapshot') {
-            // The reference pass builds the id map; the window and snapshot
-            // passes that follow (references merge first) only consume it.
+            // ONE TRANSACTIONAL UNIT. Reference, snapshots and window are
+            // restored together, driven by the reference entry: the window
+            // names the snapshot revision its features were computed from,
+            // so it may only be written when that revision exists HERE with
+            // the same content — decided inside the SAME transaction, not in
+            // three separate table passes. (A previous split-pass version
+            // loaded `srcSnaps` only in the snapshot pass, leaving the
+            // snapshot status map EMPTY in the window pass, so every
+            // conflict-free window with a snapshot revision was silently
+            // skipped.) The window and snapshot list entries that follow are
+            // already handled here and only skip.
+            if (t != 'bp_research_reference') {
+              continue;
+            }
             try {
               final refCols = await destCols('bp_research_reference');
               final winCols = await destCols('bp_research_window');
               final snapCols = await destCols('bp_research_snapshot');
-              final srcRefs =
-                  t == 'bp_research_reference' &&
-                      await srcHasTable('bp_research_reference', src)
+              final srcRefs = await srcHasTable('bp_research_reference', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_reference')
                   : const <Map<String, Object?>>[];
-              final srcWins =
-                  t == 'bp_research_window' &&
-                      await srcHasTable('bp_research_window', src)
-                  ? await src.rawQuery('SELECT * FROM bp_research_window')
-                  : const <Map<String, Object?>>[];
-              final srcSnaps =
-                  t == 'bp_research_snapshot' &&
-                      await srcHasTable('bp_research_snapshot', src)
+              final srcSnaps = await srcHasTable('bp_research_snapshot', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_snapshot')
+                  : const <Map<String, Object?>>[];
+              final srcWins = await srcHasTable('bp_research_window', src)
+                  ? await src.rawQuery('SELECT * FROM bp_research_window')
                   : const <Map<String, Object?>>[];
               await db.transaction((txn) async {
                 for (final r in srcRefs) {
@@ -9299,7 +9318,14 @@ class LocalDb {
                   final mapped =
                       bpIdMap[(row.remove('reference_id') as num?)?.toInt()];
                   final rev = (row['revision'] as num?)?.toInt();
-                  if (mapped == null || rev == null) continue;
+                  if (mapped == null || rev == null) {
+                    // A snapshot whose source reference did not map is a
+                    // dangling source row — skipped and counted, never
+                    // silently claimed as imported.
+                    skippedSnapshots++;
+                    skippedSnapshotsDanglingReference++;
+                    continue;
+                  }
                   final clash = await txn.rawQuery(
                     'SELECT onehz_json, rr_json FROM bp_research_snapshot '
                     'WHERE reference_id = ? AND revision = ?',
@@ -9316,7 +9342,14 @@ class LocalDb {
                         clash.first['onehz_json'] == row['onehz_json'] &&
                         clash.first['rr_json'] == row['rr_json'];
                     snapStatus[(mapped, rev)] = same ? 'identical' : 'conflict';
-                    if (!same) skippedSnapshots++;
+                    if (same) {
+                      // An identical re-import is NOT a new import — the
+                      // count must not claim it.
+                      skippedSnapshots++;
+                      skippedSnapshotsIdentical++;
+                    } else {
+                      skippedSnapshots++;
+                    }
                   } else {
                     await txn.rawInsert(
                       'INSERT INTO bp_research_snapshot '
@@ -9340,8 +9373,13 @@ class LocalDb {
                   };
                   final mapped =
                       bpIdMap[(row.remove('reference_id') as num?)?.toInt()];
-                  if (mapped == null) continue;
-                  // WINDOW/SNAPSHOT CONSISTENCY: a window that names a
+                  if (mapped == null) {
+                    // Dangling source window: no reference to attach to.
+                    // Skipped and counted, never claimed as imported.
+                    skippedWindows++;
+                    skippedWindowsDanglingReference++;
+                    continue;
+                  }
                   // snapshot revision may only be imported when that
                   // revision is HERE with the same content ('inserted' or
                   // 'identical'). A 'conflict' means the local revision n
@@ -9352,8 +9390,18 @@ class LocalDb {
                   final rev = (row['snapshot_revision'] as num?)?.toInt();
                   if (rev != null) {
                     final status = snapStatus[(mapped, rev)];
-                    if (status == null || status == 'conflict') {
+                    if (status == null) {
+                      // The source window names a snapshot revision the
+                      // source backup does not carry — its features cannot
+                      // be linked to raw data that does not exist. Skipped
+                      // and counted as missing, never imported snapshotless.
                       skippedWindows++;
+                      skippedWindowsMissingSnapshot++;
+                      continue;
+                    }
+                    if (status == 'conflict') {
+                      skippedWindows++;
+                      skippedWindowsSnapshotConflict++;
                       continue;
                     }
                   }
@@ -9393,16 +9441,29 @@ class LocalDb {
                   );
                 }
               });
-              counts[t] = t == 'bp_research_reference'
-                  ? srcRefs.length
-                  : t == 'bp_research_window'
-                  // Windows skipped over a snapshot conflict were not
-                  // imported — the count must not claim them.
-                  ? srcWins.length - skippedWindows
-                  // Snapshots whose (reference, revision) key collided
-                  // with DIFFERENT content were skipped, not imported —
-                  // the count must not claim them.
-                  : srcSnaps.length - skippedSnapshots;
+              counts['bp_research_reference'] = srcRefs.length;
+              // Snapshots whose (reference, revision) key collided with
+              // DIFFERENT content were skipped, not imported — the count
+              // must not claim them.
+              counts['bp_research_snapshot'] =
+                  srcSnaps.length - skippedSnapshots;
+              // Windows skipped over a snapshot conflict or a missing source
+              // snapshot were not imported — the count must not claim them.
+              counts['bp_research_window'] = srcWins.length - skippedWindows;
+              // Audit keys: WHY windows or snapshots were skipped, so a
+              // restore result can be read without opening the source file.
+              counts['bp_research_snapshot_conflicts'] =
+                  skippedSnapshots -
+                  skippedSnapshotsDanglingReference -
+                  skippedSnapshotsIdentical;
+              counts['bp_research_window_snapshot_conflicts'] =
+                  skippedWindowsSnapshotConflict;
+              counts['bp_research_window_missing_snapshot'] =
+                  skippedWindowsMissingSnapshot;
+              counts['bp_research_snapshot_dangling_reference'] =
+                  skippedSnapshotsDanglingReference;
+              counts['bp_research_window_dangling_reference'] =
+                  skippedWindowsDanglingReference;
             } catch (_) {
               if (!tolerant) rethrow;
               counts[t] = 0;

@@ -1010,4 +1010,471 @@ void main() {
       expect(w.rrMsMean, 1100.0);
     },
   );
+  // ========================================================================
+  // ATOMIC BP RESEARCH RESTORE (reference + snapshot + window, ONE unit).
+  // The regression behind these tests: the restore loop used to visit the
+  // three BP tables in SEPARATE passes and loaded the source snapshots only
+  // in the snapshot pass — so in the window pass the snapshot status map
+  // was EMPTY and every conflict-free window with a snapshot revision was
+  // silently skipped. Fresh-target restores lost their windows entirely.
+  // ========================================================================
+
+  Future<String> makeForeignBpDb(
+    String name, {
+    required int refId,
+    required int measuredAtMs,
+    String device = 'restore',
+    double sys = 130,
+    double dia = 85,
+    List<Map<String, Object?>>? snapshots,
+    List<Map<String, Object?>>? windows,
+  }) async {
+    final srcPath = p.join(await databaseFactory.getDatabasesPath(), name);
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+      'CREATE TABLE bp_research_reference ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+      'measured_at_ms INTEGER NOT NULL, device TEXT, posture TEXT, '
+      'conditions TEXT, systolic_mmhg REAL NOT NULL, '
+      'diastolic_mmhg REAL NOT NULL, captured_at_ms INTEGER NOT NULL, '
+      'UNIQUE (measured_at_ms, device))',
+    );
+    await src.insert('bp_research_reference', {
+      'id': refId,
+      'measured_at_ms': measuredAtMs,
+      'device': device,
+      'systolic_mmhg': sys,
+      'diastolic_mmhg': dia,
+      'captured_at_ms': measuredAtMs,
+    });
+    await src.execute(
+      'CREATE TABLE bp_research_window ('
+      'reference_id INTEGER PRIMARY KEY, window_start_ms INTEGER NOT NULL, '
+      'window_end_ms INTEGER NOT NULL, onehz_rows INTEGER, rr_beats INTEGER, '
+      'hr_mean REAL, rr_ms_mean REAL, rr_ms_min REAL, rr_ms_max REAL, '
+      'rmssd_ms REAL, meta_json TEXT, observed_start_ms INTEGER, '
+      'observed_end_ms INTEGER, valid_hr_seconds INTEGER, '
+      'valid_interval_count INTEGER, valid_interval_pair_count INTEGER, '
+      'coverage_fraction REAL, rejected_interval_fraction REAL, '
+      'quality_status TEXT, feature_version INTEGER, '
+      'snapshot_revision INTEGER)',
+    );
+    for (final w in windows ?? const <Map<String, Object?>>[]) {
+      await src.insert('bp_research_window', w);
+    }
+    await src.execute(
+      'CREATE TABLE bp_research_snapshot ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, reference_id INTEGER NOT NULL, '
+      'revision INTEGER NOT NULL, onehz_json TEXT NOT NULL, '
+      'rr_json TEXT NOT NULL, created_at_ms INTEGER NOT NULL, '
+      'UNIQUE (reference_id, revision))',
+    );
+    for (final s in snapshots ?? const <Map<String, Object?>>[]) {
+      await src.insert('bp_research_snapshot', s);
+    }
+    await src.close();
+    return srcPath;
+  }
+
+  Map<String, Object?> foreignWindow(
+    int refId, {
+    int? snapshotRevision,
+    double hrMean = 77.7,
+    int onehzRows = 300,
+  }) => {
+    'reference_id': refId,
+    'window_start_ms': _at - 300000,
+    'window_end_ms': _at,
+    'onehz_rows': onehzRows,
+    'rr_beats': 210,
+    'hr_mean': hrMean,
+    'rmssd_ms': 38.5,
+    'feature_version': kResearchFeatureVersion,
+    'snapshot_revision': snapshotRevision,
+  };
+
+  Map<String, Object?> foreignSnapshot(
+    int refId,
+    int revision, {
+    required int hr,
+  }) => {
+    'reference_id': refId,
+    'revision': revision,
+    'onehz_json': '[{"rec_ts":${(_at - 60000) ~/ 1000},"hr":$hr}]',
+    'rr_json': '[]',
+    'created_at_ms': _at,
+  };
+
+  Future<void> clearBpTables() async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+  }
+
+  test('restore TEST 1: a FRESH target restores reference + snapshot + window '
+      'as one unit (the regression)', () async {
+    await clearBpTables();
+    // FRESH target: no local BP rows at all. The source carries a
+    // reference, snapshot revision 1, and a window naming revision 1.
+    final srcPath = await makeForeignBpDb(
+      'bp_fresh_success.db',
+      refId: 7,
+      measuredAtMs: _at,
+      snapshots: [foreignSnapshot(7, 1, hr: 60)],
+      windows: [foreignWindow(7, snapshotRevision: 1, hrMean: 71.5)],
+    );
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    final db = await LocalDb.instance;
+    final refs = await db.rawQuery('SELECT * FROM bp_research_reference');
+    expect(refs, hasLength(1));
+    final destId = refs.first['id'] as int;
+    final snaps = await db.rawQuery(
+      'SELECT * FROM bp_research_snapshot '
+      'WHERE reference_id = ? AND revision = 1',
+      [destId],
+    );
+    expect(snaps, hasLength(1));
+    expect(
+      snaps.first['onehz_json'],
+      '[{"rec_ts":${(_at - 60000) ~/ 1000},"hr":60}]',
+    );
+    final wins = await db.rawQuery(
+      'SELECT * FROM bp_research_window WHERE reference_id = ?',
+      [destId],
+    );
+    expect(wins, hasLength(1));
+    expect(wins.first['snapshot_revision'], 1);
+    expect(wins.first['hr_mean'], 71.5);
+    expect(wins.first['rmssd_ms'], 38.5);
+    // Counters: exactly 1 / 1 / 1, no skips.
+    expect(counts['bp_research_reference'], 1);
+    expect(counts['bp_research_snapshot'], 1);
+    expect(counts['bp_research_window'], 1);
+    expect(counts['bp_research_window_snapshot_conflicts'], 0);
+    expect(counts['bp_research_window_missing_snapshot'], 0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('restore TEST 2: an IDENTICAL snapshot re-import is idempotent and the '
+      'window converges', () async {
+    await clearBpTables();
+    // LOCAL: reference + snapshot rev 1 (rows A) + a LOCAL window with
+    // DISTINCT features, so the test proves the import UPDATED the
+    // window rather than merely preserving a pre-existing one.
+    final rowsA = [
+      {'rec_ts': (_at - 60000) ~/ 1000, 'hr': 60},
+    ];
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 130,
+        diastolicMmHg: 85,
+        capturedAtMs: _at,
+        device: 'restore',
+        window: researchWindowFrom(
+          measuredAtMs: _at,
+          onehzRows: rowsA,
+          rrRows: const [],
+        ),
+      ),
+      snapshotOnehzRows: rowsA,
+      snapshotRrRows: const [],
+    );
+    final db = await LocalDb.instance;
+    final destId =
+        (await db.rawQuery('SELECT id FROM bp_research_reference')).first['id']
+            as int;
+    // SOURCE: the SAME natural reference, the SAME snapshot rev 1 (rows
+    // A), but a window with DIFFERENT features (88.8) — the identical
+    // snapshot status must admit that window and converge it.
+    final srcPath = await makeForeignBpDb(
+      'bp_ident_converge.db',
+      refId: 9,
+      measuredAtMs: _at,
+      device: 'restore',
+      snapshots: [foreignSnapshot(9, 1, hr: 60)],
+      windows: [foreignWindow(9, snapshotRevision: 1, hrMean: 88.8)],
+    );
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    final snaps = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot '
+      'WHERE reference_id = ?',
+      [destId],
+    );
+    expect(snaps.first['c'], 1); // no duplicate revision rows
+    final wins = await db.rawQuery(
+      'SELECT hr_mean, snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [destId],
+    );
+    expect(wins, hasLength(1));
+    expect(wins.first['hr_mean'], 88.8); // the IMPORTED window won
+    expect(wins.first['snapshot_revision'], 1);
+    // Re-import AGAIN: full idempotency, still one of each, same values.
+    final counts2 = await LocalDb.importFromDbFile(srcPath);
+    final snaps2 = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot '
+      'WHERE reference_id = ?',
+      [destId],
+    );
+    expect(snaps2.first['c'], 1);
+    final wins2 = await db.rawQuery(
+      'SELECT hr_mean FROM bp_research_window WHERE reference_id = ?',
+      [destId],
+    );
+    expect(wins2, hasLength(1));
+    expect(wins2.first['hr_mean'], 88.8);
+    // An identical snapshot is NOT a new import; nothing was skipped
+    // as a conflict or missing.
+    expect(counts['bp_research_snapshot'], 0);
+    expect(counts['bp_research_snapshot_conflicts'], 0);
+    expect(counts2['bp_research_snapshot'], 0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('restore TEST 3: a CONFLICTING snapshot skips the snapshot AND the '
+      'window, counters rise', () async {
+    await clearBpTables();
+    // LOCAL: reference + snapshot rev 1 (rows A) + window A.
+    final rowsA = [
+      {'rec_ts': (_at - 60000) ~/ 1000, 'hr': 60},
+    ];
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 130,
+        diastolicMmHg: 85,
+        capturedAtMs: _at,
+        device: 'restore',
+        window: researchWindowFrom(
+          measuredAtMs: _at,
+          onehzRows: rowsA,
+          rrRows: const [],
+        ),
+      ),
+      snapshotOnehzRows: rowsA,
+      snapshotRrRows: const [],
+    );
+    final db = await LocalDb.instance;
+    final destId =
+        (await db.rawQuery('SELECT id FROM bp_research_reference')).first['id']
+            as int;
+    final localJson =
+        (await db.rawQuery(
+              'SELECT onehz_json FROM bp_research_snapshot '
+              'WHERE reference_id = ? AND revision = 1',
+              [destId],
+            )).first['onehz_json']
+            as String;
+    final localHr = (await db.rawQuery(
+      'SELECT hr_mean FROM bp_research_window WHERE reference_id = ?',
+      [destId],
+    )).first['hr_mean'];
+    // SOURCE: same natural reference, snapshot rev 1 with DIFFERENT
+    // rows (hr 99), and a window computed from those rows.
+    final srcPath = await makeForeignBpDb(
+      'bp_conflict_counters.db',
+      refId: 11,
+      measuredAtMs: _at,
+      device: 'restore',
+      snapshots: [foreignSnapshot(11, 1, hr: 99)],
+      windows: [foreignWindow(11, snapshotRevision: 1, hrMean: 95.5)],
+    );
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    // Local snapshot rev 1 stays byte-identical (A), foreign B lost.
+    final snap = await db.rawQuery(
+      'SELECT onehz_json FROM bp_research_snapshot '
+      'WHERE reference_id = ? AND revision = 1',
+      [destId],
+    );
+    expect(snap, hasLength(1));
+    expect(snap.first['onehz_json'], localJson);
+    // The foreign window was SKIPPED; local window A survives untouched.
+    final win = await db.rawQuery(
+      'SELECT hr_mean FROM bp_research_window WHERE reference_id = ?',
+      [destId],
+    );
+    expect(win, hasLength(1));
+    expect(win.first['hr_mean'], localHr);
+    // Counters tell the truth: nothing imported, conflicts recorded.
+    expect(counts['bp_research_snapshot'], 0);
+    expect(counts['bp_research_window'], 0);
+    expect(counts['bp_research_snapshot_conflicts'], 1);
+    expect(counts['bp_research_window_snapshot_conflicts'], 1);
+    expect(counts['bp_research_window_missing_snapshot'], 0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('restore TEST 4: a window whose snapshot is MISSING in the source is '
+      'never imported', () async {
+    await clearBpTables();
+    // SOURCE: a reference and a window naming snapshot revision 1 —
+    // but NO snapshot row at all. Its features have no raw-data basis
+    // here; importing the window would point at nothing.
+    final srcPath = await makeForeignBpDb(
+      'bp_missing_snapshot.db',
+      refId: 13,
+      measuredAtMs: _at,
+      snapshots: const [],
+      windows: [foreignWindow(13, snapshotRevision: 1)],
+    );
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    final db = await LocalDb.instance;
+    final refs = await db.rawQuery('SELECT * FROM bp_research_reference');
+    expect(refs, hasLength(1)); // the reference itself is imported
+    final destId = refs.first['id'] as int;
+    final wins = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [destId],
+    );
+    expect(wins.first['c'], 0); // the window was NOT imported
+    expect(counts['bp_research_window'], 0);
+    expect(counts['bp_research_window_missing_snapshot'], 1);
+    expect(counts['bp_research_window_snapshot_conflicts'], 0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('restore TEST 5: a LEGACY snapshotless window (snapshot_revision NULL) '
+      'imports snapshotless, no fabricated revision', () async {
+    await clearBpTables();
+    // SOURCE: v1-style capture — a window with snapshot_revision NULL
+    // and no snapshot rows. The documented legacy rule: import the
+    // window as-is, keep it snapshotless, never fabricate a revision.
+    final srcPath = await makeForeignBpDb(
+      'bp_legacy_window.db',
+      refId: 15,
+      measuredAtMs: _at,
+      snapshots: const [],
+      windows: [foreignWindow(15, snapshotRevision: null, hrMean: 66.6)],
+    );
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    final db = await LocalDb.instance;
+    final refs = await db.rawQuery('SELECT * FROM bp_research_reference');
+    expect(refs, hasLength(1));
+    final destId = refs.first['id'] as int;
+    final wins = await db.rawQuery(
+      'SELECT hr_mean, snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [destId],
+    );
+    expect(wins, hasLength(1));
+    expect(wins.first['hr_mean'], 66.6);
+    expect(wins.first['snapshot_revision'], null); // stays snapshotless
+    final snaps = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot '
+      'WHERE reference_id = ?',
+      [destId],
+    );
+    expect(snaps.first['c'], 0); // no revision was fabricated
+    expect(counts['bp_research_window'], 1);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('restore TEST 6: a reference ID collision maps snapshot and window to '
+      'the CORRECT destination reference', () async {
+    await clearBpTables();
+    // LOCAL: one capture whose AUTOINCREMENT id is 1 (deliberately the
+    // same NUMBER the source uses for a DIFFERENT natural reference).
+    await LocalDb.putBpResearchCapture(_capture(_at, device: 'local'));
+    final db = await LocalDb.instance;
+    final localId =
+        (await db.rawQuery(
+              'SELECT id FROM bp_research_reference WHERE device = ?',
+              ['local'],
+            )).first['id']
+            as int;
+    // SOURCE: id 1 — a DIFFERENT natural reference (different time) —
+    // with its own snapshot and window. They must land on the SOURCE
+    // row's DESTINATION id, never on the local id that shares the
+    // number.
+    final srcPath = await makeForeignBpDb(
+      'bp_id_collision.db',
+      refId: 1,
+      measuredAtMs: _at + 60000,
+      device: 'foreign',
+      snapshots: [foreignSnapshot(1, 1, hr: 70)],
+      windows: [foreignWindow(1, snapshotRevision: 1, hrMean: 72.0)],
+    );
+    await LocalDb.importFromDbFile(srcPath);
+    final refs = await db.rawQuery(
+      'SELECT id, device, measured_at_ms FROM bp_research_reference '
+      'ORDER BY measured_at_ms',
+    );
+    expect(refs, hasLength(2)); // both captures survive
+    final foreignDestId =
+        refs.firstWhere((r) => r['device'] == 'foreign')['id'] as int;
+    // Snapshot and window point at the FOREIGN reference's destination
+    // id — never at the local row that merely shares the number 1.
+    final snaps = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot '
+      'WHERE reference_id = ? AND revision = 1',
+      [foreignDestId],
+    );
+    expect(snaps.first['c'], 1);
+    final wins = await db.rawQuery(
+      'SELECT hr_mean, snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [foreignDestId],
+    );
+    expect(wins, hasLength(1));
+    expect(wins.first['hr_mean'], 72.0);
+    expect(wins.first['snapshot_revision'], 1);
+    // The LOCAL reference keeps its window untouched (from _capture:
+    // the first put had none, so the count is 0 here) and no foreign
+    // row landed on it.
+    final localSnaps = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot '
+      'WHERE reference_id = ?',
+      [localId],
+    );
+    expect(localSnaps.first['c'], 0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('restore TEST 7: a repeated re-import of the SAME source creates no '
+      'duplicates and stable counts', () async {
+    await clearBpTables();
+    final srcPath = await makeForeignBpDb(
+      'bp_reimport.db',
+      refId: 17,
+      measuredAtMs: _at,
+      snapshots: [foreignSnapshot(17, 1, hr: 65)],
+      windows: [foreignWindow(17, snapshotRevision: 1, hrMean: 73.0)],
+    );
+    final c1 = await LocalDb.importFromDbFile(srcPath);
+    final c2 = await LocalDb.importFromDbFile(srcPath);
+    final c3 = await LocalDb.importFromDbFile(srcPath);
+    final db = await LocalDb.instance;
+    final refs = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_reference',
+    );
+    expect(refs.first['c'], 1); // no duplicate references
+    final snaps = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot',
+    );
+    expect(snaps.first['c'], 1); // no duplicate snapshots
+    final wins = await db.rawQuery('SELECT COUNT(*) c FROM bp_research_window');
+    expect(wins.first['c'], 1); // no duplicate windows
+    final json = await db.rawQuery(
+      'SELECT onehz_json, rr_json FROM bp_research_snapshot',
+    );
+    expect(
+      json.first['onehz_json'],
+      '[{"rec_ts":${(_at - 60000) ~/ 1000},"hr":65}]',
+    );
+    expect(json.first['rr_json'], '[]'); // content unchanged
+    // First import reports 1/1/1; re-imports converge — the identical
+    // snapshot and the natural-key reference are not NEW imports.
+    expect(c1['bp_research_reference'], 1);
+    expect(c1['bp_research_snapshot'], 1);
+    expect(c1['bp_research_window'], 1);
+    expect(c2['bp_research_reference'], 1); // matched, updated in place
+    expect(c2['bp_research_snapshot'], 0); // identical, not new
+    expect(c2['bp_research_window'], 1); // re-written, still one row
+    expect(c3['bp_research_window_missing_snapshot'], 0);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
 }
