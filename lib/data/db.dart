@@ -8973,21 +8973,52 @@ class LocalDb {
                       if (refCols.contains(e.key)) e.key: e.value,
                   };
                   final srcId = row.remove('id');
-                  final destId = await txn.rawInsert(
-                    'INSERT OR REPLACE INTO bp_research_reference '
-                    '(measured_at_ms, device, posture, conditions, '
-                    'systolic_mmhg, diastolic_mmhg, captured_at_ms) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?)',
-                    [
-                      row['measured_at_ms'],
-                      (row['device'] as String?) ?? '',
-                      row['posture'],
-                      row['conditions'],
-                      row['systolic_mmhg'],
-                      row['diastolic_mmhg'],
-                      row['captured_at_ms'],
-                    ],
+                  // KEEP the destination id on collision. `INSERT OR
+                  // REPLACE` would delete the colliding local row and mint a
+                  // fresh AUTOINCREMENT id — stranding the local window row
+                  // under the old reference_id with no FK cascade to take
+                  // it, exactly the orphan putBpResearchCapture avoids by
+                  // deleting first. UPDATE preserves the id the window is
+                  // about to be re-attached to.
+                  final device = (row['device'] as String?) ?? '';
+                  final existing = await txn.rawQuery(
+                    'SELECT id FROM bp_research_reference '
+                    'WHERE measured_at_ms = ? AND device = ?',
+                    [row['measured_at_ms'], device],
                   );
+                  final int destId;
+                  if (existing.isNotEmpty) {
+                    destId = (existing.first['id'] as num).toInt();
+                    await txn.rawUpdate(
+                      'UPDATE bp_research_reference SET posture = ?, '
+                      'conditions = ?, systolic_mmhg = ?, diastolic_mmhg = ?, '
+                      'captured_at_ms = ? WHERE id = ?',
+                      [
+                        row['posture'],
+                        row['conditions'],
+                        row['systolic_mmhg'],
+                        row['diastolic_mmhg'],
+                        row['captured_at_ms'],
+                        destId,
+                      ],
+                    );
+                  } else {
+                    destId = await txn.rawInsert(
+                      'INSERT INTO bp_research_reference '
+                      '(measured_at_ms, device, posture, conditions, '
+                      'systolic_mmhg, diastolic_mmhg, captured_at_ms) '
+                      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                      [
+                        row['measured_at_ms'],
+                        device,
+                        row['posture'],
+                        row['conditions'],
+                        row['systolic_mmhg'],
+                        row['diastolic_mmhg'],
+                        row['captured_at_ms'],
+                      ],
+                    );
+                  }
                   if (srcId is num) {
                     bpIdMap[srcId.toInt()] = destId;
                   }

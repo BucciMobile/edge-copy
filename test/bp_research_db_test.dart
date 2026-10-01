@@ -210,6 +210,65 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
+  test('a colliding restore keeps the destination id and its window',
+      () async {
+    final db0 = await LocalDb.instance;
+    await db0.delete('bp_research_window');
+    await db0.delete('bp_research_reference');
+    // Local capture WITH a window.
+    await LocalDb.putBpResearchCapture(
+        _capture(_at, device: 'local', window: _win));
+    final localId = (await db0.rawQuery(
+        'SELECT id FROM bp_research_reference')).first['id'] as int;
+
+    // A foreign export of the SAME instant (same natural key) with no
+    // window row: the capture's fields update, the window survives.
+    final srcPath =
+        p.join(await databaseFactory.getDatabasesPath(), 'bp_foreign3.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+        'CREATE TABLE bp_research_reference ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'measured_at_ms INTEGER NOT NULL, '
+        'device TEXT, posture TEXT, conditions TEXT, '
+        'systolic_mmhg REAL NOT NULL, diastolic_mmhg REAL NOT NULL, '
+        'captured_at_ms INTEGER NOT NULL, '
+        'UNIQUE (measured_at_ms, device))');
+    await src.insert('bp_research_reference', {
+      'id': 7,
+      'measured_at_ms': _at,
+      'device': 'local',
+      'posture': 'standing',
+      'conditions': 'after exercise',
+      'systolic_mmhg': 140,
+      'diastolic_mmhg': 90,
+      'captured_at_ms': _at + 1000,
+    });
+    await src.close();
+
+    await LocalDb.importFromDbFile(srcPath);
+
+    final db = await LocalDb.instance;
+    final refs = await db.rawQuery(
+        'SELECT id, posture, systolic_mmhg FROM bp_research_reference');
+    expect(refs, hasLength(1));
+    // The destination id is KEPT, so the window stays attached.
+    expect(refs.first['id'], localId);
+    expect(refs.first['posture'], 'standing');
+    expect(refs.first['systolic_mmhg'], 140.0);
+    final orphaned = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_window '
+      'WHERE reference_id NOT IN (SELECT id FROM bp_research_reference)',
+    );
+    expect(orphaned.first['c'], 0);
+    final win = await db.rawQuery(
+        'SELECT hr_mean FROM bp_research_window WHERE reference_id = ?',
+        [localId]);
+    expect(win.first['hr_mean'], 62.5);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
   test('a re-import of the same export converges (idempotent merge)',
       () async {
     final db0 = await LocalDb.instance;
