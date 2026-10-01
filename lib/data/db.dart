@@ -1190,6 +1190,12 @@ class LocalDb {
     await _createNotifFired(db);
     await _createNotifSlots(db);
     await _createAlarmSchedule(db);
+    // BP research (rung 55 + v2 rung 56): both helpers are fully idempotent
+    // (CREATE TABLE IF NOT EXISTS plus per-column guarded ALTERs), so a
+    // same-version merged build whose schema lineage skipped a rung gets
+    // repaired here instead of bricking on the first BP read or write.
+    await _createBpResearch(db);
+    await _upgradeBpResearchV2(db);
     // CREATE TABLE IF NOT EXISTS on the every-open repair path, no schema
     // version bump needed — additive, no backfill (see _createImportedWorkout
     // just above for the same reasoning).
@@ -1643,6 +1649,13 @@ class LocalDb {
   /// (every ADD COLUMN guarded by _columnsOf) so it can serve both the
   /// onUpgrade ladder and a fresh install that ran rung 55's CREATE first.
   static Future<void> _upgradeBpResearchV2(Database db) async {
+    // SELF-SUFFICIENT rung: the ALTERs below assume the rung-55 tables exist.
+    // A v55 database whose bp_research tables are missing (an interrupted
+    // foreign build, an unusual merge lineage) would throw "no such table"
+    // inside the ONE exclusive onUpgrade transaction and brick every launch
+    // with no rollback target. CREATE TABLE IF NOT EXISTS is a no-op in every
+    // normal path (the ladder created the tables one rung earlier).
+    await _createBpResearch(db);
     final refCols = await _columnsOf(db, 'bp_research_reference');
     // Measurement vs entry time. NULL on v1 rows: their measured_at_ms
     // doubles as both, and absent stays absent — no backfill.
