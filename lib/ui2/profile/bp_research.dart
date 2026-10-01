@@ -192,10 +192,20 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
         'ORDER BY rec_ts ASC',
         [LocalDb.kPrimaryDeviceId, start ~/ 1000, end ~/ 1000],
       );
+      // The full beat identity rides along: beat_index (always present in
+      // decoded_rr) and beat_ts_ms (the measured sub-second instant, NULL
+      // on rows banked before that column existed — _ensureBeatTimeColumn
+      // guarantees the COLUMN on every open, old data keeps NULL values).
+      // Window membership uses the beat's real position when known:
+      // COALESCE(beat_ts_ms, rr_ts_ms) — a beat whose record second lies
+      // in the window but whose measured instant does not (or vice versa)
+      // is filtered by where the beat actually was, not by its record.
       final rr = await db.rawQuery(
-        'SELECT rr_ts_ms, rr_ms FROM decoded_rr '
-        'WHERE device_id = ? AND rr_ts_ms >= ? AND rr_ts_ms <= ? '
-        'ORDER BY rr_ts_ms ASC',
+        'SELECT rr_ts_ms, rr_ms, beat_index, beat_ts_ms FROM decoded_rr '
+        'WHERE device_id = ? '
+        'AND COALESCE(beat_ts_ms, rr_ts_ms) >= ? '
+        'AND COALESCE(beat_ts_ms, rr_ts_ms) < ? '
+        'ORDER BY rr_ts_ms ASC, beat_index ASC',
         [LocalDb.kPrimaryDeviceId, start, end],
       );
       final window = researchWindowFrom(

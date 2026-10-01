@@ -602,4 +602,412 @@ void main() {
     expect(n, 1);
     await databaseFactory.deleteDatabase(srcPath);
   });
+
+  test('a restore whose snapshot conflicts skips the window too '
+      '(window/snapshot consistency)', () async {
+    final db0 = await LocalDb.instance;
+    await db0.delete('bp_research_snapshot');
+    await db0.delete('bp_research_window');
+    await db0.delete('bp_research_reference');
+    // LOCAL: a capture with snapshot revision 1 (rows A) and a window
+    // pointing at it.
+    final rowsA = [
+      {'rec_ts': (_at - 60000) ~/ 1000, 'hr': 60},
+    ];
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'cuff',
+        window: researchWindowFrom(
+          measuredAtMs: _at,
+          onehzRows: rowsA,
+          rrRows: const [],
+        ),
+      ),
+      snapshotOnehzRows: rowsA,
+      snapshotRrRows: const [],
+    );
+    final localId =
+        (await db0.rawQuery('SELECT id FROM bp_research_reference')).first['id']
+            as int;
+    final localJson =
+        (await db0.rawQuery(
+              'SELECT onehz_json FROM bp_research_snapshot '
+              'WHERE reference_id = ? AND revision = 1',
+              [localId],
+            )).first['onehz_json']
+            as String;
+    final localHr = (await db0.rawQuery(
+      'SELECT hr_mean FROM bp_research_window WHERE reference_id = ?',
+      [localId],
+    )).first['hr_mean'];
+
+    // FOREIGN: the SAME natural reference, a snapshot revision 1 with
+    // DIFFERENT rows (B), and a window whose features came from B —
+    // importing that window would point features at local revision 1,
+    // which holds A. Both must be skipped; the local pair stays.
+    final srcPath = p.join(
+      await databaseFactory.getDatabasesPath(),
+      'bp_foreign_conflict.db',
+    );
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+      'CREATE TABLE bp_research_reference ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+      'measured_at_ms INTEGER NOT NULL, device TEXT, posture TEXT, '
+      'conditions TEXT, systolic_mmhg REAL NOT NULL, '
+      'diastolic_mmhg REAL NOT NULL, captured_at_ms INTEGER NOT NULL, '
+      'UNIQUE (measured_at_ms, device))',
+    );
+    await src.insert('bp_research_reference', {
+      'id': 42,
+      'measured_at_ms': _at,
+      'device': 'cuff',
+      'systolic_mmhg': 121,
+      'diastolic_mmhg': 81,
+      'captured_at_ms': _at,
+    });
+    await src.execute(
+      'CREATE TABLE bp_research_window ('
+      'reference_id INTEGER PRIMARY KEY, window_start_ms INTEGER NOT NULL, '
+      'window_end_ms INTEGER NOT NULL, onehz_rows INTEGER, rr_beats INTEGER, '
+      'hr_mean REAL, rr_ms_mean REAL, rr_ms_min REAL, rr_ms_max REAL, '
+      'rmssd_ms REAL, meta_json TEXT, observed_start_ms INTEGER, '
+      'observed_end_ms INTEGER, valid_hr_seconds INTEGER, '
+      'valid_interval_count INTEGER, valid_interval_pair_count INTEGER, '
+      'coverage_fraction REAL, rejected_interval_fraction REAL, '
+      'quality_status TEXT, feature_version INTEGER, '
+      'snapshot_revision INTEGER)',
+    );
+    await src.insert('bp_research_window', {
+      'reference_id': 42,
+      'window_start_ms': _at - 300000,
+      'window_end_ms': _at,
+      'onehz_rows': 300,
+      'hr_mean': 77.7,
+      'feature_version': 3,
+      'snapshot_revision': 1,
+    });
+    await src.execute(
+      'CREATE TABLE bp_research_snapshot ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, reference_id INTEGER NOT NULL, '
+      'revision INTEGER NOT NULL, onehz_json TEXT NOT NULL, '
+      'rr_json TEXT NOT NULL, created_at_ms INTEGER NOT NULL, '
+      'UNIQUE (reference_id, revision))',
+    );
+    await src.insert('bp_research_snapshot', {
+      'reference_id': 42,
+      'revision': 1,
+      'onehz_json': '[{"rec_ts":${(_at - 60000) ~/ 1000},"hr":99}]',
+      'rr_json': '[]',
+      'created_at_ms': _at,
+    });
+    await src.close();
+    await LocalDb.importFromDbFile(srcPath);
+
+    final db = await LocalDb.instance;
+    // The local snapshot revision 1 is untouched — foreign content lost.
+    final snap = await db.rawQuery(
+      'SELECT onehz_json FROM bp_research_snapshot '
+      'WHERE reference_id = ? AND revision = 1',
+      [localId],
+    );
+    expect(snap, hasLength(1));
+    expect(snap.first['onehz_json'], localJson);
+    // The foreign window was SKIPPED: the local window survives.
+    final win = await db.rawQuery(
+      'SELECT hr_mean FROM bp_research_window WHERE reference_id = ?',
+      [localId],
+    );
+    expect(win, hasLength(1));
+    expect(win.first['hr_mean'], localHr);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test(
+    'a restore with an IDENTICAL snapshot is idempotent (window too)',
+    () async {
+      final db = await LocalDb.instance;
+      final localId =
+          (await db.rawQuery(
+                'SELECT id FROM bp_research_reference',
+              )).first['id']
+              as int;
+      final localJson =
+          (await db.rawQuery(
+                'SELECT onehz_json FROM bp_research_snapshot '
+                'WHERE reference_id = ? AND revision = 1',
+                [localId],
+              )).first['onehz_json']
+              as String;
+      // The SAME snapshot content under the same key: idempotent
+      // re-import, no duplicate revision rows, the window converges.
+      final srcPath = p.join(
+        await databaseFactory.getDatabasesPath(),
+        'bp_foreign_ident.db',
+      );
+      await databaseFactory.deleteDatabase(srcPath);
+      final src = await databaseFactory.openDatabase(srcPath);
+      await src.execute(
+        'CREATE TABLE bp_research_reference ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'measured_at_ms INTEGER NOT NULL, device TEXT, posture TEXT, '
+        'conditions TEXT, systolic_mmhg REAL NOT NULL, '
+        'diastolic_mmhg REAL NOT NULL, captured_at_ms INTEGER NOT NULL, '
+        'UNIQUE (measured_at_ms, device))',
+      );
+      await src.insert('bp_research_reference', {
+        'id': 43,
+        'measured_at_ms': _at,
+        'device': 'cuff',
+        'systolic_mmhg': 120,
+        'diastolic_mmhg': 80,
+        'captured_at_ms': _at,
+      });
+      await src.execute(
+        'CREATE TABLE bp_research_window ('
+        'reference_id INTEGER PRIMARY KEY, window_start_ms INTEGER NOT NULL, '
+        'window_end_ms INTEGER NOT NULL, onehz_rows INTEGER, rr_beats INTEGER, '
+        'hr_mean REAL, rr_ms_mean REAL, rr_ms_min REAL, rr_ms_max REAL, '
+        'rmssd_ms REAL, meta_json TEXT, observed_start_ms INTEGER, '
+        'observed_end_ms INTEGER, valid_hr_seconds INTEGER, '
+        'valid_interval_count INTEGER, valid_interval_pair_count INTEGER, '
+        'coverage_fraction REAL, rejected_interval_fraction REAL, '
+        'quality_status TEXT, feature_version INTEGER, '
+        'snapshot_revision INTEGER)',
+      );
+      await src.insert('bp_research_window', {
+        'reference_id': 43,
+        'window_start_ms': _at - 300000,
+        'window_end_ms': _at,
+        'onehz_rows': 1,
+        'hr_mean': 60,
+        'feature_version': 3,
+        'snapshot_revision': 1,
+      });
+      await src.execute(
+        'CREATE TABLE bp_research_snapshot ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, reference_id INTEGER NOT NULL, '
+        'revision INTEGER NOT NULL, onehz_json TEXT NOT NULL, '
+        'rr_json TEXT NOT NULL, created_at_ms INTEGER NOT NULL, '
+        'UNIQUE (reference_id, revision))',
+      );
+      await src.insert('bp_research_snapshot', {
+        'reference_id': 43,
+        'revision': 1,
+        'onehz_json': localJson,
+        'rr_json': '[]',
+        'created_at_ms': _at,
+      });
+      await src.close();
+      await LocalDb.importFromDbFile(srcPath);
+      await LocalDb.importFromDbFile(srcPath);
+      final snaps = await db.rawQuery(
+        'SELECT COUNT(*) c FROM bp_research_snapshot '
+        'WHERE reference_id = ?',
+        [localId],
+      );
+      expect(snaps.first['c'], 1);
+      final win = await db.rawQuery(
+        'SELECT COUNT(*) c FROM bp_research_window '
+        'WHERE reference_id = ?',
+        [localId],
+      );
+      expect(win.first['c'], 1);
+      await databaseFactory.deleteDatabase(srcPath);
+    },
+  );
+
+  test('the store rejects invalid references before writing anything', () async {
+    final db = await LocalDb.instance;
+    final before =
+        (await db.rawQuery(
+              'SELECT COUNT(*) c FROM bp_research_reference',
+            )).first['c']
+            as int;
+    BpResearchCapture ref(int m, double sys, double dia) => BpResearchCapture(
+      measuredAtMs: m,
+      systolicMmHg: sys,
+      diastolicMmHg: dia,
+      capturedAtMs: m,
+      device: 'validate',
+      window: _win,
+    );
+    // NaN / infinity: rejected, never laundered through the bounds check.
+    for (final bad in [
+      ref(_at + 1000000, double.nan, 80),
+      ref(_at + 1000000, double.infinity, 80),
+      ref(_at + 1000000, 120, double.nan),
+      ref(_at + 1000000, 120, double.negativeInfinity),
+      // Out of research bounds.
+      ref(_at + 1000000, 301, 80),
+      ref(_at + 1000000, 49, 80),
+      ref(_at + 1000000, 120, 201),
+      ref(_at + 1000000, 120, 19),
+      // dia >= sys.
+      ref(_at + 1000000, 120, 120),
+      ref(_at + 1000000, 110, 120),
+    ]) {
+      await expectLater(LocalDb.putBpResearchCapture(bad), throwsArgumentError);
+    }
+    // Boundary values are VALID: 300/200 passes the bounds, dia < sys.
+    await LocalDb.putBpResearchCapture(ref(_at + 1000000, 300, 200));
+    // Nothing partial was left behind by the rejected writes.
+    final after =
+        (await db.rawQuery(
+              'SELECT COUNT(*) c FROM bp_research_reference',
+            )).first['c']
+            as int;
+    expect(after, before + 1);
+    // None of the REJECTED writes left a window or snapshot row behind:
+    // the only window/snapshot rows are the ones that BELONG to the one
+    // valid reference (rows with no owning reference must not exist).
+    final orphanW =
+        (await db.rawQuery(
+              'SELECT COUNT(*) c FROM bp_research_window '
+              'WHERE reference_id NOT IN (SELECT id FROM bp_research_reference)',
+            )).first['c']
+            as int;
+    final orphanS =
+        (await db.rawQuery(
+              'SELECT COUNT(*) c FROM bp_research_snapshot '
+              'WHERE reference_id NOT IN (SELECT id FROM bp_research_reference)',
+            )).first['c']
+            as int;
+    expect(orphanW, 0);
+    expect(orphanS, 0);
+    await LocalDb.deleteBpResearchCapture(_at + 1000000);
+  });
+
+  test('the production beat query and window computation keep every beat '
+      'of one record (integration)', () async {
+    // The FULL production path, not synthetic maps: real decoded_rr rows
+    // (several beats of ONE record share rr_ts_ms = rec_ts*1000), the
+    // same COALESCE query the capture screen runs, the snapshot freeze,
+    // and researchWindowFrom on the queried rows.
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    await db.delete('decoded_rr');
+    final recTs = (_at - 60000) ~/ 1000; // inside the rest window
+    // FOUR beats of that one record: identical rr_ts_ms, distinct
+    // beat_index; one carries a measured beat_ts_ms.
+    await db.insert('decoded_rr', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 0,
+      'rec_ts': recTs,
+      'beat_index': 0,
+      'rr_ts_ms': recTs * 1000,
+      'rr_ms': 1000,
+    });
+    await db.insert('decoded_rr', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 0,
+      'rec_ts': recTs,
+      'beat_index': 1,
+      'rr_ts_ms': recTs * 1000,
+      'rr_ms': 1100,
+    });
+    await db.insert('decoded_rr', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 0,
+      'rec_ts': recTs,
+      'beat_index': 2,
+      'rr_ts_ms': recTs * 1000,
+      'rr_ms': 900,
+    });
+    await db.insert('decoded_rr', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 0,
+      'rec_ts': recTs,
+      'beat_index': 3,
+      'rr_ts_ms': recTs * 1000,
+      'beat_ts_ms': recTs * 1000 + 3000,
+      'rr_ms': 1050,
+    });
+    // THE PRODUCTION QUERY (same shape as the capture screen).
+    final start = _at - kResearchRestPreMs;
+    final end = _at + kResearchWindowPostMs;
+    final rr = await db.rawQuery(
+      'SELECT rr_ts_ms, rr_ms, beat_index, beat_ts_ms FROM decoded_rr '
+      'WHERE device_id = ? '
+      'AND COALESCE(beat_ts_ms, rr_ts_ms) >= ? '
+      'AND COALESCE(beat_ts_ms, rr_ts_ms) < ? '
+      'ORDER BY rr_ts_ms ASC, beat_index ASC',
+      [LocalDb.kPrimaryDeviceId, start, end],
+    );
+    expect(rr, hasLength(4)); // no beat was dropped as a "duplicate"
+    final w = researchWindowFrom(
+      measuredAtMs: _at,
+      onehzRows: const [],
+      rrRows: rr,
+    );
+    expect(w, isNotNull);
+    expect(w!.rrBeats, 4); // all four beats survive the window computation
+    expect(w.validIntervalCount, 4);
+    // Beat 3 was MEASURED 3000 ms after beat 2 — beyond the 2500 ms beat-gap
+    // engineering default — so the pair across that gap is correctly NOT
+    // used for RMSSD: 3 successive beats = 2 RMSSD pairs, not 3.
+    expect(w.validIntervalPairCount, 2);
+    expect(w.rmssdMs, isNotNull);
+    // The snapshot freezes exactly these queried rows (beat fields ride
+    // along), so re-processing reproduces the same features.
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'integration',
+        window: w,
+      ),
+      snapshotOnehzRows: const [],
+      snapshotRrRows: rr,
+    );
+    final snap = await db.rawQuery('SELECT rr_json FROM bp_research_snapshot');
+    expect(snap, hasLength(1));
+    expect(snap.first['rr_json'] as String, contains('beat_index'));
+    await LocalDb.deleteBpResearchCapture(
+      (await db.rawQuery('SELECT id FROM bp_research_reference')).first['id']
+          as int,
+    );
+  });
+
+  test(
+    'beat_ts_ms window membership follows the measured beat instant',
+    () async {
+      // A beat whose record second lies in the window but whose MEASURED
+      // instant does not must stay outside; the mirrored case (record
+      // outside, measured inside) must be kept.
+      final recIn = (_at - 10000) ~/ 1000; // record inside the window
+      final w = researchWindowFrom(
+        measuredAtMs: _at,
+        onehzRows: const [],
+        rrRows: [
+          // Record second inside, measured instant BEFORE the window.
+          {
+            'rr_ts_ms': recIn * 1000,
+            'beat_index': 0,
+            'beat_ts_ms': _at - kResearchRestPreMs - 5000,
+            'rr_ms': 1000,
+          },
+          // Record second before the window, measured instant inside.
+          {
+            'rr_ts_ms': (_at - kResearchRestPreMs - 60000) ~/ 1000 * 1000,
+            'beat_index': 0,
+            'beat_ts_ms': _at - 60000,
+            'rr_ms': 1100,
+          },
+        ],
+      );
+      expect(w, isNotNull);
+      expect(w!.rrBeats, 1); // only the measured-inside beat survives
+      expect(w.rrMsMean, 1100.0);
+    },
+  );
 }

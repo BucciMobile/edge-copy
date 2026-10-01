@@ -996,10 +996,16 @@ class LocalDb {
           // is what `id = ''` (kPrimaryDeviceId) means. Roles move, keys do
           // not. A no-op on a database with no device row yet.
           await _addColumnIfMissing(
-            db, 'device', 'role', "TEXT NOT NULL DEFAULT 'paired'",
+            db,
+            'device',
+            'role',
+            "TEXT NOT NULL DEFAULT 'paired'",
           );
           await _addColumnIfMissing(
-            db, 'device', 'wearing', 'INTEGER NOT NULL DEFAULT 1',
+            db,
+            'device',
+            'wearing',
+            'INTEGER NOT NULL DEFAULT 1',
           );
           // A rung must no-op on a table this ladder has not created yet
           // (the same rule _addColumnIfMissing follows above).
@@ -1033,7 +1039,9 @@ class LocalDb {
           await _rekeyByDeviceIdV51(db, 'band_events', keyTail: const ['hex']);
           await _rekeyByDeviceIdV51(db, 'events', keyTail: const ['hex']);
           await _rekeyByDeviceIdV51(
-            db, 'band_battery', keyTail: const ['ts', 'source'],
+            db,
+            'band_battery',
+            keyTail: const ['ts', 'source'],
           );
 
           // Step 6: coverage for the days the substrate still holds. Bounded,
@@ -1051,7 +1059,9 @@ class LocalDb {
           // exactly its configured time, unchanged. No kAlgoVersion bump:
           // this is not a health metric.
           await _addColumnIfMissing(
-            db, 'alarm_schedule', 'smart_window_minutes',
+            db,
+            'alarm_schedule',
+            'smart_window_minutes',
             'INTEGER NOT NULL DEFAULT 0',
           );
         }
@@ -1185,7 +1195,9 @@ class LocalDb {
     // just above for the same reasoning).
     await _createLiveWorkoutTally(db);
     await _addColumnIfMissing(
-      db, 'alarm_schedule', 'smart_window_minutes',
+      db,
+      'alarm_schedule',
+      'smart_window_minutes',
       'INTEGER NOT NULL DEFAULT 0',
     );
     await _createEcgTables(db);
@@ -1447,7 +1459,6 @@ class LocalDb {
   static Future<void> _ensureBeatTimeColumn(Database db) =>
       _addColumnIfMissing(db, 'decoded_rr', 'beat_ts_ms', 'INTEGER');
 
-
   /// v46: retire what v34 banked into `on_wrist` / `hr_valid`, and any
   /// `skin_temp_c` that is really the sensor's unavailable sentinel.
   ///
@@ -1608,7 +1619,6 @@ class LocalDb {
     );
   }
 
-
   /// BP research capture store (schema rung 55).
   ///
   /// EXPERIMENTAL, DEVELOPER-ONLY, and it stays that way. A cuff reading the
@@ -1638,42 +1648,49 @@ class LocalDb {
     // doubles as both, and absent stays absent — no backfill.
     if (!refCols.contains('measurement_started_at_ms')) {
       await db.execute(
-          'ALTER TABLE bp_research_reference '
-          'ADD COLUMN measurement_started_at_ms INTEGER');
+        'ALTER TABLE bp_research_reference '
+        'ADD COLUMN measurement_started_at_ms INTEGER',
+      );
     }
     if (!refCols.contains('measurement_finished_at_ms')) {
       await db.execute(
-          'ALTER TABLE bp_research_reference '
-          'ADD COLUMN measurement_finished_at_ms INTEGER');
+        'ALTER TABLE bp_research_reference '
+        'ADD COLUMN measurement_finished_at_ms INTEGER',
+      );
     }
     // Band identity and session grouping, kept beside the capture so signal
     // provenance survives a device swap or a second band.
     if (!refCols.contains('band_device_id')) {
       await db.execute(
-          'ALTER TABLE bp_research_reference ADD COLUMN band_device_id TEXT');
+        'ALTER TABLE bp_research_reference ADD COLUMN band_device_id TEXT',
+      );
     }
     if (!refCols.contains('measurement_session_id')) {
       await db.execute(
-          'ALTER TABLE bp_research_reference '
-          'ADD COLUMN measurement_session_id TEXT');
+        'ALTER TABLE bp_research_reference '
+        'ADD COLUMN measurement_session_id TEXT',
+      );
     }
     // Precision of the recorded measurement instant ('minute' for the
     // current UI) — the analysis must know the pairing instant is not
     // second-accurate.
     if (!refCols.contains('time_precision')) {
       await db.execute(
-          'ALTER TABLE bp_research_reference ADD COLUMN time_precision TEXT');
+        'ALTER TABLE bp_research_reference ADD COLUMN time_precision TEXT',
+      );
     }
 
     final winCols = await _columnsOf(db, 'bp_research_window');
     // Requested vs OBSERVED window bounds: what the data actually covered.
     if (!winCols.contains('observed_start_ms')) {
       await db.execute(
-          'ALTER TABLE bp_research_window ADD COLUMN observed_start_ms INTEGER');
+        'ALTER TABLE bp_research_window ADD COLUMN observed_start_ms INTEGER',
+      );
     }
     if (!winCols.contains('observed_end_ms')) {
       await db.execute(
-          'ALTER TABLE bp_research_window ADD COLUMN observed_end_ms INTEGER');
+        'ALTER TABLE bp_research_window ADD COLUMN observed_end_ms INTEGER',
+      );
     }
     // Quality counts (v2): honest coverage and continuity metrics, never a
     // fabricated confidence number.
@@ -1698,14 +1715,15 @@ class LocalDb {
     // NEW revision row; old revisions stay. Research-only, same isolation
     // as the rung-55 tables.
     await db.execute(
-        'CREATE TABLE IF NOT EXISTS bp_research_snapshot ('
-        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-        'reference_id INTEGER NOT NULL, '
-        'revision INTEGER NOT NULL, '
-        'onehz_json TEXT NOT NULL, '
-        'rr_json TEXT NOT NULL, '
-        'created_at_ms INTEGER NOT NULL, '
-        'UNIQUE (reference_id, revision))');
+      'CREATE TABLE IF NOT EXISTS bp_research_snapshot ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+      'reference_id INTEGER NOT NULL, '
+      'revision INTEGER NOT NULL, '
+      'onehz_json TEXT NOT NULL, '
+      'rr_json TEXT NOT NULL, '
+      'created_at_ms INTEGER NOT NULL, '
+      'UNIQUE (reference_id, revision))',
+    );
   }
 
   static Future<void> _createBpResearch(Database db) async {
@@ -1767,6 +1785,24 @@ class LocalDb {
     List<Map<String, Object?>>? snapshotOnehzRows,
     List<Map<String, Object?>>? snapshotRrRows,
   }) async {
+    // STORE-SIDE validation, not just UI: any caller (a future import, a
+    // second screen) meets the same research bounds. Enforced BEFORE the
+    // transaction opens, so a rejected capture leaves no partial row, no
+    // window, no snapshot behind. Out-of-bounds is REJECTED, never
+    // corrected or clamped — a clamped reading is a fabricated one.
+    if (!c.systolicMmHg.isFinite ||
+        !c.diastolicMmHg.isFinite ||
+        c.systolicMmHg < kResearchSystolicBounds.$1 ||
+        c.systolicMmHg > kResearchSystolicBounds.$2 ||
+        c.diastolicMmHg < kResearchDiastolicBounds.$1 ||
+        c.diastolicMmHg > kResearchDiastolicBounds.$2 ||
+        c.diastolicMmHg >= c.systolicMmHg) {
+      throw ArgumentError(
+        'Invalid BP research reference: systolic '
+        '${c.systolicMmHg} / diastolic ${c.diastolicMmHg} mmHg is '
+        'outside the research bounds or dia >= sys.',
+      );
+    }
     final db = await instance;
     await db.transaction((txn) async {
       // NULL never equals NULL in a UNIQUE constraint, so a retake with no
@@ -1842,7 +1878,9 @@ class LocalDb {
       final w = c.window;
       if (w == null) {
         await txn.rawDelete(
-          'DELETE FROM bp_research_window WHERE reference_id = ?', [id]);
+          'DELETE FROM bp_research_window WHERE reference_id = ?',
+          [id],
+        );
         return;
       }
       await txn.rawInsert(
@@ -1885,11 +1923,13 @@ class LocalDb {
       // error instead of a silent history rewrite. Rows frozen as JSON
       // exactly as the window computation saw them.
       if (snapshotOnehzRows != null || snapshotRrRows != null) {
-        final maxRev = Sqflite.firstIntValue(await txn.rawQuery(
-          'SELECT MAX(revision) FROM bp_research_snapshot '
-          'WHERE reference_id = ?',
-          [id],
-        ));
+        final maxRev = Sqflite.firstIntValue(
+          await txn.rawQuery(
+            'SELECT MAX(revision) FROM bp_research_snapshot '
+            'WHERE reference_id = ?',
+            [id],
+          ),
+        );
         final rev = (maxRev ?? 0) + 1;
         await txn.rawInsert(
           'INSERT INTO bp_research_snapshot '
@@ -1911,7 +1951,6 @@ class LocalDb {
       }
     });
   }
-
 
   /// All captures, newest first, for the dev screen and the CSV export.
   static Future<List<Map<String, Object?>>> bpResearchCaptures() async {
@@ -2055,8 +2094,9 @@ class LocalDb {
             'VALUES(?, ?, ?)',
             [category, dedupeKey, candidate],
           );
-          final n =
-              Sqflite.firstIntValue(await txn.rawQuery('SELECT changes()'));
+          final n = Sqflite.firstIntValue(
+            await txn.rawQuery('SELECT changes()'),
+          );
           if (n == 1) return candidate;
         }
         throw StateError('notif_slots: no free slot within $probes probes');
@@ -2234,11 +2274,11 @@ class LocalDb {
       );
       final batch = txn.batch();
       for (var i = 0; i < packets.length; i++) {
-        batch.insert(
-          'ecg_reading_packet',
-          {...packets[i], 'reading_id': reading['id'], 'ordinal': i},
-          conflictAlgorithm: ConflictAlgorithm.fail,
-        );
+        batch.insert('ecg_reading_packet', {
+          ...packets[i],
+          'reading_id': reading['id'],
+          'ordinal': i,
+        }, conflictAlgorithm: ConflictAlgorithm.fail);
       }
       await batch.commit(noResult: true);
     });
@@ -2260,9 +2300,7 @@ class LocalDb {
   }
 
   /// The accepted packets of [id] in ordinal order (placeholders included).
-  static Future<List<Map<String, Object?>>> ecgReadingPackets(
-    String id,
-  ) async {
+  static Future<List<Map<String, Object?>>> ecgReadingPackets(String id) async {
     final db = await instance;
     return db.query(
       'ecg_reading_packet',
@@ -2322,17 +2360,13 @@ class LocalDb {
     int smartWindowMinutes = 0,
   }) async {
     final db = await instance;
-    await db.insert(
-      'alarm_schedule',
-      {
-        'weekday': weekday,
-        'hour': hour,
-        'minute': minute,
-        'enabled': enabled ? 1 : 0,
-        'smart_window_minutes': smartWindowMinutes,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('alarm_schedule', {
+      'weekday': weekday,
+      'hour': hour,
+      'minute': minute,
+      'enabled': enabled ? 1 : 0,
+      'smart_window_minutes': smartWindowMinutes,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// Wipe the whole weekly schedule — the "Cancel-all" half of disabling the
@@ -2362,7 +2396,8 @@ class LocalDb {
     return db.query(
       'decoded_onehz',
       columns: const ['rec_ts', 'hr', 'ax', 'ay', 'az'],
-      where: 'rec_ts >= ? AND rec_ts <= ? '
+      where:
+          'rec_ts >= ? AND rec_ts <= ? '
           'AND hr IS NOT NULL AND ax IS NOT NULL AND ay IS NOT NULL AND az IS NOT NULL',
       whereArgs: [sinceEpochSec, untilEpochSec],
       orderBy: 'rec_ts ASC',
@@ -2636,14 +2671,7 @@ class LocalDb {
       '${blankAdapter ? 'adapter_id = NULL, ' : 'adapter_id = COALESCE(?, adapter_id), '}'
       'remote_id = COALESCE(?, remote_id), label = COALESCE(?, label), '
       'tier = COALESCE(?, tier), last_seen = ? WHERE id = ?',
-      [
-        if (!blankAdapter) adapterId,
-        remoteId,
-        label,
-        tier,
-        now,
-        id,
-      ],
+      [if (!blankAdapter) adapterId, remoteId, label, tier, now, id],
     );
   }
 
@@ -2872,11 +2900,7 @@ class LocalDb {
     int limit = 200,
   }) async {
     final db = await instance;
-    return db.query(
-      'imported_workout',
-      orderBy: 'start_ts DESC',
-      limit: limit,
-    );
+    return db.query('imported_workout', orderBy: 'start_ts DESC', limit: limit);
   }
 
   /// Drop one imported workout AND its route. `deleteSession` cannot do this —
@@ -3097,13 +3121,16 @@ class LocalDb {
     // A DB whose ladder has not created these must no-op rather than throw.
     for (final t in const ['decoded_onehz', 'device_coverage']) {
       final present = await db.rawQuery(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", [t],
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        [t],
       );
       if (present.isEmpty) return;
     }
     // Pre-v47 shape has no device_id; every row is the primary by definition.
     final cols = await _columnsOf(db, 'decoded_onehz');
-    final dev = cols.contains('device_id') ? 'device_id' : "'$kPrimaryDeviceId'";
+    final dev = cols.contains('device_id')
+        ? 'device_id'
+        : "'$kPrimaryDeviceId'";
 
     const kBucket = 60; // seconds — the resolver's grid
     // One interval may absorb a gap of up to this many buckets and stay open.
@@ -3167,8 +3194,9 @@ class LocalDb {
     // RR beats live in their own table, one row per beat.
     final rrCols = await _columnsOf(db, 'decoded_rr');
     if (rrCols.isNotEmpty) {
-      final rrDev =
-          rrCols.contains('device_id') ? 'device_id' : "'$kPrimaryDeviceId'";
+      final rrDev = rrCols.contains('device_id')
+          ? 'device_id'
+          : "'$kPrimaryDeviceId'";
       final rows = await db.rawQuery(
         'SELECT $rrDev AS d, rec_ts / $kBucket AS b FROM decoded_rr '
         'WHERE rec_ts > 0 GROUP BY d, b ORDER BY d ASC, b ASC',
@@ -3208,11 +3236,12 @@ class LocalDb {
     List<NeutralSample>? neutrals,
     Map<String, int>? toleranceSec,
   }) async {
-    assert(samples.length == sampleSecs.length,
-        'sampleSecs must be parallel to samples');
+    assert(
+      samples.length == sampleSecs.length,
+      'sampleSecs must be parallel to samples',
+    );
     final seen = <String, List<int>>{};
-    void observe(String signal, int sec) =>
-        (seen[signal] ??= <int>[]).add(sec);
+    void observe(String signal, int sec) => (seen[signal] ??= <int>[]).add(sec);
     for (var i = 0; i < samples.length; i++) {
       final s = samples[i];
       if (s == null) continue;
@@ -3272,10 +3301,12 @@ class LocalDb {
         orderBy: 'start_ts DESC',
         limit: 1,
       );
-      final startTs =
-          open.isEmpty ? null : (open.single['start_ts'] as num).toInt();
-      final endTs =
-          open.isEmpty ? null : (open.single['end_ts'] as num).toInt();
+      final startTs = open.isEmpty
+          ? null
+          : (open.single['start_ts'] as num).toInt();
+      final endTs = open.isEmpty
+          ? null
+          : (open.single['end_ts'] as num).toInt();
       for (var i = 0; i < spans.length; i++) {
         final (firstSec, lastSec) = spans[i];
         // EXTEND ONLY A SPAN THAT STARTS AT OR AFTER THE OPEN INTERVAL and is
@@ -3303,16 +3334,12 @@ class LocalDb {
             );
           }
         } else {
-          await txn.insert(
-            'device_coverage',
-            {
-              'device_id': deviceId,
-              'signal': signal,
-              'start_ts': firstSec,
-              'end_ts': lastSec,
-            },
-            conflictAlgorithm: ConflictAlgorithm.ignore,
-          );
+          await txn.insert('device_coverage', {
+            'device_id': deviceId,
+            'signal': signal,
+            'start_ts': firstSec,
+            'end_ts': lastSec,
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
       }
     }
@@ -3566,14 +3593,13 @@ class LocalDb {
     int loSec,
     int hiSec, {
     required String deviceId,
-  }) =>
-      _toggleSpans(
-        loSec,
-        hiSec,
-        onId: proto.EventId.wristOn,
-        offId: proto.EventId.wristOff,
-        deviceId: deviceId,
-      );
+  }) => _toggleSpans(
+    loSec,
+    hiSec,
+    onId: proto.EventId.wristOn,
+    offId: proto.EventId.wristOff,
+    deviceId: deviceId,
+  );
 
   /// Spans ([startSec, endSec]) in [loSec, hiSec) during which the band was on
   /// the charger — off-wrist by definition, and motionless.
@@ -3581,14 +3607,13 @@ class LocalDb {
     int loSec,
     int hiSec, {
     required String deviceId,
-  }) =>
-      _toggleSpans(
-        loSec,
-        hiSec,
-        onId: proto.EventId.chargingOff,
-        offId: proto.EventId.chargingOn,
-        deviceId: deviceId,
-      );
+  }) => _toggleSpans(
+    loSec,
+    hiSec,
+    onId: proto.EventId.chargingOff,
+    offId: proto.EventId.chargingOn,
+    deviceId: deviceId,
+  );
 
   /// Build "state active" spans from a pair of toggle events, clipped to
   /// [loSec, hiSec). [offId] opens a span; [onId] closes it.
@@ -3789,6 +3814,7 @@ class LocalDb {
     String? trimToken,
     Map<String, String>? extraCursors,
     List<ArchiveRecord>? archives,
+
     /// Rows from a band with no framed record to decode — a notify sensor's
     /// beats, a ring's stamped temperature. Queued into the SAME transaction
     /// as [raws], so a source with no flash still gets the one durable write
@@ -3807,20 +3833,21 @@ class LocalDb {
     // the host supplies it; a signal absent from the map defaults to
     // 2*kBucket (120s) inside [_extendCoverageVia].
     Map<String, int>? coverageToleranceSec,
-  }) =>
-      _withCommitGate(() => _commitSyncBatchLocked(
-            raws,
-            samples,
-            trimToken: trimToken,
-            extraCursors: extraCursors,
-            archives: archives,
-            neutrals: neutrals,
-            ecgRawPackets: ecgRawPackets,
-            onCheckpoint: onCheckpoint,
-            deviceFamily: deviceFamily,
-            deviceId: deviceId,
-            coverageToleranceSec: coverageToleranceSec,
-          ));
+  }) => _withCommitGate(
+    () => _commitSyncBatchLocked(
+      raws,
+      samples,
+      trimToken: trimToken,
+      extraCursors: extraCursors,
+      archives: archives,
+      neutrals: neutrals,
+      ecgRawPackets: ecgRawPackets,
+      onCheckpoint: onCheckpoint,
+      deviceFamily: deviceFamily,
+      deviceId: deviceId,
+      coverageToleranceSec: coverageToleranceSec,
+    ),
+  );
 
   static Future<void> _commitSyncBatchLocked(
     List<RawRecord> raws,
@@ -4058,8 +4085,11 @@ class LocalDb {
         await setCursor(kCounter, '$maxCounter', txn: txn);
         await setCursor(kRecTs, '$maxRecTs', txn: txn);
         if (trimToken != null) {
-          await setCursor(cursorKeyFor('strap_trim', deviceId), trimToken,
-              txn: txn);
+          await setCursor(
+            cursorKeyFor('strap_trim', deviceId),
+            trimToken,
+            txn: txn,
+          );
         }
         if (extraCursors != null) {
           for (final e in extraCursors.entries) {
@@ -5631,12 +5661,14 @@ class LocalDb {
     List<String> prepend = const [],
     List<String>? primaryKey,
   }) {
-    final own = [
-      for (final c in info)
-        if ((((c['pk'] as num?)?.toInt()) ?? 0) > 0) c,
-    ]..sort(
-        (a, b) => ((a['pk'] as num).toInt()).compareTo((b['pk'] as num).toInt()),
-      );
+    final own =
+        [
+          for (final c in info)
+            if ((((c['pk'] as num?)?.toInt()) ?? 0) > 0) c,
+        ]..sort(
+          (a, b) =>
+              ((a['pk'] as num).toInt()).compareTo((b['pk'] as num).toInt()),
+        );
     final key = primaryKey ?? [for (final c in own) c['name'] as String];
     final inline = key.length == 1 ? key.first : null;
     final defs = <String>[...prepend];
@@ -5709,14 +5741,7 @@ class LocalDb {
     final tmp = '_${table}_v47';
     await db.execute('DROP TABLE IF EXISTS $tmp');
     await db.execute(
-      'CREATE TABLE $tmp (${_rebuildDdlBody(
-        info,
-        prepend: const [
-          "device_id TEXT NOT NULL DEFAULT ''",
-          'ts_ms INTEGER NOT NULL DEFAULT 0',
-        ],
-        primaryKey: ['device_id', 'ts_ms', ...keyTail],
-      )})',
+      'CREATE TABLE $tmp (${_rebuildDdlBody(info, prepend: const ["device_id TEXT NOT NULL DEFAULT ''", 'ts_ms INTEGER NOT NULL DEFAULT 0'], primaryKey: ['device_id', 'ts_ms', ...keyTail])})',
     );
     final cols = names.join(', ');
     // COALESCE because a declared PRIMARY KEY on a legacy rowid table does NOT
@@ -5768,11 +5793,7 @@ class LocalDb {
     final tmp = '_${table}_v51';
     await db.execute('DROP TABLE IF EXISTS $tmp');
     await db.execute(
-      'CREATE TABLE $tmp (${_rebuildDdlBody(
-        info,
-        prepend: ["device_id TEXT NOT NULL DEFAULT '$kPrimaryDeviceId'"],
-        primaryKey: ['device_id', ...keyTail],
-      )})',
+      'CREATE TABLE $tmp (${_rebuildDdlBody(info, prepend: ["device_id TEXT NOT NULL DEFAULT '$kPrimaryDeviceId'"], primaryKey: ['device_id', ...keyTail])})',
     );
     final cols = names.join(', ');
     await db.execute(
@@ -6304,7 +6325,6 @@ class LocalDb {
     return (rawRecTs != null && rawRecTs > 0) ? rawRecTs : decoded.tsEpoch;
   }
 
-
   /// Replaces this second's RR beats. Returns the ops queued.
   ///
   /// Clear the second before reinserting so a SHRINKING beat count can't strand
@@ -6394,22 +6414,18 @@ class LocalDb {
     required String deviceId,
   }) {
     final recTs = n.tsEpoch;
-    batch.insert(
-      'decoded_onehz',
-      {
-        'device_id': deviceId,
-        'ts_ms': recTs * 1000,
-        'rec_ts': recTs,
-        'counter': 0,
-        // Absent is NULL, never zeroed — same rule _queueDecodedOneHz
-        // follows for hr/accel/optical.
-        'hr': n.hr,
-        'skin_temp_c': n.skinTempC,
-        'device_family': deviceFamily,
-        'source': deviceFamily,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    batch.insert('decoded_onehz', {
+      'device_id': deviceId,
+      'ts_ms': recTs * 1000,
+      'rec_ts': recTs,
+      'counter': 0,
+      // Absent is NULL, never zeroed — same rule _queueDecodedOneHz
+      // follows for hr/accel/optical.
+      'hr': n.hr,
+      'skin_temp_c': n.skinTempC,
+      'device_family': deviceFamily,
+      'source': deviceFamily,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     var ops = 1;
     // SCOPED TO THE WRITING DEVICE. Clear the second before reinserting so a
     // shrinking beat count can't strand stale high-index beats — same
@@ -6423,20 +6439,16 @@ class LocalDb {
     for (var i = 0; i < n.rrMs.length; i++) {
       final rr = n.rrMs[i];
       if (rr <= 0) continue;
-      batch.insert(
-        'decoded_rr',
-        {
-          'device_id': deviceId,
-          'ts_ms': recTs * 1000,
-          'rec_ts': recTs,
-          'beat_index': i,
-          'rr_ts_ms': recTs * 1000,
-          'rr_ms': rr,
-          'device_family': deviceFamily,
-          'source': deviceFamily,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      batch.insert('decoded_rr', {
+        'device_id': deviceId,
+        'ts_ms': recTs * 1000,
+        'rec_ts': recTs,
+        'beat_index': i,
+        'rr_ts_ms': recTs * 1000,
+        'rr_ms': rr,
+        'device_family': deviceFamily,
+        'source': deviceFamily,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       ops++;
     }
     return ops;
@@ -6667,7 +6679,9 @@ class LocalDb {
   /// retention edge anyway, so the cap is a backstop and not the normal case.
   /// INSERT OR IGNORE, so it can never overwrite a row the live writer already
   /// wrote.
-  static Future<void> _backfillBandBatteryFromEvents(DatabaseExecutor db) async {
+  static Future<void> _backfillBandBatteryFromEvents(
+    DatabaseExecutor db,
+  ) async {
     // A DB whose ladder has not created these yet (or is mid-ladder) must
     // NO-OP rather than throw. `redriveArchivedRecords` guards the same way and
     // for the same reason: a throw in here rolls the WHOLE upgrade back and
@@ -6790,11 +6804,10 @@ class LocalDb {
         'captured_at': capturedAt,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
       if (battery != null) {
-        await db.insert(
-          'band_battery',
-          {'device_id': deviceId, ...battery},
-          conflictAlgorithm: ConflictAlgorithm.ignore,
-        );
+        await db.insert('band_battery', {
+          'device_id': deviceId,
+          ...battery,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
       }
     }, bestEffort: true);
   }
@@ -7103,15 +7116,19 @@ class LocalDb {
     // the oldV<44 ladder step, where `decoded_onehz` is still keyed by rec_ts
     // alone and naming `device_id` would throw inside onUpgrade (quarantining
     // the database), and from the app/tests on a re-keyed table. One PRAGMA.
-    final preDeviceKey =
-        !(await _columnsOf(db, 'decoded_onehz')).contains('device_id');
+    final preDeviceKey = !(await _columnsOf(
+      db,
+      'decoded_onehz',
+    )).contains('device_id');
 
     // Same self-detection as `preDeviceKey` above, for `raw_archive`'s own
     // rekey (v51): this function runs from the oldV<44 rung too, i.e. BEFORE
     // the v51 rekey, so at that point `raw_archive` is still hex-keyed and the
     // row-value comparison below must fall back to comparing `hex` alone.
-    final preArchiveDeviceKey =
-        !(await _columnsOf(db, 'raw_archive')).contains('device_id');
+    final preArchiveDeviceKey = !(await _columnsOf(
+      db,
+      'raw_archive',
+    )).contains('device_id');
 
     final marks = List.filled(redrivableArchiveReasons.length, '?').join(',');
     // Paged on (hex, device_id) — a stable, total order that needs no extra
@@ -7147,8 +7164,9 @@ class LocalDb {
       // one another.
       final byDeviceRecTs = <(String, int), (RawRecord, Sample)>{};
       for (final r in rows) {
-        final deviceId =
-            preArchiveDeviceKey ? kPrimaryDeviceId : r['device_id'] as String;
+        final deviceId = preArchiveDeviceKey
+            ? kPrimaryDeviceId
+            : r['device_id'] as String;
         final raw = RawRecord(
           counter: (r['counter'] as num?)?.toInt() ?? 0,
           packetType: (r['packet_type'] as num?)?.toInt() ?? 0,
@@ -7819,7 +7837,11 @@ class LocalDb {
     final db = await instance;
     final name = signal.name;
     await db.transaction((txn) async {
-      await txn.delete('signal_priority', where: 'signal = ?', whereArgs: [name]);
+      await txn.delete(
+        'signal_priority',
+        where: 'signal = ?',
+        whereArgs: [name],
+      );
       for (var i = 0; i < order.length; i++) {
         await txn.insert('signal_priority', {
           'signal': name,
@@ -7863,7 +7885,10 @@ class LocalDb {
   /// Sparse: an absent signal falls through to `rankSources()` (§4.5's ladder).
   static Future<Map<String, List<String>>> signalPriorities() async {
     final db = await instance;
-    final rows = await db.query('signal_priority', orderBy: 'signal ASC, rank ASC, device_id ASC');
+    final rows = await db.query(
+      'signal_priority',
+      orderBy: 'signal ASC, rank ASC, device_id ASC',
+    );
     final out = <String, List<String>>{};
     for (final r in rows) {
       (out[r['signal'] as String] ??= []).add(r['device_id'] as String);
@@ -8965,85 +8990,85 @@ class LocalDb {
   /// merges, in order: independent tables first; all use INSERT OR
   /// REPLACE so re-import is safe.
   static const List<String> _restoreTables = [
-      // Hand-entered rows first. Nothing regenerates these, so if a merge is
-      // ever cut short (an OOM, a damaged source) they are the ones already
-      // banked. They were also simply MISSING here until now — nutrition,
-      // medication, strength sets, symptoms and routes did not survive a
-      // backup/restore round trip at all, the same omission `wipeAll` documents.
-      'bp_research_reference',
-      'bp_research_window',
-      'bp_research_snapshot',
-      'journal',
-      'journal_metric',
-      'journal_field_def',
-      'lab_result',
-      'lab_marker_def',
-      'strength_set',
-      'exercise_def',
-      'food_entry',
-      'food_def',
-      'med_def',
-      'med_dose',
-      'cycle_log',
-      'cycle_symptom',
-      'breathing_session',
-      // Vendor-computed, typed-in and imported scalars. In the hand-entered
-      // block because a third of it IS hand-entered and nothing regenerates
-      // any of it — a `reports` band trims its own history, and the app whose
-      // export the imported rows came from may be uninstalled by now.
-      'observation',
-      'workout_route',
-      'workout_split',
-      // The user's sleep corrections. These are the ONLY copy of them — the
-      // detector's output is deliberately not baked in, so a restore that
-      // skipped these would silently reinstate every nap the user had deleted
-      // and lose every one they logged.
-      'sleep_override',
-      'sleep_nap',
-      'samples',
-      'events',
-      'decoded_onehz',
-      'decoded_rr',
-      // The only copy of what a paired sensor measured during a session — the
-      // band cannot re-deliver it, so a restore that skipped it loses it.
-      'external_hr',
-      // Re-readable from the health store, but only for as long as that app is
-      // installed and that permission is granted — cheaper to carry.
-      'imported_measurement',
-      // Same reasoning, and more so: a route is thousands of points that the
-      // source app may have deleted since. `workout_route` is already in this
-      // list above and carries the imported routes too.
-      'imported_workout',
-      // The never-pruned archive of frames we could not decode. exportCopy()
-      // is a whole-database VACUUM INTO, so these rows DO leave the device —
-      // leaving the table out here meant a backup/restore round trip silently
-      // dropped them, in the one table whose entire purpose is that a frame is
-      // never lost. Keyed by `hex`, so two same-counter frames from different
-      // boots both survive the merge.
-      'raw_archive',
-      'band_events',
-      'band_battery',
-      'day_result',
-      'metric_series',
-      'metric_series_version',
-      'sessions',
-      'notifications',
-      'baselines',
-      // The devices this phone knows about — so a SECONDARY device's identity
-      // survives a backup/restore round trip rather than leaving its rows in
-      // `decoded_onehz` pointing at a `device_id` nothing can name. The PRIMARY
-      // row is deliberately skipped on the way in; see the guard below.
-      'device',
-      'device_coverage',
-      'signal_priority',
-      // WHOOP MG ECG: a user-initiated reading, its exact accepted packets
-      // and the raw R16 records history recovered for it. None regenerates —
-      // the band trimmed its copy on ACK. Parent before child so a restore
-      // cut short never leaves packets without their reading.
-      'ecg_reading',
-      'ecg_reading_packet',
-      'ecg_raw_packet',
-      'sync_cursor',
+    // Hand-entered rows first. Nothing regenerates these, so if a merge is
+    // ever cut short (an OOM, a damaged source) they are the ones already
+    // banked. They were also simply MISSING here until now — nutrition,
+    // medication, strength sets, symptoms and routes did not survive a
+    // backup/restore round trip at all, the same omission `wipeAll` documents.
+    'bp_research_reference',
+    'bp_research_window',
+    'bp_research_snapshot',
+    'journal',
+    'journal_metric',
+    'journal_field_def',
+    'lab_result',
+    'lab_marker_def',
+    'strength_set',
+    'exercise_def',
+    'food_entry',
+    'food_def',
+    'med_def',
+    'med_dose',
+    'cycle_log',
+    'cycle_symptom',
+    'breathing_session',
+    // Vendor-computed, typed-in and imported scalars. In the hand-entered
+    // block because a third of it IS hand-entered and nothing regenerates
+    // any of it — a `reports` band trims its own history, and the app whose
+    // export the imported rows came from may be uninstalled by now.
+    'observation',
+    'workout_route',
+    'workout_split',
+    // The user's sleep corrections. These are the ONLY copy of them — the
+    // detector's output is deliberately not baked in, so a restore that
+    // skipped these would silently reinstate every nap the user had deleted
+    // and lose every one they logged.
+    'sleep_override',
+    'sleep_nap',
+    'samples',
+    'events',
+    'decoded_onehz',
+    'decoded_rr',
+    // The only copy of what a paired sensor measured during a session — the
+    // band cannot re-deliver it, so a restore that skipped it loses it.
+    'external_hr',
+    // Re-readable from the health store, but only for as long as that app is
+    // installed and that permission is granted — cheaper to carry.
+    'imported_measurement',
+    // Same reasoning, and more so: a route is thousands of points that the
+    // source app may have deleted since. `workout_route` is already in this
+    // list above and carries the imported routes too.
+    'imported_workout',
+    // The never-pruned archive of frames we could not decode. exportCopy()
+    // is a whole-database VACUUM INTO, so these rows DO leave the device —
+    // leaving the table out here meant a backup/restore round trip silently
+    // dropped them, in the one table whose entire purpose is that a frame is
+    // never lost. Keyed by `hex`, so two same-counter frames from different
+    // boots both survive the merge.
+    'raw_archive',
+    'band_events',
+    'band_battery',
+    'day_result',
+    'metric_series',
+    'metric_series_version',
+    'sessions',
+    'notifications',
+    'baselines',
+    // The devices this phone knows about — so a SECONDARY device's identity
+    // survives a backup/restore round trip rather than leaving its rows in
+    // `decoded_onehz` pointing at a `device_id` nothing can name. The PRIMARY
+    // row is deliberately skipped on the way in; see the guard below.
+    'device',
+    'device_coverage',
+    'signal_priority',
+    // WHOOP MG ECG: a user-initiated reading, its exact accepted packets
+    // and the raw R16 records history recovered for it. None regenerates —
+    // the band trimmed its copy on ACK. Parent before child so a restore
+    // cut short never leaves packets without their reading.
+    'ecg_reading',
+    'ecg_reading_packet',
+    'ecg_raw_packet',
+    'sync_cursor',
   ];
 
   @visibleForTesting
@@ -9069,6 +9094,7 @@ class LocalDb {
       final info = await db.rawQuery('PRAGMA table_info($t)');
       return {for (final c in info) (c['name'] as String)};
     }
+
     Future<bool> srcHasTable(String t, Database s) async {
       // A salvage source may predate the window table; `SELECT *` on a
       // missing table throws, so probe for its existence first.
@@ -9088,6 +9114,10 @@ class LocalDb {
     // DIFFERENT snapshot under the same (reference, revision) key —
     // immutable history is never overwritten, the source file keeps them.
     var skippedSnapshots = 0;
+    // Window rows skipped on import because the snapshot revision their
+    // features were computed from conflicts with the destination's local
+    // revision — a window may never point at a foreign snapshot.
+    var skippedWindows = 0;
     // DISTINCT DAYS ACTUALLY WRITTEN — the number the caller reports as
     // "N days imported".
     //
@@ -9166,15 +9196,18 @@ class LocalDb {
               final refCols = await destCols('bp_research_reference');
               final winCols = await destCols('bp_research_window');
               final snapCols = await destCols('bp_research_snapshot');
-              final srcRefs = t == 'bp_research_reference' &&
+              final srcRefs =
+                  t == 'bp_research_reference' &&
                       await srcHasTable('bp_research_reference', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_reference')
                   : const <Map<String, Object?>>[];
-              final srcWins = t == 'bp_research_window' &&
+              final srcWins =
+                  t == 'bp_research_window' &&
                       await srcHasTable('bp_research_window', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_window')
                   : const <Map<String, Object?>>[];
-              final srcSnaps = t == 'bp_research_snapshot' &&
+              final srcSnaps =
+                  t == 'bp_research_snapshot' &&
                       await srcHasTable('bp_research_snapshot', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_snapshot')
                   : const <Map<String, Object?>>[];
@@ -9248,14 +9281,82 @@ class LocalDb {
                     bpIdMap[srcId.toInt()] = destId;
                   }
                 }
+                // SNAPSHOT PASS FIRST. A window row names the snapshot
+                // revision its features were computed from, so the window
+                // may only be imported when that revision exists HERE with
+                // the SAME content. Doing snapshots first builds the
+                // (dest_reference_id, dest_revision) -> status map the
+                // window pass then checks against — the invariant being:
+                // window features must belong to exactly the snapshot they
+                // were computed from, never to a local revision that
+                // happens to share the number but holds different rows.
+                final snapStatus = <(int, int), String>{};
+                for (final sn in srcSnaps) {
+                  final row = <String, Object?>{
+                    for (final e in sn.entries)
+                      if (snapCols.contains(e.key)) e.key: e.value,
+                  };
+                  final mapped =
+                      bpIdMap[(row.remove('reference_id') as num?)?.toInt()];
+                  final rev = (row['revision'] as num?)?.toInt();
+                  if (mapped == null || rev == null) continue;
+                  final clash = await txn.rawQuery(
+                    'SELECT onehz_json, rr_json FROM bp_research_snapshot '
+                    'WHERE reference_id = ? AND revision = ?',
+                    [mapped, rev],
+                  );
+                  if (clash.isNotEmpty) {
+                    // IMMUTABLE HISTORY: an existing revision is never
+                    // overwritten. Identical content = idempotent re-import
+                    // (status 'identical'); different content = a conflict
+                    // the window pass must respect (status 'conflict') —
+                    // the source revision stays available in the source
+                    // backup, nothing is lost, nothing is rewritten.
+                    final same =
+                        clash.first['onehz_json'] == row['onehz_json'] &&
+                        clash.first['rr_json'] == row['rr_json'];
+                    snapStatus[(mapped, rev)] = same ? 'identical' : 'conflict';
+                    if (!same) skippedSnapshots++;
+                  } else {
+                    await txn.rawInsert(
+                      'INSERT INTO bp_research_snapshot '
+                      '(reference_id, revision, onehz_json, rr_json, '
+                      'created_at_ms) VALUES (?, ?, ?, ?, ?)',
+                      [
+                        mapped,
+                        rev,
+                        row['onehz_json'],
+                        row['rr_json'],
+                        row['created_at_ms'],
+                      ],
+                    );
+                    snapStatus[(mapped, rev)] = 'inserted';
+                  }
+                }
                 for (final w in srcWins) {
                   final row = <String, Object?>{
                     for (final e in w.entries)
                       if (winCols.contains(e.key)) e.key: e.value,
                   };
-                  final mapped = bpIdMap[
-                      (row.remove('reference_id') as num?)?.toInt()];
+                  final mapped =
+                      bpIdMap[(row.remove('reference_id') as num?)?.toInt()];
                   if (mapped == null) continue;
+                  // WINDOW/SNAPSHOT CONSISTENCY: a window that names a
+                  // snapshot revision may only be imported when that
+                  // revision is HERE with the same content ('inserted' or
+                  // 'identical'). A 'conflict' means the local revision n
+                  // holds DIFFERENT rows than the source window's features
+                  // were computed from — importing it would point features
+                  // at a foreign snapshot. The window is skipped and
+                  // counted; the destination keeps its own consistent pair.
+                  final rev = (row['snapshot_revision'] as num?)?.toInt();
+                  if (rev != null) {
+                    final status = snapStatus[(mapped, rev)];
+                    if (status == null || status == 'conflict') {
+                      skippedWindows++;
+                      continue;
+                    }
+                  }
                   await txn.rawInsert(
                     'INSERT OR REPLACE INTO bp_research_window '
                     '(reference_id, window_start_ms, window_end_ms, '
@@ -9291,55 +9392,17 @@ class LocalDb {
                     ],
                   );
                 }
-                for (final sn in srcSnaps) {
-                  final row = <String, Object?>{
-                    for (final e in sn.entries)
-                      if (snapCols.contains(e.key)) e.key: e.value,
-                  };
-                  final mapped = bpIdMap[
-                      (row.remove('reference_id') as num?)?.toInt()];
-                  if (mapped == null) continue;
-                  // Snapshots are IMMUTABLE: a colliding (reference, revision)
-                  // key with DIFFERENT content is skipped, not overwritten —
-                  // the destination history cannot be rewritten by an import,
-                  // and the source revision stays available in the source
-                  // file. A byte-identical collision is a no-op (idempotent
-                  // re-import).
-                  final rev = (row['revision'] as num?)?.toInt();
-                  if (rev == null) continue;
-                  final clash = await txn.rawQuery(
-                    'SELECT onehz_json, rr_json FROM bp_research_snapshot '
-                    'WHERE reference_id = ? AND revision = ?',
-                    [mapped, rev],
-                  );
-                  if (clash.isNotEmpty) {
-                    final same = clash.first['onehz_json'] == row['onehz_json'] &&
-                        clash.first['rr_json'] == row['rr_json'];
-                    if (!same) skippedSnapshots++;
-                    continue;
-                  }
-                  await txn.rawInsert(
-                    'INSERT INTO bp_research_snapshot '
-                    '(reference_id, revision, onehz_json, rr_json, '
-                    'created_at_ms) VALUES (?, ?, ?, ?, ?)',
-                    [
-                      mapped,
-                      rev,
-                      row['onehz_json'],
-                      row['rr_json'],
-                      row['created_at_ms'],
-                    ],
-                  );
-                }
               });
               counts[t] = t == 'bp_research_reference'
                   ? srcRefs.length
                   : t == 'bp_research_window'
-                      ? srcWins.length
-                      // Snapshots whose (reference, revision) key collided
-                      // with DIFFERENT content were skipped, not imported —
-                      // the count must not claim them.
-                      : srcSnaps.length - skippedSnapshots;
+                  // Windows skipped over a snapshot conflict were not
+                  // imported — the count must not claim them.
+                  ? srcWins.length - skippedWindows
+                  // Snapshots whose (reference, revision) key collided
+                  // with DIFFERENT content were skipped, not imported —
+                  // the count must not claim them.
+                  : srcSnaps.length - skippedSnapshots;
             } catch (_) {
               if (!tolerant) rethrow;
               counts[t] = 0;
@@ -9997,7 +10060,8 @@ class LocalDb {
     final db = await instance;
     return db.query(
       'metric_series',
-      where: 'key = ? AND value IS NOT NULL'
+      where:
+          'key = ? AND value IS NOT NULL'
           '${measuredOnly ? ' AND date NOT IN ($_importedDatesSql)' : ''}',
       whereArgs: [key],
       orderBy: 'date ASC',

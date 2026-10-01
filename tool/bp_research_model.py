@@ -72,7 +72,18 @@ MIN_FEATURE_SPREAD = 0.25  # and this much normalized spread in H and L
 # missing features are excluded; 'gappy' is admitted — it is usable data
 # with an honest warning flag, and excluding it would bias the dataset
 # toward clean, unrepresentative windows.
-ADMITTED_QUALITY = frozenset({"ok", "gappy", ""})
+ADMITTED_QUALITY = frozenset({"ok", "gappy"})
+
+
+def is_admitted_quality(status: str | None) -> bool:
+    """Strict, documented research admission rule: only 'ok' and 'gappy'
+    enter the model. UNKNOWN quality (None, empty, anything else) is NOT
+    admitted by default — a silent None -> "" -> admitted path would let
+    mixed or legacy sessions in through the back door. Historical rows
+    without a quality status can be admitted explicitly via
+    --admit-missing-quality (a documented compatibility mode, off by
+    default, reported in the report)."""
+    return status in ADMITTED_QUALITY
 # Session aggregation span: members of one explicit session id are only
 # aggregated when they lie within this span (engineering default, 30 min —
 # a few cuff readings of one sitting). Same label, farther apart: NOT one
@@ -216,7 +227,8 @@ def load_rows(path: str) -> list[Row]:
     return rows
 
 
-def aggregate_sessions(rows: list[Row]) -> list[Row]:
+def aggregate_sessions(rows: list[Row],
+                       admit_missing_quality: bool = False) -> list[Row]:
     """Multiple cuff readings of one sitting are NOT independent
     physiological states — average them into one reference before they
     enter the model.
@@ -273,8 +285,20 @@ def aggregate_sessions(rows: list[Row]) -> list[Row]:
                 hr_mean=wmean([m.hr_mean for m in members]),
                 rmssd_ms=wmean([m.rmssd_ms for m in members]),
                 session_id=label,
-                quality=(members[0].quality if all(
-                    m.quality == members[0].quality for m in members) else None),
+                # STRICT member fold: if ANY member of the session is not
+                # admitted quality, the whole aggregated session carries
+                # None and is excluded downstream — an 'ok + pending'
+                # sitting is not admitted because half of it is not final
+                # data. All-admitted sessions carry their worst (most
+                # flagged) admitted status, 'gappy' over 'ok'.
+                quality=(max(
+                    (m.quality for m in members),
+                    key=lambda q: {"ok": 0, "gappy": 1}.get(q, -1))
+                    if all(
+                        is_admitted_quality(m.quality)
+                        or (m.quality is None and admit_missing_quality)
+                        for m in members)
+                    else None),
                 coverage=(sum(weights) / n if all(
                     m.coverage is not None for m in members) else None),
             ))
@@ -290,7 +314,8 @@ def signed_mean(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else float("nan")
 
 
-def run(rows: list[Row], level_b: bool = False) -> dict:
+def run(rows: list[Row], level_b: bool = False,
+        admit_missing_quality: bool = False) -> dict:
     """Chronological prequential replay.
 
     FAIR COMPARISON: all three models are evaluated on the EXACT SAME
@@ -306,13 +331,18 @@ def run(rows: list[Row], level_b: bool = False) -> dict:
     did not ask for level B), the update falls back to level A and the
     report says so.
     """
-    aggregated = aggregate_sessions(rows)
+    aggregated = aggregate_sessions(rows,
+                                   admit_missing_quality=admit_missing_quality)
     if not aggregated:
         return {"error": "no rows"}
 
-    # Quality admission (documented research rule, see ADMITTED_QUALITY).
+    # Quality admission (documented research rule). aggregate_sessions
+    # already folded every member's quality into the aggregate: a session
+    # with ANY non-admitted member ('ok + pending') carries quality None
+    # and lands here, never silently inside the model.
     admitted = [r for r in aggregated
-                if (r.quality or "") in ADMITTED_QUALITY]
+                if is_admitted_quality(r.quality)
+                or (r.quality is None and admit_missing_quality)]
     excluded_quality = len(aggregated) - len(admitted)
 
     # Calibration row: the first admitted reference seeds the models.
@@ -341,6 +371,14 @@ def run(rows: list[Row], level_b: bool = False) -> dict:
     processed_z: list[list[float]] = []
     level_b_updates = 0
     level_a_updates = 0
+    # The A->B hand-over happens EXACTLY ONCE, at the first causally
+    # admissible level-B update: the live models are re-seeded from their
+    # level-A state (theta carried over, p_offset into P[0][0], slope
+    # variances at DEFAULT_P0) and every later level-B update continues the
+    # matrix covariance. Without this the level-B updates would run on the
+    # INITIAL P, discarding everything level A learned about the offset.
+    level_b_started = False
+    level_b_started_at: int | None = None
 
     per_target: list[dict] = []
 
@@ -377,6 +415,11 @@ def run(rows: list[Row], level_b: bool = False) -> dict:
         # 4. update AFTER recording the predictions. The mode decision uses
         # ONLY processed history (no future rows, no len(usable)).
         use_b = level_b and _b_gate(processed_z)
+        if use_b and not level_b_started:
+            m_sys = Model.hand_over_to_level_b(m_sys)
+            m_dia = Model.hand_over_to_level_b(m_dia)
+            level_b_started = True
+            level_b_started_at = len(processed_z)
         if use_b:
             update_level_b(m_sys, z, r.sys_mmhg, delta_days)
             update_level_b(m_dia, z, r.dia_mmhg, delta_days)
@@ -411,16 +454,27 @@ def run(rows: list[Row], level_b: bool = False) -> dict:
         "rows_excluded_no_features": excluded_no_features,
         "admission_rule": {
             "admitted_quality": sorted(ADMITTED_QUALITY),
+            "unknown_quality_admitted": admit_missing_quality,
             "max_session_span_ms": MAX_SESSION_SPAN_MS,
         },
         "updates": {
             "level_a": level_a_updates,
             "level_b": level_b_updates,
             "level_b_requested": level_b,
+            "level_b_started": level_b_started,
+            "level_b_started_after_refs": level_b_started_at,
             "level_b_gate": {
                 "min_processed_refs": MIN_SLOPE_SAMPLES,
                 "min_feature_spread_h_and_l": MIN_FEATURE_SPREAD,
             },
+            # Why level B never opened, when it was requested but never
+            # started: too few processed references, or too little spread
+            # in H or L — the run fell back to level A throughout.
+            "level_b_fallback_reason": (
+                None if (not level_b or level_b_started)
+                else "gate never opened: fewer than "
+                     f"{MIN_SLOPE_SAMPLES} processed references with "
+                     f">={MIN_FEATURE_SPREAD} spread in BOTH H and L"),
         },
         "systolic": {
             "baseline_last_cuff": stats("pred_last_cuff_sys", "ref_sys"),
@@ -468,10 +522,16 @@ def main() -> int:
                     help="enable experimental full-parameter learning "
                          "(level B; requires independent feature variation)")
     ap.add_argument("--out", help="write the report as JSON instead of stdout")
+    ap.add_argument("--admit-missing-quality", action="store_true",
+                    help="COMPATIBILITY MODE (off by default): admit rows "
+                         "with an UNKNOWN quality status — e.g. exports "
+                         "from before quality_status existed. Strict, "
+                         "reproducible default stays: unknown is excluded.")
     args = ap.parse_args()
 
     rows = load_rows(args.csv)
-    report = run(rows, level_b=args.level_b)
+    report = run(rows, level_b=args.level_b,
+                 admit_missing_quality=args.admit_missing_quality)
     text = json.dumps(report, indent=2)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as f:

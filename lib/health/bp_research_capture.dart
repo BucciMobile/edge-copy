@@ -198,9 +198,15 @@ class BpResearchCapture {
   /// invented duration.
   final int? measurementFinishedAtMs;
 
-  /// 'minute' — the precision of [measuredAtMs] as recorded by the current
-  /// UI. Documented so an analysis knows the pairing instant is not
-  /// second-accurate; a future finer-grained UI would record 'second'.
+  /// The precision of the USER-REPORTED measurement time ('minute' for
+  /// the current UI) — NOT a property of the stored millisecond timestamp
+  /// itself. measuredAtMs always carries full millisecond precision; when
+  /// the user typed "14:30" or left the field empty, only the MINUTE part
+  /// of that timestamp is meaningful, and this field says so. An analysis
+  /// must not treat the seconds/millis of a user-typed instant as known.
+  /// (Back-dated instants are truncated to the minute; an empty field
+  /// stores the entry moment as-is — its precision documents the reported
+  /// time, not the anchor's technical resolution.)
   final String? timePrecision;
 
   /// When the pair was TYPED IN. A retro capture entered hours later has
@@ -238,29 +244,54 @@ class BpResearchCapture {
 const (double, double) kResearchSystolicBounds = (50, 300);
 const (double, double) kResearchDiastolicBounds = (20, 200);
 
-/// The row key that identifies ONE beat: the measured sub-second instant
-/// when the decoder provides it (`beat_ts_ms`), otherwise the whole-second
-/// record time plus the beat's index within that record. rr_ts_ms alone is
-/// rec_ts*1000 for EVERY beat of a record, so keying by it would collapse
-/// all beats of a second into one and corrupt every RMSSD.
-int _beatKey(Map<String, Object?> r) {
-  final beatTs = r['beat_ts_ms'];
-  if (beatTs is num && beatTs > 0) return beatTs.toInt();
-  final ts = r['rr_ts_ms'];
-  final idx = r['beat_index'];
-  return ((ts is num ? ts.toInt() : 0) << 8) | (idx is num ? idx.toInt() : 0);
-}
-
-/// The beat's position on the time axis for continuity checks: the measured
-/// instant when the decoder provides it, otherwise the whole-second record
-/// time (a documented heuristic — beats of one second then share a time,
-/// and pairs of those are still treated as contiguous, which can only
-/// under-reject, never fabricate differences).
+/// The measured beat instant when the decoder provides it (`beat_ts_ms`),
+/// otherwise the whole-second record time. rr_ts_ms alone is rec_ts*1000
+/// for EVERY beat of a record, so the beat POSITION falls back to the
+/// record second on legacy rows — a documented heuristic: beats of one
+/// second then share a position, and continuity pairs across them can
+/// only under-reject, never fabricate differences.
 int _beatTimeMs(Map<String, Object?> r) {
   final beatTs = r['beat_ts_ms'];
   if (beatTs is num && beatTs > 0) return beatTs.toInt();
   final ts = r['rr_ts_ms'];
   return ts is num ? ts.toInt() : 0;
+}
+
+/// BEAT IDENTITY — collision-free by construction, never bit-packed:
+/// the measured beat instant when present, otherwise the whole-second
+/// record time AND the beat's index within the record. Neither component
+/// is truncated or masked, so any beat_index range (and negative or junk
+/// values) can only produce distinct keys, never a silent collision.
+// ignore: avoid_redundant_argument_values
+/// BEAT IDENTITY — collision-free by construction, never bit-packed:
+/// the measured beat instant when present ('b', beat_ts_ms, 0),
+/// otherwise the whole-second record time AND the beat's index within
+/// the record ('r', rr_ts_ms, beat_index). Neither component is
+/// truncated or masked, so any beat_index range — and negative or junk
+/// values — can only produce distinct keys, never a silent collision.
+(String, int, int) _beatKey(Map<String, Object?> r) {
+  final beatTs = r['beat_ts_ms'];
+  if (beatTs is num && beatTs > 0) return ('b', beatTs.toInt(), 0);
+  final ts = r['rr_ts_ms'];
+  final idx = r['beat_index'];
+  return ('r', ts is num ? ts.toInt() : 0, idx is num ? idx.toInt() : 0);
+}
+
+/// Deterministic beat order: measured beat time first (when present),
+/// then the whole-second record time, then the beat index. Ties beyond
+/// that are true duplicates and fall to the dedup pass — List.sort is
+/// NOT stable in Dart, so no rule may silently depend on compare == 0.
+int _beatOrder(Map<String, Object?> a, Map<String, Object?> b) {
+  final at = _beatTimeMs(a);
+  final bt = _beatTimeMs(b);
+  if (at != bt) return at < bt ? -1 : 1;
+  final ar = (a['rr_ts_ms'] as num?)?.toInt() ?? 0;
+  final br = (b['rr_ts_ms'] as num?)?.toInt() ?? 0;
+  if (ar != br) return ar < br ? -1 : 1;
+  final ai = (a['beat_index'] as num?)?.toInt() ?? 0;
+  final bi = (b['beat_index'] as num?)?.toInt() ?? 0;
+  if (ai != bi) return ai < bi ? -1 : 1;
+  return 0;
 }
 
 /// Compute the frozen band window around the MEASUREMENT instant
@@ -339,15 +370,20 @@ BpResearchWindow? researchWindowFrom({
     }
   }
 
+  // Window membership follows the beat's real position: the measured
+  // sub-second instant when the row carries one, otherwise the record
+  // second — the SAME rule the production query filters by, so no beat
+  // can be admitted by the query and then re-rejected here (or vice
+  // versa) because its record second and its measured instant disagree.
   final rrAll = rrRows.where((r) {
-    final ts = r['rr_ts_ms'];
-    return ts is num && ts >= start && ts < end;
-  }).toList()..sort((a, b) => _beatTimeMs(a).compareTo(_beatTimeMs(b)));
+    final t = _beatTimeMs(r);
+    return t >= start && t < end;
+  }).toList()..sort(_beatOrder);
   // Dedup by BEAT IDENTITY, not by rr_ts_ms — beats of one record differ
   // in beat_index and, when the decoder provides it, beat_ts_ms.
   final rrDedup = <Map<String, Object?>>[];
   {
-    int? lastKey;
+    (String, int, int)? lastKey;
     for (final r in rrAll) {
       final key = _beatKey(r);
       if (lastKey == key) continue;

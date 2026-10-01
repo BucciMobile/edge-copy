@@ -140,6 +140,79 @@ def test_quality_exclusion():
     assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 1
 
 
+def test_level_b_handover_happens_once_in_run():
+    # END-TO-END: level-A updates run first (gate shut), the gate opens
+    # causally, the hand-over happens EXACTLY ONCE, and the FIRST
+    # level-B update runs on P[0][0] = the p_offset level A actually
+    # learned — not the initial DEFAULT_P0.
+    rows = [_row(0, 120.0, 80.0)]
+    for i in range(25):
+        hr = 60.0 + (i % 5) * 8.0
+        rm = 25.0 + (i % 4) * 15.0
+        rows.append(_row((i + 1) * 86_400_000, 120.0 + i * 0.5, 80.0,
+                          hr=hr, rm=rm))
+    rep = m.run(rows, level_b=True)
+    u = rep["updates"]
+    assert u["level_b_requested"] is True
+    assert u["level_b_started"] is True
+    assert u["level_b"] == 25 - m.MIN_SLOPE_SAMPLES
+    assert u["level_a"] == m.MIN_SLOPE_SAMPLES
+    # The hand-over fired after exactly MIN_SLOPE_SAMPLES processed refs.
+    assert u["level_b_started_after_refs"] == m.MIN_SLOPE_SAMPLES
+    assert u["level_b_fallback_reason"] is None
+
+
+def test_level_b_p_offset_carries_into_level_b():
+    # The hand-over must carry the LEARNED p_offset: after many level-A
+    # updates the offset covariance is far below DEFAULT_P0, so P[0][0]
+    # at hand-over must be that learned value.
+    mdl = m.Model.initial(120.0)
+    z = m.features(70.0, 40.0)
+    for _ in range(100):
+        m.update_level_a(mdl, z, 128.0, delta_days=0.01)
+    handed = m.Model.hand_over_to_level_b(mdl)
+    assert handed.P[0][0] == mdl.p_offset
+    assert handed.P[0][0] < m.DEFAULT_P0
+
+
+def test_mixed_session_quality_excludes_the_session():
+    # 'ok + pending' in ONE session: the whole session is excluded —
+    # never silently admitted through a None -> "" back door.
+    rows = [_row(0, 120.0, 80.0),
+            _row(60_000, 122.0, 82.0, sess="s1", q="ok"),
+            _row(120_000, 124.0, 84.0, sess="s1", q="pending")]
+    rep = m.run(rows)
+    assert rep["rows_excluded_quality"] == 1
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 0
+
+
+def test_all_admitted_session_quality_stays_admitted():
+    rows = [_row(0, 120.0, 80.0),
+            _row(60_000, 122.0, 82.0, sess="s1", q="ok"),
+            _row(120_000, 124.0, 84.0, sess="s1", q="gappy")]
+    rep = m.run(rows)
+    assert rep["rows_excluded_quality"] == 0
+    # The aggregate carries the worst ADMITTED status ('gappy').
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 1
+
+
+def test_unknown_quality_is_excluded_by_default():
+    rows = [_row(0, 120.0, 80.0, q="ok"),
+            _row(86_400_000, 121.0, 81.0, q=None)]
+    rep = m.run(rows)
+    assert rep["rows_excluded_quality"] == 1
+    assert rep["admission_rule"]["unknown_quality_admitted"] is False
+
+
+def test_unknown_quality_admitted_only_in_compatibility_mode():
+    rows = [_row(0, 120.0, 80.0, q="ok"),
+            _row(86_400_000, 121.0, 81.0, q=None)]
+    rep = m.run(rows, admit_missing_quality=True)
+    assert rep["rows_excluded_quality"] == 0
+    assert rep["admission_rule"]["unknown_quality_admitted"] is True
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 1
+
+
 def test_level_a_to_level_b_handover():
     # The documented transition: theta carries over unchanged, p_offset
     # seeds the offset diagonal of P, slopes start at DEFAULT_P0.
