@@ -42,6 +42,7 @@ void main() {
       final s = f.readAsStringSync();
       final hit = s.contains('bp_research_reference') ||
           s.contains('bp_research_window') ||
+          s.contains('bp_research_snapshot') ||
           s.contains('bpResearchCaptures') ||
           s.contains('putBpResearchCapture') ||
           s.contains('deleteBpResearchCapture');

@@ -12482,6 +12482,22 @@
   "@bpResearchCapture": {
     "description": "Button label to store one capture"
   },
+  "bpResearchMeasuredAt": "Measurement time (HH:MM or YYYY-MM-DD HH:MM; empty = now)",
+  "@bpResearchMeasuredAt": {
+    "description": "Optional back-dating field: when the cuff reading was actually taken"
+  },
+  "bpResearchMeasuredAtHint": "Back-date to the actual cuff reading \u2014 the band window is frozen around THAT instant, not around typing it in.",
+  "@bpResearchMeasuredAtHint": {
+    "description": "Helper text under the measurement-time field"
+  },
+  "bpResearchSessionId": "Session id (optional)",
+  "@bpResearchSessionId": {
+    "description": "Optional label grouping readings of one sitting"
+  },
+  "bpResearchSessionIdHint": "Group readings of one sitting \u2014 they are not independent states, and an analysis must be able to tell.",
+  "@bpResearchSessionIdHint": {
+    "description": "Helper text under the session-id field"
+  },
   "bpResearchHistory": "Captures",
   "@bpResearchHistory": {
     "description": "Section header for the stored capture list"

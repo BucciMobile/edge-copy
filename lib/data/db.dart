@@ -169,6 +169,7 @@ class LocalDb {
     // Hand-entered. The only copy that exists anywhere.
     'bp_research_reference',
     'bp_research_window',
+    'bp_research_snapshot',
     'journal',
     'journal_metric',
     'journal_field_def',
@@ -352,7 +353,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 55;
+  static const int schemaVersion = 56;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -465,6 +466,7 @@ class LocalDb {
         await _createNotifSlots(db);
         await _createAlarmSchedule(db);
         await _createBpResearch(db);
+        await _upgradeBpResearchV2(db);
         await _ensureCoachViews(db);
       },
       onUpgrade: (db, oldV, newV) async {
@@ -1089,6 +1091,14 @@ class LocalDb {
           // [_createBpResearch]).
           await _createBpResearch(db);
         }
+        if (oldV < 56) {
+          // BP research v2: measurement vs entry time, the rest window
+          // with quality counts, and immutable raw-row snapshots. All
+          // ADDITIVE: new nullable columns on the existing tables plus one
+          // new table — no rewrite, no backfill (v1 rows keep NULL in the
+          // new columns; absent stays absent). Same isolation as rung 55.
+          await _upgradeBpResearchV2(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1618,6 +1628,79 @@ class LocalDb {
   /// cuff reading at the same instant re-states the window rather than
   /// duplicating it. Legitimate repeat measurements minutes apart are
   /// different instants and both stay.
+  /// Rung 56: the v2 research columns and the snapshot table. Additive only —
+  /// nullable columns and a new table, no rewrite, no backfill. Idempotent
+  /// (every ADD COLUMN guarded by _columnsOf) so it can serve both the
+  /// onUpgrade ladder and a fresh install that ran rung 55's CREATE first.
+  static Future<void> _upgradeBpResearchV2(Database db) async {
+    final refCols = await _columnsOf(db, 'bp_research_reference');
+    // Measurement vs entry time. NULL on v1 rows: their measured_at_ms
+    // doubles as both, and absent stays absent — no backfill.
+    if (!refCols.contains('measurement_started_at_ms')) {
+      await db.execute(
+          'ALTER TABLE bp_research_reference '
+          'ADD COLUMN measurement_started_at_ms INTEGER');
+    }
+    if (!refCols.contains('measurement_finished_at_ms')) {
+      await db.execute(
+          'ALTER TABLE bp_research_reference '
+          'ADD COLUMN measurement_finished_at_ms INTEGER');
+    }
+    // Band identity and session grouping, kept beside the capture so signal
+    // provenance survives a device swap or a second band.
+    if (!refCols.contains('band_device_id')) {
+      await db.execute(
+          'ALTER TABLE bp_research_reference ADD COLUMN band_device_id TEXT');
+    }
+    if (!refCols.contains('measurement_session_id')) {
+      await db.execute(
+          'ALTER TABLE bp_research_reference '
+          'ADD COLUMN measurement_session_id TEXT');
+    }
+
+    final winCols = await _columnsOf(db, 'bp_research_window');
+    // Requested vs OBSERVED window bounds: what the data actually covered.
+    if (!winCols.contains('observed_start_ms')) {
+      await db.execute(
+          'ALTER TABLE bp_research_window ADD COLUMN observed_start_ms INTEGER');
+    }
+    if (!winCols.contains('observed_end_ms')) {
+      await db.execute(
+          'ALTER TABLE bp_research_window ADD COLUMN observed_end_ms INTEGER');
+    }
+    // Quality counts (v2): honest coverage and continuity metrics, never a
+    // fabricated confidence number.
+    for (final c in [
+      'valid_hr_seconds INTEGER',
+      'valid_interval_count INTEGER',
+      'valid_interval_pair_count INTEGER',
+      'coverage_fraction REAL',
+      'rejected_interval_fraction REAL',
+      'quality_status TEXT',
+      'feature_version INTEGER',
+      'snapshot_revision INTEGER',
+    ]) {
+      final name = c.split(' ').first;
+      if (!winCols.contains(name)) {
+        await db.execute('ALTER TABLE bp_research_window ADD COLUMN $c');
+      }
+    }
+
+    // Immutable raw-row snapshots: the exact onehz/rr rows a window
+    // revision was computed from, frozen as JSON. Re-processing writes a
+    // NEW revision row; old revisions stay. Research-only, same isolation
+    // as the rung-55 tables.
+    await db.execute(
+        'CREATE TABLE IF NOT EXISTS bp_research_snapshot ('
+        'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+        'reference_id INTEGER NOT NULL, '
+        'revision INTEGER NOT NULL, '
+        'onehz_json TEXT NOT NULL, '
+        'rr_json TEXT NOT NULL, '
+        'created_at_ms INTEGER NOT NULL, '
+        'UNIQUE (reference_id, revision))');
+  }
+
   static Future<void> _createBpResearch(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS bp_research_reference (
@@ -1664,7 +1747,19 @@ class LocalDb {
   /// `(measured_at_ms, device)`: `INSERT OR REPLACE` on the reference, then
   /// the window row is restated in the same transaction so a retake can never
   /// leave an old window under a new reference.
-  static Future<void> putBpResearchCapture(BpResearchCapture c) async {
+  /// Insert one cuff reference reading plus its frozen band window and the
+  /// immutable snapshot of the rows the window was computed from.
+  ///
+  /// Pure write; the caller computes the window stats (see
+  /// `lib/health/bp_research_capture.dart`). Idempotent on
+  /// `(measured_at_ms, device)`: the colliding row is deleted explicitly
+  /// first (window, snapshots, then the reference — no PRAGMA foreign_keys
+  /// here, so nothing cascades on its own), then re-inserted.
+  static Future<void> putBpResearchCapture(
+    BpResearchCapture c, {
+    List<Map<String, Object?>>? snapshotOnehzRows,
+    List<Map<String, Object?>>? snapshotRrRows,
+  }) async {
     final db = await instance;
     await db.transaction((txn) async {
       // NULL never equals NULL in a UNIQUE constraint, so a retake with no
@@ -1672,9 +1767,15 @@ class LocalDb {
       // Normalizing to '' keeps (measured_at_ms, device) unique either way,
       // and the window of the row being replaced is deleted explicitly —
       // without PRAGMA foreign_keys the ON DELETE CASCADE never runs, and
-      // INSERT OR REPLACE assigns a fresh id that would orphan it.
+      // a fresh id would orphan the old window.
       await txn.rawDelete(
         'DELETE FROM bp_research_window WHERE reference_id IN '
+        '(SELECT id FROM bp_research_reference '
+        'WHERE measured_at_ms = ? AND device = ?)',
+        [c.measuredAtMs, c.device ?? ''],
+      );
+      await txn.rawDelete(
+        'DELETE FROM bp_research_snapshot WHERE reference_id IN '
         '(SELECT id FROM bp_research_reference '
         'WHERE measured_at_ms = ? AND device = ?)',
         [c.measuredAtMs, c.device ?? ''],
@@ -1686,16 +1787,22 @@ class LocalDb {
       );
       final id = await txn.rawInsert(
         'INSERT INTO bp_research_reference '
-        '(measured_at_ms, device, posture, conditions, systolic_mmhg, '
-        'diastolic_mmhg, captured_at_ms) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        '(measured_at_ms, measurement_started_at_ms, '
+        'measurement_finished_at_ms, device, posture, conditions, '
+        'systolic_mmhg, diastolic_mmhg, captured_at_ms, band_device_id, '
+        'measurement_session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           c.measuredAtMs,
+          c.measurementStartedAtMs,
+          c.measurementFinishedAtMs,
           c.device ?? '',
           c.posture,
           c.conditions,
           c.systolicMmHg,
           c.diastolicMmHg,
           c.capturedAtMs,
+          c.bandDeviceId,
+          c.measurementSessionId,
         ],
       );
       // A capture with no band data stores NO window row — the LEFT JOIN in
@@ -1710,13 +1817,19 @@ class LocalDb {
       }
       await txn.rawInsert(
         'INSERT OR REPLACE INTO bp_research_window '
-        '(reference_id, window_start_ms, window_end_ms, onehz_rows, '
-        'rr_beats, hr_mean, rr_ms_mean, rr_ms_min, rr_ms_max, rmssd_ms, '
-        'meta_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
+        'observed_end_ms, onehz_rows, rr_beats, hr_mean, rr_ms_mean, '
+        'rr_ms_min, rr_ms_max, rmssd_ms, valid_hr_seconds, '
+        'valid_interval_count, valid_interval_pair_count, '
+        'coverage_fraction, rejected_interval_fraction, quality_status, '
+        'feature_version, snapshot_revision, meta_json) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           id,
           w.windowStartMs,
           w.windowEndMs,
+          w.observedStartMs,
+          w.observedEndMs,
           w.onehzRows,
           w.rrBeats,
           w.hrMean,
@@ -1724,20 +1837,61 @@ class LocalDb {
           w.rrMsMin,
           w.rrMsMax,
           w.rmssdMs,
+          w.validHrSeconds,
+          w.validIntervalCount,
+          w.validIntervalPairCount,
+          w.coverageFraction,
+          w.rejectedIntervalFraction,
+          w.qualityStatus,
+          w.featureVersion,
+          w.snapshotRevision,
           w.metaJson,
         ],
       );
+      // The immutable snapshot: revision 1 for a fresh capture, n+1 when a
+      // re-processed capture carries an explicit revision. Rows frozen as
+      // JSON exactly as the window computation saw them.
+      if (snapshotOnehzRows != null || snapshotRrRows != null) {
+        final rev = w.snapshotRevision ?? 1;
+        await txn.rawInsert(
+          'INSERT OR REPLACE INTO bp_research_snapshot '
+          '(reference_id, revision, onehz_json, rr_json, created_at_ms) '
+          'VALUES (?, ?, ?, ?, ?)',
+          [
+            id,
+            rev,
+            jsonEncode(snapshotOnehzRows ?? const []),
+            jsonEncode(snapshotRrRows ?? const []),
+            c.capturedAtMs,
+          ],
+        );
+        await txn.rawUpdate(
+          'UPDATE bp_research_window SET snapshot_revision = ? '
+          'WHERE reference_id = ?',
+          [rev, id],
+        );
+      }
     });
   }
+
 
   /// All captures, newest first, for the dev screen and the CSV export.
   static Future<List<Map<String, Object?>>> bpResearchCaptures() async {
     final db = await instance;
     return db.rawQuery('''
-      SELECT r.id, r.measured_at_ms, r.device, r.posture, r.conditions,
+      SELECT r.id, r.measured_at_ms,
+             r.measurement_started_at_ms, r.measurement_finished_at_ms,
+             r.device, r.posture, r.conditions,
              r.systolic_mmhg, r.diastolic_mmhg, r.captured_at_ms,
-             w.window_start_ms, w.window_end_ms, w.onehz_rows, w.rr_beats,
+             r.band_device_id, r.measurement_session_id,
+             w.window_start_ms, w.window_end_ms,
+             w.observed_start_ms, w.observed_end_ms,
+             w.onehz_rows, w.rr_beats,
              w.hr_mean, w.rr_ms_mean, w.rr_ms_min, w.rr_ms_max, w.rmssd_ms,
+             w.valid_hr_seconds, w.valid_interval_count,
+             w.valid_interval_pair_count, w.coverage_fraction,
+             w.rejected_interval_fraction, w.quality_status,
+             w.feature_version, w.snapshot_revision,
              w.meta_json
       FROM bp_research_reference r
       LEFT JOIN bp_research_window w ON w.reference_id = r.id
@@ -1753,6 +1907,11 @@ class LocalDb {
     await db.transaction((txn) async {
       await txn.delete(
         'bp_research_window',
+        where: 'reference_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete(
+        'bp_research_snapshot',
         where: 'reference_id = ?',
         whereArgs: [id],
       );
@@ -8774,6 +8933,7 @@ class LocalDb {
       // backup/restore round trip at all, the same omission `wipeAll` documents.
       'bp_research_reference',
       'bp_research_window',
+      'bp_research_snapshot',
       'journal',
       'journal_metric',
       'journal_field_def',
@@ -8944,27 +9104,36 @@ class LocalDb {
             rethrow;
           }
           // BP RESEARCH CAPTURES MERGE BY NATURAL KEY, NOT BY SOURCE ID. The
-          // reference's `id` is a device-local AUTOINCREMENT and the window's
-          // `reference_id` names it, so the generic REPLACE-by-PK path would
-          // let a foreign export's id=1 eat this install's id=1 capture. Both
-          // tables are hand-typed and tiny (nothing writes them but the dev
-          // screen), so a dedicated two-query merge beats threading a special
-          // case through the paged loop: the reference REPLACEs on its natural
-          // UNIQUE (measured_at_ms, device) key, the window follows onto the
-          // DESTINATION id, and a capture whose incoming window is absent
-          // keeps the window it already had. Re-import converges.
-          if (t == 'bp_research_reference' || t == 'bp_research_window') {
-            // The reference pass builds the id map; the window pass that
-            // follows (references merge first) only consumes it.
+          // reference's `id` is a device-local AUTOINCREMENT and the window
+          // and snapshot rows' `reference_id` name it, so the generic
+          // REPLACE-by-PK path would let a foreign export's id=1 eat this
+          // install's id=1 capture. All three tables are hand-typed and tiny
+          // (nothing writes them but the dev screen), so a dedicated merge
+          // beats threading a special case through the paged loop: the
+          // reference is keyed on its natural UNIQUE (measured_at_ms, device)
+          // identity, the window and snapshots follow onto the DESTINATION
+          // id, and a capture whose incoming window is absent keeps the
+          // window it already had. Re-import converges.
+          if (t == 'bp_research_reference' ||
+              t == 'bp_research_window' ||
+              t == 'bp_research_snapshot') {
+            // The reference pass builds the id map; the window and snapshot
+            // passes that follow (references merge first) only consume it.
             try {
               final refCols = await destCols('bp_research_reference');
               final winCols = await destCols('bp_research_window');
-              final srcRefs = t == 'bp_research_reference'
+              final snapCols = await destCols('bp_research_snapshot');
+              final srcRefs = t == 'bp_research_reference' &&
+                      await srcHasTable('bp_research_reference', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_reference')
                   : const <Map<String, Object?>>[];
               final srcWins = t == 'bp_research_window' &&
                       await srcHasTable('bp_research_window', src)
                   ? await src.rawQuery('SELECT * FROM bp_research_window')
+                  : const <Map<String, Object?>>[];
+              final srcSnaps = t == 'bp_research_snapshot' &&
+                      await srcHasTable('bp_research_snapshot', src)
+                  ? await src.rawQuery('SELECT * FROM bp_research_snapshot')
                   : const <Map<String, Object?>>[];
               await db.transaction((txn) async {
                 for (final r in srcRefs) {
@@ -8973,13 +9142,9 @@ class LocalDb {
                       if (refCols.contains(e.key)) e.key: e.value,
                   };
                   final srcId = row.remove('id');
-                  // KEEP the destination id on collision. `INSERT OR
-                  // REPLACE` would delete the colliding local row and mint a
-                  // fresh AUTOINCREMENT id — stranding the local window row
-                  // under the old reference_id with no FK cascade to take
-                  // it, exactly the orphan putBpResearchCapture avoids by
-                  // deleting first. UPDATE preserves the id the window is
-                  // about to be re-attached to.
+                  // KEEP the destination id on collision (see the v1 fix):
+                  // UPDATE in place preserves the id the window and
+                  // snapshot rows are about to be re-attached to.
                   final device = (row['device'] as String?) ?? '';
                   final existing = await txn.rawQuery(
                     'SELECT id FROM bp_research_reference '
@@ -8990,32 +9155,45 @@ class LocalDb {
                   if (existing.isNotEmpty) {
                     destId = (existing.first['id'] as num).toInt();
                     await txn.rawUpdate(
-                      'UPDATE bp_research_reference SET posture = ?, '
+                      'UPDATE bp_research_reference SET '
+                      'measurement_started_at_ms = ?, '
+                      'measurement_finished_at_ms = ?, posture = ?, '
                       'conditions = ?, systolic_mmhg = ?, diastolic_mmhg = ?, '
-                      'captured_at_ms = ? WHERE id = ?',
+                      'captured_at_ms = ?, band_device_id = ?, '
+                      'measurement_session_id = ? WHERE id = ?',
                       [
+                        row['measurement_started_at_ms'],
+                        row['measurement_finished_at_ms'],
                         row['posture'],
                         row['conditions'],
                         row['systolic_mmhg'],
                         row['diastolic_mmhg'],
                         row['captured_at_ms'],
+                        row['band_device_id'],
+                        row['measurement_session_id'],
                         destId,
                       ],
                     );
                   } else {
                     destId = await txn.rawInsert(
                       'INSERT INTO bp_research_reference '
-                      '(measured_at_ms, device, posture, conditions, '
-                      'systolic_mmhg, diastolic_mmhg, captured_at_ms) '
-                      'VALUES (?, ?, ?, ?, ?, ?, ?)',
+                      '(measured_at_ms, measurement_started_at_ms, '
+                      'measurement_finished_at_ms, device, posture, '
+                      'conditions, systolic_mmhg, diastolic_mmhg, '
+                      'captured_at_ms, band_device_id, measurement_session_id) '
+                      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                       [
                         row['measured_at_ms'],
+                        row['measurement_started_at_ms'],
+                        row['measurement_finished_at_ms'],
                         device,
                         row['posture'],
                         row['conditions'],
                         row['systolic_mmhg'],
                         row['diastolic_mmhg'],
                         row['captured_at_ms'],
+                        row['band_device_id'],
+                        row['measurement_session_id'],
                       ],
                     );
                   }
@@ -9028,21 +9206,25 @@ class LocalDb {
                     for (final e in w.entries)
                       if (winCols.contains(e.key)) e.key: e.value,
                   };
-                  final destRef = row.remove('reference_id');
-                  final mapped = destRef is num
-                      ? bpIdMap[destRef.toInt()]
-                      : null;
+                  final mapped = bpIdMap[
+                      (row.remove('reference_id') as num?)?.toInt()];
                   if (mapped == null) continue;
                   await txn.rawInsert(
                     'INSERT OR REPLACE INTO bp_research_window '
                     '(reference_id, window_start_ms, window_end_ms, '
-                    'onehz_rows, rr_beats, hr_mean, rr_ms_mean, rr_ms_min, '
-                    'rr_ms_max, rmssd_ms, meta_json) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    'observed_start_ms, observed_end_ms, onehz_rows, '
+                    'rr_beats, hr_mean, rr_ms_mean, rr_ms_min, rr_ms_max, '
+                    'rmssd_ms, valid_hr_seconds, valid_interval_count, '
+                    'valid_interval_pair_count, coverage_fraction, '
+                    'rejected_interval_fraction, quality_status, '
+                    'feature_version, snapshot_revision, meta_json) '
+                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
                     [
                       mapped,
                       row['window_start_ms'],
                       row['window_end_ms'],
+                      row['observed_start_ms'],
+                      row['observed_end_ms'],
                       row['onehz_rows'],
                       row['rr_beats'],
                       row['hr_mean'],
@@ -9050,20 +9232,52 @@ class LocalDb {
                       row['rr_ms_min'],
                       row['rr_ms_max'],
                       row['rmssd_ms'],
+                      row['valid_hr_seconds'],
+                      row['valid_interval_count'],
+                      row['valid_interval_pair_count'],
+                      row['coverage_fraction'],
+                      row['rejected_interval_fraction'],
+                      row['quality_status'],
+                      row['feature_version'],
+                      row['snapshot_revision'],
                       row['meta_json'],
+                    ],
+                  );
+                }
+                for (final sn in srcSnaps) {
+                  final row = <String, Object?>{
+                    for (final e in sn.entries)
+                      if (snapCols.contains(e.key)) e.key: e.value,
+                  };
+                  final mapped = bpIdMap[
+                      (row.remove('reference_id') as num?)?.toInt()];
+                  if (mapped == null) continue;
+                  await txn.rawInsert(
+                    'INSERT OR REPLACE INTO bp_research_snapshot '
+                    '(reference_id, revision, onehz_json, rr_json, '
+                    'created_at_ms) VALUES (?, ?, ?, ?, ?)',
+                    [
+                      mapped,
+                      row['revision'],
+                      row['onehz_json'],
+                      row['rr_json'],
+                      row['created_at_ms'],
                     ],
                   );
                 }
               });
               counts[t] = t == 'bp_research_reference'
                   ? srcRefs.length
-                  : srcWins.length;
+                  : t == 'bp_research_window'
+                      ? srcWins.length
+                      : srcSnaps.length;
             } catch (_) {
               if (!tolerant) rethrow;
               counts[t] = 0;
             }
             continue;
           }
+
           if (t == 'day_result') importedDays = <String>{};
           if (firstPage.isEmpty) {
             counts[t] = 0;

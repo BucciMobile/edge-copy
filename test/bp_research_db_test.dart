@@ -41,6 +41,7 @@ const _win = BpResearchWindow(
   rrMsMin: 800,
   rrMsMax: 1100,
   rmssdMs: 42,
+  featureVersion: kResearchFeatureVersion,
   metaJson: null,
 );
 
@@ -109,6 +110,90 @@ void main() {
       'WHERE reference_id NOT IN (SELECT id FROM bp_research_reference)',
     );
     expect(orphaned.first['c'], 0);
+  });
+
+  test('a retro capture pairs with HISTORICAL rows and keeps entry time',
+      () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    final measured = _at;                    // the cuff reading, this morning
+    final entered = _at + 6 * 3600 * 1000;   // typed in this evening
+    await LocalDb.putBpResearchCapture(BpResearchCapture(
+      measuredAtMs: measured,
+      measurementStartedAtMs: measured,
+      systolicMmHg: 120,
+      diastolicMmHg: 80,
+      capturedAtMs: entered,                 // ENTRY time, not measurement
+      device: 'omron',
+      bandDeviceId: LocalDb.kPrimaryDeviceId,
+      measurementSessionId: 'morning',
+      window: _win,
+    ));
+    final r = (await LocalDb.bpResearchCaptures()).first;
+    expect(r['measured_at_ms'], measured);
+    expect(r['measurement_started_at_ms'], measured);
+    expect(r['measurement_finished_at_ms'], isNull); // no invented duration
+    expect(r['captured_at_ms'], entered);            // entry vs measurement
+    expect(r['band_device_id'], LocalDb.kPrimaryDeviceId);
+    expect(r['measurement_session_id'], 'morning');
+  });
+
+  test('a snapshot freezes the raw rows; re-processing writes a new revision',
+      () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    final onehz = [
+      {'rec_ts': (_at - 60000) ~/ 1000, 'hr': 60},
+      {'rec_ts': (_at - 59000) ~/ 1000, 'hr': 62},
+    ];
+    final rr = [
+      {'rr_ts_ms': _at - 60000, 'rr_ms': 1000},
+      {'rr_ts_ms': _at - 59000, 'rr_ms': 1050},
+    ];
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'omron',
+        window: researchWindowFrom(
+            measuredAtMs: _at, onehzRows: onehz, rrRows: rr),
+      ),
+      snapshotOnehzRows: onehz,
+      snapshotRrRows: rr,
+    );
+    final id = (await db.rawQuery(
+        'SELECT id FROM bp_research_reference')).first['id'] as int;
+    final snap1 = await db.rawQuery(
+        'SELECT revision, onehz_json FROM bp_research_snapshot '
+        'WHERE reference_id = ?', [id]);
+    expect(snap1, hasLength(1));
+    expect(snap1.first['revision'], 1);
+    // The frozen rows are the exact input: reproducible.
+    expect(snap1.first['onehz_json'], contains('60'));
+    final win = await db.rawQuery(
+        'SELECT snapshot_revision, feature_version, quality_status, '
+        'valid_interval_pair_count FROM bp_research_window '
+        'WHERE reference_id = ?', [id]);
+    expect(win.first['snapshot_revision'], 1);
+    expect(win.first['feature_version'], kResearchFeatureVersion);
+    expect(win.first['quality_status'], isNotNull);
+    expect(win.first['valid_interval_pair_count'], 1);
+  });
+
+  test('delete removes the snapshot rows too', () async {
+    final db = await LocalDb.instance;
+    final id = (await db.rawQuery(
+        'SELECT id FROM bp_research_reference')).first['id'] as int;
+    await LocalDb.deleteBpResearchCapture(id);
+    final left = await db.rawQuery(
+        'SELECT COUNT(*) c FROM bp_research_snapshot '
+        'WHERE reference_id = ?', [id]);
+    expect(left.first['c'], 0);
   });
 
   test('the research tables ride the backup restore and salvage lists',
