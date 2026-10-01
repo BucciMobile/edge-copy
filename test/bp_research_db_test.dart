@@ -1680,4 +1680,137 @@ void main() {
     );
     expect(win.first['quality_status'], 'pending');
   });
+  test('A: an empty, not-final window is PENDING, keeps its row, and '
+      're-processing attaches a new revision once data arrives', () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    await db.delete('decoded_onehz');
+    await db.delete('decoded_rr');
+    // Szenario: cuff reading "just now", band has synced NOTHING yet —
+    // watermark 0 < window end. The capture must KEEP a pending window
+    // row (not lose it to null), so re-processing can find it.
+    final w = researchWindowFrom(
+      measuredAtMs: _at,
+      onehzRows: const [],
+      rrRows: const [],
+      nowMs: _at,
+      dataThroughMs: 0,
+    );
+    expect(w, isNotNull); // the regression: no more silent null
+    expect(w!.qualityStatus, 'pending');
+    expect(w.onehzRows, isNull); // missing ≠ 0
+    expect(w.rrBeats, isNull);
+    expect(w.hrMean, isNull);
+    expect(w.rmssdMs, isNull);
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'syncfix',
+        window: w,
+      ),
+      snapshotOnehzRows: const [],
+      snapshotRrRows: const [],
+    );
+    final refId =
+        (await db.rawQuery(
+              'SELECT id FROM bp_research_reference WHERE device = ?',
+              ['syncfix'],
+            )).first['id']
+            as int;
+    var win = await db.rawQuery(
+      'SELECT quality_status, snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win, hasLength(1)); // the window row SURVIVED the store
+    expect(win.first['quality_status'], 'pending');
+    // Re-process BEFORE any sync: must stay pending, must NOT lose the
+    // row, must NOT invent a revision over empty rows.
+    await LocalDb.reprocessBpResearchCapture(refId);
+    win = await db.rawQuery(
+      'SELECT quality_status, snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win, hasLength(1));
+    expect(win.first['quality_status'], 'pending');
+    // The band syncs the full window tail now...
+    for (int s = 0; s < 300; s++) {
+      await db.insert('decoded_onehz', {
+        'device_id': LocalDb.kPrimaryDeviceId,
+        'ts_ms': 1000 + s,
+        'rec_ts': (_at - 300000) ~/ 1000 + s,
+        'counter': s,
+        'hr': 60,
+      });
+    }
+    await db.insert('decoded_rr', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 2000,
+      'rec_ts': (_at - 1000) ~/ 1000,
+      'beat_index': 0,
+      'rr_ts_ms': _at - 1000,
+      'rr_ms': 900,
+    });
+    // ...and re-processing attaches REAL data plus a new revision.
+    await LocalDb.reprocessBpResearchCapture(refId);
+    win = await db.rawQuery(
+      'SELECT quality_status, snapshot_revision, onehz_rows, hr_mean '
+      'FROM bp_research_window WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win.first['quality_status'], 'ok'); // final now
+    expect(win.first['snapshot_revision'], 1); // FIRST real revision
+    expect(win.first['onehz_rows'], 300);
+    expect(win.first['hr_mean'], 60.0);
+    final snap = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot WHERE reference_id = ?',
+      [refId],
+    );
+    expect(snap.first['c'], 1);
+    // A SECOND re-process with unchanged data writes revision 2 and
+    // keeps revision 1 byte-identical.
+    final rev1 =
+        (await db.rawQuery(
+              'SELECT onehz_json FROM bp_research_snapshot '
+              'WHERE reference_id = ? AND revision = 1',
+              [refId],
+            )).first['onehz_json']
+            as String;
+    await LocalDb.reprocessBpResearchCapture(refId);
+    final win2 = await db.rawQuery(
+      'SELECT snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win2.first['snapshot_revision'], 2);
+    final rev1After =
+        (await db.rawQuery(
+              'SELECT onehz_json FROM bp_research_snapshot '
+              'WHERE reference_id = ? AND revision = 1',
+              [refId],
+            )).first['onehz_json']
+            as String;
+    expect(rev1After, rev1);
+  });
+
+  test('A: a final, provably empty window is still an honest NULL window '
+      '(no pending-forever regression)', () async {
+    // Watermark provably covers the window end, the window is in the
+    // past, and there is STILL nothing: null is CORRECT (no_data
+    // honesty), not a fabricated pending row.
+    final w = researchWindowFrom(
+      measuredAtMs: _at,
+      onehzRows: const [],
+      rrRows: const [],
+      nowMs: _at + 600000,
+      dataThroughMs: _at + 600000,
+    );
+    expect(w, isNull);
+  });
 }

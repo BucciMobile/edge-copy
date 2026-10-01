@@ -1859,9 +1859,7 @@ class LocalDb {
     // delivered their tail.
     final onehzThrough = through.onehzThroughMs ?? 0;
     final rrThrough = through.rrThroughMs ?? 0;
-    final dataThroughMs = onehzThrough < rrThrough
-        ? onehzThrough
-        : rrThrough;
+    final dataThroughMs = onehzThrough < rrThrough ? onehzThrough : rrThrough;
     final window = researchWindowFrom(
       measuredAtMs: (r['measured_at_ms'] as num).toInt(),
       onehzRows: onehz,
@@ -1873,10 +1871,61 @@ class LocalDb {
     );
     await db.transaction((txn) async {
       if (window == null) {
-        // Still nothing usable: drop the window row, keep the reference.
+        // FINAL and provably empty: the honest no-data case — the window
+        // row goes, the reference stays.
         await txn.rawDelete(
           'DELETE FROM bp_research_window WHERE reference_id = ?',
           [referenceId],
+        );
+        return;
+      }
+      final onehzEmpty = onehz.isEmpty;
+      final rrEmpty = rr.isEmpty;
+      if (onehzEmpty && rrEmpty) {
+        // NOT final and still nothing locally: keep the window as
+        // 'pending' — it must survive so a later re-process can attach
+        // a new snapshot revision. A new revision over EMPTY rows would
+        // be fabricated evidence, so the window KEEPS whatever revision
+        // it already points at (or stays snapshotless).
+        await txn.rawInsert(
+          'INSERT OR REPLACE INTO bp_research_window '
+          '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
+          'observed_end_ms, onehz_rows, rr_beats, hr_mean, rr_ms_mean, '
+          'rr_ms_min, rr_ms_max, rmssd_ms, valid_hr_seconds, '
+          'valid_interval_count, valid_interval_pair_count, '
+          'coverage_fraction, rejected_interval_fraction, quality_status, '
+          'feature_version, snapshot_revision, meta_json) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            referenceId,
+            window.windowStartMs,
+            window.windowEndMs,
+            window.observedStartMs,
+            window.observedEndMs,
+            window.onehzRows,
+            window.rrBeats,
+            window.hrMean,
+            window.rrMsMean,
+            window.rrMsMin,
+            window.rrMsMax,
+            window.rmssdMs,
+            window.validHrSeconds,
+            window.validIntervalCount,
+            window.validIntervalPairCount,
+            window.coverageFraction,
+            window.rejectedIntervalFraction,
+            window.qualityStatus,
+            window.featureVersion,
+            // Keep the EXISTING revision: no new snapshot was computed, so
+            // no new revision may be claimed (snapshot-invariant).
+            (await txn.rawQuery(
+                  'SELECT snapshot_revision FROM bp_research_window '
+                  'WHERE reference_id = ?',
+                  [referenceId],
+                )).firstOrNull?['snapshot_revision']
+                as int?,
+            window.metaJson,
+          ],
         );
         return;
       }
@@ -2049,8 +2098,11 @@ class LocalDb {
       //   · no snapshot lists → snapshot_revision = NULL: the window is
       //     stored SNAPSHOTLESS (a legacy-style summary), never claiming
       //     an old or foreign revision it cannot prove.
+      // Same content rule as the snapshot below: lists that are empty
+      // carry no evidence, so the window stays snapshotless.
       final hasSnapshotRows =
-          snapshotOnehzRows != null || snapshotRrRows != null;
+          (snapshotOnehzRows != null && snapshotOnehzRows.isNotEmpty) ||
+          (snapshotRrRows != null && snapshotRrRows.isNotEmpty);
       await txn.rawInsert(
         'INSERT OR REPLACE INTO bp_research_window '
         '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
@@ -2093,7 +2145,14 @@ class LocalDb {
       // makes an overwrite of an existing revision a database-integrity
       // error instead of a silent history rewrite. Rows frozen as JSON
       // exactly as the window computation saw them.
-      if (snapshotOnehzRows != null || snapshotRrRows != null) {
+      // NO SNAPSHOT OVER EMPTY ROWS: a revision frozen over zero onehz
+      // AND zero rr rows is fabricated evidence — a pending window keeps
+      // its row without claiming any revision; the FIRST real data
+      // creates revision 1.
+      final snapshotHasContent =
+          (snapshotOnehzRows != null && snapshotOnehzRows.isNotEmpty) ||
+          (snapshotRrRows != null && snapshotRrRows.isNotEmpty);
+      if (snapshotHasContent) {
         final maxRev = Sqflite.firstIntValue(
           await txn.rawQuery(
             'SELECT MAX(revision) FROM bp_research_snapshot '

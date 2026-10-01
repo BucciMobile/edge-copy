@@ -392,7 +392,34 @@ BpResearchWindow? researchWindowFrom({
     }
   }
 
-  if (onehzDedup.isEmpty && rrDedup.isEmpty) return null;
+  // EMPTY ≠ FINAL-EMPTY. With the sync-finality semantics a window can
+  // only be judged when its data basis is provably complete:
+  //   · no rows at all AND the window is not provably final (future end
+  //     or a watermark short of it) → a PENDING window, not null: the
+  //     band may simply not have synced the last minutes yet, and the
+  //     capture must keep its window row so a later re-process can
+  //     attach a new snapshot revision to it. All stats stay NULL —
+  //     missing is not zero.
+  //   · no rows at all AND final (watermark provably reaches the end)
+  //     → null is CORRECT: a final window that provably holds nothing
+  //     is the honest no-data case.
+  final notFinal =
+      (nowMs != null && end > nowMs) ||
+      (dataThroughMs != null && dataThroughMs < end - 1000);
+  if (onehzDedup.isEmpty && rrDedup.isEmpty) {
+    if (notFinal) {
+      return BpResearchWindow(
+        windowStartMs: start,
+        windowEndMs: end,
+        onehzRows: null,
+        rrBeats: null,
+        qualityStatus: 'pending',
+        featureVersion: kResearchFeatureVersion,
+        metaJson: metaJson,
+      );
+    }
+    return null;
+  }
 
   // Valid HR rows only — a run of hr = 0 rows must not drag the average
   // toward zero AND must not count as observed signal (coverage).
