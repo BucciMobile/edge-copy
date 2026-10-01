@@ -169,6 +169,15 @@ class MedSlot {
   /// Display only, per the user's clock format — never a storage key.
   String get timeLabel => formatClockMinute(slotMin);
 
+  /// Machine-readable 24-hour time (HH:mm), stable across clock format changes.
+  /// Use this for payloads, storage keys, and coach actions — never [timeLabel],
+  /// which follows the user's 12/24-hour preference.
+  String get timeMachine {
+    final h = slotMin ~/ 60;
+    final m = slotMin % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
+  }
+
   /// A slot that has passed and was neither taken nor deliberately skipped.
   bool get isMiss => state == DoseState.missed;
 

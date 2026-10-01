@@ -107,6 +107,7 @@ String formatClockOf(DateTime d) => formatClock(d.hour, d.minute);
 
 /// Local minutes past midnight, as [formatClock]. Wraps past 24 h.
 String formatClockMinute(int minuteOfDay) {
-  final m = minuteOfDay % (24 * 60);
+  // Normalize negative values: -30 becomes 1410 (23:30), not -30.
+  final m = ((minuteOfDay % 1440) + 1440) % 1440;
   return formatClock(m ~/ 60, m % 60);
 }
