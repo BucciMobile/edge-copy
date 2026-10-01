@@ -417,6 +417,111 @@ def test_admitted_rows_without_features_report_zero_targets():
     assert rep["rows_excluded_no_features"] == 1
 
 
+def test_load_rows_rejects_corrupt_mandatory_numbers():
+    import csv as _csv, tempfile
+    bad = [
+        ("measured_at_ms,systolic_mmhg,diastolic_mmhg\n,120,80\n", "empty required"),
+        ("measured_at_ms,systolic_mmhg,diastolic_mmhg\nabc,120,80\n", "non-numeric"),
+        ("measured_at_ms,systolic_mmhg,diastolic_mmhg\n1700000000,abc,80\n", "bad sys"),
+        ("measured_at_ms,systolic_mmhg,diastolic_mmhg\n1700000000,120,\n", "empty dia"),
+        ("measured_at_ms,systolic_mmhg,diastolic_mmhg\n1700000000,nan,80\n", "nan sys"),
+        ("measured_at_ms,systolic_mmhg,diastolic_mmhg\n1700000000,inf,80\n", "inf sys"),
+    ]
+    for content, why in bad:
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+            f.write(content)
+            path = f.name
+        try:
+            try:
+                m.load_rows(path)
+            except m.CsvDataError:
+                pass
+            else:
+                raise AssertionError(f"corrupt CSV accepted: {why}")
+        finally:
+            os.unlink(path)
+
+
+def test_load_rows_rejects_invalid_timestamp():
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+        f.write("measured_at_ms,systolic_mmhg,diastolic_mmhg\n"
+                "1700000000.5,120,80\n")
+        path = f.name
+    try:
+        try:
+            m.load_rows(path)
+        except m.CsvDataError:
+            pass
+        else:
+            raise AssertionError("fractional measured_at_ms accepted")
+    finally:
+        os.unlink(path)
+
+
+def test_load_rows_rejects_corrupt_optional_numbers():
+    # A non-empty optional field that does not parse (or is nan/inf) is a
+    # corrupt row, never a quiet None that would read as "no data".
+    import tempfile
+    bad = [
+        ("1700000000,120,80,abc,40\n", "non-numeric hr"),
+        ("1700000000,120,80,70,nan\n", "nan rmssd"),
+        ("1700000000,120,80,70,inf\n", "inf rmssd"),
+    ]
+    for tail, why in bad:
+        with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+            f.write("measured_at_ms,systolic_mmhg,diastolic_mmhg,"
+                    "hr_mean,rmssd_ms\n" + tail)
+            path = f.name
+        try:
+            try:
+                m.load_rows(path)
+            except m.CsvDataError:
+                pass
+            else:
+                raise AssertionError(f"corrupt optional field accepted: {why}")
+        finally:
+            os.unlink(path)
+
+
+def test_load_rows_keeps_empty_optionals_as_none():
+    # Empty optional fields are honestly missing, not corrupt.
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+        f.write("measured_at_ms,systolic_mmhg,diastolic_mmhg,"
+                "hr_mean,rmssd_ms\n1700000000,120,80,,\n")
+        path = f.name
+    try:
+        rows = m.load_rows(path)
+        assert len(rows) == 1
+        assert rows[0].hr_mean is None
+        assert rows[0].rmssd_ms is None
+    finally:
+        os.unlink(path)
+
+
+def test_main_reports_corrupt_csv_structured():
+    # The CLI exits 2 with a parseable JSON error report, no traceback.
+    import json as _json, subprocess, tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".csv", delete=False) as f:
+        f.write("measured_at_ms,systolic_mmhg,diastolic_mmhg\n"
+                "1700000000,abc,80\n")
+        path = f.name
+    try:
+        proc = subprocess.run(
+            [sys.executable, os.path.join(os.path.dirname(__file__),
+                                          "bp_research_model.py"),
+             "--csv", path],
+            capture_output=True, text=True)
+        assert proc.returncode == 2, proc.stderr
+        report = _json.loads(proc.stdout)
+        assert report["error"] == "corrupt csv"
+        assert "systolic_mmhg" in report["detail"]
+        assert "Traceback" not in proc.stderr
+    finally:
+        os.unlink(path)
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

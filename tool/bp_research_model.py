@@ -237,27 +237,68 @@ def update_level_b(m: Model, z: list[float], ref: float,
             m.P[i][j] = apa[i][j] + DEFAULT_R_MMHG * k[i] * k[j]
 
 
+class CsvDataError(ValueError):
+    """A row of the CSV export is corrupt (missing/invalid mandatory field,
+    unparseable or non-finite number, invalid timestamp). Raised INSTEAD of
+    a raw traceback so the CLI can report a structured, understandable
+    research error. Corrupt is corrupt — it is never silently laundered
+    into None/missing."""
+
+
 def load_rows(path: str) -> list[Row]:
     rows: list[Row] = []
     with open(path, newline="", encoding="utf-8") as f:
-        for r in csv.DictReader(f):
-            def num(key: str) -> float | None:
+        for i, r in enumerate(csv.DictReader(f), start=2):
+            def required(key: str) -> float:
+                v = (r.get(key) or "").strip()
+                if not v:
+                    raise CsvDataError(
+                        f"CSV row {i}: required field '{key}' is empty")
+                try:
+                    x = float(v)
+                except ValueError:
+                    raise CsvDataError(
+                        f"CSV row {i}: required field '{key}' is not a "
+                        f"number: {v!r}") from None
+                if not math.isfinite(x):
+                    raise CsvDataError(
+                        f"CSV row {i}: required field '{key}' is not "
+                        f"finite: {v!r}")
+                return x
+
+            def optional(key: str) -> float | None:
+                # Empty = honestly missing (stays None downstream). A
+                # NON-EMPTY value that does not parse, or parses to
+                # NaN/inf, is CORRUPT — an error, never a quiet None
+                # that would read as "no data".
                 v = (r.get(key) or "").strip()
                 if not v:
                     return None
                 try:
-                    return float(v)
+                    x = float(v)
                 except ValueError:
-                    return None
+                    raise CsvDataError(
+                        f"CSV row {i}: field '{key}' is not a number: "
+                        f"{v!r}") from None
+                if not math.isfinite(x):
+                    raise CsvDataError(
+                        f"CSV row {i}: field '{key}' is not finite: {v!r}")
+                return x
+
+            measured = required("measured_at_ms")
+            if not measured.is_integer():
+                raise CsvDataError(
+                    f"CSV row {i}: 'measured_at_ms' must be a whole "
+                    f"number of milliseconds, got {measured!r}")
             rows.append(Row(
-                measured_at_ms=int(float(r["measured_at_ms"])),
-                sys_mmhg=float(r["systolic_mmhg"]),
-                dia_mmhg=float(r["diastolic_mmhg"]),
-                hr_mean=num("hr_mean"),
-                rmssd_ms=num("rmssd_ms"),
+                measured_at_ms=int(measured),
+                sys_mmhg=required("systolic_mmhg"),
+                dia_mmhg=required("diastolic_mmhg"),
+                hr_mean=optional("hr_mean"),
+                rmssd_ms=optional("rmssd_ms"),
                 session_id=(r.get("measurement_session_id") or "").strip() or None,
                 quality=(r.get("quality_status") or "").strip() or None,
-                coverage=num("coverage_fraction"),
+                coverage=optional("coverage_fraction"),
             ))
     rows.sort(key=lambda x: x.measured_at_ms)
     return rows
@@ -573,7 +614,18 @@ def main() -> int:
                          "reproducible default stays: unknown is excluded.")
     args = ap.parse_args()
 
-    rows = load_rows(args.csv)
+    try:
+        rows = load_rows(args.csv)
+    except CsvDataError as e:
+        report = {"error": "corrupt csv", "detail": str(e)}
+        text = json.dumps(report, indent=2)
+        if args.out:
+            with open(args.out, "w", encoding="utf-8") as f:
+                f.write(text + "\n")
+        else:
+            print(text)
+        print(f"error: {e}", file=sys.stderr)
+        return 2
     report = run(rows, level_b=args.level_b,
                  admit_missing_quality=args.admit_missing_quality)
     text = json.dumps(report, indent=2)
