@@ -38,8 +38,13 @@ class ClockFormatController extends ChangeNotifier {
   factory ClockFormatController.seed(ClockFormat f) =>
       ClockFormatController._(f);
 
-  static Future<ClockFormatController> bootstrap() async {
-    final prefs = await SharedPreferences.getInstance();
+  static Future<ClockFormatController> bootstrap({
+    Duration timeout = const Duration(seconds: 6),
+  }) async {
+    // Timeout applied to preference loading BEFORE constructing the controller,
+    // so a late SharedPreferences load cannot assign a controller to _active
+    // after main.dart has already fallen back to the seeded system controller.
+    final prefs = await SharedPreferences.getInstance().timeout(timeout);
     return ClockFormatController._(_parse(prefs.getString(_kClockFormat)));
   }
 
