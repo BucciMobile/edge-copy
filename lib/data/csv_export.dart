@@ -114,7 +114,8 @@ const kCsvExportSets = <CsvExportSet>[
     name: 'sleep',
     title: 'Sleep stages',
     columns: ['date', 'start_ts', 'end_ts', 'stage'],
-    sql: 'SELECT date, start_ts, end_ts, stage FROM v_hypnogram '
+    sql:
+        'SELECT date, start_ts, end_ts, stage FROM v_hypnogram '
         'ORDER BY date ASC, start_ts ASC',
   ),
   CsvExportSet(
@@ -146,7 +147,8 @@ const kCsvExportSets = <CsvExportSet>[
     name: 'labs',
     title: 'Lab results',
     columns: ['taken_on', 'marker', 'value', 'unit', 'note'],
-    sql: 'SELECT taken_on, marker, value, unit, note FROM lab_result '
+    sql:
+        'SELECT taken_on, marker, value, unit, note FROM lab_result '
         'ORDER BY taken_on ASC, marker ASC',
   ),
   // ── everything below is data the user TYPED IN ──────────────────────────────
@@ -303,6 +305,7 @@ const kCsvExportSets = <CsvExportSet>[
       'diastolic_mmhg',
       'band_device_id',
       'measurement_session_id',
+      'time_precision',
       'window_start_ms',
       'window_end_ms',
       'observed_start_ms',
@@ -334,6 +337,7 @@ const kCsvExportSets = <CsvExportSet>[
              r.systolic_mmhg, r.diastolic_mmhg,
              COALESCE(r.band_device_id, '') AS band_device_id,
              COALESCE(r.measurement_session_id, '') AS measurement_session_id,
+             COALESCE(r.time_precision, '') AS time_precision,
              w.window_start_ms, w.window_end_ms,
              w.observed_start_ms, w.observed_end_ms,
              w.onehz_rows, w.rr_beats,

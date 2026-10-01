@@ -15,29 +15,48 @@
 // NULL window. Missing is missing — never 0, never a fabricated average.
 //
 // v2 (this file's current shape) separates three instants the v1 capture
-// conflated: the MEASUREMENT instant (when the cuff actually squeezed),
-// the ENTRY instant (when the user typed the pair in — a retro capture can
-// be entered hours later), and the WINDOW instants. A retro capture is
-// paired with the historical sensor data of its measurement instant, never
-// with whatever the band happens to hold at entry time.
+// conflated: the MEASUREMENT instant (when the cuff actually squeezed), the
+// ENTRY instant (when the user typed the pair in — a retro capture can be
+// entered hours later), and the WINDOW instants. A retro capture is paired
+// with the historical sensor data of its measurement instant, never with
+// whatever the band happens to hold at entry time.
+
+import 'dart:math' show sqrt;
+
+//
+// TIME SEMANTICS (honest by construction):
+//   · The UI records only a MINUTE-precision instant — either the time the
+//     reading was taken (back-dated) or the entry moment (field empty). The
+//     entry moment is a usable pairing anchor ONLY when the user records
+//     the reading right away; it is stored as the measured instant with
+//     time_precision = 'minute' and is never claimed to be the exact
+//     inflation start. No invented start/finish instants are fabricated.
+//   · The window is the rest window BEFORE the measurement instant and the
+//     product exposes no post-measurement window at all (Option 1 of the
+//     pending-window review): a window that would reach into the future
+//     cannot be produced by the UI, so 'pending' remains an internal,
+//     data-level state only.
 
 /// Feature-schema version of the window computation. Bumped whenever a
 /// window field's MEANING changes (not its mere presence): exports carry it
 /// so an analysis can tell which formula produced which column.
-const int kResearchFeatureVersion = 2;
+/// v3: coverage counts VALID HR seconds only (v2 counted raw deduplicated
+/// rows); RR beats are keyed by their true beat identity (beat_ts_ms when
+/// present, else (rr_ts_ms, beat_index)) instead of being deduplicated by
+/// the whole-second rr_ts_ms; the window is half-open [start, end).
+const int kResearchFeatureVersion = 3;
 
-/// Rest window BEFORE the cuff measurement starts (engineering default,
-/// 5 minutes): the feature window is [measurement_start − pre, measurement_start].
-/// The cuff's own inflation must not enter the feature window unchecked —
-/// ending the window at the measurement start keeps it out by construction.
+/// Rest window BEFORE the cuff measurement instant (engineering default,
+/// 5 minutes): the feature window is
+/// [measurement_instant − pre, measurement_instant). The cuff's own
+/// inflation must not enter the feature window unchecked — ending the
+/// window at the measurement instant keeps it out by construction.
 /// A documented research parameter, not a validated physiological constant.
 const int kResearchRestPreMs = 5 * 60 * 1000;
 
-/// Optional window AFTER the measurement start. Default 0: the preferred
-/// research design uses only the pre-measurement rest window. A non-zero
-/// value may include the inflation itself, so a window whose end lies in
-/// the future is stored as pending and finalized only after it has fully
-/// elapsed and the band has had time to sync.
+/// The product exposes ONLY the pre-measurement rest window; there is no
+/// post-measurement window and no UI path that could produce one. Kept as a
+/// named constant so the design decision stays visible at the call sites.
 const int kResearchWindowPostMs = 0;
 
 /// Maximum gap between two successive beat intervals for them to count as
@@ -74,43 +93,58 @@ class BpResearchWindow {
     this.metaJson,
   });
 
-  /// The REQUESTED window bounds ([start, end] around the measurement).
+  /// The REQUESTED window bounds — half-open [start, end) around the
+  /// measurement instant. Half-open so a 5-minute window at 1 Hz holds at
+  /// most exactly 300 seconds and coverage can never exceed 1.0 by
+  /// counting both endpoints of a closed interval.
   final int windowStartMs;
   final int windowEndMs;
 
   /// What the data actually OBSERVED inside the requested window — the
-  /// first and last valid row time. Distinct from the requested bounds so
-  /// an analysis can tell "the band was worn for the last minute of a
-  /// five-minute window" from "the band was worn all five minutes".
+  /// first and last VALID row time (a row with no usable value does not
+  /// extend the observed signal; raw coverage is reported separately via
+  /// [onehzRows]/[rrBeats], which count all in-window rows). Distinct from
+  /// the requested bounds so an analysis can tell "the band was worn for
+  /// the last minute of a five-minute window" from "the band was worn all
+  /// five minutes".
   final int? observedStartMs;
   final int? observedEndMs;
 
+  /// All in-window 1 Hz rows (raw, deduplicated by rec_ts) — raw coverage.
   final int? onehzRows;
+
+  /// All in-window beat rows (raw, deduplicated by beat identity) — raw
+  /// beat coverage.
   final int? rrBeats;
+
   final double? hrMean;
   final double? rrMsMean;
   final double? rrMsMin;
   final double? rrMsMax;
   final double? rmssdMs;
 
-  // ── quality (v2) ─────────────────────────────────────────────────────────
+  // ── quality (v2) ──────────────────────────────────────────────────────
   /// 1 Hz rows with a valid HR — at 1 Hz that is seconds of valid signal.
   final int? validHrSeconds;
 
-  /// Beat intervals that survived validation (sorted, deduplicated,
-  /// finite, positive). Intervals the analysis may legitimately use.
+  /// Beat intervals that survived validation (finite, positive, sorted,
+  /// deduplicated by beat identity). Intervals the analysis may use.
   final int? validIntervalCount;
 
-  /// SUCCESSIVE interval pairs that are also CONTIGUOUS in time (gap ≤
-  /// [kResearchMaxBeatGapMs]). The only pairs RMSSD is computed over.
+  /// SUCCESSIVE interval pairs that are also CONTIGUOUS in time. The only
+  /// pairs RMSSD is computed over.
   final int? validIntervalPairCount;
 
-  /// valid_hr_seconds ÷ requested window seconds. NULL when the window has
-  /// no duration or no 1 Hz rows at all — coverage of nothing is not 0%.
+  /// valid_hr_seconds ÷ requested window seconds (half-open window).
+  /// NULL when the window has no duration or no valid HR row at all —
+  /// coverage of nothing is not 0%.
   final double? coverageFraction;
 
-  /// Share of successive interval pairs REJECTED as non-contiguous (gap in
-  /// the beat series). NULL when there are no pairs to reject.
+  /// Share of successive VALID interval pairs REJECTED as non-contiguous
+  /// (gap in the beat series). Named for what it measures: a PAIR-rejection
+  /// rate, not an interval-exclusion rate (the latter is visible via
+  /// [rrBeats] vs [validIntervalCount]). NULL when there are no successive
+  /// pairs to reject.
   final double? rejectedIntervalFraction;
 
   /// 'pending' | 'ok' | 'gappy' | 'no_data' — see [researchWindowFrom].
@@ -138,6 +172,7 @@ class BpResearchCapture {
     required this.device,
     this.measurementStartedAtMs,
     this.measurementFinishedAtMs,
+    this.timePrecision,
     this.posture,
     this.conditions,
     this.bandDeviceId,
@@ -146,22 +181,30 @@ class BpResearchCapture {
   });
 
   /// Nominal measurement instant — the v1 identity of the capture and still
-  /// the idempotency key together with [device]. For v2 captures this is
-  /// the measurement START when the user supplied a real instant.
+  /// the idempotency key together with [device]. This is the instant the
+  /// user supplied (minute precision) — the time the cuff reading was TAKEN
+  /// for a back-dated capture, or the ENTRY moment when the field was left
+  /// empty (the reading was taken "just now"; the pairing anchor is the
+  /// entry moment, never claimed to be the exact inflation start).
   final int measuredAtMs;
 
-  /// When the cuff actually STARTED squeezing. NULL on v1 rows (their
-  /// measuredAtMs doubles as both) — absent stays absent, it is not
-  /// backfilled with measuredAtMs.
+  /// When the cuff actually STARTED squeezing. Kept for data that has a
+  /// real start instant; the current UI records a single minute-precision
+  /// instant and leaves this NULL — absent stays absent.
   final int? measurementStartedAtMs;
 
   /// When the cuff finished. Optional: many cuffs report one instant only.
-  /// If only a single measurement instant is known, the pair fields above
-  /// carry that instant and this stays NULL — no invented duration.
+  /// If only a single measurement instant is known, this stays NULL — no
+  /// invented duration.
   final int? measurementFinishedAtMs;
 
+  /// 'minute' — the precision of [measuredAtMs] as recorded by the current
+  /// UI. Documented so an analysis knows the pairing instant is not
+  /// second-accurate; a future finer-grained UI would record 'second'.
+  final String? timePrecision;
+
   /// When the pair was TYPED IN. A retro capture entered hours later has
-  /// this far after its measurement instants.
+  /// this far after its measurement instant.
   final int capturedAtMs;
 
   final double systolicMmHg;
@@ -195,14 +238,39 @@ class BpResearchCapture {
 const (double, double) kResearchSystolicBounds = (50, 300);
 const (double, double) kResearchDiastolicBounds = (20, 200);
 
+/// The row key that identifies ONE beat: the measured sub-second instant
+/// when the decoder provides it (`beat_ts_ms`), otherwise the whole-second
+/// record time plus the beat's index within that record. rr_ts_ms alone is
+/// rec_ts*1000 for EVERY beat of a record, so keying by it would collapse
+/// all beats of a second into one and corrupt every RMSSD.
+int _beatKey(Map<String, Object?> r) {
+  final beatTs = r['beat_ts_ms'];
+  if (beatTs is num && beatTs > 0) return beatTs.toInt();
+  final ts = r['rr_ts_ms'];
+  final idx = r['beat_index'];
+  return ((ts is num ? ts.toInt() : 0) << 8) | (idx is num ? idx.toInt() : 0);
+}
+
+/// The beat's position on the time axis for continuity checks: the measured
+/// instant when the decoder provides it, otherwise the whole-second record
+/// time (a documented heuristic — beats of one second then share a time,
+/// and pairs of those are still treated as contiguous, which can only
+/// under-reject, never fabricate differences).
+int _beatTimeMs(Map<String, Object?> r) {
+  final beatTs = r['beat_ts_ms'];
+  if (beatTs is num && beatTs > 0) return beatTs.toInt();
+  final ts = r['rr_ts_ms'];
+  return ts is num ? ts.toInt() : 0;
+}
+
 /// Compute the frozen band window around the MEASUREMENT instant
 /// ([measuredAtMs]) from already-decoded rows, pure and testable without a
 /// database (pass the rows in).
 ///
-/// Window: [measurement_start − preMs, measurement_start + postMs] — the
-/// default design is the 5-minute rest window BEFORE the measurement
-/// ([kResearchRestPreMs], [kResearchWindowPostMs] = 0), so the cuff's own
-/// inflation stays out of the feature window by construction.
+/// Window: [measurement_instant − preMs, measurement_instant + postMs) —
+/// half-open. The default design is the 5-minute rest window BEFORE the
+/// measurement ([kResearchRestPreMs], [kResearchWindowPostMs] = 0), so the
+/// cuff's own inflation stays out of the feature window by construction.
 ///
 /// Reads ONLY what the caller passes — `decoded_onehz` (HR) and
 /// `decoded_rr` (beat intervals) rows. No raw archive, no re-decode,
@@ -211,18 +279,25 @@ const (double, double) kResearchDiastolicBounds = (20, 200);
 ///
 /// Quality rules (all documented engineering parameters, none claimed as
 /// validated artifact thresholds):
-///   · onehz rows are sorted and deduplicated by `rec_ts`;
-///   · an HR row is valid when its `hr` is a finite positive integer —
+///   · onehz rows are filtered to the half-open window, sorted, and
+///     deduplicated by `rec_ts`;
+///   · an HR row is valid when its `hr` is a finite positive number —
 ///     absent validity is absent, not false, and an invalid row never
-///     enters the mean (it must not drag an average toward zero);
-///   · intervals are sorted and deduplicated by `rr_ts_ms`; non-finite,
-///     zero, or negative values are rejected outright;
+///     enters the mean NOR the coverage (a run of hr = 0 off-skin rows
+///     must not read as a worn band);
+///   · beat rows are keyed by beat identity ([_beatKey]: beat_ts_ms when
+///     present, else (rr_ts_ms, beat_index)) — NEVER by rr_ts_ms alone,
+///     which is identical for every beat of a record;
+///   · non-finite, zero, or negative interval values are rejected;
 ///   · an interval PAIR is valid only when the two intervals are
-///     contiguous in time (gap ≤ [kResearchMaxBeatGapMs]) — RMSSD is
-///     computed over those pairs and ONLY those pairs, never across a
-///     sensor gap;
+///     successive valid beats whose beat times are contiguous
+///     (gap ≤ [kResearchMaxBeatGapMs]) — RMSSD is computed over those
+///     pairs and ONLY those pairs, never across a sensor gap;
 ///   · [nowMs] decides pending: a window whose end lies in the future is
-///     'pending' and must be finalized once it has elapsed.
+///     'pending' and must be finalized once it has elapsed. The UI never
+///     produces one (Option 1: pre-measurement window only, future
+///     measurement instants are refused); the state exists so data-level
+///     callers cannot silently mislabel such a window as final.
 BpResearchWindow? researchWindowFrom({
   required int measuredAtMs,
   required List<Map<String, Object?>> onehzRows,
@@ -241,71 +316,73 @@ BpResearchWindow? researchWindowFrom({
   final end = measuredAtMs + post;
 
   // decoded_onehz.rec_ts is epoch SECONDS; rr is rr_ts_ms (epoch ms).
-  // Filter, then SORT (epoch bases differ; rows may arrive unsorted), then
-  // DEDUPLICATE by timestamp (first row wins — a re-decoded duplicate is
-  // the same second, not a new one).
-  final onehz = onehzRows
-      .where((r) {
+  // Filter to the HALF-OPEN window [start, end), then SORT, then
+  // DEDUPLICATE by rec_ts (first row wins — a re-decoded duplicate is the
+  // same second, not a new one).
+  final onehz =
+      onehzRows.where((r) {
         final ts = r['rec_ts'];
-        return ts is num && ts * 1000 >= start && ts * 1000 <= end;
-      })
-      .toList()
-    ..sort((a, b) =>
-        ((a['rec_ts'] as num).toDouble()).compareTo((b['rec_ts'] as num).toDouble()));
-  final dedupedOnehz = <Map<String, Object?>>[];
+        return ts is num && ts * 1000 >= start && ts * 1000 < end;
+      }).toList()..sort(
+        (a, b) => ((a['rec_ts'] as num).toDouble()).compareTo(
+          (b['rec_ts'] as num).toDouble(),
+        ),
+      );
+  final onehzDedup = <Map<String, Object?>>[];
   {
     int? lastTs;
     for (final r in onehz) {
       final ts = (r['rec_ts'] as num).toInt();
       if (lastTs == ts) continue;
       lastTs = ts;
-      dedupedOnehz.add(r);
+      onehzDedup.add(r);
     }
   }
-  final onehzDedup = dedupedOnehz;
 
-  final rrAll = rrRows
-      .where((r) {
-        final ts = r['rr_ts_ms'];
-        return ts is num && ts >= start && ts <= end;
-      })
-      .toList()
-    ..sort((a, b) =>
-        ((a['rr_ts_ms'] as num).toDouble()).compareTo((b['rr_ts_ms'] as num).toDouble()));
-  final dedupedRr = <Map<String, Object?>>[];
+  final rrAll = rrRows.where((r) {
+    final ts = r['rr_ts_ms'];
+    return ts is num && ts >= start && ts < end;
+  }).toList()..sort((a, b) => _beatTimeMs(a).compareTo(_beatTimeMs(b)));
+  // Dedup by BEAT IDENTITY, not by rr_ts_ms — beats of one record differ
+  // in beat_index and, when the decoder provides it, beat_ts_ms.
+  final rrDedup = <Map<String, Object?>>[];
   {
-    int? lastTs;
+    int? lastKey;
     for (final r in rrAll) {
-      final ts = (r['rr_ts_ms'] as num).toInt();
-      if (lastTs == ts) continue;
-      lastTs = ts;
-      dedupedRr.add(r);
+      final key = _beatKey(r);
+      if (lastKey == key) continue;
+      lastKey = key;
+      rrDedup.add(r);
     }
   }
-  final rrDedup = dedupedRr;
 
   if (onehzDedup.isEmpty && rrDedup.isEmpty) return null;
 
   // Valid HR rows only — a run of hr = 0 rows must not drag the average
-  // toward zero, and non-finite values are rejected outright.
-  final validHr = onehzDedup
-      .map((r) => r['hr'])
-      .whereType<num>()
-      .map((v) => v.toDouble())
-      .where((h) => h.isFinite && h > 0)
+  // toward zero AND must not count as observed signal (coverage).
+  final validHrRows = onehzDedup
+      .where((r) {
+        final h = r['hr'];
+        return h is num && h.isFinite && h > 0;
+      })
       .toList(growable: false);
-  final hrMean =
-      validHr.isEmpty ? null : validHr.reduce((a, b) => a + b) / validHr.length;
-  final validHrSeconds =
-      validHr.isEmpty ? null : onehzDedup.length; // 1 Hz: one row is one second
+  final hrMean = validHrRows.isEmpty
+      ? null
+      : validHrRows
+                .map((r) => (r['hr'] as num).toDouble())
+                .reduce((a, b) => a + b) /
+            validHrRows.length;
+  // 1 Hz: one valid row is one second of valid signal. This is the number
+  // coverage is computed from — valid seconds, not raw rows.
+  final validHrSeconds = validHrRows.isEmpty ? null : validHrRows.length;
 
-  // Valid intervals: finite, positive, deduplicated. Rejected ones are
-  // counted so an analysis can see HOW MUCH of the beat series survived.
-  final validIntervals = <(int, double)>[]; // (rr_ts_ms, rr_ms)
+  // Valid intervals: finite, positive, beat-keyed. Raw vs valid counts are
+  // kept apart so an analysis can see how much of the beat series survived.
+  final validIntervals = <(int, double)>[]; // (beat_time_ms, rr_ms)
   for (final r in rrDedup) {
     final v = r['rr_ms'];
     if (v is num && v.isFinite && v > 0) {
-      validIntervals.add(((r['rr_ts_ms'] as num).toInt(), v.toDouble()));
+      validIntervals.add((_beatTimeMs(r), v.toDouble()));
     }
   }
 
@@ -316,9 +393,9 @@ BpResearchWindow? researchWindowFrom({
     rrMean = values.reduce((a, b) => a + b) / values.length;
     rrMin = values.reduce((a, b) => a < b ? a : b);
     rrMax = values.reduce((a, b) => a > b ? a : b);
-    // RMSSD over CONTIGUOUS successive pairs only: the two intervals must
-    // be adjacent in time (gap ≤ [gap]). A difference across a sensor gap
-    // is a fabrication, not an HRV sample.
+    // RMSSD over CONTIGUOUS successive pairs only: the two beats must be
+    // adjacent in time (gap ≤ [gap]). A difference across a sensor gap is a
+    // fabrication, not an HRV sample.
     if (validIntervals.length >= 2) {
       var sumSq = 0.0;
       for (var i = 1; i < validIntervals.length; i++) {
@@ -327,28 +404,33 @@ BpResearchWindow? researchWindowFrom({
         sumSq += d * d;
         validPairs++;
       }
-      if (validPairs > 0) rmssd = _sqrt(sumSq / validPairs);
+      if (validPairs > 0) rmssd = sqrt(sumSq / validPairs);
     }
   }
 
   final pairTotal = validIntervals.length >= 2 ? validIntervals.length - 1 : 0;
-  final rejectedPairFraction =
-      pairTotal == 0 ? null : 1.0 - (validPairs / pairTotal);
+  final rejectedPairFraction = pairTotal == 0
+      ? null
+      : 1.0 - (validPairs / pairTotal);
 
   final windowSeconds = (end - start) / 1000.0;
-  final coverage =
-      validHrSeconds == null || windowSeconds <= 0 ? null : validHrSeconds / windowSeconds;
+  final coverage = validHrSeconds == null || windowSeconds <= 0
+      ? null
+      : validHrSeconds / windowSeconds;
 
   // Quality status — an honest verdict, not a fabricated confidence number.
-  //   pending  — the window extends into the future; finalize later.
+  //   pending  — the window extends into the future; finalize later. Not
+  //              producible from the UI (future instants are refused); a
+  //              data-level caller that still passes one gets an honest
+  //              label instead of a silently "final" window.
   //   no_data  — nothing valid survived in either series.
-  //   gappy    — over half the pairs were rejected across gaps, or under
-  //              half the window has valid HR: usable, flag it.
+  //   gappy    — over half the successive pairs were rejected across gaps,
+  //              or under half the window has valid HR: usable, flag it.
   //   ok       — otherwise.
   String status;
   if (nowMs != null && end > nowMs) {
     status = 'pending';
-  } else if (validHr.isEmpty && validIntervals.isEmpty) {
+  } else if (validHrRows.isEmpty && validIntervals.isEmpty) {
     status = 'no_data';
   } else if ((rejectedPairFraction != null && rejectedPairFraction > 0.5) ||
       (coverage != null && coverage < 0.5)) {
@@ -357,15 +439,29 @@ BpResearchWindow? researchWindowFrom({
     status = 'ok';
   }
 
+  int? observedStart;
+  int? observedEnd;
+  final o1 = validHrRows.isNotEmpty
+      ? (validHrRows.first['rec_ts'] as num).toInt() * 1000
+      : null;
+  final o2 = validIntervals.isNotEmpty ? validIntervals.first.$1 : null;
+  final e1 = validHrRows.isNotEmpty
+      ? (validHrRows.last['rec_ts'] as num).toInt() * 1000
+      : null;
+  final e2 = validIntervals.isNotEmpty ? validIntervals.last.$1 : null;
+  if (o1 != null && o2 != null) {
+    observedStart = o1 < o2 ? o1 : o2;
+    observedEnd = (e1 ?? o1) > (e2 ?? o2) ? (e1 ?? o1) : (e2 ?? o2);
+  } else {
+    observedStart = o1 ?? o2;
+    observedEnd = e1 ?? e2;
+  }
+
   return BpResearchWindow(
     windowStartMs: start,
     windowEndMs: end,
-    observedStartMs: onehzDedup.isNotEmpty
-        ? (onehzDedup.first['rec_ts'] as num).toInt() * 1000
-        : (rrDedup.isNotEmpty ? (rrDedup.first['rr_ts_ms'] as num).toInt() : null),
-    observedEndMs: onehzDedup.isNotEmpty
-        ? (onehzDedup.last['rec_ts'] as num).toInt() * 1000
-        : (rrDedup.isNotEmpty ? (rrDedup.last['rr_ts_ms'] as num).toInt() : null),
+    observedStartMs: observedStart,
+    observedEndMs: observedEnd,
     onehzRows: onehzDedup.isEmpty ? null : onehzDedup.length,
     rrBeats: rrDedup.isEmpty ? null : rrDedup.length,
     hrMean: hrMean,
@@ -373,7 +469,7 @@ BpResearchWindow? researchWindowFrom({
     rrMsMin: rrMin,
     rrMsMax: rrMax,
     rmssdMs: rmssd,
-    validHrSeconds: validHr.isEmpty ? null : validHr.length,
+    validHrSeconds: validHrSeconds,
     validIntervalCount: validIntervals.isEmpty ? null : validIntervals.length,
     validIntervalPairCount: validPairs == 0 ? null : validPairs,
     coverageFraction: coverage,
@@ -392,15 +488,4 @@ class BpResearchSnapshotRows {
   /// The filtered, sorted, deduplicated rows the window computation saw.
   final List<Map<String, Object?>> onehzRows;
   final List<Map<String, Object?>> rrRows;
-}
-
-double _sqrt(double v) => v <= 0 ? 0.0 : _sqrtNewton(v);
-double _sqrtNewton(double v) {
-  var x = v;
-  var y = (x + 1) / 2;
-  while ((y - x).abs() > 1e-12) {
-    x = y;
-    y = (x + v / x) / 2;
-  }
-  return y;
 }
