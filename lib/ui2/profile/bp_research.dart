@@ -21,6 +21,7 @@
 //   · Nothing here is exported to HealthKit / Health Connect.
 // A window with no band data is stored as a capture with an EMPTY window —
 // missing is missing, never zero.
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -32,6 +33,10 @@ import 'devices.dart' show formatDayTime;
 
 class BpResearchScreen extends StatefulWidget {
   const BpResearchScreen({super.key});
+
+  @visibleForTesting
+  static String windowSummary(Map<String, Object?> r) =>
+      _BpResearchScreenState._windowSummary(r);
 
   @override
   State<BpResearchScreen> createState() => _BpResearchScreenState();
@@ -219,8 +224,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
       );
       final onehzThrough = through.onehzThroughMs ?? 0;
       final rrThrough = through.rrThroughMs ?? 0;
-      final dataThroughMs =
-          onehzThrough < rrThrough ? onehzThrough : rrThrough;
+      final dataThroughMs = onehzThrough < rrThrough ? onehzThrough : rrThrough;
       final window = researchWindowFrom(
         measuredAtMs: measuredAtMs,
         onehzRows: onehz,
@@ -426,14 +430,36 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
   /// A window is summarised as what it actually holds. A NULL stat is shown
   /// as absent — a dash, never a zero, and never a value that would read as
   /// a measurement.
+  ///
+  /// INVARIANT: pending ≠ no_data. 'pending' means the window is NOT
+  /// FINALIZABLE yet — the local sync provably does not reach the window
+  /// end, so the missing tail may still arrive after a sync + refresh. It
+  /// is never "no band data": that verdict is reserved for a FINAL window
+  /// that provably holds nothing. Pending is checked FIRST so a NULL stat
+  /// can never be misread as a final verdict; whatever HAS arrived is
+  /// still shown honestly alongside the hint. A non-medical, non-claiming
+  /// message.
   static String _windowSummary(Map<String, Object?> r) {
     final onehz = r['onehz_rows'];
     final beats = r['rr_beats'];
     final hr = r['hr_mean'];
     final rmssd = r['rmssd_ms'];
     final status = r['quality_status'];
+    if (status == 'pending') {
+      // Not final YET — never "no band data". Show whatever has arrived
+      // (partial data is honest data), plus the sync hint.
+      final parts = <String>[
+        'Band data is still syncing — refresh this window after sync.',
+      ];
+      if (hr is num) parts.add('HR ${hr.toStringAsFixed(0)} bpm');
+      if (rmssd is num) parts.add('RMSSD ${rmssd.toStringAsFixed(0)} ms');
+      if (onehz is num || beats is num) {
+        parts.add('${onehz ?? 0} 1 Hz rows, ${beats ?? 0} beats so far');
+      }
+      return parts.join(' · ');
+    }
     if (onehz == null && beats == null) {
-      return 'No band data in the window \u2014 stored as-is.';
+      return 'No band data in the window — stored as-is.';
     }
     final parts = <String>[];
     if (hr is num) parts.add('HR ${hr.toStringAsFixed(0)} bpm');
@@ -442,6 +468,6 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     if (status is String && status.isNotEmpty && status != 'ok') {
       parts.add(status);
     }
-    return parts.join(' \u00b7 ');
+    return parts.join(' · ');
   }
 }
