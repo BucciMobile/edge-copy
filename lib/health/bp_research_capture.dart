@@ -258,12 +258,6 @@ int _beatTimeMs(Map<String, Object?> r) {
 }
 
 /// BEAT IDENTITY — collision-free by construction, never bit-packed:
-/// the measured beat instant when present, otherwise the whole-second
-/// record time AND the beat's index within the record. Neither component
-/// is truncated or masked, so any beat_index range (and negative or junk
-/// values) can only produce distinct keys, never a silent collision.
-// ignore: avoid_redundant_argument_values
-/// BEAT IDENTITY — collision-free by construction, never bit-packed:
 /// the measured beat instant when present ('b', beat_ts_ms, 0),
 /// otherwise the whole-second record time AND the beat's index within
 /// the record ('r', rr_ts_ms, beat_index). Neither component is
@@ -324,11 +318,16 @@ int _beatOrder(Map<String, Object?> a, Map<String, Object?> b) {
 ///     successive valid beats whose beat times are contiguous
 ///     (gap ≤ [kResearchMaxBeatGapMs]) — RMSSD is computed over those
 ///     pairs and ONLY those pairs, never across a sensor gap;
-///   · [nowMs] decides pending: a window whose end lies in the future is
-///     'pending' and must be finalized once it has elapsed. The UI never
-///     produces one (Option 1: pre-measurement window only, future
-///     measurement instants are refused); the state exists so data-level
-///     callers cannot silently mislabel such a window as final.
+///   · [nowMs] and [dataThroughMs] decide pending: a window whose end
+///     lies in the future, or whose locally decoded data provably does
+///     not reach the window end yet (dataThroughMs — the sync watermark
+///     of exactly this band), is 'pending' and must be re-processed once
+///     the data has arrived. 'pending' is NOT a quality verdict — it
+///     only says the window cannot be finally judged yet. The UI never
+///     produces a future window (Option 1: pre-measurement window only,
+///     future measurement instants are refused), but a 'just now'
+///     capture CAN still be pending when the band has not synced the
+///     last minutes yet.
 BpResearchWindow? researchWindowFrom({
   required int measuredAtMs,
   required List<Map<String, Object?>> onehzRows,
@@ -337,6 +336,7 @@ BpResearchWindow? researchWindowFrom({
   int? postMs,
   int? maxGapMs,
   int? nowMs,
+  int? dataThroughMs,
   String? deviceId,
   String? metaJson,
 }) {
@@ -455,16 +455,30 @@ BpResearchWindow? researchWindowFrom({
       : validHrSeconds / windowSeconds;
 
   // Quality status — an honest verdict, not a fabricated confidence number.
-  //   pending  — the window extends into the future; finalize later. Not
-  //              producible from the UI (future instants are refused); a
-  //              data-level caller that still passes one gets an honest
-  //              label instead of a silently "final" window.
-  //   no_data  — nothing valid survived in either series.
-  //   gappy    — over half the successive pairs were rejected across gaps,
-  //              or under half the window has valid HR: usable, flag it.
-  //   ok       — otherwise.
+  //   pending  — the window is NOT final yet: its end lies in the future
+  //              (nowMs), or the locally decoded data provably does not
+  //              reach up to the window end yet (dataThroughMs, the
+  //              sync watermark of exactly this band). 'Not final' means
+  //              the missing tail may still arrive — it must never be
+  //              mislabeled 'no_data' or 'gappy', which would claim the
+  //              window was finalizable and just holds bad data.
+  //              ONE-SECOND TOLERANCE: decoded_onehz rows are whole
+  //              seconds, so the last second that can still lie INSIDE
+  //              the half-open [start, end) window ends at end - 1000.
+  //              A watermark there proves every row the window could
+  //              contain has arrived; demanding watermark = end would
+  //              require a row OUTSIDE the window and keep honest
+  //              pre-measurement windows pending forever.
+  //   no_data  — finalizable, but nothing valid survived in either series.
+  //   gappy    — finalizable, but over half the successive pairs were
+  //              rejected across gaps, or under half the window has valid
+  //              HR: usable, flag it.
+  //   ok       — finalizable and passes the current research rule.
+  // PRECEDENCE: pending wins over everything — a window whose data basis
+  // is not provably complete cannot carry a final verdict.
   String status;
-  if (nowMs != null && end > nowMs) {
+  if ((nowMs != null && end > nowMs) ||
+      (dataThroughMs != null && dataThroughMs < end - 1000)) {
     status = 'pending';
   } else if (validHrRows.isEmpty && validIntervals.isEmpty) {
     status = 'no_data';

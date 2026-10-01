@@ -1780,6 +1780,161 @@ class LocalDb {
   /// `(measured_at_ms, device)`: the colliding row is deleted explicitly
   /// first (window, snapshots, then the reference — no PRAGMA foreign_keys
   /// here, so nothing cascades on its own), then re-inserted.
+  /// The SYNC WATERMARK of exactly one band: up to which instant do we
+  /// provably hold DECODED local data for this device? HR and RR are
+  /// answered SEPARATELY — the two series decode from different packets
+  /// and a shared watermark would be a fabrication. NULL means no decoded
+  /// row exists for the device. The BP research window classification
+  /// uses this as its pending criterion: a window whose end lies beyond
+  /// the watermark is 'pending', never a final 'no_data'/'gappy' — the
+  /// missing tail may still arrive with the next sync.
+  static Future<({int? onehzThroughMs, int? rrThroughMs})>
+  bpResearchDataThroughMs(String deviceId) async {
+    final db = await instance;
+    final onehz = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT MAX(rec_ts) FROM decoded_onehz WHERE device_id = ?',
+        [deviceId],
+      ),
+    );
+    final rr = Sqflite.firstIntValue(
+      await db.rawQuery(
+        'SELECT MAX(COALESCE(beat_ts_ms, rr_ts_ms)) / 1 FROM decoded_rr '
+        'WHERE device_id = ?',
+        [deviceId],
+      ),
+    );
+    return (
+      onehzThroughMs: onehz == null ? null : onehz * 1000,
+      rrThroughMs: rr,
+    );
+  }
+
+  /// EXPLICIT RE-PROCESSING of ONE stored capture (developer-mode action).
+  /// Re-reads the CURRENT local WHOOP data for the capture's ORIGINAL
+  /// window bounds, re-classifies the window, and writes a NEW snapshot
+  /// revision — the old revisions stay byte-identical. The reference
+  /// itself (cuff values, measurement time) is NEVER touched. A window
+  /// whose data basis still does not reach the window end stays
+  /// 'pending' — no fabricated finality.
+  static Future<void> reprocessBpResearchCapture(int referenceId) async {
+    final db = await instance;
+    final refs = await db.rawQuery(
+      'SELECT r.measured_at_ms, r.band_device_id, '
+      'w.window_start_ms, w.window_end_ms '
+      'FROM bp_research_reference r '
+      'LEFT JOIN bp_research_window w ON w.reference_id = r.id '
+      'WHERE r.id = ?',
+      [referenceId],
+    );
+    if (refs.isEmpty) return;
+    final r = refs.first;
+    final bandDeviceId = (r['band_device_id'] as String?) ?? kPrimaryDeviceId;
+    // The ORIGINAL window bounds: re-processing must not silently move
+    // the feature window, only refresh the data inside it.
+    final start =
+        (r['window_start_ms'] as num?)?.toInt() ??
+        (r['measured_at_ms'] as num).toInt() - kResearchRestPreMs;
+    final end =
+        (r['window_end_ms'] as num?)?.toInt() ??
+        (r['measured_at_ms'] as num).toInt() + kResearchWindowPostMs;
+    final onehz = await db.rawQuery(
+      'SELECT rec_ts, hr FROM decoded_onehz '
+      'WHERE device_id = ? AND rec_ts >= ? AND rec_ts <= ? '
+      'ORDER BY rec_ts ASC',
+      [bandDeviceId, start ~/ 1000, (end - 1) ~/ 1000],
+    );
+    final rr = await db.rawQuery(
+      'SELECT rr_ts_ms, rr_ms, beat_index, beat_ts_ms FROM decoded_rr '
+      'WHERE device_id = ? '
+      'AND COALESCE(beat_ts_ms, rr_ts_ms) >= ? '
+      'AND COALESCE(beat_ts_ms, rr_ts_ms) < ? '
+      'ORDER BY rr_ts_ms ASC, beat_index ASC',
+      [bandDeviceId, start, end],
+    );
+    final through = await bpResearchDataThroughMs(bandDeviceId);
+    // CONSERVATIVE WATERMARK: a series with NO decoded rows at all has
+    // watermark 0 (nothing provably decoded); the EARLIER of the two
+    // series decides — the window cannot be final until BOTH could have
+    // delivered their tail.
+    final onehzThrough = through.onehzThroughMs ?? 0;
+    final rrThrough = through.rrThroughMs ?? 0;
+    final dataThroughMs = onehzThrough < rrThrough
+        ? onehzThrough
+        : rrThrough;
+    final window = researchWindowFrom(
+      measuredAtMs: (r['measured_at_ms'] as num).toInt(),
+      onehzRows: onehz,
+      rrRows: rr,
+      preMs: (r['measured_at_ms'] as num).toInt() - start,
+      postMs: end - (r['measured_at_ms'] as num).toInt(),
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+      dataThroughMs: dataThroughMs,
+    );
+    await db.transaction((txn) async {
+      if (window == null) {
+        // Still nothing usable: drop the window row, keep the reference.
+        await txn.rawDelete(
+          'DELETE FROM bp_research_window WHERE reference_id = ?',
+          [referenceId],
+        );
+        return;
+      }
+      final maxRev = Sqflite.firstIntValue(
+        await txn.rawQuery(
+          'SELECT MAX(revision) FROM bp_research_snapshot '
+          'WHERE reference_id = ?',
+          [referenceId],
+        ),
+      );
+      final rev = (maxRev ?? 0) + 1;
+      await txn.rawInsert(
+        'INSERT INTO bp_research_snapshot '
+        '(reference_id, revision, onehz_json, rr_json, created_at_ms) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [
+          referenceId,
+          rev,
+          jsonEncode(onehz),
+          jsonEncode(rr),
+          DateTime.now().millisecondsSinceEpoch,
+        ],
+      );
+      await txn.rawUpdate(
+        'UPDATE bp_research_window SET '
+        'window_start_ms = ?, window_end_ms = ?, observed_start_ms = ?, '
+        'observed_end_ms = ?, onehz_rows = ?, rr_beats = ?, hr_mean = ?, '
+        'rr_ms_mean = ?, rr_ms_min = ?, rr_ms_max = ?, rmssd_ms = ?, '
+        'valid_hr_seconds = ?, valid_interval_count = ?, '
+        'valid_interval_pair_count = ?, coverage_fraction = ?, '
+        'rejected_interval_fraction = ?, quality_status = ?, '
+        'feature_version = ?, snapshot_revision = ? WHERE reference_id = ?',
+        [
+          window.windowStartMs,
+          window.windowEndMs,
+          window.observedStartMs,
+          window.observedEndMs,
+          window.onehzRows,
+          window.rrBeats,
+          window.hrMean,
+          window.rrMsMean,
+          window.rrMsMin,
+          window.rrMsMax,
+          window.rmssdMs,
+          window.validHrSeconds,
+          window.validIntervalCount,
+          window.validIntervalPairCount,
+          window.coverageFraction,
+          window.rejectedIntervalFraction,
+          window.qualityStatus,
+          window.featureVersion,
+          rev,
+          referenceId,
+        ],
+      );
+    });
+  }
+
   static Future<void> putBpResearchCapture(
     BpResearchCapture c, {
     List<Map<String, Object?>>? snapshotOnehzRows,
@@ -1883,6 +2038,19 @@ class LocalDb {
         );
         return;
       }
+      // SNAPSHOT/WINDOW INVARIANT: a window may only name a snapshot
+      // revision that ACTUALLY exists for THIS reference. The revision is
+      // decided HERE, from the snapshot lists of THIS operation — never
+      // from a caller-set w.snapshotRevision, which could point at a
+      // foreign or non-existent revision (the window would reference raw
+      // data that is not what its features were computed from).
+      //   · snapshot lists passed → new revision (max + 1) is created
+      //     below and the window is pointed at it in the SAME transaction;
+      //   · no snapshot lists → snapshot_revision = NULL: the window is
+      //     stored SNAPSHOTLESS (a legacy-style summary), never claiming
+      //     an old or foreign revision it cannot prove.
+      final hasSnapshotRows =
+          snapshotOnehzRows != null || snapshotRrRows != null;
       await txn.rawInsert(
         'INSERT OR REPLACE INTO bp_research_window '
         '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
@@ -1912,7 +2080,10 @@ class LocalDb {
           w.rejectedIntervalFraction,
           w.qualityStatus,
           w.featureVersion,
-          w.snapshotRevision,
+          // NULL without snapshot lists — no revision is claimed that
+          // does not exist; with lists the UPDATE below sets the real
+          // new revision before the transaction commits.
+          hasSnapshotRows ? w.snapshotRevision : null,
           w.metaJson,
         ],
       );

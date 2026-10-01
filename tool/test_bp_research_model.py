@@ -293,6 +293,130 @@ def test_chronological_replay():
            b["systolic"]["adaptive_cuff_offset_baseline"]["mae_mmhg"]
 
 
+
+
+# ======================================================================
+# C: the compatibility mode re-admits ONLY genuinely missing quality.
+# A session excluded for a KNOWN bad member (pending, no_data) carries
+# the EXPLICIT EXCLUDED_MIXED status and stays excluded in every mode.
+# ======================================================================
+
+def test_ok_pending_session_stays_excluded_in_compatibility_mode():
+    rows = [_row(0, 120.0, 80.0),
+            _row(60_000, 122.0, 82.0, sess="s1", q="ok"),
+            _row(120_000, 124.0, 84.0, sess="s1", q="pending")]
+    rep = m.run(rows, admit_missing_quality=True)
+    assert rep["rows_excluded_quality"] == 1
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 0
+
+
+def test_ok_no_data_session_stays_excluded_in_compatibility_mode():
+    rows = [_row(0, 120.0, 80.0),
+            _row(60_000, 122.0, 82.0, sess="s1", q="ok"),
+            _row(120_000, 124.0, 84.0, sess="s1", q="no_data")]
+    rep = m.run(rows, admit_missing_quality=True)
+    assert rep["rows_excluded_quality"] == 1
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 0
+
+
+def test_ok_gappy_session_is_admitted_as_gappy_in_compatibility_mode():
+    rows = [_row(0, 120.0, 80.0),
+            _row(60_000, 122.0, 82.0, sess="s1", q="ok"),
+            _row(120_000, 124.0, 84.0, sess="s1", q="gappy")]
+    rep = m.run(rows, admit_missing_quality=True)
+    assert rep["rows_excluded_quality"] == 0
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 1
+
+
+def test_all_missing_quality_session_follows_the_flag():
+    # Every member genuinely lacks quality metadata (historical data):
+    # excluded by default, admitted ONLY with the explicit flag.
+    rows = [_row(0, 120.0, 80.0, sess="s1", q=None),
+            _row(60_000, 122.0, 82.0, sess="s1", q=None)]
+    rep_default = m.run(rows)
+    # ONE aggregated session row (all members None) → excluded by default.
+    assert rep_default["rows_excluded_quality"] == 1
+    rep_compat = m.run(rows, admit_missing_quality=True)
+    assert rep_compat["rows_excluded_quality"] == 0
+
+
+def test_admitted_mixed_with_missing_is_conservative():
+    # 'ok + genuinely missing' (no KNOWN bad member): excluded without
+    # the flag; the flag admits it because nothing known is wrong.
+    rows = [_row(60_000, 122.0, 82.0, sess="s1", q="ok"),
+            _row(120_000, 124.0, 84.0, sess="s1", q=None)]
+    rep_default = m.run(rows)
+    # The two members aggregate into ONE session row, whose folded
+    # quality is None (conservative) → excluded without the flag.
+    assert rep_default["rows_excluded_quality"] == 1
+    rep_compat = m.run(rows, admit_missing_quality=True)
+    assert rep_compat["rows_excluded_quality"] == 0
+
+
+def test_excluded_mixed_status_is_never_admitted():
+    # The fold's explicit exclusion status itself never passes admission.
+    assert m.is_admitted_quality(m.EXCLUDED_MIXED) is False
+    assert m.is_admitted_quality(m.EXCLUDED_MIXED,
+                                 admit_missing_quality=True) is False
+    assert m.is_admitted_quality("pending") is False
+    assert m.is_admitted_quality("no_data") is False
+
+
+# ======================================================================
+# D: no crash when nothing is admitted — a structured, parseable
+# research report instead of an IndexError.
+# ======================================================================
+
+def test_empty_csv_returns_no_rows_error():
+    rep = m.run([])
+    assert rep["error"] == "no rows"
+
+
+def test_only_pending_rows_return_no_admitted_rows():
+    rows = [_row(0, 120.0, 80.0, q="pending"),
+            _row(86_400_000, 121.0, 81.0, q="pending")]
+    rep = m.run(rows)
+    assert rep["error"] == "no admitted rows"
+    assert rep["rows_total"] == 2
+    assert rep["rows_excluded_quality"] == 2
+    assert rep["admission_rule"]["unknown_quality_admitted"] is False
+
+
+def test_only_no_data_rows_return_no_admitted_rows():
+    rows = [_row(0, 120.0, 80.0, q="no_data")]
+    rep = m.run(rows)
+    assert rep["error"] == "no admitted rows"
+    assert rep["rows_excluded_quality"] == 1
+
+
+def test_only_unknown_quality_returns_no_admitted_rows():
+    rows = [_row(0, 120.0, 80.0, q="weird_status")]
+    rep = m.run(rows)
+    assert rep["error"] == "no admitted rows"
+    assert rep["rows_excluded_quality"] == 1
+
+
+def test_calibration_row_then_only_excluded_still_reports():
+    # One valid calibration point, then only excluded rows: no target
+    # rows, but a structured report — never a crash.
+    rows = [_row(0, 120.0, 80.0, q="ok"),
+            _row(86_400_000, 121.0, 81.0, q="pending")]
+    rep = m.run(rows)
+    assert "error" not in rep
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 0
+
+
+def test_admitted_rows_without_features_report_zero_targets():
+    # Admitted rows exist, but none carries usable HR/RMSSD features:
+    # the report is structured, targets are zero, no exception.
+    rows = [_row(0, 120.0, 80.0, q="ok"),
+            _row(86_400_000, 121.0, 81.0, hr=None, rm=None, q="ok")]
+    rep = m.run(rows)
+    assert "error" not in rep
+    assert rep["systolic"]["adaptive_cuff_offset_baseline"]["n"] == 0
+    assert rep["rows_excluded_no_features"] == 1
+
+
 if __name__ == "__main__":
     for name, fn in sorted(globals().items()):
         if name.startswith("test_"):

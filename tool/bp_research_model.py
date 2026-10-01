@@ -75,15 +75,51 @@ MIN_FEATURE_SPREAD = 0.25  # and this much normalized spread in H and L
 ADMITTED_QUALITY = frozenset({"ok", "gappy"})
 
 
-def is_admitted_quality(status: str | None) -> bool:
+def is_admitted_quality(status: str | None,
+                        *,
+                        admit_missing_quality: bool = False) -> bool:
     """Strict, documented research admission rule: only 'ok' and 'gappy'
     enter the model. UNKNOWN quality (None, empty, anything else) is NOT
-    admitted by default — a silent None -> "" -> admitted path would let
-    mixed or legacy sessions in through the back door. Historical rows
-    without a quality status can be admitted explicitly via
-    --admit-missing-quality (a documented compatibility mode, off by
-    default, reported in the report)."""
-    return status in ADMITTED_QUALITY
+    admitted — and NEVER re-admitted via --admit-missing-quality, which
+    exists ONLY for historical rows whose quality metadata is genuinely
+    absent (None). Default stays strict and reproducible."""
+    if status in ADMITTED_QUALITY:
+        return True
+    if status is None:
+        return admit_missing_quality
+    return False
+# Explicit exclusion status — an aggregated session carries this when any
+# member's quality is KNOWN to be non-admitted ('pending', 'no_data', …).
+# --admit-missing-quality can NEVER re-admit it: that flag exists ONLY for
+# historical rows whose quality metadata is genuinely absent (None).
+EXCLUDED_MIXED = "excluded_mixed_quality"
+
+
+def _fold_member_quality(members) -> str | None:
+    """Fold member qualities into one honest session verdict.
+
+    · ok/gappy everywhere → worst admitted status ('gappy' over 'ok').
+    · any KNOWN non-admitted member → EXCLUDED_MIXED: excluded in every
+      mode, never re-admitted by the compatibility flag.
+    · all members None (historical, no metadata) → None: admission then
+      follows --admit-missing-quality.
+    · admitted mixed with genuinely-missing → conservative None (the
+      flag decides downstream; without it the session is excluded).
+    """
+    rank = {"ok": 0, "gappy": 1}
+    if any(m.quality is not None and not is_admitted_quality(m.quality)
+           for m in members):
+        return EXCLUDED_MIXED
+    if all(m.quality is None for m in members):
+        return None
+    if any(m.quality is None for m in members):
+        # Admitted mixed with genuinely-missing: conservative — the
+        # admission flag decides via None (excluded without it).
+        return None
+    return max((m.quality for m in members),
+               key=lambda q: rank.get(q, -1))
+
+
 # Session aggregation span: members of one explicit session id are only
 # aggregated when they lie within this span (engineering default, 30 min —
 # a few cuff readings of one sitting). Same label, farther apart: NOT one
@@ -285,20 +321,12 @@ def aggregate_sessions(rows: list[Row],
                 hr_mean=wmean([m.hr_mean for m in members]),
                 rmssd_ms=wmean([m.rmssd_ms for m in members]),
                 session_id=label,
-                # STRICT member fold: if ANY member of the session is not
-                # admitted quality, the whole aggregated session carries
-                # None and is excluded downstream — an 'ok + pending'
-                # sitting is not admitted because half of it is not final
-                # data. All-admitted sessions carry their worst (most
-                # flagged) admitted status, 'gappy' over 'ok'.
-                quality=(max(
-                    (m.quality for m in members),
-                    key=lambda q: {"ok": 0, "gappy": 1}.get(q, -1))
-                    if all(
-                        is_admitted_quality(m.quality)
-                        or (m.quality is None and admit_missing_quality)
-                        for m in members)
-                    else None),
+                # STRICT member fold with EXPLICIT exclusion statuses —
+                # 'known non-admitted quality' (→ EXCLUDED_MIXED, never
+                # compatibility-admitted) must stay distinct from
+                # 'genuinely missing historical quality' (→ None, which
+                # follows the compatibility flag at admission time).
+                quality=_fold_member_quality(members),
                 coverage=(sum(weights) / n if all(
                     m.coverage is not None for m in members) else None),
             ))
@@ -341,9 +369,25 @@ def run(rows: list[Row], level_b: bool = False,
     # with ANY non-admitted member ('ok + pending') carries quality None
     # and lands here, never silently inside the model.
     admitted = [r for r in aggregated
-                if is_admitted_quality(r.quality)
-                or (r.quality is None and admit_missing_quality)]
+                if is_admitted_quality(r.quality,
+                                       admit_missing_quality=
+                                       admit_missing_quality)]
     excluded_quality = len(aggregated) - len(admitted)
+    if not admitted:
+        # Structured, parseable research report instead of an
+        # IndexError on admitted[0]: rows exist, but none passes the
+        # quality admission rule.
+        return {
+            "error": "no admitted rows",
+            "rows_total": len(rows),
+            "rows_aggregated": len(aggregated),
+            "rows_excluded_quality": excluded_quality,
+            "admission_rule": {
+                "admitted_quality": sorted(ADMITTED_QUALITY),
+                "unknown_quality_admitted": admit_missing_quality,
+                "max_session_span_ms": MAX_SESSION_SPAN_MS,
+            },
+        }
 
     # Calibration row: the first admitted reference seeds the models.
     # Baselines start from it too, so all models see the same history.

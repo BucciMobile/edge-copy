@@ -208,11 +208,25 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
         'ORDER BY rr_ts_ms ASC, beat_index ASC',
         [LocalDb.kPrimaryDeviceId, start, end],
       );
+      // SYNC FINALITY: a window is only final when the locally decoded
+      // data provably reaches its end. Both series are checked separately
+      // (they decode from different packets); the EARLIER watermark decides
+      // — the window cannot be judged final until BOTH series could have
+      // delivered their tail. A series with NO decoded rows at all counts
+      // as watermark 0: not provably through, conservative pending.
+      final through = await LocalDb.bpResearchDataThroughMs(
+        LocalDb.kPrimaryDeviceId,
+      );
+      final onehzThrough = through.onehzThroughMs ?? 0;
+      final rrThrough = through.rrThroughMs ?? 0;
+      final dataThroughMs =
+          onehzThrough < rrThrough ? onehzThrough : rrThrough;
       final window = researchWindowFrom(
         measuredAtMs: measuredAtMs,
         onehzRows: onehz,
         rrRows: rr,
         nowMs: enteredAtMs,
+        dataThroughMs: dataThroughMs,
       );
       await LocalDb.putBpResearchCapture(
         BpResearchCapture(
@@ -366,12 +380,32 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                   '${formatDayTime(DateTime.fromMillisecondsSinceEpoch(r['measured_at_ms'] as int), l)}',
                 ),
                 subtitle: Text(_windowSummary(r)),
-                trailing: IconButton(
-                  icon: const Icon(LucideIcons.trash2, size: 18),
-                  onPressed: () async {
-                    await LocalDb.deleteBpResearchCapture(r['id'] as int);
-                    await _refresh();
-                  },
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // EXPLICIT REPROCESSING (developer mode): re-read the
+                    // CURRENT local data for this capture's ORIGINAL window
+                    // bounds, write a NEW snapshot revision, re-classify
+                    // (pending → final once the sync provably reaches the
+                    // window end). Reference values are never touched.
+                    IconButton(
+                      icon: const Icon(LucideIcons.refreshCw, size: 18),
+                      tooltip: 'Refresh band window',
+                      onPressed: () async {
+                        await LocalDb.reprocessBpResearchCapture(
+                          r['id'] as int,
+                        );
+                        await _refresh();
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(LucideIcons.trash2, size: 18),
+                      onPressed: () async {
+                        await LocalDb.deleteBpResearchCapture(r['id'] as int);
+                        await _refresh();
+                      },
+                    ),
+                  ],
                 ),
               ),
             const SizedBox(height: S.x4),

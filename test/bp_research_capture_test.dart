@@ -320,4 +320,47 @@ void main() {
     expect(w!.windowEndMs, at + 60000);
     expect(w.onehzRows, 1);
   });
+  test('a window whose local data does not provably reach its end is '
+      'pending (sync watermark), never a final verdict', () {
+    // Full, perfectly valid data — but the watermark proves the band
+    // has not synced up to the window END: the missing tail may still
+    // arrive, so 'pending', NOT 'ok' (and never 'no_data'/'gappy').
+    final rows = <Map<String, Object?>>[
+      for (int s = 0; s < 300; s++) {'rec_ts': at ~/ 1000 - 300 + s, 'hr': 60},
+    ];
+    final w = researchWindowFrom(
+      measuredAtMs: at,
+      onehzRows: rows,
+      rrRows: const [],
+      dataThroughMs: at - 60000, // synced only to T-60s
+    );
+    expect(w, isNotNull);
+    expect(w!.qualityStatus, 'pending');
+    // The data itself is still frozen — pending is a VERDICT about
+    // finality, not a rejection of the rows.
+    expect(w.onehzRows, 300);
+    // Once the watermark reaches the end, the SAME rows are final:
+    final w2 = researchWindowFrom(
+      measuredAtMs: at,
+      onehzRows: rows,
+      rrRows: const [],
+      dataThroughMs: at,
+    );
+    expect(w2!.qualityStatus, 'ok');
+  });
+
+  test('pending outranks a would-be gappy classification (precedence)', () {
+    // Half the coverage missing AND the watermark short: the missing
+    // part may still arrive, so 'pending', not 'gappy'.
+    final rows = <Map<String, Object?>>[
+      for (int s = 0; s < 150; s++) {'rec_ts': at ~/ 1000 - 300 + s, 'hr': 60},
+    ];
+    final w = researchWindowFrom(
+      measuredAtMs: at,
+      onehzRows: rows,
+      rrRows: const [],
+      dataThroughMs: at - 150000,
+    );
+    expect(w!.qualityStatus, 'pending');
+  });
 }

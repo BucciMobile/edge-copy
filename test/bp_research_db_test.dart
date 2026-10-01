@@ -1477,4 +1477,207 @@ void main() {
     expect(c3['bp_research_window_missing_snapshot'], 0);
     await databaseFactory.deleteDatabase(srcPath);
   });
+  test('restore-invariant: a window without snapshot lists is stored '
+      'SNAPSHOTLESS, never a fabricated revision (B2/B4)', () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    // A window object carrying a BOGUS snapshotRevision=99 — without
+    // snapshot lists the store must NOT persist that claim.
+    final bogus = BpResearchWindow(
+      windowStartMs: _at - 300000,
+      windowEndMs: _at,
+      onehzRows: 10,
+      hrMean: 60.0,
+      featureVersion: kResearchFeatureVersion,
+      snapshotRevision: 99,
+      qualityStatus: 'ok',
+    );
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'invariant',
+        window: bogus,
+      ),
+      // NO snapshot lists.
+    );
+    final win = await db.rawQuery(
+      'SELECT snapshot_revision FROM bp_research_window w '
+      'JOIN bp_research_reference r ON r.id = w.reference_id '
+      'WHERE r.device = ?',
+      ['invariant'],
+    );
+    expect(win, hasLength(1));
+    // No revision is claimed that does not exist.
+    expect(win.first['snapshot_revision'], isNull);
+    final snaps = await db.rawQuery(
+      'SELECT COUNT(*) c FROM bp_research_snapshot s '
+      'JOIN bp_research_reference r ON r.id = s.reference_id '
+      'WHERE r.device = ?',
+      ['invariant'],
+    );
+    expect(snaps.first['c'], 0);
+  });
+
+  test('reprocess: a pending capture with a later watermark becomes final, '
+      'writes revision 2, keeps revision 1 byte-identical (A3)', () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    await db.delete('decoded_onehz');
+    // Band synced only up to T-60s at capture time: pending.
+    await db.insert('decoded_onehz', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 1,
+      'rec_ts': (_at - 60000) ~/ 1000,
+      'counter': 0,
+      'hr': 60,
+    });
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'reprocess',
+        window: researchWindowFrom(
+          measuredAtMs: _at,
+          onehzRows: [
+            {'rec_ts': (_at - 60000) ~/ 1000, 'hr': 60},
+          ],
+          rrRows: const [],
+          dataThroughMs: _at - 60000,
+        ),
+      ),
+      snapshotOnehzRows: [
+        {'rec_ts': (_at - 60000) ~/ 1000, 'hr': 60},
+      ],
+      snapshotRrRows: const [],
+    );
+    final refId =
+        (await db.rawQuery(
+              'SELECT id FROM bp_research_reference WHERE device = ?',
+              ['reprocess'],
+            )).first['id']
+            as int;
+    var win = await db.rawQuery(
+      'SELECT quality_status, snapshot_revision '
+      'FROM bp_research_window WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win.first['quality_status'], 'pending');
+    expect(win.first['snapshot_revision'], 1);
+    final rev1Json =
+        (await db.rawQuery(
+              'SELECT onehz_json FROM bp_research_snapshot '
+              'WHERE reference_id = ? AND revision = 1',
+              [refId],
+            )).first['onehz_json']
+            as String;
+    // The band syncs the rest of the window — up to the LAST whole
+    // second that can still lie inside the half-open window.
+    for (int s = 0; s < 300; s++) {
+      await db.insert('decoded_onehz', {
+        'device_id': LocalDb.kPrimaryDeviceId,
+        'ts_ms': 100 + s,
+        'rec_ts': (_at - 300000) ~/ 1000 + s,
+        'counter': s,
+        'hr': 60,
+      });
+    }
+    // The RR series syncs its tail too — the watermark is the EARLIER
+    // of both series, so HR alone would keep the window pending.
+    await db.insert('decoded_rr', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 900,
+      'rec_ts': (_at - 1000) ~/ 1000,
+      'beat_index': 0,
+      'rr_ts_ms': _at - 1000,
+      'rr_ms': 900,
+    });
+    // ...and the developer explicitly re-processes the capture.
+    await LocalDb.reprocessBpResearchCapture(refId);
+    win = await db.rawQuery(
+      'SELECT quality_status, snapshot_revision, hr_mean '
+      'FROM bp_research_window WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win.first['quality_status'], 'ok');
+    expect(win.first['snapshot_revision'], 2); // NEW revision
+    // Revision 1 stays byte-identical.
+    final rev1After =
+        (await db.rawQuery(
+              'SELECT onehz_json FROM bp_research_snapshot '
+              'WHERE reference_id = ? AND revision = 1',
+              [refId],
+            )).first['onehz_json']
+            as String;
+    expect(rev1After, rev1Json);
+    // The reference itself was never touched.
+    final ref = await db.rawQuery(
+      'SELECT measured_at_ms, systolic_mmhg, diastolic_mmhg, captured_at_ms '
+      'FROM bp_research_reference WHERE id = ?',
+      [refId],
+    );
+    expect(ref.first['measured_at_ms'], _at);
+    expect(ref.first['systolic_mmhg'], 120.0);
+    expect(ref.first['diastolic_mmhg'], 80.0);
+  });
+
+  test('reprocess stays pending when the sync still does not reach the '
+      'window end (A3, smoke 3)', () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    await db.delete('decoded_onehz');
+    await db.insert('decoded_onehz', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 500,
+      'rec_ts': (_at - 240000) ~/ 1000,
+      'counter': 0,
+      'hr': 62,
+    });
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 118,
+        diastolicMmHg: 78,
+        capturedAtMs: _at,
+        device: 'stillpending',
+        window: researchWindowFrom(
+          measuredAtMs: _at,
+          onehzRows: [
+            {'rec_ts': (_at - 240000) ~/ 1000, 'hr': 62},
+          ],
+          rrRows: const [],
+          dataThroughMs: _at - 240000,
+        ),
+      ),
+      snapshotOnehzRows: [
+        {'rec_ts': (_at - 240000) ~/ 1000, 'hr': 62},
+      ],
+      snapshotRrRows: const [],
+    );
+    final refId =
+        (await db.rawQuery(
+              'SELECT id FROM bp_research_reference WHERE device = ?',
+              ['stillpending'],
+            )).first['id']
+            as int;
+    // Re-process WITHOUT new data: must stay pending — no fabricated
+    // final verdict.
+    await LocalDb.reprocessBpResearchCapture(refId);
+    final win = await db.rawQuery(
+      'SELECT quality_status FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win.first['quality_status'], 'pending');
+  });
 }
