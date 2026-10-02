@@ -224,7 +224,6 @@ class IosShortcutSync {
         );
       }
       task.update('syncing');
-      var previousBatches = 0;
       for (var session = 0; session < 20 && !task.stopped; session++) {
         final report = await engine.runSync(timeout: task.remaining);
         if (task.stopped) return task.expired;
@@ -235,12 +234,11 @@ class IosShortcutSync {
           return await _derive(task);
         }
         if (!report.complete ||
-            report.batches <= previousBatches ||
+            report.batches == 0 ||
             engine.historyStuckThisSession ||
             !engine.isConnected) {
           break;
         }
-        previousBatches = report.batches;
         // HISTORY_COMPLETE can end one session while the advertised backlog still remains.
         if (!task.stopped) await engine.requestHistorySync();
       }
@@ -266,6 +264,7 @@ class IosShortcutSync {
       background: true,
     ).run(profile, heavy: false);
     if (task.stopped) return task.expired;
+    if (ResetGate.active) throw StateError('data reset in progress');
     await WidgetService.refresh(
       LocalRepositoryImpl(getProfileMap: () => profile.toMap()),
     );

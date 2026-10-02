@@ -5469,7 +5469,10 @@ class AppState extends ChangeNotifier {
     if (!engine.isConnected) {
       task.update('connecting');
       // A background Shortcut must not enable the UI's high-rate live streams.
-      await openSession(foreground: !_background);
+      final background = _background;
+      await openSession(foreground: !background);
+      // openSession left foregroundActive set; re-arm or restore wakes stay ignored.
+      if (background && !engine.isConnected) await _armRecovery();
     }
     if (task.stopped || !engine.isConnected) return SyncReport(0, 0, false);
     final report = await _kickSyncBurst(kickFirst: _syncBurst == null);

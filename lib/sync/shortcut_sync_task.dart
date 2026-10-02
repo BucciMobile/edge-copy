@@ -44,7 +44,10 @@ class ShortcutSyncTask {
   ShortcutSyncResult get expired => ShortcutSyncResult(
     phase == 'connecting'
         ? 'bandUnreachable'
-        : phase == 'syncing' || phase == 'processing'
+        // the transfer is already committed once derive starts
+        : phase == 'processing'
+        ? 'complete'
+        : phase == 'syncing'
         ? 'partial'
         : 'timedOut',
     records: records,
