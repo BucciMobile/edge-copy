@@ -153,6 +153,12 @@ void main() {
           reason: 'the first timeout marks the store hung for the rest of '
               'the lock hold; each further delete would hold the lock '
               'another full timeout');
+      final retry =
+          await LocalDb.getCursor('health_export_retry_state') ?? '';
+      expect(retry, isNot(contains('attempts')),
+          reason: 'a locked store is transient, not a failed export; '
+              'counting it lets locked background passes burn the attempt '
+              'cap and give the day up for good');
 
       // The next hold starts clean, so a workout export still tries.
       expect(await exporter.exportWorkout(_session(0)), isFalse);

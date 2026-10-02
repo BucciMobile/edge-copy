@@ -756,6 +756,9 @@ class HealthExporter {
               return 0;
             }
             Future<void> recordPriorityFailure() async {
+              // A timed-out (unavailable) store isn't a failed export; don't
+              // spend an attempt on it.
+              if (_storeHung) return;
               retryState[priorityDay!.key] = {
                 'attempts': attempts + 1,
                 'last_ms': nowMs,
@@ -874,6 +877,11 @@ class HealthExporter {
                 retryState[date] = {'ok_ms': nowMs};
                 retryStateDirty = true;
               }
+            } else if (_storeHung) {
+              // Store timed out (locked phone): transient, not a failed
+              // export. Leave the day pending without spending an attempt,
+              // or locked background passes burn the cap and give it up.
+              debugPrint('[health] day $date not exported, store unavailable');
             } else {
               final nextAttempts = attempts + 1;
               retryState[date] = {
