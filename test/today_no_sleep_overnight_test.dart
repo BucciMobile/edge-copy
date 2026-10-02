@@ -18,6 +18,10 @@ void main() {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
     LocalDb.dbName = 'openstrap_today_no_sleep_test.db';
+  });
+
+  setUp(() async {
+    await LocalDb.close();
     await databaseFactory.deleteDatabase(
       p.join(await databaseFactory.getDatabasesPath(), LocalDb.dbName),
     );
@@ -71,5 +75,54 @@ void main() {
     expect(
         readiness is Map ? readiness['value'] : readiness, isNot(isA<num>()),
         reason: "yesterday's 77 is not this morning's readiness");
+  });
+
+  test('a held-over no-sleep night does not show an older night under its date',
+      () async {
+    final today = todayLabel();
+    final now = DateTime.now();
+    final yesterday =
+        todayLabel(DateTime(now.year, now.month, now.day - 1, 12));
+    final twoAgo = todayLabel(DateTime(now.year, now.month, now.day - 2, 12));
+    await LocalDb.putDayResult(
+      dayId: twoAgo,
+      algoVersion: kAlgoVersion,
+      payloadJson: jsonEncode({
+        'scalars': {'readiness': 77, 'rmssd': 55},
+        'sleep': {
+          'accounting': {
+            'value': {'tst_sec': 25200},
+          },
+        },
+      }),
+      windowJson: '{}',
+    );
+    await LocalDb.putDayResult(
+      dayId: yesterday,
+      algoVersion: kAlgoVersion,
+      payloadJson: jsonEncode({
+        'scalars': {'steps': 900},
+        'flags': ['NO_SLEEP_DETECTED'],
+      }),
+      windowJson: '{}',
+    );
+    await LocalDb.putDayResult(
+      dayId: today,
+      algoVersion: kAlgoVersion,
+      payloadJson: jsonEncode({
+        'scalars': {'steps': 300},
+      }),
+      windowJson: '{}',
+    );
+    await LocalDb.refreshComputeFreshness();
+
+    final t = await LocalRepositoryImpl(getProfileMap: () => {}).getToday();
+    final status = t['status'] as Map;
+    expect(status['showing_prior_overnight'], true);
+    expect(status['overnight_day'], yesterday);
+    final readiness = (t['daily'] as Map)['readiness'];
+    expect(
+        readiness is Map ? readiness['value'] : readiness, isNot(isA<num>()),
+        reason: "$twoAgo's 77 is not $yesterday's readiness");
   });
 }
