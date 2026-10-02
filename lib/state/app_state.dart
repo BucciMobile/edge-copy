@@ -4795,9 +4795,19 @@ class AppState extends ChangeNotifier {
   void _armAlarmGraceTimer(DateTime when) {
     _alarmGraceTimer?.cancel();
     _alarmGraceTimer = Timer(
-      Duration(milliseconds: _alarm.graceMs + 250),
+      alarmGraceTimerDelay(_alarm.graceMs, retryLeft: !_alarmAutoRetried),
       () => unawaited(_onAlarmGraceElapsed(when)),
     );
+  }
+
+  /// Every retry is spent and 56 still hasn't come. While connected a slow
+  /// strap can still confirm, so the critical alert waits; [_handleAlarmEvent]
+  /// cancels this timer when 56 lands, and the alert re-checks confirmation.
+  void _escalateAlarmLatchFailed(int epoch) {
+    _alarmGraceTimer?.cancel();
+    _alarmGraceTimer = Timer(alarmLatchAlertDelay(connected: isConnected), () {
+      if (!_disposed) unawaited(_notifyAlarmLatchFailed(epoch));
+    });
   }
 
   /// Grace window elapsed with no event 56. Before showing the soft warning,
@@ -4812,7 +4822,7 @@ class AppState extends ChangeNotifier {
     if (_savedAlarm != epoch) return;
     if (_alarmAutoRetried || !isConnected) {
       notifyListeners();
-      unawaited(_notifyAlarmLatchFailed(epoch));
+      _escalateAlarmLatchFailed(epoch);
       return;
     }
     _alarmAutoRetried = true;
@@ -4846,7 +4856,7 @@ class AppState extends ChangeNotifier {
       return;
     }
     notifyListeners();
-    unawaited(_notifyAlarmLatchFailed(epoch));
+    _escalateAlarmLatchFailed(epoch);
   }
 
   /// The "alarm not confirmed" safety notification (Feature 2.1): fires once

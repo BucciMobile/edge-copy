@@ -15,7 +15,8 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/ble/ble_state.dart';
-import 'package:openstrap_edge/state/alarm_schedule.dart' show alarmLatchFailed;
+import 'package:openstrap_edge/state/alarm_schedule.dart'
+    show alarmGraceTimerDelay, alarmLatchAlertDelay, alarmLatchFailed;
 import 'package:openstrap_edge/sync/sync_policy.dart' show ClockRef;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 
@@ -292,6 +293,30 @@ void main() {
       expect(a.onEvent(AlarmConfirmation.kEvtSet, 90000),
           AlarmEffect.confirmed);
       expect(a.isUnconfirmed(90000), isFalse);
+    });
+
+    test('the retry reopens the window before it closes, so no warning flash',
+        () {
+      final a = AlarmConfirmation()..set(1750000000, 0);
+      final retryAt =
+          alarmGraceTimerDelay(a.graceMs, retryLeft: true).inMilliseconds;
+      expect(a.isPending(retryAt), isTrue,
+          reason: 'still waiting when the retry re-sets the window');
+      final lastAt =
+          alarmGraceTimerDelay(a.graceMs, retryLeft: false).inMilliseconds;
+      expect(a.isUnconfirmed(lastAt), isTrue,
+          reason: 'the final rebuild lands on the warning');
+    });
+
+    test('critical alert holds back while connected, a late 56 then wins', () {
+      final a = AlarmConfirmation()..set(1750000000, 0);
+      final alertAt = 2 * a.graceMs +
+          alarmLatchAlertDelay(connected: true).inMilliseconds;
+      expect(alertAt, greaterThan(90000),
+          reason: 'a 56 at 90s must beat the alert');
+      a.onEvent(AlarmConfirmation.kEvtSet, 90000);
+      expect(alarmLatchFailed(a, 1750000000, enabled: true), isFalse);
+      expect(alarmLatchAlertDelay(connected: false), Duration.zero);
     });
 
     test('event 56 confirms (and clears pending/unconfirmed)', () {

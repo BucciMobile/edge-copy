@@ -258,3 +258,17 @@ bool alarmArmsTonight(int? armedEpochSec, DateTime now) {
 /// unit-testable without a fake OS notification sink.
 bool alarmLatchFailed(AlarmConfirmation a, int epoch, {required bool enabled}) =>
     enabled && a.targetEpoch == epoch && !a.confirmed;
+
+/// When the grace timer fires after a SET. With the auto-retry still to come it
+/// fires just BEFORE the window closes, so the retry reopens "waiting" without
+/// the row flashing "not confirmed" in between; the last window fires just
+/// after it closes, so the UI rebuild lands on the warning.
+Duration alarmGraceTimerDelay(int graceMs, {required bool retryLeft}) =>
+    Duration(milliseconds: retryLeft ? graceMs - 250 : graceMs + 250);
+
+/// How long after the last grace window before the critical "alarm not
+/// confirmed" alert goes out. Still connected = the strap may just be slow
+/// (event 56 can lag by minutes, and a late one still confirms), so hold the
+/// alert back; disconnected = nothing more can arrive, alert now.
+Duration alarmLatchAlertDelay({required bool connected}) =>
+    connected ? const Duration(minutes: 5) : Duration.zero;
