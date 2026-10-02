@@ -302,30 +302,18 @@ void main() {
 
   test('the stranded reset still lands when an advance is queued ahead of it',
       () async {
-    // THE WRITE-ORDERING HOLE THE RESET OPERATION CLOSES. The stranded note
-    // can arrive while an ordinary `oura_cursor_ds` advance from an earlier
-    // batch is still queued (the note handler runs on the event stream, the
-    // writes run on the serialised chain). Clearing the high-water mark at
-    // note-arrival time let that queued advance run FIRST and re-arm the
-    // mark, so the reset's own write of 0 was then refused by the guard and
-    // the stranded bookmark stayed stored — the permanent stall the reset
-    // exists to fix. The reset now runs as its own operation in the queue and
-    // clears the mark when IT runs, so an advance queued ahead of it can
-    // re-arm the mark all it likes: the mark is null by the time the reset's
-    // own write is checked.
+    // Batch 1 advances the cursor, batch 2 is stranded; the reset is queued
+    // behind the advance and must still be the write that lands.
     await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
     await OuraLink.instance.ingestForTest(
       _deviceId,
       _key,
-      // Batch 1 banks new data above the bookmark and emits a cursor advance;
-      // batch 2 comes back empty with bytes left — the stranded signal — so
-      // the advance's write and the reset's write are both in flight.
       (i, v) {
         if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
         if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
         if (v.first != 0x10) return const <List<int>>[];
         final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
-        if (cursor == 0) {
+        if (cursor == 5000) {
           return [
             _event(kOuraEvtTimeSync, 5000, _syncBody(1782043215)),
             _event(kOuraEvtTempPeriod, 5100, _hex(_temp3436)),
@@ -341,14 +329,7 @@ void main() {
   });
 
   test('a stranded reset invalidates the stored time anchor too', () async {
-    // THE ANCHOR IS A (previous-boot ds, Unix) PAIR, and the reset means the
-    // boot it was measured on is gone. Left in storage, the next session's
-    // `_loadAnchor` hands it to the adapter, and readings from the new boot's
-    // first batches are stamped by extrapolating the OLD origin across the
-    // NEW uptime — plausible, wrong, and indistinguishable from a
-    // measurement downstream. The reset clears the durable anchor and the
-    // session copy both, so those readings wait for the new boot's own
-    // `time_sync` instead.
+    // The anchor was measured on the boot the reset ended.
     await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
     await LocalDb.setCursor('oura_anchor:$_deviceId', '4000,1782043215');
     await OuraLink.instance.ingestForTest(
@@ -436,16 +417,7 @@ void main() {
   });
 
   test('a ring that answers below the bookmark never moves it', () async {
-    // DEFENCE IN DEPTH, pinned at the storage seam. A ring that answers a
-    // bookmark with events stamped below it is serving a replayed tail, and
-    // advancing on it would move the bookmark BACKWARDS — a busy loop on a
-    // live radio, re-reading the same window on every future sync. The
-    // adapter drops replays before they can earn a cursor advance (see the
-    // adapter tests), and the host's high-water mark refuses a regressing
-    // write outright; this pins the observable end state — the stored
-    // bookmark survives a below-the-cursor answer untouched — because a
-    // guarantee that lives in two files is only proven when the storage seam
-    // refuses the wrong write, not when each layer promises to.
+    // Replays below the bookmark must not move it backwards.
     await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
     await OuraLink.instance.ingestForTest(
       _deviceId,
@@ -467,7 +439,26 @@ void main() {
     expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 5000);
   });
 
-
+  test('a sleep-stage row stamped in the future is refused', () async {
+    await LocalDb.setCursor('oura_anchor:$_deviceId', '0,$_nowSec');
+    await _run([
+      [
+        _event(kOuraEvtSleepPhaseInformation, 10, _hex('000055aaff')),
+        _event(kOuraEvtSleepPhaseInformation, 10000000, _hex('000055aaff')),
+        _summary(2, 0),
+      ],
+    ]);
+    // Vendor scalars are banked off the commit chain; wait for them.
+    final db = await LocalDb.instance;
+    var rows = <Map<String, Object?>>[];
+    for (var i = 0; i < 200 && rows.isEmpty; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      rows = await db.query('observation');
+    }
+    expect(rows, hasLength(4));
+    expect(rows.every((r) => r['ts_ms'] == (_nowSec + 1) * 1000), isTrue,
+        reason: 'the stage row a million seconds out is not written');
+  });
 
   group('forgetRing', () {
     test('drops the device row', () async {
