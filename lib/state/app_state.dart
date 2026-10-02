@@ -6830,11 +6830,20 @@ class AppState extends ChangeNotifier {
     // the anchors cannot define one — then only absence counts, see
     // WorkoutIdleWatch). The ask is a notification, once per session; the
     // session itself is never touched — there is deliberately no auto-stop.
+    //
+    // ...but never above the zone-1 floor (issue #466): the calorie gate is
+    // 40 % HRR, moderate intensity, so a steady 92 bpm session the live bar
+    // shows as ZONE 1 was being told "nothing above resting effort". Quiet
+    // means below BOTH lines — billed as rest AND shown as rest.
     final wRhr = w.restingHr;
     final wMax = w.hrMax;
-    final idleGate = (wRhr != null && wMax != null)
+    final calGate = (wRhr != null && wMax != null)
         ? ana.Calories.activeGateHr(wMax, wRhr)
         : null;
+    final z1Floor = w.zoneSet?.zones.first.lower;
+    final idleGate = (calGate == null || z1Floor == null)
+        ? calGate
+        : math.min(calGate, z1Floor);
     if (w.idleWatch.onTick(DateTime.now(), hr: hr, gate: idleGate)) {
       unawaited(_nudgeIdleWorkout(w));
     }

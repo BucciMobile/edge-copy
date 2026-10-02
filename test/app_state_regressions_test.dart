@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
@@ -447,6 +448,35 @@ void main() {
       active.debugTickWorkout();
       expect(w2.idleWatch.lastAskAt, isNull,
           reason: 'a real reading (no gate → any reading) is activity');
+    });
+
+    test('a zone-1 reading below the calorie gate is not "resting" (#466)', () {
+      // RHR 60 / max 190: the calorie gate is 112 bpm, zone 1 starts at 95.
+      // A steady 100 bpm session reads ZONE 1 on the live bar, so it must not
+      // be asked "nothing above resting effort".
+      LiveWorkoutState session(String id) => LiveWorkoutState(
+            startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+            targetKcal: 300,
+            workoutId: id,
+            type: 'strength',
+            hrMax: 190,
+            restingHr: 60,
+            zoneSet: ana.HeartRateZones.zonesFromMaxHr(190),
+          );
+      final app = connected(100);
+      addTearDown(app.dispose);
+      final w = session('z1');
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNull);
+
+      final rest = connected(70);
+      addTearDown(rest.dispose);
+      final w2 = session('rest');
+      rest.activeWorkout = w2;
+      rest.debugTickWorkout();
+      expect(w2.idleWatch.lastAskAt, isNotNull,
+          reason: 'below zone 1 is still quiet');
     });
   });
 
