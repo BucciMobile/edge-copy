@@ -896,12 +896,13 @@ int? hardwareStepsFromCounter(
 /// The same credited deltas as [hardwareStepsFromCounter], placed on the
 /// clock: every delta happened between the two records it was read across, so
 /// the counter DOES carry times — one per record. Grouped into one span per
-/// clock hour (by the delta's closing record), each span running from the
+/// LOCAL clock hour (by the delta's closing record), each span running from the
 /// first credited delta's opening record to the last one's closing record.
+/// Local, not `ts ~/ 3600`: in a half-hour-offset zone a UTC hour crosses a
+/// local hour line, and the day chart spreads a span evenly over its extent,
+/// so a UTC-hour span would push steps into the wrong local hour.
 /// The spans sum to exactly [hardwareStepsFromCounter]'s total. Null whenever
 /// that is null.
-// ponytail: UTC-hour buckets; a half-hour-offset zone gets spans straddling
-// its local hour lines, which the day chart apportions by time anyway.
 List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
   Substrate sub, {
   required int? cumulativeCounterModulus,
@@ -911,7 +912,7 @@ List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
   final seen = _walkCounterDeltas(sub, cumulativeCounterModulus,
       maxStepsPerSecond, (fromTs, ts, delta) {
     final last = out.isEmpty ? null : out.last;
-    if (last != null && last.endTs ~/ 3600 == ts ~/ 3600) {
+    if (last != null && _localHourStart(last.endTs) == _localHourStart(ts)) {
       out[out.length - 1] =
           (startTs: last.startTs, endTs: ts, steps: last.steps + delta);
     } else {
@@ -919,6 +920,12 @@ List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
     }
   });
   return seen ? out : null;
+}
+
+/// Epoch second of the start of the local clock hour containing [ts].
+int _localHourStart(int ts) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  return ts - d.minute * 60 - d.second;
 }
 
 /// Walks [sub]'s counter and calls [credit] once per delta that passes the

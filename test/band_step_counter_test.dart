@@ -42,7 +42,9 @@ void main() {
     test('one span per clock hour, summing to the total, reset dropped', () {
       // 10-minute records from an hour boundary. The delta closing at +3600 is
       // the second hour's; the jump to 39998 and the reset to 0 are dropped.
-      const t0 = 1_699_999_200; // a whole UTC hour
+      // A whole LOCAL hour (spans bucket by local hour), whatever the host zone.
+      final t0 = 1_699_999_200 -
+          DateTime.fromMillisecondsSinceEpoch(1_699_999_200 * 1000).minute * 60;
       final s = _sub([0, 10, 20, 20, 30, 40, 50, 39998, 40000, 0, 7],
           startTs: t0, step: 600);
       final spans = hardwareStepSpansFromCounter(s, cumulativeCounterModulus: 65536)!;
