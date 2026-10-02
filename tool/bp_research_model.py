@@ -16,7 +16,7 @@ are for MATH tests only.
 Usage:
     python3 bp_research_model.py --csv bp_research.csv [--out report.txt]
 
-Model (research draft, per the PR description):
+Model (research draft):
     H = mean of valid HR in the window (hr_mean)
     V = RMSSD over valid contiguous interval pairs (rmssd_ms)
     L = ln((V + eps) / 1 ms), eps = 1e-3 ms, numerical stability only
