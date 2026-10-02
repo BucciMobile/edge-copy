@@ -1733,8 +1733,7 @@ class LocalDb {
     );
     // Nothing local any more but a snapshot exists: the decoded rows were
     // pruned, and the frozen window is the only copy. Keep it.
-    // ponytail: a partially pruned window still overwrites; compare row
-    // counts against the last snapshot if that ever matters.
+    // A partially pruned window still writes a smaller revision.
     if (rows.onehz.isEmpty && rows.rr.isEmpty && r['max_rev'] != null) return;
     final window = researchWindowFrom(
       measuredAtMs: at,
@@ -1943,11 +1942,10 @@ class LocalDb {
     ''');
   }
 
-  /// Delete one capture (dev screen). The window cascades.
+  /// Delete one capture with its window and snapshots. foreign_keys is off,
+  /// so ON DELETE CASCADE does nothing here.
   static Future<void> deleteBpResearchCapture(int id) async {
     final db = await instance;
-    // No PRAGMA foreign_keys here, so the window's ON DELETE CASCADE is
-    // inert — the delete has to take the window row explicitly.
     await db.transaction((txn) async {
       await txn.delete(
         'bp_research_window',
@@ -9076,8 +9074,6 @@ class LocalDb {
     }
 
     Future<bool> srcHasTable(String t, Database s) async {
-      // A salvage source may predate the window table; `SELECT *` on a
-      // missing table throws, so probe for its existence first.
       final rows = await s.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
         [t],
@@ -9086,30 +9082,14 @@ class LocalDb {
     }
 
     final counts = <String, int>{};
-    // SOURCE→DEST id map for the BP research reference merge below: the
-    // window rows of a foreign export name their reference by the SOURCE
-    // database's AUTOINCREMENT id, which is meaningless here.
+    // BP research rows name their reference by the source's AUTOINCREMENT id.
     final bpIdMap = <int, int>{};
-    // Snapshot revisions skipped on import because the destination holds a
-    // DIFFERENT snapshot under the same (reference, revision) key —
-    // immutable history is never overwritten, the source file keeps them.
     var skippedSnapshots = 0;
-    // Window rows skipped on import because the snapshot revision their
-    // features were computed from conflicts with the destination's local
-    // revision — a window may never point at a foreign snapshot.
     var skippedWindows = 0;
-    // Of those, the split by REASON — surfaced as extra import-count keys
-    // so a restore can be audited: a skipped window is either a snapshot
-    // CONTENT conflict or a snapshot the source backup simply does not
-    // carry.
     var skippedWindowsSnapshotConflict = 0;
     var skippedWindowsMissingSnapshot = 0;
-    // Rows skipped because their SOURCE reference did not map (dangling
-    // source rows) — reported separately from content conflicts.
     var skippedSnapshotsDanglingReference = 0;
     var skippedWindowsDanglingReference = 0;
-    // Source snapshots already present HERE byte-identically — idempotent
-    // re-imports, not new imports; the count must not claim them.
     var skippedSnapshotsIdentical = 0;
     // DISTINCT DAYS ACTUALLY WRITTEN — the number the caller reports as
     // "N days imported".
@@ -9169,31 +9149,13 @@ class LocalDb {
             if (e.isNoSuchTableError()) continue;
             rethrow;
           }
-          // BP RESEARCH CAPTURES MERGE BY NATURAL KEY, NOT BY SOURCE ID. The
-          // reference's `id` is a device-local AUTOINCREMENT and the window
-          // and snapshot rows' `reference_id` name it, so the generic
-          // REPLACE-by-PK path would let a foreign export's id=1 eat this
-          // install's id=1 capture. All three tables are hand-typed and tiny
-          // (nothing writes them but the dev screen), so a dedicated merge
-          // beats threading a special case through the paged loop: the
-          // reference is keyed on its natural UNIQUE (measured_at_ms, device)
-          // identity, the window and snapshots follow onto the DESTINATION
-          // id, and a capture whose incoming window is absent keeps the
-          // window it already had. Re-import converges.
+          // BP research captures merge by their natural key
+          // (measured_at_ms, device) in one transaction, never by source id.
+          // A snapshot revision is never overwritten; a window whose
+          // snapshot is missing or differs here is skipped and counted.
           if (t == 'bp_research_reference' ||
               t == 'bp_research_window' ||
               t == 'bp_research_snapshot') {
-            // ONE TRANSACTIONAL UNIT. Reference, snapshots and window are
-            // restored together, driven by the reference entry: the window
-            // names the snapshot revision its features were computed from,
-            // so it may only be written when that revision exists HERE with
-            // the same content — decided inside the SAME transaction, not in
-            // three separate table passes. (A previous split-pass version
-            // loaded `srcSnaps` only in the snapshot pass, leaving the
-            // snapshot status map EMPTY in the window pass, so every
-            // conflict-free window with a snapshot revision was silently
-            // skipped.) The window and snapshot list entries that follow are
-            // already handled here and only skip.
             if (t != 'bp_research_reference') {
               continue;
             }
@@ -9217,9 +9179,6 @@ class LocalDb {
                       if (refCols.contains(e.key)) e.key: e.value,
                   };
                   final srcId = row.remove('id');
-                  // KEEP the destination id on collision (see the v1 fix):
-                  // UPDATE in place preserves the id the window and
-                  // snapshot rows are about to be re-attached to.
                   final device = (row['device'] as String?) ?? '';
                   final existing = await txn.rawQuery(
                     'SELECT id FROM bp_research_reference '
@@ -9280,15 +9239,6 @@ class LocalDb {
                     bpIdMap[srcId.toInt()] = destId;
                   }
                 }
-                // SNAPSHOT PASS FIRST. A window row names the snapshot
-                // revision its features were computed from, so the window
-                // may only be imported when that revision exists HERE with
-                // the SAME content. Doing snapshots first builds the
-                // (dest_reference_id, dest_revision) -> status map the
-                // window pass then checks against — the invariant being:
-                // window features must belong to exactly the snapshot they
-                // were computed from, never to a local revision that
-                // happens to share the number but holds different rows.
                 final snapStatus = <(int, int), String>{};
                 for (final sn in srcSnaps) {
                   final row = <String, Object?>{
@@ -9299,9 +9249,6 @@ class LocalDb {
                       bpIdMap[(row.remove('reference_id') as num?)?.toInt()];
                   final rev = (row['revision'] as num?)?.toInt();
                   if (mapped == null || rev == null) {
-                    // A snapshot whose source reference did not map is a
-                    // dangling source row — skipped and counted, never
-                    // silently claimed as imported.
                     skippedSnapshots++;
                     skippedSnapshotsDanglingReference++;
                     continue;
@@ -9312,19 +9259,11 @@ class LocalDb {
                     [mapped, rev],
                   );
                   if (clash.isNotEmpty) {
-                    // IMMUTABLE HISTORY: an existing revision is never
-                    // overwritten. Identical content = idempotent re-import
-                    // (status 'identical'); different content = a conflict
-                    // the window pass must respect (status 'conflict') —
-                    // the source revision stays available in the source
-                    // backup, nothing is lost, nothing is rewritten.
                     final same =
                         clash.first['onehz_json'] == row['onehz_json'] &&
                         clash.first['rr_json'] == row['rr_json'];
                     snapStatus[(mapped, rev)] = same ? 'identical' : 'conflict';
                     if (same) {
-                      // An identical re-import is NOT a new import — the
-                      // count must not claim it.
                       skippedSnapshots++;
                       skippedSnapshotsIdentical++;
                     } else {
@@ -9354,27 +9293,14 @@ class LocalDb {
                   final mapped =
                       bpIdMap[(row.remove('reference_id') as num?)?.toInt()];
                   if (mapped == null) {
-                    // Dangling source window: no reference to attach to.
-                    // Skipped and counted, never claimed as imported.
                     skippedWindows++;
                     skippedWindowsDanglingReference++;
                     continue;
                   }
-                  // snapshot revision may only be imported when that
-                  // revision is HERE with the same content ('inserted' or
-                  // 'identical'). A 'conflict' means the local revision n
-                  // holds DIFFERENT rows than the source window's features
-                  // were computed from — importing it would point features
-                  // at a foreign snapshot. The window is skipped and
-                  // counted; the destination keeps its own consistent pair.
                   final rev = (row['snapshot_revision'] as num?)?.toInt();
                   if (rev != null) {
                     final status = snapStatus[(mapped, rev)];
                     if (status == null) {
-                      // The source window names a snapshot revision the
-                      // source backup does not carry — its features cannot
-                      // be linked to raw data that does not exist. Skipped
-                      // and counted as missing, never imported snapshotless.
                       skippedWindows++;
                       skippedWindowsMissingSnapshot++;
                       continue;
@@ -9422,16 +9348,9 @@ class LocalDb {
                 }
               });
               counts['bp_research_reference'] = srcRefs.length;
-              // Snapshots whose (reference, revision) key collided with
-              // DIFFERENT content were skipped, not imported — the count
-              // must not claim them.
               counts['bp_research_snapshot'] =
                   srcSnaps.length - skippedSnapshots;
-              // Windows skipped over a snapshot conflict or a missing source
-              // snapshot were not imported — the count must not claim them.
               counts['bp_research_window'] = srcWins.length - skippedWindows;
-              // Audit keys: WHY windows or snapshots were skipped, so a
-              // restore result can be read without opening the source file.
               counts['bp_research_snapshot_conflicts'] =
                   skippedSnapshots -
                   skippedSnapshotsDanglingReference -
