@@ -55,12 +55,6 @@ class MetricSpec {
   /// reason, shown as a `StatusCard` in place of the chart.
   final String? suppress;
   final String? suppressFix;
-  /// True when the suppressed metric still has imported values worth
-  /// SHOWING. A suppressed spec loads no series at all — the chart is the
-  /// thing suppression refuses — but a vendor-imported scalar that IS the
-  /// metric deserves its values on screen, as a dated table with provenance
-  /// instead of a trend line. Data-loading flag, not a rendering one.
-  final bool importedValues;
 
   /// How it is computed, and who published the method. Rendered by Nerd stats.
   final String method;
@@ -89,7 +83,6 @@ class MetricSpec {
     this.higherBetter = true,
     this.suppress,
     this.suppressFix,
-    this.importedValues = false,
     this.method = '',
     this.citation = '',
     this.requires = const {},
@@ -317,17 +310,7 @@ const _specs = <String, MetricSpec>{
     citation: 'Within-user dispersion',
     requires: {InputSignal.rrIntervals},
   ),
-  // Blood oxygen, as WHOOP'S OWN DERIVED VALUE from a CSV export — never as
-  // a measurement this app made. The band's raw red/IR ADCs are refused as an
-  // SpO2 source PERMANENTLY (see `kSpo2Refusal` in onehz_pipeline.dart: within
-  // a capture session `ir - red` is a fixed offset, so every ratio built from
-  // them measures baseline drift, not oxygenation). What survives is the
-  // vendor's own number, and only on days the WHOOP importer wrote
-  // (`series: {'spo2': ...}` in whoop_import.dart — DerivationEngine's own
-  // series map does NOT list the key, so a band re-derive can never fabricate
-  // one). SUPPRESSED rather than charted for the same reason skin_temp is:
-  // a chart mixes band-derived and vendor-imported points under one line with
-  // no provenance axis, and WHOOP's calibration is not this app's to audit.
+  // Only the WHOOP importer writes this key today; the band derive does not.
   'spo2': MetricSpec(
     chartKey: 'spo2',
     title: 'Blood oxygen',
@@ -335,16 +318,9 @@ const _specs = <String, MetricSpec>{
     color: C.pink,
     icon: LucideIcons.droplet,
     higherBetter: true,
-    suppress: 'Not measured by this app. WHOOP\'s own derived value, carried '
-        'verbatim from an imported export — never computed from the band\'s '
-        'raw signals, whose red/IR pair cannot yield a saturation.',
-    method: 'Nothing is computed here. The nightly mean saturation is '
-        'WHOOP\'s own derived number, read from the `blood oxygen %` column '
-        'of an imported export and stored as-is with '
-        '`inputs_used: [whoop_export]`.',
-    citation: 'Vendor-derived, imported',
-    importedValues: true,
-    requires: {},
+    method: 'WHOOP\'s own nightly value, read from the blood oxygen column of '
+        'an imported export and stored as-is.',
+    citation: 'Imported from WHOOP',
   ),
   // Both of these were written to `metric_series` on every derive since v55 and
   // had no spec, so nothing could open them — `specOf` fell through to a
@@ -402,7 +378,7 @@ const _specs = <String, MetricSpec>{
     citation: 'Relative only — uncalibrated ADC',
     requires: {InputSignal.skinTempRaw},
   ),
-  // `spo2`, `odi_per_hour` and `strain_effort` used to live here as cards that
+  // `odi_per_hour` and `strain_effort` used to live here as cards that
   // existed only to explain that they were empty. A metric this app does not
   // produce has no entry, no card and no key. See docs/internal/UI_ROADMAP.md.
   //
@@ -524,9 +500,7 @@ class MetricData {
     List<DeviceOption> candidates = const [],
   }) async {
     final spec = specOf(key);
-    if (spec.suppress != null && !spec.importedValues) {
-      return const MetricData();
-    }
+    if (spec.suppress != null) return const MetricData();
     final chart = await repo.getChart(
       spec.chartKey,
       signals: {for (final s in spec.requires) s.name},
@@ -890,21 +864,6 @@ class _MetricDetailState extends State<MetricDetail> {
           icon: spec.icon,
         ),
         const SizedBox(height: S.x5),
-        // The imported values themselves, as a dated table rather than a
-        // trend: suppression refuses the LINE (a chart would sit these
-        // vendor-derived points under the same maths as the band's own), not
-        // the numbers, which are the metric's only content. Newest first, so
-        // the latest import reads without scrolling.
-        if (d.series.isNotEmpty) ...[
-          MonoTable(
-            l?.metricDetailImportedTableTitle ?? 'Imported values',
-            [
-              for (final p in d.series.reversed.take(30))
-                (axisDay(p.t), '${p.v.toStringAsFixed(1)} ${spec.unit}'),
-            ],
-          ),
-          const SizedBox(height: S.x5),
-        ],
         investigateRow(c, () => go(c, Investigate(widget.metricKey))),
       ] else if (vals.isEmpty) ...[
         _ranges(c, d, spec.color),

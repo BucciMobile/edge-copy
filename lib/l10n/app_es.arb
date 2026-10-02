@@ -1082,11 +1082,7 @@
   "metricDetailRange6Months": "6 meses",
   "metricDetailRangeYear": "Año",
   "metricDetailLockedNote": "{label} necesita {needed} días de historial. Tienes {have}.",
-    "metricDetailImportedTableTitle": "Valores importados",
-  "@metricDetailImportedTableTitle": {
-    "description": "Valores importados con fecha para una métrica suprimida e importada del proveedor (oxígeno en sangre)."
-  },
-"metricDetailNotShownTitle": "No se muestra como tendencia",
+  "metricDetailNotShownTitle": "No se muestra como tendencia",
   "metricDetailNothingRecordedToday": "Nada registrado hoy",
   "metricDetailNoHistoryYet": "Aún no hay historial de {metric}",
   "metricDetailNoValueYet": "Hoy aún no ha producido un valor.",
@@ -1319,11 +1315,11 @@
   "healthBlurbNapMin": "Sueño detectado fuera de la noche principal",
   "healthBlurbRespRate": "Respiraciones por minuto, obtenidas del ritmo cardíaco",
   "healthBlurbBrv": "Cuánto varía ese ritmo a lo largo de la noche",
-    "healthBlurbSpo2": "Valor propio de WHOOP, tomado de una importación",
+  "healthBlurbSpo2": "Valor propio de WHOOP, tomado de una importación",
   "@healthBlurbSpo2": {
     "description": "Descripción del catálogo Explore: oxígeno en sangre importado"
   },
-"healthBlurbSteps": "Contados por un podómetro, nunca estimados",
+  "healthBlurbSteps": "Contados por un podómetro, nunca estimados",
   "healthBlurbActiveMin": "Minutos de volumen de movimiento, no de desplazamiento",
   "healthBlurbCalories": "Energía activa calculada a partir de la frecuencia cardíaca y tu perfil",
   "healthBlurbStrain": "Carga cardiovascular a lo largo del día, en una escala de 0 a 21",

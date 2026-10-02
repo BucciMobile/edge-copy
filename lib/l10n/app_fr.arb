@@ -1082,11 +1082,7 @@
   "metricDetailRange6Months": "6 mois",
   "metricDetailRangeYear": "Année",
   "metricDetailLockedNote": "{label} nécessite {needed} jours d’historique. Vous en avez {have}.",
-    "metricDetailImportedTableTitle": "Valeurs importées",
-  "@metricDetailImportedTableTitle": {
-    "description": "Valeurs importées datées pour une métrique supprimée et importée du fournisseur (oxygène sanguin)."
-  },
-"metricDetailNotShownTitle": "Non affiché sous forme de tendance",
+  "metricDetailNotShownTitle": "Non affiché sous forme de tendance",
   "metricDetailNothingRecordedToday": "Rien d’enregistré aujourd’hui",
   "metricDetailNoHistoryYet": "Pas encore d’historique pour {metric}",
   "metricDetailNoValueYet": "Aujourd’hui n’a pas encore produit de valeur.",
@@ -1319,11 +1315,11 @@
   "healthBlurbNapMin": "Sommeil détecté en dehors de la nuit principale",
   "healthBlurbRespRate": "Respirations par minute, déduites du rythme cardiaque",
   "healthBlurbBrv": "À quel point ce rythme varie au cours de la nuit",
-    "healthBlurbSpo2": "Valeur propre de WHOOP, reprise d'une importation",
+  "healthBlurbSpo2": "Valeur propre de WHOOP, reprise d'une importation",
   "@healthBlurbSpo2": {
     "description": "Description du catalogue Explore : oxygène sanguin importé"
   },
-"healthBlurbSteps": "Comptés par un podomètre, jamais modélisés",
+  "healthBlurbSteps": "Comptés par un podomètre, jamais modélisés",
   "healthBlurbActiveMin": "Minutes de volume de mouvement, pas de déplacement",
   "healthBlurbCalories": "Énergie active calculée à partir de la fréquence cardiaque et de votre profil",
   "healthBlurbStrain": "Charge cardiovasculaire sur la journée, sur une échelle de 0 à 21",

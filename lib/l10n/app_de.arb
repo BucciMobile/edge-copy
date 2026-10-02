@@ -1082,11 +1082,7 @@
   "metricDetailRange6Months": "6 Monate",
   "metricDetailRangeYear": "Jahr",
   "metricDetailLockedNote": "{label} benötigt {needed} Tage Verlauf. Du hast {have}.",
-    "metricDetailImportedTableTitle": "Importierte Werte",
-  "@metricDetailImportedTableTitle": {
-    "description": "Datierte importierte Werte einer unterdrückten, hersteller-importierten Metrik (Blutsauerstoff)."
-  },
-"metricDetailNotShownTitle": "Nicht als Trend angezeigt",
+  "metricDetailNotShownTitle": "Nicht als Trend angezeigt",
   "metricDetailNothingRecordedToday": "Heute nichts aufgezeichnet",
   "metricDetailNoHistoryYet": "Noch kein Verlauf für {metric}",
   "metricDetailNoValueYet": "Für heute liegt noch kein Wert vor.",
@@ -1319,11 +1315,11 @@
   "healthBlurbNapMin": "Schlaf, der außerhalb der Hauptnacht erkannt wurde",
   "healthBlurbRespRate": "Atemzüge pro Minute, aus der Herzschlagzeit ermittelt",
   "healthBlurbBrv": "Wie stark diese Rate über die Nacht hinweg schwankt",
-    "healthBlurbSpo2": "WHOOPs eigener Wert, unverändert aus einem Import übernommen",
+  "healthBlurbSpo2": "WHOOPs eigener Wert, unverändert aus einem Import übernommen",
   "@healthBlurbSpo2": {
     "description": "Explore-Katalog: importierter Blutsauerstoff"
   },
-"healthBlurbSteps": "Von einem Schrittzähler gezählt, niemals modelliert",
+  "healthBlurbSteps": "Von einem Schrittzähler gezählt, niemals modelliert",
   "healthBlurbActiveMin": "Minuten an Bewegungsvolumen, nicht an Fortbewegung",
   "healthBlurbCalories": "Aktive Energie aus Herzfrequenz und deinem Profil",
   "healthBlurbStrain": "Kardiovaskuläre Belastung über den Tag, auf einer Skala von 0–21",

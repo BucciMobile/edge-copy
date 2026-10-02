@@ -1082,11 +1082,7 @@
   "metricDetailRange6Months": "6 महीने",
   "metricDetailRangeYear": "साल",
   "metricDetailLockedNote": "{label} के लिए {needed} दिनों का इतिहास चाहिए। आपके पास {have} है।",
-    "metricDetailImportedTableTitle": "आयातित मान",
-  "@metricDetailImportedTableTitle": {
-    "description": "दबाई गई, विक्रेता-आयातित मीट्रिक (रक्त ऑक्सीजन) के दिनांकित आयातित मान।"
-  },
-"metricDetailNotShownTitle": "ट्रेंड के रूप में नहीं दिखाया गया",
+  "metricDetailNotShownTitle": "ट्रेंड के रूप में नहीं दिखाया गया",
   "metricDetailNothingRecordedToday": "आज कुछ भी दर्ज नहीं हुआ",
   "metricDetailNoHistoryYet": "{metric} के लिए अभी तक कोई इतिहास नहीं",
   "metricDetailNoValueYet": "आज अभी तक कोई मान नहीं मिला है।",
@@ -1319,11 +1315,11 @@
   "healthBlurbNapMin": "मुख्य रात के अलावा मिली नींद",
   "healthBlurbRespRate": "प्रति मिनट साँसें, धड़कन-समय से निकाली गई",
   "healthBlurbBrv": "यह दर पूरी रात में कितनी बदलती है",
-    "healthBlurbSpo2": "WHOOP का अपना मान, आयात से लिया गया",
+  "healthBlurbSpo2": "WHOOP का अपना मान, आयात से लिया गया",
   "@healthBlurbSpo2": {
     "description": "Explore सूची: आयातित रक्त ऑक्सीजन"
   },
-"healthBlurbSteps": "पेडोमीटर से गिने गए, कभी अनुमानित नहीं",
+  "healthBlurbSteps": "पेडोमीटर से गिने गए, कभी अनुमानित नहीं",
   "healthBlurbActiveMin": "गति की मात्रा के मिनट, चलना-फिरना नहीं",
   "healthBlurbCalories": "हृदय गति और आपकी प्रोफ़ाइल से निकाली गई सक्रिय ऊर्जा",
   "healthBlurbStrain": "पूरे दिन का हृदय-संवहनी भार, 0–21 के पैमाने पर",

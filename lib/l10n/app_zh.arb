@@ -1082,11 +1082,7 @@
   "metricDetailRange6Months": "6 个月",
   "metricDetailRangeYear": "一年",
   "metricDetailLockedNote": "{label}需要 {needed} 天的历史记录。你有 {have} 天。",
-    "metricDetailImportedTableTitle": "导入值",
-  "@metricDetailImportedTableTitle": {
-    "description": "被压制、供应商导入指标（血氧）的带日期导入值。"
-  },
-"metricDetailNotShownTitle": "不作为趋势显示",
+  "metricDetailNotShownTitle": "不作为趋势显示",
   "metricDetailNothingRecordedToday": "今天没有记录",
   "metricDetailNoHistoryYet": "{metric}暂无历史记录",
   "metricDetailNoValueYet": "今天还没有产生数值。",
@@ -1319,11 +1315,11 @@
   "healthBlurbNapMin": "在主要夜间睡眠之外检测到的睡眠",
   "healthBlurbRespRate": "每分钟呼吸次数，由心跳节律推算得出",
   "healthBlurbBrv": "该频率在整夜中的波动程度",
-    "healthBlurbSpo2": "WHOOP 自己的数值，来自导入数据",
+  "healthBlurbSpo2": "WHOOP 自己的数值，来自导入数据",
   "@healthBlurbSpo2": {
     "description": "Explore 目录：导入的血氧"
   },
-"healthBlurbSteps": "由计步器实际计数，从不依赖模型估算",
+  "healthBlurbSteps": "由计步器实际计数，从不依赖模型估算",
   "healthBlurbActiveMin": "运动量的分钟数，而非移动距离",
   "healthBlurbCalories": "根据心率和你的个人资料计算出的活动能量",
   "healthBlurbStrain": "全天的心血管负荷，0至21分制",

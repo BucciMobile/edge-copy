@@ -85,10 +85,6 @@ class InvestigateData {
   final int? coveragePct;
   final int? windowStart, windowEnd;
   final List<double> series;
-  /// `series` WITH its timestamps, for the one reader that labels values
-  /// with days (the imported-values table). Suppressed metrics use this
-  /// instead of being reduced to bare doubles.
-  final List<ChartPoint> seriesPoints;
 
   const InvestigateData({
     this.day,
@@ -108,7 +104,6 @@ class InvestigateData {
     this.windowStart,
     this.windowEnd,
     this.series = const [],
-    this.seriesPoints = const [],
   });
 
   static Future<InvestigateData> load(LocalRepository repo, String key,
@@ -126,10 +121,8 @@ class InvestigateData {
     final lungs = await repo.getDayLungs(day);
     final row = await LocalDb.dayResult(day);
     final win = lungs['sleep_window'];
-    final seriesPoints = spec.suppress != null && !spec.importedValues
-        ? const <ChartPoint>[]
-        : pointsOf(await repo.getChart(spec.chartKey));
-    final series = [for (final p in seriesPoints) p.v];
+    final series =
+        spec.suppress != null ? const <double>[] : seriesOf(await repo.getChart(spec.chartKey));
     final hrvish = key == 'hrv';
     final dc = hrvish
         ? pointsOf(await repo.getChart('prsa_dc'))
@@ -176,7 +169,6 @@ class InvestigateData {
       windowStart: win is Map ? (win['start'] as num?)?.toInt() : null,
       windowEnd: win is Map ? (win['end'] as num?)?.toInt() : null,
       series: series,
-      seriesPoints: seriesPoints,
     );
   }
 
@@ -1087,19 +1079,6 @@ class _InvestigateState extends State<Investigate> {
             l?.investigateNothingComputedForKey ?? 'Nothing computed for this key',
             spec.suppress!,
             icon: spec.icon),
-        // Same display path as the detail screen: a suppressed spec refuses
-        // the TREND, but a vendor-imported series is still the data the user
-        // came here to see. Dated values with provenance, never a line.
-        if (spec.importedValues && d.series.isNotEmpty) ...[
-          const SizedBox(height: S.x3),
-          MonoTable(
-            l?.metricDetailImportedTableTitle ?? 'Imported values',
-            [
-              for (final p in d.seriesPoints.reversed.take(30))
-                (axisDay(p.t), '${p.v.toStringAsFixed(1)} ${spec.unit}'),
-            ],
-          ),
-        ],
       ];
     }
     final s = d.series;
