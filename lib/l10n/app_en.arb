@@ -12490,7 +12490,7 @@
   "@bpResearchBadValue": {
     "description": "Snackbar text for an out-of-bounds reference pair, which is rejected, never clamped"
   },
-  "bpResearchExportHint": "Export as CSV from Your data › Export CSV (set \"BP research captures\"). Backups and an opt-in health share include them too.",
+  "bpResearchExportHint": "Included in Your data › Export as spreadsheets. Backups and an opt-in health share include them too.",
   "@bpResearchExportHint": {
     "description": "Hint under the capture list explaining the CSV export path"
   },
@@ -12501,5 +12501,53 @@
   "bpResearchWindowEmpty": "No band data in the window",
   "@bpResearchWindowEmpty": {
     "description": "Capture list subtitle when the band recorded nothing around the reading"
+  },
+  "bpResearchRefreshFailed": "Saved, but the list failed to refresh. ({error})",
+  "@bpResearchRefreshFailed": {
+    "description": "Snackbar when the capture was stored but the list reload threw",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "bpResearchCaptureFailed": "Capture failed, nothing was saved. ({error})",
+  "@bpResearchCaptureFailed": {
+    "description": "Snackbar when storing the capture threw",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "bpResearchWindowHr": "HR {bpm} bpm",
+  "@bpResearchWindowHr": {
+    "description": "Capture list subtitle part: mean heart rate in the window",
+    "placeholders": {
+      "bpm": {
+        "type": "String"
+      }
+    }
+  },
+  "bpResearchWindowRmssd": "RMSSD {ms} ms",
+  "@bpResearchWindowRmssd": {
+    "description": "Capture list subtitle part: RMSSD in the window",
+    "placeholders": {
+      "ms": {
+        "type": "String"
+      }
+    }
+  },
+  "bpResearchWindowCounts": "{rows} 1 Hz rows, {beats} beats",
+  "@bpResearchWindowCounts": {
+    "description": "Capture list subtitle part: how much band data the window holds",
+    "placeholders": {
+      "rows": {
+        "type": "String"
+      },
+      "beats": {
+        "type": "String"
+      }
+    }
   }
 }

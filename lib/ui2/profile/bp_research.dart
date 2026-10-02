@@ -100,8 +100,10 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(stored
-              ? 'Saved, but the list failed to refresh. ($e)'
-              : 'Capture failed, nothing was saved. ($e)'),
+              ? (l?.bpResearchRefreshFailed('$e') ??
+                  'Saved, but the list failed to refresh. ($e)')
+              : (l?.bpResearchCaptureFailed('$e') ??
+                  'Capture failed, nothing was saved. ($e)')),
         ));
       }
     } finally {
@@ -198,9 +200,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
             const SizedBox(height: S.x4),
             Text(
               l?.bpResearchExportHint ??
-                  'Export as CSV from Your data › Export CSV (set "BP '
-                  'research captures"). Backups and an opt-in health share '
-                  'include them too.',
+                  'Included in Your data › Export as spreadsheets. Backups '
+                  'and an opt-in health share include them too.',
               style: F.cap.copyWith(color: p.ink2, height: 1.5),
             ),
           ],
@@ -223,9 +224,17 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
           : (l?.bpResearchWindowEmpty ?? 'No band data in the window');
     }
     final parts = <String>[];
-    if (hr is num) parts.add('HR ${hr.toStringAsFixed(0)} bpm');
-    if (rmssd is num) parts.add('RMSSD ${rmssd.toStringAsFixed(0)} ms');
-    parts.add('${onehz ?? 0} 1 Hz rows, ${beats ?? 0} beats');
+    if (hr is num) {
+      final v = hr.toStringAsFixed(0);
+      parts.add(l?.bpResearchWindowHr(v) ?? 'HR $v bpm');
+    }
+    if (rmssd is num) {
+      final v = rmssd.toStringAsFixed(0);
+      parts.add(l?.bpResearchWindowRmssd(v) ?? 'RMSSD $v ms');
+    }
+    final rows = '${onehz ?? 0}', n = '${beats ?? 0}';
+    parts.add(
+        l?.bpResearchWindowCounts(rows, n) ?? '$rows 1 Hz rows, $n beats');
     return parts.join(' · ');
   }
 }
