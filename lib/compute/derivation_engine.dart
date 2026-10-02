@@ -31,6 +31,7 @@ import 'package:flutter/foundation.dart';
 import 'findings.dart';
 import 'nap_edits.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
+import '../data/live_coverage_policy.dart' show CoverageSpan;
 import '../data/step_calibration.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_performance/firebase_performance.dart';
@@ -4873,14 +4874,17 @@ class DerivationEngine {
     await _maybeFreezeHeadlineReadiness(day, dataNowSec, sc('readiness'));
     // Learn the step-counter calibration from finalized days only (a partial
     // day has the phone running ahead of the last offload), and only from
-    // phone-only days: on a mixed day `liveSteps.phone` is what is left after
+    // phone-only days: on a mixed day the phone spans are what is left after
     // band spans claimed their windows, not an independent reference.
     if (finalized && counterWearing != 0 && !liveSteps.mixed) {
       await _updateStepCalibration(
         day.date,
         daySub,
         counterWearing,
-        phoneReference: liveSteps.phone,
+        phoneSpans: [
+          for (final s in liveSteps.spans)
+            if (!s.fromBand) s,
+        ],
       );
     }
   }
@@ -4892,24 +4896,36 @@ class DerivationEngine {
     String date,
     Substrate daySub,
     int wearing, {
-    required int phoneReference,
+    required List<CoverageSpan> phoneSpans,
   }) async {
     try {
       final family = daySub.deviceFamily;
       if (family == null) return;
-      final counter = counterDeltasFromSubstrate(
+      // Pair the two sensors over the same windows only. A whole-day ratio
+      // reads a phone left on a desk, or the band off charging, as counter
+      // error.
+      final ticks = counterTicksPerWindow(
         daySub,
+        [for (final s in phoneSpans) (s.startTs, s.endTs)],
         cumulativeCounterModulus:
             ana.calibrationFor(_stepCounterModulus, family),
       );
       // No counter on this family (gen4): nothing to learn, nothing to bank.
-      if (counter == null) return;
+      if (ticks == null) return;
+      var reference = 0;
+      var counted = 0;
+      for (var i = 0; i < ticks.length; i++) {
+        final t = ticks[i];
+        if (t == null) continue;
+        reference += phoneSpans[i].steps;
+        counted += t;
+      }
       await LocalDb.putStepCalibrationDay(
         day: date,
         deviceFamily: family,
         wearing: wearing,
-        referenceSteps: phoneReference > 0 ? phoneReference : null,
-        counterTicks: counter.total,
+        referenceSteps: reference > 0 ? reference : null,
+        counterTicks: counted,
       );
       final rows = await LocalDb.stepCalibrationDays(family, wearing);
       final profile = estimateStepCalibration(

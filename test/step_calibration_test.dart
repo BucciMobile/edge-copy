@@ -250,4 +250,34 @@ void main() {
       );
     });
   });
+
+  group('counterTicksPerWindow', () {
+    const t0 = 1_700_000_000;
+    // 1 Hz counter rising 1 per second over [0, 600) and [1200, 1800); the
+    // band is off (no records) over [600, 1200).
+    final ts = [
+      for (var t = 0; t < 600; t++) t0 + t,
+      for (var t = 1200; t < 1800; t++) t0 + t,
+    ];
+    final s = _sub([for (var i = 0; i < ts.length; i++) i], ts: ts);
+
+    test('counts only inside a window the counter saw end to end', () {
+      final w = counterTicksPerWindow(
+        s,
+        [(t0 + 100, t0 + 400), (t0 + 500, t0 + 1300), (t0 + 1300, t0 + 1700)],
+        cumulativeCounterModulus: 65536,
+      )!;
+      expect(w[0], 300);
+      expect(w[1], isNull); // the band was off for part of it
+      expect(w[2], 400);
+    });
+
+    test('no counter on the family is null, not zero', () {
+      expect(
+        counterTicksPerWindow(_sub([-1, -1]), [(t0, t0 + 1)],
+            cumulativeCounterModulus: 65536),
+        isNull,
+      );
+    });
+  });
 }
