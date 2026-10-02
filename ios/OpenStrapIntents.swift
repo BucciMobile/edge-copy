@@ -61,16 +61,12 @@ enum OpenStrapShared {
   }
   static var noData: String { "I don't have today's numbers yet. Open OpenStrap and sync your band." }
 
-  /// The snapshot as JSON, for Shortcuts ([GetNumbersIntent]). Same gate as
-  /// the spoken answers: when [hasData] is false (no data, a day that isn't
-  /// scored yet, or a snapshot past [staleAfter]) every number is null. A -1
-  /// sentinel is null too, never a guess. `date` is the local day the snapshot
-  /// was written, which is the day it describes (push() refuses held-over
-  /// overnight numbers, so a written number belongs to that day).
-  static func numbersJSON(_ d: UserDefaults? = defaults(), now: Date = Date()) -> String {
+  /// The snapshot as JSON for [GetNumbersIntent]. Every number is null unless
+  /// [hasData]; a -1 sentinel is null too. `date` is the local day of `updated_at`.
+  static func numbersJSON() -> String {
+    let d = defaults()
     let at = d?.object(forKey: "updated_at") as? Int ?? 0
-    let fresh = (d?.bool(forKey: "has_data") ?? false)
-      && (at <= 0 || now.timeIntervalSince1970 - Double(at) <= staleAfter)
+    let fresh = hasData
     func int(_ key: String) -> Any {
       guard fresh, let v = d?.object(forKey: key) as? Int, v >= 0 else { return NSNull() }
       return v
@@ -89,7 +85,7 @@ enum OpenStrapShared {
     let band = d?.string(forKey: "readiness_band") ?? ""
     out["readiness_band"] = fresh && !band.isEmpty ? band : NSNull()
     if fresh, let s = d?.object(forKey: "strain") as? Double, s >= 0 {
-      // One decimal, as the app shows it; a decimal number so JSON says 8.4, not 8.4000000000000004.
+      // Decimal so JSON says 8.4, not 8.4000000000000004.
       out["strain"] = NSDecimalNumber(string: String(format: "%.1f", s))
     } else {
       out["strain"] = NSNull()
@@ -162,12 +158,8 @@ struct SleepIntent: AppIntent {
   }
 }
 
-/// "Get Today's Numbers" — the same snapshot as the widgets and the answers
-/// above, handed to Shortcuts as JSON so an automation can pass it on (a
-/// training log, a spreadsheet, a note). One text value because Shortcuts can
-/// hand text to any other app's action; an entity's properties would have to
-/// be mapped one by one. Use "Get Dictionary from Input" to pick keys.
-/// Missing numbers are null; see [OpenStrapShared.numbersJSON].
+/// "Get Today's Numbers": the widget snapshot as one JSON text value, so a
+/// shortcut can pass it to another app ("Get Dictionary from Input" picks keys).
 @available(iOS 16.0, *)
 struct GetNumbersIntent: AppIntent {
   static var title: LocalizedStringResource = "Get Today's Numbers"
