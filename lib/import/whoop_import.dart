@@ -211,6 +211,9 @@ class WhoopImporter {
   /// accumulate these across every file in the import before writing, so a
   /// later file's row (missing the earlier file's columns) can't null out
   /// what the earlier file already contributed for the same date.
+  // a blank/0/garbage cell is no reading, not a 0% night.
+  static num? _pct(num? v, num lo) => v != null && v >= lo && v <= 100 ? v : null;
+
   static (String, Map<String, dynamic>)? _extractDayFields(_Row row) {
     String get(List<String> names) => row.get(names);
     final wakeTs = _parseTs(get(['wake onset', 'sleep onset', 'cycle start time']));
@@ -227,7 +230,7 @@ class WhoopImporter {
       'strain': n(['day strain', 'strain']),
       'calories': _kcal(get(_energyCols), row.header(_energyCols)),
       'resp': n(['respiratory rate (rpm)', 'respiratory rate']),
-      'spo2': n(['blood oxygen %', 'blood oxygen']),
+      'spo2': _pct(n(['blood oxygen %', 'blood oxygen']), 70),
       'skinTempC': n(['skin temp (celsius)', 'skin temperature (celsius)']),
       'asleepMin': n(['asleep duration (min)', 'asleep duration (minutes)']),
       'inBedMin': n(['in bed duration (min)', 'in bed duration (minutes)']),

@@ -56,6 +56,24 @@ void main() {
         (payload['flags'] as List).contains('IMPORTED_WHOOP_BETA'), isTrue);
   });
 
+  test('an out-of-range blood oxygen cell is dropped, not charted', () async {
+    final dir = await Directory.systemTemp.createTemp('spo2_range');
+    addTearDown(() => dir.delete(recursive: true));
+    const wake = '2026-03-11 07:15:00';
+    final day = localDateLabel(
+        DateTime.parse(wake).millisecondsSinceEpoch ~/ 1000);
+    final f = File('${dir.path}/day.csv');
+    f.writeAsStringSync(
+      'Cycle start time,Wake onset,Sleep onset,Blood oxygen %,Resting heart rate (bpm)\n'
+      '$wake,$wake,2026-03-10 23:10:00,0,52\n',
+    );
+    await WhoopImporter.importFiles([f.path]);
+    final db = await LocalDb.instance;
+    final rows = await db.query('metric_series',
+        where: 'date = ? AND key = ?', whereArgs: [day, 'spo2']);
+    expect(rows.where((r) => r['value'] != null), isEmpty);
+  });
+
   test('the metric screen loads the imported series', () async {
     final dir = await Directory.systemTemp.createTemp('spo2_visible');
     addTearDown(() => dir.delete(recursive: true));
