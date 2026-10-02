@@ -68,18 +68,25 @@ enum AlarmArmState {
 }
 
 /// Home's door onto the alarm: the next armed day and time plus its state,
-/// or "Set an alarm". A plain [detailLinkRow], not a card.
-Widget alarmDoor(BuildContext c, DateTime? at, AlarmArmState state) {
+/// or "Set an alarm". A plain [detailLinkRow], not a card. An epoch already
+/// behind [now] fired or was missed while the link was down (only a live
+/// event or the next connect clears it), so it says so instead of passing a
+/// spent alarm off as the next one.
+Widget alarmDoor(BuildContext c, DateTime? at, AlarmArmState state,
+    {DateTime? now}) {
   final l = AppLocalizations.of(c);
-  return detailLinkRow(
-      c,
-      LucideIcons.alarmClock,
-      l?.alarmNavTitle ?? 'Alarm',
-      at == null
-          ? (l?.alarmSetAnAlarm ?? 'Set an alarm')
-          : '${AlarmScreenView._dayAndTime(c, at)} · '
-              '${AlarmScreenView._localizedStateLabel(c, state)}',
-      () => go(c, const AlarmScreen()));
+  final String sub;
+  if (at == null) {
+    sub = l?.alarmSetAnAlarm ?? 'Set an alarm';
+  } else {
+    final what = at.isAfter(now ?? DateTime.now())
+        ? AlarmScreenView._localizedStateLabel(c, state)
+        : (l?.alarmInThePast ??
+            'In the past — it has already fired or been missed');
+    sub = '${AlarmScreenView._dayAndTime(c, at)} · $what';
+  }
+  return detailLinkRow(c, LucideIcons.alarmClock, l?.alarmNavTitle ?? 'Alarm',
+      sub, () => go(c, const AlarmScreen()));
 }
 
 class AlarmScreen extends StatelessWidget {

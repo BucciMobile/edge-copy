@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
@@ -310,6 +311,30 @@ void main() {
               'came back on the next launch');
     });
 
+    test('a fire while connected arms the schedule\'s next occurrence',
+        () async {
+      await silenceOsPresent();
+      final engine = _ArmRecordingEngine();
+      final app = AppState.forTesting(engine: engine);
+      addTearDown(app.dispose);
+      await app.setScheduleDay(weekday: 2, enabled: true); // offline: no arm
+      expect(engine.armed, isEmpty);
+      app.device.connection = 'connected';
+      app.device.alarmEpoch = 1785000000;
+
+      app.debugHandleAlarmEvent(57);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      // Pre-fix nothing re-armed until the next reconnect: a link that stayed
+      // up all day left the next morning unarmed and Home saying
+      // "Set an alarm" while the schedule still had the day on.
+      expect(engine.armed, hasLength(1));
+      expect(engine.armed.single.isAfter(DateTime.now()), isTrue);
+      expect(engine.armed.single.weekday, DateTime.wednesday);
+      expect(app.alarmEpoch,
+          engine.armed.single.millisecondsSinceEpoch ~/ 1000);
+    });
+
     test('ALARM_SET (event 56) leaves the armed alarm alone', () async {
       SharedPreferences.setMockInitialValues({'alarm_epoch': 1785000000});
       final app = AppState.forTesting();
@@ -563,4 +588,16 @@ void main() {
       expect(await LocalDb.liveWorkoutTally(id), isNull);
     });
   });
+}
+
+/// Records every SET_ALARM instead of writing to a band.
+class _ArmRecordingEngine extends BleEngine {
+  _ArmRecordingEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
+  final armed = <DateTime>[];
+  @override
+  Future<DateTime?> setAlarm(DateTime when,
+      {int index = 0, List<int>? haptics}) async {
+    armed.add(when);
+    return when;
+  }
 }

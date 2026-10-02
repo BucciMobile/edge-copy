@@ -4949,6 +4949,10 @@ class AppState extends ChangeNotifier {
         // indefinitely — with live "Test buzz"/"Clear" affordances for an alarm
         // that is no longer armed. Clear state AND the persisted epoch.
         _clearArmedAlarmState();
+        // ...and arm the schedule's next occurrence now. Otherwise nothing
+        // re-arms until the next reconnect, so a link that stays up all day
+        // leaves tomorrow unarmed and Home saying "Set an alarm".
+        unawaited(_armNextAlarmOccurrence());
         break;
       case AlarmEffect.cleared:
         // Same persistence gap on the strap-driven clear (event 59): state was
