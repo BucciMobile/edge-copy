@@ -419,13 +419,15 @@ void main() {
     });
   });
 
-  // A connected Polar or Coros also exposes 0x180D; asked first, the generic
-  // entry would claim it and route it past its own adapter.
-  test('connected-device lookup asks the generic heart-rate entry last', () {
+  // A connected Coros also exposes 0x180D; asked first, the generic entry
+  // would claim it and route it past its own adapter. A Polar H10 exposes PMD
+  // without PPI, so PMD must not claim ahead of generic or it never streams.
+  test('connected-device lookup: specific, then generic hr, then polar pmd',
+      () {
     final order = HrsLink.systemDeviceQueryOrder(
         kBandRegistry.where((e) => !e.isFramed).toList());
-    expect(order.last.id, kBleHrs.id);
-    expect(order.indexOf(kPolarPmd), lessThan(order.indexOf(kBleHrs)));
+    expect(order.last.id, kPolarPmd.id);
+    expect(order.indexOf(kBleHrs), lessThan(order.indexOf(kPolarPmd)));
     expect(order.indexOf(kCoros), lessThan(order.indexOf(kBleHrs)));
   });
 }

@@ -479,16 +479,23 @@ class HrsLink {
   }
 
   /// The order [scanForAny]'s connected-device lookup asks the OS in. The
-  /// generic Heart Rate entry goes LAST: the lookup matches on a peripheral's
-  /// GATT, a Polar or Coros exposes 0x180D too, and the first entry to claim
-  /// a remote id keeps it.
+  /// generic Heart Rate entry goes after the specific ones: the lookup matches
+  /// on a peripheral's GATT, a Coros exposes 0x180D too, and the first entry
+  /// to claim a remote id keeps it.
+  ///
+  /// Polar PMD goes after generic, not before it. Having the PMD service is
+  /// not having PPI: an H10 carries PMD for ECG/accel only, the PMD adapter
+  /// ends its session when PPI start is refused, and 0x180D works on every
+  /// Polar. A connected, silent Verity Sense lands on generic HR as a result.
   @visibleForTesting
   static List<BandEntry> systemDeviceQueryOrder(List<BandEntry> entries) {
     bool generic(BandEntry e) =>
         Guid(e.service) == Guid(kHeartRateServiceUuid);
+    bool pmd(BandEntry e) => e.id == kPolarPmd.id;
     return [
-      ...entries.where((e) => !generic(e)),
+      ...entries.where((e) => !generic(e) && !pmd(e)),
       ...entries.where(generic),
+      ...entries.where(pmd),
     ];
   }
 
