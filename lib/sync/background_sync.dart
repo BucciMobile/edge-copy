@@ -56,7 +56,6 @@ import '../ecg/ecg_recovery.dart';
 import '../ecg/ecg_transport.dart';
 import '../notify/notification_center.dart';
 import '../notify/notification_event.dart';
-import '../notify/tap_router.dart';
 import '../state/alarm_schedule.dart';
 import 'band_ownership.dart';
 import 'high_freq_wake_window.dart';
@@ -622,7 +621,9 @@ Future<void> checkSyncStaleness({bool allowPermissionPrompt = false}) async {
         body: 'No new data for about $hoursStale hours. Open OpenStrap to '
             'reconnect — background sync may have stalled.',
         date: now.toIso8601String().substring(0, 10),
-        route: kRouteProfile, // the band's sync state lives there
+        // Home: its day card carries the synced-through line and the sync
+        // button this body points at. Profile shows neither.
+        route: '/today',
       ),
       allowPermissionPrompt: allowPermissionPrompt,
     );
