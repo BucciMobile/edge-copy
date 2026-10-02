@@ -190,7 +190,11 @@ class _MoreSettingsState extends State<MoreSettings> {
           : UnitSystem.imperial),
       onCycleAppearance: () => theme.setChoice(AppThemeChoice.values[
           (theme.choice.index + 1) % AppThemeChoice.values.length]),
-      onCycleClockFormat: clock.cycle,
+      // the wind-down body bakes the time in when it's armed, re-arm it now
+      onCycleClockFormat: () async {
+        await clock.cycle();
+        await app.refreshAiReminders();
+      },
       onToggleCycleTracking: () =>
           app.setCycleTrackingEnabled(!app.cycleTrackingEnabled),
       onTogglePhoneSteps: () => app.phoneStepsEnabled
