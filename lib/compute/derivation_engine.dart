@@ -4051,6 +4051,14 @@ class DerivationEngine {
     // Under the SAME lock as run()/runDays(): this writes day_result rows, and
     // an import racing a background derive of the same day is exactly the
     // partial-overwrites-complete case the lock exists for.
+    //
+    // It WAITS for the lock instead of taking the busy skip: the substrate
+    // lives only in the caller's buffer, which is evicted right after, so a
+    // skipped import day is gone for good. No await between the loop's last
+    // check and the lock taking it, so nothing can slip in between.
+    while (_running) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
     return _withRunLock(0, () async {
       final days = calendarDays(sub);
       final dataNowSec = sub.lastTs ?? 0;
