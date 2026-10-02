@@ -358,7 +358,12 @@ class ExerciseDef {
   /// makes every strength app feel like a spreadsheet.
   final double step;
 
-  const ExerciseDef(this.key, this.label, this.muscles, {this.step = 2.5});
+  /// Done with the body as the load. With no history to seed from, the set
+  /// starts as bodyweight instead of inheriting the last lift's kilos.
+  final bool bodyweight;
+
+  const ExerciseDef(this.key, this.label, this.muscles,
+      {this.step = 2.5, this.bodyweight = false});
 }
 
 const exerciseLibrary = <ExerciseDef>[
@@ -369,7 +374,8 @@ const exerciseLibrary = <ExerciseDef>[
       step: 2),
   ExerciseDef('cable_fly', 'Cable fly', {'chest': .8, 'shoulders': .2}),
   ExerciseDef('push_up', 'Push-up',
-      {'chest': .6, 'triceps': .25, 'shoulders': .15}),
+      {'chest': .6, 'triceps': .25, 'shoulders': .15},
+      bodyweight: true),
   ExerciseDef('overhead_press', 'Overhead press',
       {'shoulders': .6, 'triceps': .3, 'core': .1}),
   ExerciseDef('triceps_pushdown', 'Triceps pushdown', {'triceps': 1.0}),
@@ -377,7 +383,8 @@ const exerciseLibrary = <ExerciseDef>[
   ExerciseDef('barbell_row', 'Barbell row',
       {'back': .65, 'biceps': .25, 'core': .1}),
   ExerciseDef('lat_pulldown', 'Lat pulldown', {'back': .7, 'biceps': .3}),
-  ExerciseDef('pull_up', 'Pull-up', {'back': .65, 'biceps': .25, 'core': .1}),
+  ExerciseDef('pull_up', 'Pull-up', {'back': .65, 'biceps': .25, 'core': .1},
+      bodyweight: true),
   ExerciseDef('barbell_curl', 'Barbell curl', {'biceps': 1.0}),
   ExerciseDef('back_squat', 'Back squat',
       {'legs': .65, 'glutes': .25, 'core': .1}),
@@ -389,8 +396,9 @@ const exerciseLibrary = <ExerciseDef>[
       {'glutes': .45, 'legs': .35, 'back': .2}),
   ExerciseDef('hip_thrust', 'Hip thrust', {'glutes': .8, 'legs': .2}),
   ExerciseDef('leg_press', 'Leg press', {'legs': .75, 'glutes': .25}),
-  ExerciseDef('plank', 'Plank', {'core': 1.0}, step: 0),
-  ExerciseDef('hanging_leg_raise', 'Hanging leg raise', {'core': 1.0}, step: 0),
+  ExerciseDef('plank', 'Plank', {'core': 1.0}, step: 0, bodyweight: true),
+  ExerciseDef('hanging_leg_raise', 'Hanging leg raise', {'core': 1.0},
+      step: 0, bodyweight: true),
 ];
 
 final Map<String, ExerciseDef> _exercisesByKey = {

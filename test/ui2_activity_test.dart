@@ -1577,6 +1577,38 @@ void main() {
           reason: 'the shell must not be rebuilt for a number inside the body');
     });
 
+    testWidgets('a first push-up set is bodyweight, not the carried-over load',
+        (tester) async {
+      tester.view.physicalSize = const Size(390 * 3, 2400 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      addTearDown(LiveDraft.clear);
+
+      var sets = <LoggedSet>[];
+      await tester.pumpWidget(_frame(
+          LiveStrength(activityByName('weight_training')!,
+              onSets: (s) => sets = s),
+          Brightness.light,
+          1.0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Log set'));
+      await tester.pump();
+      expect(sets.single.loadKg, 40, reason: 'bench keeps its stepper load');
+
+      await tester.tap(find.byIcon(LucideIcons.plus));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Push-up'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Skip rest'));
+      await tester.pump();
+      await tester.tap(find.text('Log set'));
+      await tester.pump();
+      expect(sets.last.exerciseKey, 'push_up');
+      expect(sets.last.loadKg, isNull,
+          reason: 'no history for push-ups must not invent a 40 kg load');
+      expect(StrengthLog(sets).volumeKg, 40 * 8);
+    });
+
     testWidgets('a session that failed to save says so and can retry',
         (tester) async {
       tester.view.physicalSize = const Size(390 * 3, 2200 * 3);
@@ -1728,6 +1760,39 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.textContaining('No calorie figure for this session'),
           findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('padel has no MET but was named, and the copy says so',
+        (tester) async {
+      tester.view.physicalSize = const Size(390 * 3, 2400 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+
+      final padel = activityByName('padel')!;
+      final base = _result(Arch.match);
+      await tester.pumpWidget(
+          _frame(ActivitySetup(padel, weightKg: 72.4), Brightness.light, 1.0));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('No estimate up front'), findsOneWidget);
+      expect(find.textContaining('names no activity'), findsNothing);
+
+      await tester.pumpWidget(_frame(
+          ActivitySummary(
+              ActivityResult(padel,
+                  start: base.start,
+                  duration: base.duration,
+                  avgHr: 131,
+                  maxHr: 158,
+                  calories: 402,
+                  hr: base.hr,
+                  zoneMinutes: base.zoneMinutes),
+              weightKg: 72.4),
+          Brightness.light,
+          1.0));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('No MET is in this figure'), findsOneWidget);
+      expect(find.textContaining('named no activity'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
