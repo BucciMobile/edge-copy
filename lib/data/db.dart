@@ -1350,12 +1350,6 @@ class LocalDb {
       // See Sample.bandSleepState for the evidence that it varies and means
       // what it says.
       'band_sleep_state': 'INTEGER',
-      // The gen5 v18 SpO2 estimate/status byte, RAW — see
-      // Sample.spo2CandidateRaw for the full reasoning. Stored so the bytes
-      // EXIST: the encoding is not pinned, so nothing may read this as a
-      // percentage, a validity or a metric while it sits here unread. Not a
-      // ladder rung for the same reason as its neighbours.
-      'spo2_candidate_raw': 'INTEGER',
     };
     final have = await _columnsOf(db, 'decoded_onehz');
     if (have.isEmpty) return; // table not created yet — the DDL carries them
@@ -5716,7 +5710,6 @@ class LocalDb {
             dynAccelG: g.dynamicAccelerationG,
             tsSubsec: g.tsSubsec,
             bandSleepState: g.sleepStateRawNibble,
-            spo2CandidateRaw: g.spo2CandidateRaw,
           );
         }
       } catch (_) {}
@@ -5888,10 +5881,6 @@ class LocalDb {
       // everything the mid-ladder backfill can replay — but omitted-when-null
       // regardless, for the same reason.
       'band_sleep_state': ?decoded.bandSleepState,
-      // The band's own SpO2 estimate/status byte, raw. gen5/MG only and
-      // omitted-when-null for the same mid-ladder reason. STORED-UNREAD —
-      // see Sample.spo2CandidateRaw.
-      'spo2_candidate_raw': ?decoded.spo2CandidateRaw,
       // 0 IS THE ABSENT SENTINEL, NOT A READING. records.dart:501 emits
       // `ambientRaw: optical ? u16@70 : 0`, so every unconfirmed record version
       // reports 0 — writing that through would turn "we did not read the

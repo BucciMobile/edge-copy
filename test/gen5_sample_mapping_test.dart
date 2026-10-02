@@ -33,7 +33,6 @@ Uint8List v18Inner({
   required int skinTempRaw,
   int hrQualityFlags = 0,
   int sleepStateByte = 0,
-  int spo2CandidateRaw = 0,
 }) {
   final inner = Uint8List(kGen5V18InnerLen);
   final v = inner.buffer.asByteData();
@@ -51,7 +50,6 @@ Uint8List v18Inner({
   v.setFloat32(45, 1.0, Endian.little); // gravity z — magSq 1.0
   v.setInt16(65, skinTempRaw, Endian.little); // AS6221 skin temp, °C = raw/100
   inner[73] = sleepStateByte; // body 60 — bits 0-1 are the disproven "on wrist"
-  inner[74] = spo2CandidateRaw; // body 61 - the SpO2 estimate/status byte
   return inner;
 }
 
@@ -269,65 +267,6 @@ void main() {
       final decoded = parseGen5Historical(inner);
       expect(decoded, isA<Gen5ImuBuffer>());
       expect(sampleFromGen5Historical(decoded), isNull);
-    });
-  });
-
-  // The band's own SpO2 estimate/status byte (inner[74]) — STORED, NEVER
-  // INTERPRETED. See Sample.spo2CandidateRaw: the encoding is not pinned
-  // (nonzero only during band-declared sleep, clusters 95-99, bit 7 a
-  // suspected flag), so the mapper carries the RAW byte through to
-  // `decoded_onehz.spo2_candidate_raw` and nothing may read it as a
-  // percentage. These tests pin the carry itself — the value, the verbatim
-  // zero, and the gen4 absence — so the column cannot silently go unwired
-  // the way the MT-12 channels once did.
-  group('sampleFromGen5Historical — the SpO2 candidate byte, raw', () {
-    test('a nonzero candidate comes through as the raw byte, unfiltered', () {
-      // 97 is inside the plausible-looking 95-99 cluster; the mapper must
-      // not range-check it, name it or convert it — carrying it raw is the
-      // entire contract.
-      final s = sampleFromGen5Historical(
-        parseGen5Historical(v18Inner(skinTempRaw: 3000, spo2CandidateRaw: 97)),
-      )!;
-      expect(s.spo2CandidateRaw, 97);
-      // Carrying the byte never costs the rest of the second.
-      expect(s.hr, 64);
-      expect(s.skinTempC, closeTo(30.0, 1e-9));
-    });
-    test('the band\'s own zero is preserved verbatim, not nulled', () {
-      // 0 is the band's "no sample this second" for 99% of records — a
-      // stored 0 says exactly that, and nulled-when-zero would erase the
-      // distinction between "sampled, nothing" and "not a gen5 record".
-      final s = sampleFromGen5Historical(
-        parseGen5Historical(v18Inner(skinTempRaw: 3000)),
-      )!;
-      expect(s.spo2CandidateRaw, 0);
-    });
-    test('a >128 value rides through un-decomposed', () {
-      // bit 7 looks like a flag rather than part of the number; the mapper
-      // must not "helpfully" mask it off — the decomposition is unproven.
-      final s = sampleFromGen5Historical(
-        parseGen5Historical(
-            v18Inner(skinTempRaw: 3000, spo2CandidateRaw: 0xE1)),
-      )!;
-      expect(s.spo2CandidateRaw, 0xE1);
-    });
-    test('the real fixtures carry their true zeros', () {
-      // Both CRC-verified real captures read inner[74] == 0 — consistent
-      // with the ~99%-zero finding, and the honest expectation for any
-      // daytime/worn second.
-      final s = sampleFromGen5Historical(
-        parseGen5Historical(hex(
-          '2f12804ffc41015e96716a5c4f00470000000000000000000031cd4f824f0000'
-          '4ca007723eaee72a3e148ec4bd3d7ad13e1702760000000100000000'
-          '0057015901950d400b010c020c2100000000000000000000000000'
-          '00000000000000000000000100a0658080000000bbe75cc0000000',
-        )),
-      )!;
-      expect(s.spo2CandidateRaw, 0);
-    });
-    test('gen4 carries no such field', () {
-      // Null on gen4 — 0 would claim the band sampled and found nothing.
-      expect(Sample(tsEpoch: 1, counter: 1, hr: 60).spo2CandidateRaw, isNull);
     });
   });
 }
