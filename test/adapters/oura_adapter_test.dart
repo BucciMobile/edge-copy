@@ -638,6 +638,50 @@ void main() {
     });
   });
 
+  test('a decisecond a full batch cuts is stamped once, by the re-read, even '
+      'when the re-read re-anchors', () async {
+    // Batch 1 is full and ends inside 1300 with one of its two carriers. Batch
+    // 2 re-reads 1300 and carries a fresh time_sync whose sub-second phase
+    // differs, so 1300 maps to a different ts_ms under each anchor.
+    const base = 1782043215;
+    final (events, _) = await _drive(
+      OuraAdapter(
+        key: _kKey,
+        anchor: (1000, base),
+        confirmTimeout: _kFast,
+        replyTimeout: _kFast,
+      ),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first != 0x10) return const [];
+        final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
+        if (cursor == 0) {
+          return [
+            for (var n = 0; n < 254; n++)
+              _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')),
+            _event(kOuraEvtSleepPhaseInformation, 1300, hypnogramBody()),
+            _summary(255, 4096),
+          ];
+        }
+        return [
+          _event(kOuraEvtSleepPhaseInformation, 1300, hypnogramBody()),
+          _event(kOuraEvtSleepPhaseData, 1300, hypnogramBody()),
+          _event(kOuraEvtTimeSync, 1405, _syncBody(base + 40)),
+          _summary(3, 0),
+        ];
+      },
+    );
+    final deep = [
+      for (final b in events.whereType<VendorScalars>())
+        for (final o in b.rows)
+          if (o.vendorKey == 'sleep_deep_min')
+            (o.at.millisecondsSinceEpoch, o.value),
+    ];
+    // Under the new anchor: (base + 40) s + (1300 - 1405) ds = base + 29.5 s.
+    expect(deep, [((base * 1000) + 29500, 4.0)]);
+  });
+
   test('a hypnogram no origin ever reaches is dropped, not guessed', () async {
     final (events, _) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];

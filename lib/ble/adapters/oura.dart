@@ -318,7 +318,14 @@ class OuraAdapter extends BandAdapter {
           yield BandNote('oura_anchor', '${e.tsDs},$unix');
         }
 
-        yield* _emit(link, got);
+        // A full batch may have been cut inside its last decisecond, which the
+        // next batch re-reads (see the cursor advance below). Decoding it here
+        // too would stamp a partial sum now and the full one after a re-anchor,
+        // on two different `ts_ms` that REPLACE cannot collapse. It is left to
+        // the re-read, which sees all of it.
+        final full = got.summary.received >= _kMaxEventsPerBatch;
+        final reread = (full && got.maxDs > cursor) ? got.maxDs : null;
+        yield* _emit(link, got, skipDs: reread);
 
         // THE ORDERING IS THE POINT. The host commits durably, then calls
         // confirm, and only then does the cursor move. Nothing is deleted
@@ -345,14 +352,13 @@ class OuraAdapter extends BandAdapter {
         // the middle of a decisecond that holds more records than fitted.
         // Jumping to `maxDs + 1` there silently drops the remainder, and
         // nothing downstream can tell: the gap is in the ring's flash, not in
-        // ours. Re-reading `maxDs` instead costs one duplicated decisecond,
-        // which `decoded_onehz`'s REPLACE key absorbs for free.
+        // ours. Re-reading `maxDs` instead costs one re-read decisecond, which
+        // is decoded only by the batch that re-reads it.
         //
         // The `> cursor` guard is the escape: a ring with a whole batch inside
         // one decisecond would otherwise re-ask for the same thing forever, and
         // a bounded loss beats an unbounded stall.
-        final full = got.summary.received >= _kMaxEventsPerBatch;
-        cursor = (full && got.maxDs > cursor) ? got.maxDs : got.maxDs + 1;
+        cursor = reread ?? got.maxDs + 1;
         yield BandNote('oura_cursor_ds', cursor);
         if (got.summary.bytesLeft <= 0) return;
       }
@@ -421,10 +427,12 @@ class OuraAdapter extends BandAdapter {
     return null;
   }
 
-  /// Turn one collected batch into events for the host.
-  Stream<BandEvent> _emit(BandLink link, _Batch got) async* {
+  /// Turn one collected batch into events for the host. Events at [skipDs]
+  /// are archived but not decoded: the next batch re-reads that decisecond.
+  Stream<BandEvent> _emit(BandLink link, _Batch got, {int? skipDs}) async* {
     final samples = <NeutralSample>[];
     for (final e in got.events) {
+      if (e.tsDs == skipDs) continue;
       switch (e.tag) {
         case kOuraEvtTemp:
         case kOuraEvtTempPeriod:
