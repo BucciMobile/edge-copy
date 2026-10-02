@@ -5014,8 +5014,8 @@ class DerivationEngine {
     // the banked night that lies inside the tail the band corroborated as
     // awake: the banked end must fall WITHIN (next end, next untrimmed end],
     // and the TST lost may not exceed what was removed from the banked window.
-    // "Within", not "equal to", because the morning record GROWS: a 07:19
-    // pass banks 07:19 (tail still < 10 min), the 08:30 pass trims to 07:10.
+    // "Within", not "equal to", because the morning record GROWS: an early
+    // pass banks a night whose awake tail is still < 10 min; a later pass trims.
     if (sameOnset &&
         nextTrim != null &&
         next.sleepOffsetSec < prev.sleepOffsetSec &&
