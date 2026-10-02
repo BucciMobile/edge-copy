@@ -267,6 +267,22 @@ void main() {
     });
   });
 
+  test('WHOOP absolute skin temp °C is not filed as skin_temp_z', () async {
+    const wake = '2026-04-10 07:00:00';
+    final day =
+        localDateLabel(DateTime.parse(wake).millisecondsSinceEpoch ~/ 1000);
+    final f = File(p.join(tmp.path, 'skin_temp.csv'));
+    f.writeAsStringSync(
+      'Cycle start time,Wake onset,Recovery score %,Skin temp (celsius),'
+      'Asleep duration (min)\n'
+      '$wake,$wake,50,33.4,400\n',
+    );
+    expect((await WhoopImporter.importFiles([f.path])).days, 1);
+    final payload =
+        jsonDecode((await _row(day))!['payload_json'] as String) as Map;
+    expect((payload['scalars'] as Map)['skin_temp_z'], isNull);
+  });
+
   group('CloudImporter session rows', () {
     test('skips a session with no start_ts instead of filing it at epoch 0',
         () async {
