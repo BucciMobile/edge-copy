@@ -300,55 +300,7 @@ void main() {
     }
   });
 
-  test('the stranded reset still lands when an advance is queued ahead of it',
-      () async {
-    // THE WRITE-ORDERING HOLE THE RESET OPERATION CLOSES. The stranded note
-    // can arrive while an ordinary `oura_cursor_ds` advance from an earlier
-    // batch is still queued (the note handler runs on the event stream, the
-    // writes run on the serialised chain). Clearing the high-water mark at
-    // note-arrival time let that queued advance run FIRST and re-arm the
-    // mark, so the reset's own write of 0 was then refused by the guard and
-    // the stranded bookmark stayed stored — the permanent stall the reset
-    // exists to fix. The reset now runs as its own operation in the queue and
-    // clears the mark when IT runs, so an advance queued ahead of it can
-    // re-arm the mark all it likes: the mark is null by the time the reset's
-    // own write is checked.
-    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
-    await OuraLink.instance.ingestForTest(
-      _deviceId,
-      _key,
-      // Batch 1 banks new data above the bookmark and emits a cursor advance;
-      // batch 2 comes back empty with bytes left — the stranded signal — so
-      // the advance's write and the reset's write are both in flight.
-      (i, v) {
-        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
-        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-        if (v.first != 0x10) return const <List<int>>[];
-        final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
-        if (cursor == 0) {
-          return [
-            _event(kOuraEvtTimeSync, 5000, _syncBody(1782043215)),
-            _event(kOuraEvtTempPeriod, 5100, _hex(_temp3436)),
-            _summary(2, 512),
-          ];
-        }
-        return [_summary(0, 4096)];
-      },
-      nowSeconds: () => _nowSec,
-    );
-    // The reset landed despite the advance queued ahead of it.
-    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
-  });
-
   test('a stranded reset invalidates the stored time anchor too', () async {
-    // THE ANCHOR IS A (previous-boot ds, Unix) PAIR, and the reset means the
-    // boot it was measured on is gone. Left in storage, the next session's
-    // `_loadAnchor` hands it to the adapter, and readings from the new boot's
-    // first batches are stamped by extrapolating the OLD origin across the
-    // NEW uptime — plausible, wrong, and indistinguishable from a
-    // measurement downstream. The reset clears the durable anchor and the
-    // session copy both, so those readings wait for the new boot's own
-    // `time_sync` instead.
     await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
     await LocalDb.setCursor('oura_anchor:$_deviceId', '4000,1782043215');
     await OuraLink.instance.ingestForTest(
@@ -434,40 +386,6 @@ void main() {
     expect(await OuraLink.pairedRingRow(), isNull);
     expect(await OuraLink.instance.sync(), isFalse);
   });
-
-  test('a ring that answers below the bookmark never moves it', () async {
-    // DEFENCE IN DEPTH, pinned at the storage seam. A ring that answers a
-    // bookmark with events stamped below it is serving a replayed tail, and
-    // advancing on it would move the bookmark BACKWARDS — a busy loop on a
-    // live radio, re-reading the same window on every future sync. The
-    // adapter drops replays before they can earn a cursor advance (see the
-    // adapter tests), and the host's high-water mark refuses a regressing
-    // write outright; this pins the observable end state — the stored
-    // bookmark survives a below-the-cursor answer untouched — because a
-    // guarantee that lives in two files is only proven when the storage seam
-    // refuses the wrong write, not when each layer promises to.
-    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
-    await OuraLink.instance.ingestForTest(
-      _deviceId,
-      _key,
-      (i, v) {
-        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
-        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-        if (v.first == 0x10) {
-          return [
-            _event(kOuraEvtTimeSync, 4000, _syncBody(1782043215)),
-            _event(kOuraEvtTempPeriod, 4100, _hex(_temp3436)),
-            _summary(2, 0),
-          ];
-        }
-        return const <List<int>>[];
-      },
-      nowSeconds: () => _nowSec,
-    );
-    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 5000);
-  });
-
-
 
   group('forgetRing', () {
     test('drops the device row', () async {

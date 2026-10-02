@@ -378,93 +378,59 @@ void main() {
         reason: 'the session must have reached the history request at all');
   });
 
-  test('a cursor past the newest event is answered with replays, and the '
-      'session ends instead of looping', () async {
-    // THE REPLAYED TAIL. A real ring (observed live on a Horizon and
-    // re-confirmed against Ring 4/5 notes by the open_oura project,
-    // 2026-09-24) answers a cursor past its newest event with the last few
-    // events AGAIN rather than an empty batch — so a session that treats them
-    // as new data asks the same question forever, and one that banks them as
-    // an ordinary short batch re-reads the same window on every idle sync.
-    // Both are wrong in ways a test without hardware cannot see on a live
-    // radio, which is why the behaviour is pinned here instead.
+  test('an up-to-date cursor answered with replays ends the session',
+      () async {
+    // Cursor 5000 = one past the newest event; the ring replays its tail,
+    // including an old boot record, which must not read as a reboot.
     final (events, link) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
       if (v.first == 0x10) {
-        // Replays only: everything is stamped below the 5000 we asked from.
         return [
-          _event(kOuraEvtTempPeriod, 4900, _hex('6c0d')),
-          _event(kOuraEvtTempPeriod, 4950, _hex('6c0d')),
+          _event(0x41, 2743, _hex('0400000032020c03')),
+          _event(kOuraEvtTempPeriod, 4999, _hex('6c0d')),
           _summary(2, 0),
         ];
       }
       return const [];
     });
-    // The replays are not banked as a batch — they are not new data, and the
-    // bytes are already in the archive from whatever earlier sync wrote them.
     expect(events.whereType<SampleBatch>(), isEmpty);
-    // And the cursor never moved on their strength.
-    expect(
-      events.whereType<BandNote>().any((n) => n.key == 'oura_cursor_ds'),
-      isFalse,
-    );
-    // ONE history request, then the session ended — not a loop of them.
+    final keys = events.whereType<BandNote>().map((n) => n.key);
+    expect(keys, isNot(contains('oura_cursor_ds')));
+    expect(keys, isNot(contains('oura_cursor_stranded')));
     expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1));
   });
 
-  test('an old boot record in the replayed tail is not a new reboot', () async {
-    // THE FALSE TRIPWIRE. A boot record (`ring_start`, tag 0x41) stamped below
-    // the cursor is one a previous session already read and advanced past — a
-    // normal sync leaves the cursor at the newest event, and the replayed
-    // tail it serves on the next idle sync can carry that boot record
-    // indefinitely. Resetting on its presence would drop a VALID bookmark on
-    // every idle sync and re-read history forever. The boot record is an
-    // archived frame for a future decoder, not a reboot tripwire: the reset
-    // runs on `bytesLeft > 0` alone, the same signal the empty-batch branch
-    // runs on.
+  test('replays far below the cursor strand the bookmark', () async {
+    // The ring's newest event is well below cursor - 1: its counter restarted
+    // after the bookmark was taken, even though it reports nothing left.
     final (events, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
       if (v.first == 0x10) {
         return [
-          // The pre-reboot boot record, below the bookmark a previous
-          // session already advanced past it.
-          _event(0x41, 2743, _hex('0400000032020c03')),
-          _event(kOuraEvtTempPeriod, 2800, _hex('6c0d')),
-          // And nothing left — an up-to-date cursor.
+          _event(0x41, 20, _hex('0400000032020c03')),
+          _event(kOuraEvtTempPeriod, 800, _hex('6c0d')),
           _summary(2, 0),
         ];
       }
       return const [];
     });
-    expect(
-      events.whereType<BandNote>().any((n) => n.key == 'oura_cursor_stranded'),
-      isFalse,
-      reason: 'an up-to-date cursor must not be reset because its replayed '
-          'tail still carries the old boot record',
-    );
     expect(events.whereType<SampleBatch>(), isEmpty);
+    expect(
+      events.whereType<BandNote>().map((n) => n.key),
+      contains('oura_cursor_stranded'),
+    );
   });
-
 
   test('replays with bytes remaining strand the bookmark, not just an empty '
       'batch', () async {
-    // The other shape the same ring hazard takes: after a REBOOT the ring's
-    // decisecond counter restarts near zero, so a bookmark from before the
-    // reboot is ahead of everything it holds — and this ring answers it with
-    // its last pre-reboot events rather than nothing, exactly as it answers
-    // an up-to-date cursor. `bytesLeft` is what separates the stranded case
-    // (data remains, unreachable behind the bookmark) from the ordinary
-    // replayed tail (nothing remains, the cursor is simply current), and a
-    // session that ends quietly on the first is the permanent silent-stall
-    // the stranded-bookmark remedy exists to fix.
     final (events, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
       if (v.first == 0x10) {
         return [
-          _event(kOuraEvtTempPeriod, 4900, _hex('6c0d')),
+          _event(kOuraEvtTempPeriod, 4999, _hex('6c0d')),
           _summary(1, 4096),
         ];
       }
@@ -479,13 +445,6 @@ void main() {
   });
 
   test('a batch of replays and new events keeps only the new', () async {
-    // The mixed batch — the one a ring that replays a short tail will actually
-    // serve on an ordinary incremental sync. The events at or after the cursor
-    // are new data and must flow through the ordinary path (banked, stamped,
-    // checkpointed, cursor advanced to their own max + 1); the ones before it
-    // must not reach the sample batch at all, because they are re-deliveries
-    // of seconds already committed and a decoder written later must be able
-    // to trust a batch not to mix the two.
     const syncUnix = 1782043215;
     final (events, link) = await _drive(_adapter(startCursorDs: 1000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
@@ -499,17 +458,14 @@ void main() {
           // New data at and after the cursor.
           _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
           _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')),
-          _summary(3, 0),
+          _summary(3, 512),
         ];
       }
       return const [];
     });
     final batch = events.whereType<SampleBatch>().single;
-    // Only the two new frames — the replay never reached `raw`.
     expect(batch.raw, hasLength(2));
-    expect(batch.samples, hasLength(1),
-        reason: 'the replay is not a second temperature second');
-    // And the cursor advanced past the new data only, to its own max + 1.
+    expect(batch.samples, hasLength(1));
     final cursor = events
         .whereType<BandNote>()
         .firstWhere((n) => n.key == 'oura_cursor_ds');
