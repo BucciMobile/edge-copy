@@ -290,18 +290,17 @@ Future<bool> runHeadlessSync({BandLease? lease}) async {
         } else if (result.epoch != null) {
           final epoch = result.epoch!;
           // No live AppState here to catch a late ALARM_SET (event 56) the way
-          // the foreground grace timer does, so wait for it inline — same
-          // grace window as AlarmConfirmation's default (6s) — before this
-          // headless connection closes. Not confirmed within that window still
+          // the foreground grace timer does, so wait for it inline — the same
+          // grace window as AlarmConfirmation — before this headless
+          // connection closes. Not confirmed within that window still
           // persists the epoch (optimistic, matching the foreground write) but
           // as unconfirmed, so the 7pm safety check (AppState._alarmArmedTonight)
           // won't wrongly treat an un-latched headless arm as covering tonight.
+          // If the wake is cut short mid-wait nothing is persisted, so the
+          // next connect re-arms instead of deduping on a stale epoch.
           final armedAtMs = DateTime.now().millisecondsSinceEpoch;
-          var confirmed = false;
-          for (var i = 0; i < 6 && !confirmed; i++) {
-            await Future.delayed(const Duration(milliseconds: 1000));
-            confirmed = await LocalDb.alarmSetConfirmedSince(armedAtMs);
-          }
+          final confirmed = await awaitAlarmLatch(
+              () => LocalDb.alarmSetConfirmedSince(armedAtMs));
           await prefs.setInt('alarm_epoch', epoch);
           await prefs.setBool('alarm_epoch_confirmed', confirmed);
         }

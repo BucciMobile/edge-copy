@@ -266,6 +266,19 @@ bool alarmLatchFailed(AlarmConfirmation a, int epoch, {required bool enabled}) =
 Duration alarmGraceTimerDelay(int graceMs, {required bool retryLeft}) =>
     Duration(milliseconds: retryLeft ? graceMs - 250 : graceMs + 250);
 
+/// Headless half of the grace window: no AppState timer to catch a late
+/// ALARM_SET (56), so poll [latched] once a second for as long as the
+/// foreground would wait. True as soon as it latches, false once the window
+/// closes.
+Future<bool> awaitAlarmLatch(Future<bool> Function() latched,
+    {int graceMs = AlarmConfirmation.kDefaultGraceMs}) async {
+  for (var waited = 0; waited < graceMs; waited += 1000) {
+    await Future.delayed(const Duration(seconds: 1));
+    if (await latched()) return true;
+  }
+  return false;
+}
+
 /// How long after the last grace window before the critical "alarm not
 /// confirmed" alert goes out. Still connected = the strap may just be slow
 /// (event 56 can lag by minutes, and a late one still confirms), so hold the
