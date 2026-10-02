@@ -427,6 +427,29 @@ void main() {
         if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
         if (v.first == 0x10) {
           return [
+            _event(kOuraEvtTimeSync, 4900, _syncBody(1782043215)),
+            _event(kOuraEvtTempPeriod, 4999, _hex(_temp3436)),
+            _summary(2, 0),
+          ];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 5000);
+  });
+
+  test('a rebooted ring whose tail stops short of the bookmark resets it',
+      () async {
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
+    await OuraLink.instance.ingestForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
             _event(kOuraEvtTimeSync, 4000, _syncBody(1782043215)),
             _event(kOuraEvtTempPeriod, 4100, _hex(_temp3436)),
             _summary(2, 0),
@@ -436,7 +459,7 @@ void main() {
       },
       nowSeconds: () => _nowSec,
     );
-    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 5000);
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
   });
 
   test('a sleep-stage row stamped in the future is refused', () async {

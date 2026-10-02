@@ -181,9 +181,11 @@ class OuraAdapter extends BandAdapter {
   /// every [SampleBatch], so nothing is lost that was not already banked.
   final List<(int ds, double tempC)> _held = [];
 
-  /// Per-stage hypnogram minutes waiting for an origin, as
-  /// `(ds, stage, minutes)`. Same lifecycle as [_held].
-  final List<(int ds, OuraSleepPhase stage, double minutes)> _heldStages = [];
+  /// Per-stage epoch counts waiting for an origin, keyed by the event that
+  /// carried them. Same lifecycle as [_held]. Keyed so a re-read decisecond
+  /// overwrites its own entry instead of counting the same event twice.
+  final Map<(int ds, int tag, int header), Map<OuraSleepPhase, int>>
+      _heldStages = {};
 
   /// The Unix second [ds] falls on, or null when no origin is known.
   int? _anchorUnixFor(int ds) {
@@ -287,9 +289,11 @@ class OuraAdapter extends BandAdapter {
         if (keep.isEmpty) {
           link.log('oura: the ring replayed ${got.events.length} event(s) '
               'below the cursor; nothing new after $cursor.');
-          // Replays with bytes still left is the same stranded bookmark as
-          // the empty-batch case above (counter restarted below it).
-          if (got.summary.bytesLeft > 0) {
+          // Stranded (counter restarted below the bookmark) when bytes are
+          // still left, or when the ring's newest event is older than the
+          // last one we read (cursor - 1): an up-to-date ring replays up to
+          // exactly that one, a rebooted ring's tail stops short of it.
+          if (got.summary.bytesLeft > 0 || got.maxDs + 1 < cursor) {
             yield const BandNote('oura_cursor_stranded');
           }
           return;
@@ -447,9 +451,7 @@ class OuraAdapter extends BandAdapter {
           for (final phase in hyp.phases) {
             epochs.update(phase, (n) => n + 1, ifAbsent: () => 1);
           }
-          for (final MapEntry(:key, :value) in epochs.entries) {
-            _heldStages.add((e.tsDs, key, value * 0.5));
-          }
+          _heldStages[(e.tsDs, e.tag, hyp.header)] = epochs;
       }
     }
     // Stamp everything an origin can now reach — this batch's readings and any
@@ -467,20 +469,31 @@ class OuraAdapter extends BandAdapter {
       ));
       return true;
     });
-    final stageRows = <Observation>[];
-    _heldStages.removeWhere((h) {
-      final unix = _anchorUnixFor(h.$1);
-      if (unix == null) return false;
-      stageRows.add(Observation(
-        at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
-        sourceKind: ObservationSource.vendor,
-        vendorKey: 'sleep_${h.$2.name}_min',
-        value: h.$3,
-        unit: 'min',
-        attribution: 'Oura',
-      ));
-      return true;
-    });
+    // Rows are stamped at the event's own decisecond, and carriers sharing
+    // one decisecond are summed: the row key is (ts_ms, vendorKey), so two
+    // events on one stamp would otherwise REPLACE each other's minutes.
+    final stageEpochs = <(int ms, OuraSleepPhase), int>{};
+    final a = _anchor;
+    if (a != null) {
+      for (final MapEntry(:key, :value) in _heldStages.entries) {
+        final ms = a.$2 * 1000 + (key.$1 - a.$1) * 100;
+        for (final MapEntry(key: stage, value: n) in value.entries) {
+          stageEpochs.update((ms, stage), (m) => m + n, ifAbsent: () => n);
+        }
+      }
+      _heldStages.clear();
+    }
+    final stageRows = [
+      for (final MapEntry(:key, :value) in stageEpochs.entries)
+        Observation(
+          at: DateTime.fromMillisecondsSinceEpoch(key.$1),
+          sourceKind: ObservationSource.vendor,
+          vendorKey: 'sleep_${key.$2.name}_min',
+          value: value * 0.5,
+          unit: 'min',
+          attribution: 'Oura',
+        ),
+    ];
     if (stageRows.isNotEmpty) yield VendorScalars(stageRows);
     // EVERY event frame is archived, including the ones just decoded and every
     // one that was not. Beat intervals, SpO2 and steps all live in here
