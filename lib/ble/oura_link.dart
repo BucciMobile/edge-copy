@@ -299,28 +299,10 @@ class OuraLink {
   /// `extraCursors` read does not re-persist the stale pair in the very next
   /// commit.
   void _resetCursor(String deviceId) {
-    // The captured [deviceId], not the mutable session `_deviceId`, and
-    // that is load-bearing: this operation runs LATER than the note that
-    // queued it — anything from a teardown (`stop()` nulls `_deviceId`,
-    // making a plain `_persistCursor` read a silent no-op) to a second
-    // session for a DIFFERENT ring landing in between — so reading session
-    // state at run time would either skip the reset or write it under the
-    // wrong device.
-    //
-    // THE ANCHOR DELETE AND THE CURSOR RESET ARE ALL-OR-NOTHING, and the
-    // order is the load-bearing half: the anchor goes FIRST, and a failure
-    // there ABORTS the whole reset. The two earlier shapes this replaced
-    // each failed one way — `deleteCursor().then(reset)` swallowed the
-    // reset on a delete failure (the stall stayed), while a best-effort
-    // delete that pressed on regardless produced something worse: cursor 0
-    // stored with the OLD anchor still loadable. The next session then
-    // re-reads everything — the reset DID run — and stamps the batches
-    // before the new `time_sync` by extrapolating the DEAD boot's origin
-    // across the new boot's uptime, which the plausibility bound cannot
-    // catch because a rebooted ring's early seconds are all in the past.
-    // A reset that stays incomplete is safe precisely because the
-    // stranded bookmark it leaves behind reads NOTHING, and the next
-    // session's stranded note re-runs the whole idempotent reset.
+    // The captured [deviceId]: this runs later than the note that queued it,
+    // possibly after `stop()` nulled `_deviceId`. The anchor goes first and a
+    // failure aborts the reset; cursor 0 with the old anchor still stored
+    // would stamp the new boot against the dead one's origin.
     _cursorWrites = _cursorWrites.then((_) async {
       _cursorHighWater = null;
       _anchor = null;
@@ -524,10 +506,7 @@ class OuraLink {
   /// Bank one frame verbatim, decoded or not (owner rulings R1-R3): the beat
   /// intervals, SpO2 and the steps are all in here undecoded and the bytes
   /// are banked now so a decoder written when someone owns a ring can be run
-  /// over them. The hypnogram is decoded in `adapters/oura.dart` now, and
-  /// its bytes are banked here too - the scalars that decode produces are
-  /// aggregates, and the epoch series itself stays in the archive for the
-  /// day a consumer for it exists.
+  /// over them.
   ArchiveRecord? _buildArchiveRow(List<int> bytes, int capturedAtMs) {
     final f = parseOuraFrame(bytes);
     if (f == null) return null;
@@ -679,8 +658,11 @@ class OuraLink {
     var finished = false;
     final done = host.run(link).whenComplete(() => finished = true);
     var served = 0;
-    for (var spin = 0; spin < 800 && !finished; spin++) {
-      await Future<void>.delayed(Duration.zero);
+    // Bounded by wall time, not a spin count: a real sqflite commit between
+    // batches can outlast any fixed number of zero-length yields.
+    final clock = Stopwatch()..start();
+    while (!finished && clock.elapsed < const Duration(seconds: 5)) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {
           link.feed(kOuraNotifyChar, f, atSec: _now());
@@ -693,6 +675,7 @@ class OuraLink {
     // final flush is the same sqflite write), so the same generous bound.
     await done.timeout(const Duration(seconds: 30), onTimeout: () {});
     await host.stop();
+    await _cursorWrites;
     _host = null;
     _anchor = null;
     _deviceId = null;
