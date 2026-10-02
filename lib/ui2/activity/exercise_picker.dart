@@ -71,19 +71,17 @@ class _ExercisePickerState extends State<_ExercisePicker> {
 
   List<ExerciseDef> _visible(String languageCode) {
     final needle = query.trim();
-    if (needle.isNotEmpty) {
+    final category = filter == _common || filter == _all ? null : filter;
+    // a highlighted category chip keeps narrowing the search
+    if (needle.isNotEmpty || category != null) {
       return [
         for (final exercise in exerciseLibrary)
-          if (exercise.matches(needle, languageCode)) exercise,
+          if ((category == null || exercise.category == category) &&
+              exercise.matches(needle, languageCode))
+            exercise,
       ];
     }
     if (filter == _all) return exerciseLibrary;
-    if (filter != _common) {
-      return [
-        for (final exercise in exerciseLibrary)
-          if (exercise.category == filter) exercise,
-      ];
-    }
 
     // recent lifts first, then the built-in short list
     final out = <ExerciseDef>[];

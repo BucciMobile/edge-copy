@@ -1496,6 +1496,28 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('searching keeps the highlighted category', (tester) async {
+      tester.view.physicalSize = const Size(390 * 3, 2400 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      addTearDown(LiveDraft.clear);
+
+      final a = activityByName('weight_training')!;
+      LiveDraft.begin(a, weightKg: 72.4);
+      await tester.pumpWidget(
+          _frame(liveFor(a, weightKg: 72.4), Brightness.light, 1.0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(BigButton, 'Choose exercise'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Abs'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'raise');
+      await tester.pumpAndSettle();
+      expect(find.text('Hanging leg raise'), findsOneWidget);
+      expect(find.text('Front Raises'), findsNothing,
+          reason: 'a shoulders lift is not in the Abs filter');
+    });
+
     testWidgets(
         'interval work/rest/rounds are configurable, not the old 45/30/8',
         (tester) async {
