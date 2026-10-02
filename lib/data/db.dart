@@ -1704,6 +1704,15 @@ class LocalDb {
     ''');
   }
 
+  /// Beats of one record share rr_ts_ms; beat_index orders them. Ranged on
+  /// ts_ms (= rr_ts_ms for every row) so the read rides the
+  /// (device_id, ts_ms, beat_index) PK. rr_ts_ms has no index, so ranging on
+  /// it scanned and sorted the whole store once per pending capture.
+  @visibleForTesting
+  static const bpResearchRrWindowSql = 'SELECT rr_ts_ms, rr_ms FROM decoded_rr '
+      'WHERE device_id = ? AND ts_ms >= ? AND ts_ms <= ? '
+      'ORDER BY ts_ms ASC, beat_index ASC';
+
   /// Fill the window of every capture that has none yet, once the primary
   /// band's synced 1 Hz data reaches the window end. At capture time the
   /// window is still in the future and the band hasn't offloaded it, so it
@@ -1736,11 +1745,8 @@ class LocalDb {
           'ORDER BY rec_ts ASC',
           [kPrimaryDeviceId, start ~/ 1000, end ~/ 1000],
         ),
-        // Beats of one record share rr_ts_ms; beat_index orders them.
         rrRows: await db.rawQuery(
-          'SELECT rr_ts_ms, rr_ms FROM decoded_rr '
-          'WHERE device_id = ? AND rr_ts_ms >= ? AND rr_ts_ms <= ? '
-          'ORDER BY rr_ts_ms ASC, beat_index ASC',
+          bpResearchRrWindowSql,
           [kPrimaryDeviceId, start, end],
         ),
       );

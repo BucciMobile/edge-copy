@@ -378,6 +378,20 @@ void main() {
     expect(r['hr_mean'], 70);
   });
 
+  test('the window RR read seeks the store instead of scanning it',
+      () async {
+    // A capture with no band data stays pending and is re-read on every
+    // prune, so this read must not walk and sort the whole decoded_rr.
+    final db = await LocalDb.instance;
+    final plan = (await db.rawQuery(
+      'EXPLAIN QUERY PLAN ${LocalDb.bpResearchRrWindowSql}',
+      [LocalDb.kPrimaryDeviceId, 1, 9],
+    )).map((r) => r['detail'].toString()).join(' | ');
+    expect(plan.toUpperCase(), contains('TS_MS'), reason: plan);
+    expect(plan.toUpperCase(), isNot(contains('USE TEMP B-TREE')),
+        reason: plan);
+  });
+
   test('a salvage with an unreadable window table keeps the references',
       () async {
     const name = 'bp_research_salvage_test.db';
