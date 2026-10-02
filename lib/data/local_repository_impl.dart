@@ -24,7 +24,8 @@ import '../compute/manual_session.dart';
 import '../compute/onehz_pipeline.dart' show kUnknownAbsenceNote, needInputNote;
 import '../compute/profile.dart';
 import '../compute/vo2max_activity_gate.dart';
-import '../compute/vo2max_history.dart' show kVo2maxHistoryMethod;
+import '../compute/vo2max_history.dart'
+    show kVo2maxHistoryFormulaVersion, kVo2maxHistoryMethod;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
@@ -2133,7 +2134,9 @@ class LocalRepositoryImpl extends LocalRepository {
     // Best-effort: the list rendered before this existed and must keep doing
     // so if the history table is missing/empty.
     try {
-      final medians = await LocalDb.vo2maxHistoryMedians();
+      final medians = await LocalDb.vo2maxHistoryMedians(
+          method: kVo2maxHistoryMethod,
+          formulaVersion: kVo2maxHistoryFormulaVersion);
       if (medians.isNotEmpty) {
         for (final w in workouts) {
           final m = medians[w['id'] as String?];
@@ -2250,8 +2253,9 @@ class LocalRepositoryImpl extends LocalRepository {
     // getWorkouts' batch — here for the single detail row. Best-effort:
     // the detail rendered before this existed.
     try {
-      final medians = await LocalDb.vo2maxHistoryMedians();
-      final m = medians[id];
+      final m = await LocalDb.vo2maxHistoryMedianForSession(id,
+          method: kVo2maxHistoryMethod,
+          formulaVersion: kVo2maxHistoryFormulaVersion);
       if (m != null) w['vo2max_history_median'] = m;
     } catch (_) {
       /* enrichment — the detail renders without the history median */
@@ -3013,24 +3017,45 @@ class LocalRepositoryImpl extends LocalRepository {
       // this session long after the substrate it would have needed is gone;
       // a later attempt that succeeds upgrades the row with a value and the
       // method code, and never overwrites either once set.
+      // VALUE, METHOD and ABSENCE REASON as separate variables from the
+      // typed record — and an explicit status when the ANCHORS are missing:
+      // the old shape silently skipped the whole block, leaving the row
+      // with neither a value nor a reason while the physiology had one
+      // honest thing to say ("no anchors to grade against"). The reason is
+      // banked once (first forward-only pass), a value upgrades it later,
+      // and the returned row ALWAYS matches what was written to the DB.
       double? vo2max;
       String? vo2maxReason;
-      if ((row['vo2max_estimate'] as num?) == null &&
-          hrMaxForSession != null &&
-          restingHrForSession != null) {
-        (vo2max, vo2maxReason) = await _submaxVo2maxFromSplits(
-          id,
-          type: row['type'] as String?,
-          hrRows: hrRows,
-          hrMaxBpm: hrMaxForSession,
-          restingHrBpm: restingHrForSession,
-        );
+      if ((row['vo2max_estimate'] as num?) == null) {
+        if (hrMaxForSession == null) {
+          vo2maxReason = 'no_hr_max_available';
+        } else if (restingHrForSession == null) {
+          vo2maxReason = 'no_resting_hr_available';
+        } else {
+          final outcome = await _submaxVo2maxFromSplits(
+            id,
+            type: row['type'] as String?,
+            hrRows: hrRows,
+            hrMaxBpm: hrMaxForSession,
+            restingHrBpm: restingHrForSession,
+          );
+          vo2max = outcome.value;
+          vo2maxReason = outcome.absenceReason;
+        }
         if (vo2max != null) {
           await LocalDb.setSessionVo2max(id, vo2max,
-              method: vo2maxReason ?? 'acsm_speed_swain_hrr');
-        } else if ((row['vo2max_absence_reason'] as String?) == null) {
-          await LocalDb.setSessionVo2maxAbsenceReason(
-              id, vo2maxReason ?? 'no_qualifying_bout');
+              method: 'acsm_speed_swain_hrr');
+          vo2maxReason = null;
+        } else {
+          final banked = row['vo2max_absence_reason'] as String?;
+          final reason = vo2maxReason ?? 'no_qualifying_bout';
+          if (banked == null) {
+            await LocalDb.setSessionVo2maxAbsenceReason(id, reason);
+          }
+          // The returned row carries what the DB now holds: the banked
+          // reason if one already existed (forward-only: the first pass's
+          // answer outlives the substrate), otherwise the fresh one.
+          vo2maxReason = banked ?? reason;
         }
       }
       final updated = {
@@ -3043,6 +3068,9 @@ class LocalRepositoryImpl extends LocalRepository {
         'trace_json': ?traceJson,
         if (traceJson != null) 'trace_samples': stats.hrSampleCount,
         'vo2max_estimate': ?vo2max,
+        // The reason and the value are MUTUALLY EXCLUSIVE by construction
+        // above (a value clears the reason), so the row the caller gets
+        // matches the DB row on both fields, not just one.
         'vo2max_absence_reason': ?vo2maxReason,
       };
       return (row: updated, hrRows: hrRows, zoneMinutesRebinned: rebinned);
@@ -3231,7 +3259,16 @@ class LocalRepositoryImpl extends LocalRepository {
   /// value) so callers can persist provenance and a screen can say WHY, not
   /// just show a gap. `null, null` means "not attempted": the banked value
   /// already exists (forward-only) and there is nothing to add.
-  Future<(double?, String?)> _submaxVo2maxFromSplits(
+  /// The live estimate's outcome, with VALUE, METHOD and ABSENCE REASON
+  /// as SEPARATE fields — the old `(double?, String?)` tuple returned the
+  /// METHOD CODE in the reason slot on success, and the call site wrote
+  /// that same variable into `vo2max_absence_reason`-shaped consumers:
+  /// a session with a value carried a non-null "absence reason" in the
+  /// returned row while the DB row (correctly) had none — row and DB
+  /// disagreed. Invariant: value present → absenceReason null;
+  /// value absent → absenceReason set.
+  Future<({double? value, String? method, String? absenceReason})>
+      _submaxVo2maxFromSplits(
     String id, {
     required String? type,
     required List<Map<String, dynamic>> hrRows,
@@ -3243,10 +3280,17 @@ class LocalRepositoryImpl extends LocalRepository {
       // or a car's GPS pace fed to the running equation is not a VO2max, it
       // is a unit error — gate on the session's own type before anything
       // else, and say so rather than return a silent null.
-      if (!vo2maxEligibleActivity(type)) return (null, 'unsupported_activity');
-      if (!await LocalDb.sessionHasRoute(id)) return (null, 'no_route');
+      if (!vo2maxEligibleActivity(type)) {
+        return (value: null, method: null,
+            absenceReason: 'unsupported_activity');
+      }
+      if (!await LocalDb.sessionHasRoute(id)) {
+        return (value: null, method: null, absenceReason: 'no_route');
+      }
       final rows = await LocalDb.routePoints(id);
-      if (rows.length < 2) return (null, 'route_too_short');
+      if (rows.length < 2) {
+        return (value: null, method: null, absenceReason: 'route_too_short');
+      }
       final points = [for (final r in rows) RoutePoint.fromRow(r)];
       final hr = [
         for (final r in hrRows)
@@ -3260,11 +3304,15 @@ class LocalRepositoryImpl extends LocalRepository {
       // Full splits only — a trailing partial km has no fixed distance to
       // divide a duration by, so its "speed" is just noise.
       final full = [for (final s in splits) if (s.meters >= 999) s];
-      if (full.isEmpty) return (null, 'no_completed_km_split');
+      if (full.isEmpty) {
+        return (value: null, method: null,
+            absenceReason: 'no_completed_km_split');
+      }
       full.sort((a, b) => b.durationSec.compareTo(a.durationSec));
       final best = full.first;
       if (best.avgHr == null || best.durationSec <= 0) {
-        return (null, 'no_steady_hr_for_split');
+        return (value: null, method: null,
+            absenceReason: 'no_steady_hr_for_split');
       }
 
       var edgeMs = points.first.tsMs;
@@ -3274,6 +3322,15 @@ class LocalRepositoryImpl extends LocalRepository {
         if (s.index != best.index) continue;
         final net = _netElevation(points, startMs, edgeMs);
         final grade = net == null ? null : net / best.meters * 100;
+        // Edge-side equation-domain gate BEFORE analytics: inside the
+        // 1.9-2.1 m/s grey zone the walk/run equation choice is arbitrary
+        // (a ~12 ml/kg/min jump at the threshold), and the honest answer
+        // is no estimate, not whichever equation the pace landed in.
+        final domainReason =
+            acsmSpeedDomainReason(best.meters / best.durationSec);
+        if (domainReason != null) {
+          return (value: null, method: null, absenceReason: domainReason);
+        }
         final m = ana.vo2maxSubmaxEstimate(
           speedMps: best.meters / best.durationSec,
           avgHrBpm: best.avgHr!,
@@ -3284,15 +3341,24 @@ class LocalRepositoryImpl extends LocalRepository {
         );
         // The analytics note is the peer-reviewed method's own abstention
         // text; the code is what a column can store and a screen can match.
-        if (!m.present) return (null, 'no_qualifying_bout');
-        return (m.value, 'acsm_speed_swain_hrr');
+        if (!m.present) {
+          return (value: null, method: null,
+              absenceReason: 'no_qualifying_bout');
+        }
+        return (
+          value: m.value,
+          method: 'acsm_speed_swain_hrr',
+          absenceReason: null,
+        );
       }
-      return (null, 'no_completed_km_split');
+      return (value: null, method: null,
+          absenceReason: 'no_completed_km_split');
     } catch (_) {
       // A storage/route failure is NOT the analytics method abstaining —
       // it never got to run. Its own code, so a screen does not claim the
       // physiology said "no" when the truth is "the read failed".
-      return (null, 'estimation_unavailable');
+      return (value: null, method: null,
+          absenceReason: 'estimation_unavailable');
     }
   }
 

@@ -23,3 +23,36 @@ const Set<String> vo2maxEligibleTypes = {
 // be a fabricated provenance.
 bool vo2maxEligibleActivity(String? type) =>
     vo2maxEligibleTypes.contains((type ?? '').trim().toLowerCase());
+
+/// ACSM EQUATION-DOMAIN GATE (edge-side, NOT a formula change).
+///
+/// The pinned analytics switches between the walking (<2.0 m/s) and running
+/// (>=2.0 m/s) equation at a hard threshold. The two equations are NOT
+/// continuous there — a flat bout at 2.0 m/s costs 15.5 ml/kg/min under the
+/// walking equation and 27.5 under the running one, a ~12-unit jump that
+/// no physiology produces over a hair of pace. The switch is a modelling
+/// artefact of using two regression equations outside their individual
+/// comfort zones, and the honest edge-side answer inside the grey zone is
+/// NO ESTIMATE rather than whichever equation the pace happens to land in.
+///
+/// The bounds below are a TECHNICAL HEURISTIC marking where neither
+/// equation's validation population lives (the walking equation's subjects
+/// and the running equation's subjects simply do not meet at 2.0 m/s);
+/// they are not calibrated confidence statements. A proper fix belongs in
+/// the analytics repo (domain checks in vo2maxSubmaxEstimate itself); this
+/// gate is the safe edge-side containment until that package change is
+/// approved.
+const double kVo2maxGreyZoneMinMps = 1.9;
+const double kVo2maxGreyZoneMaxMps = 2.1;
+
+/// Machine-readable reason a bout's pace falls where the ACSM equation
+/// choice is arbitrary, or null when the pace is safely inside one
+/// equation's domain. Pure, public, unit-testable.
+String? acsmSpeedDomainReason(double speedMps) {
+  if (!speedMps.isFinite || speedMps <= 0) return 'no_completed_km_split';
+  if (speedMps >= kVo2maxGreyZoneMinMps &&
+      speedMps <= kVo2maxGreyZoneMaxMps) {
+    return 'equation_domain_ambiguous';
+  }
+  return null;
+}

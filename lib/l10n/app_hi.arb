@@ -2382,5 +2382,20 @@
   "ecgProgress": "{pct}% पूर्ण",
   "ecgWaveformEmpty": "इस रीडिंग के साथ कोई तरंग सहेजी नहीं गई।",
   "ecgWaveformLabel": "स्वीकृत तरंग, माइक्रोवोल्ट में जैसा बैंड ने भेजा। रिक्त स्थान अनुपलब्ध सेकंड हैं।",
-  "ecgSampleNote": "{rate} Hz पर {count} सैंपल, फ़िल्टर्ड, इनपुट-संदर्भित µV। कोई लीड या ध्रुवता का दावा नहीं।"
+  "ecgSampleNote": "{rate} Hz पर {count} सैंपल, फ़िल्टर्ड, इनपुट-संदर्भित µV। कोई लीड या ध्रुवता का दावा नहीं।",
+  "vo2maxStatLabel": "VO2max (अंदान)",
+  "vo2maxStatMethod": "{value} ml/kg/min (अंदान, ACSM गति + %HRR)",
+  "vo2maxHistoryStatLabel": "VO2max (इतिहास से)",
+  "vo2maxHistoryStatMethod": "{value} ml/kg/min (इस सेशन के स्प्लिट से पूर्ववृत्त अंदान)",
+  "vo2maxAbsenceUnsupportedActivity": "इस गतिविधि के लिए अंदान नहीं (केवल ACSM चाल/दौड़)",
+  "vo2maxAbsenceNoRoute": "अंदान नहीं — इस सेशन के लिए GPS रूट नहीं",
+  "vo2maxAbsenceRouteTooShort": "अंदान नहीं — GPS रूट बहुत छोटी है",
+  "vo2maxAbsenceNoCompletedKmSplit": "अंदान नहीं — पूरा 1 km स्प्लिट नहीं",
+  "vo2maxAbsenceNoSteadyHr": "अंदान नहीं — स्प्लिट पर स्थिर हृदय दर नहीं",
+  "vo2maxAbsenceNoQualifyingBout": "अंदान नहीं — कोई स्थिर सबमैक्सिमल हिस्सा नहीं (हिस्सा बहुत छोटा, तीव्रता 40–90 %HRR से बाहर, या अविश्वसनीय परिणाम)",
+  "vo2maxAbsenceNoHrMax": "अंदान नहीं — इस सेशन के लिए अधिकतम हृदय दर स्रोत नहीं",
+  "vo2maxAbsenceNoRestingHr": "अंदान नहीं — इस सेशन से पहले कोई विश्रांति हृदय दर नहीं",
+  "vo2maxAbsenceDomainAmbiguous": "अंदान नहीं — गति चाल/दौड़ समीकरण की ग्रेज़ोन में है (लगभग 1.9–2.1 m/s), जहाँ अंदान सार्थक नहीं है",
+  "vo2maxAbsenceEstimationUnavailable": "अंदऺन नहीं — इनपुट डेटा पढ़ा नहीं जा सका",
+  "vo2maxAbsenceFallback": "इस सेशन से अंदान नहीं"
 }

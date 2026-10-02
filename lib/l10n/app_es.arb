@@ -2411,5 +2411,20 @@
   "ecgProgress": "{pct}% completado",
   "ecgWaveformEmpty": "No se guardó ninguna onda con esta lectura.",
   "ecgWaveformLabel": "Onda aceptada en microvoltios tal como la envió la banda. Los huecos son segundos faltantes.",
-  "ecgSampleNote": "{count} muestras a {rate} Hz, filtradas, µV referidos a la entrada. No se afirma derivación ni polaridad."
+  "ecgSampleNote": "{count} muestras a {rate} Hz, filtradas, µV referidos a la entrada. No se afirma derivación ni polaridad.",
+  "vo2maxStatLabel": "VO2max (est.)",
+  "vo2maxStatMethod": "{value} ml/kg/min (est., ritmo ACSM + %HRR)",
+  "vo2maxHistoryStatLabel": "VO2max (del historial)",
+  "vo2maxHistoryStatMethod": "{value} ml/kg/min (est. retrospectiva de los parciales de esta sesión)",
+  "vo2maxAbsenceUnsupportedActivity": "No estimado para este tipo de actividad (solo caminar/correr ACSM)",
+  "vo2maxAbsenceNoRoute": "No estimado — sin ruta GPS para esta sesión",
+  "vo2maxAbsenceRouteTooShort": "No estimado — ruta GPS demasiado corta",
+  "vo2maxAbsenceNoCompletedKmSplit": "No estimado — ningún parcial de 1 km completado",
+  "vo2maxAbsenceNoSteadyHr": "No estimado — sin frecuencia cardíaca estable en el parcial",
+  "vo2maxAbsenceNoQualifyingBout": "No estimado — sin tramo submaximal estable (tramo demasiado corto, intensidad fuera del 40–90 %HRR o resultado implausible)",
+  "vo2maxAbsenceNoHrMax": "No estimado — sin ancla de FC máxima para esta sesión",
+  "vo2maxAbsenceNoRestingHr": "No estimado — sin frecuencia cardíaca en reposo antes de esta sesión",
+  "vo2maxAbsenceDomainAmbiguous": "No estimado — el ritmo está en la zona gris de la ecuación caminar/correr (aprox. 1,9–2,1 m/s), donde la estimación no es significativa",
+  "vo2maxAbsenceEstimationUnavailable": "No estimado — no se pudieron leer los datos de entrada",
+  "vo2maxAbsenceFallback": "No estimado a partir de esta sesión"
 }

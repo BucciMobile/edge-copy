@@ -13,7 +13,7 @@ compatibility contract. The user-facing claim is always **"geschätzte VO₂max"
 | Formula core (pure function) | `openstrap_analytics` (pinned SHA in `pubspec.yaml`), `lib/src/onehz/clinical/vo2max.dart` → `vo2maxSubmaxEstimate` |
 | Edge call site / split selection (LIVE estimate) | `lib/data/local_repository_impl.dart` → `_submaxVo2maxFromSplits` |
 | Activity-type gate (ACSM is foot-only) | `lib/compute/vo2max_activity_gate.dart` |
-| Retrospective history pass ("Schätzung aus bisherigen Aktivitäten") | `lib/compute/vo2max_history.dart` → `backfillVo2maxHistory` (incremental per derive: full pass once per formula version via `compute_freshness`, then only sessions without history rows; invoked from `derivation_engine.dart` after the strain rescale) |
+| Retrospective history pass ("Schätzung aus bisherigen Aktivitäten") | `lib/compute/vo2max_history.dart` → `backfillVo2maxHistory` (incremental per derive: full pass once per formula version via `compute_freshness`, then only sessions whose input fingerprint changed or that have no rows yet; invoked from `derivation_engine.dart` after the strain rescale) |
 | Storage — live estimate (additive, nullable columns) | `lib/data/db.dart` → `sessions.vo2max_estimate`, `sessions.vo2max_method`, `sessions.vo2max_absence_reason` |
 | Storage — history estimates (separate table) | `lib/data/db.dart` → `vo2max_history` (per (session_id, km): value, absence_reason, method, formula_version, hr_max_bpm, resting_hr_bpm, activity_ts, computed_at) |
 | Display (label carries method + unit; history is its own row) | `lib/ui2/activity/summary.dart` → `sessionStats` |
@@ -72,6 +72,16 @@ from the UI for that reason. The analytics package attaches a heuristic
 band-position confidence (0.25–0.6), which is a heuristic, not a
 calibrated probability.
 
+### Storage caveats
+
+- `vo2max_history.hr_max_bpm` / `resting_hr_bpm` are `REAL NOT NULL` and read `0`
+  when an anchor was missing — a SCHEMA LIMITATION, not a measurement. Every
+  consumer treats `vo2max IS NULL` as the abstention signal; the anchor columns
+  are provenance, and a nullable migration would be the clean fix (needs
+  approval, it is a schema change).
+- No FK to `sessions` (on-device only, like every session-owned table here);
+  `putVo2maxHistory` guards against orphans transactionally instead.
+
 ### Data-quality gates (all machine-readable, all abstaining, never 0)
 
 | Gate | Code (`vo2max_absence_reason`) | Rule |
@@ -81,6 +91,7 @@ calibrated probability.
 | Full km split | `no_completed_km_split` | Only completed ≥999 m splits; a partial trailing km has no fixed distance. |
 | Steady HR over split | `no_steady_hr_for_split` | Split's own average HR exists and duration > 0. |
 | Steady-state bout | `no_qualifying_bout` | Analytics-side: bout ≥ 300 s, %HRR in [0.40, 0.90], reserve ≥ 20 bpm, plausible result range. |
+| Equation grey zone | `equation_domain_ambiguous` | Edge-side: bout pace in ~1.9–2.1 m/s, where the ACSM walk/run equation switch is a modelling artefact (a ~12 ml·kg⁻¹·min⁻¹ jump at 2.0 m/s). Technical heuristic; the real fix belongs in analytics. |
 | Read failure | `estimation_unavailable` | A storage/route error — the method never ran; never dressed up as a physiology abstention. |
 | Method | `acsm_speed_swain_hrr` | Provenance code stored with the value (`vo2max_method`). |
 
@@ -222,6 +233,14 @@ carries at most one estimate from one method (`vo2max_method`).
   unit; when there is no estimate the line shows the reason in prose via
   `vo2maxAbsenceText` (snake_case codes never render). No screen shows
   VO₂max = 0 for missing data.
+- Localization: the VO₂max stat labels, method hints and every absence
+  reason are keyed in `lib/l10n/app_*.arb` (`vo2maxStatLabel`,
+  `vo2maxStatMethod`, `vo2maxHistoryStatLabel`,
+  `vo2maxHistoryStatMethod`, `vo2maxAbsence*`) for ALL SIX supported
+  locales (de, en, es, fr, hi, zh). `vo2maxAbsenceText(code, l)` takes the
+  caller's `AppLocalizations`; a null `l` falls back to the built-in
+  English lines so pure unit callers keep working. The storage codes stay
+  locale-independent vocabulary.
 - No new dependencies. No personal health data is logged by this path beyond
   what the session row already stores.
 
@@ -254,6 +273,25 @@ carries at most one estimate from one method (`vo2max_method`).
   `absence_and_offload_guards_test`, `crossday_pipeline_test`,
   `workout_enrichment_test`, `log_workout_test`.
 - `flutter analyze` - no issues.
+- Test isolation: every VO₂max DB test runs on a FRESH database per test
+  (`setUp` deletes the file). The suites additionally pass under
+  `--test-randomize-ordering-seed` (history seed 12345, trend seeds 777/42)
+  and per-`--plain-name` single runs — no hidden order dependencies.
+- Provenance re-walk regressions: a later-measured historical RHR re-walks
+  a session whose splits never changed (abstention upgrades to a value,
+  reason fully cleared); a LATER `hr_ceiling_bpm` does not displace an older
+  session's as-of anchor (187 stays 187, value stays ~54); a corrected
+  session timestamp re-walks and replaces the stale row.
+- Partial-failure regression: with a SQLite trigger injected to fail one
+  session's history INSERT mid-pass, the pass throws, the already-written
+  session's rows survive, the freshness payload is NOT marked current, and
+  the next pass completes the failed session without duplicating the
+  good one (test seam: SQL trigger, no production-code hook).
+- Upgrade regression: a stale `formula_version` payload triggers a full
+  re-walk that replaces rows in place.
+- L10n regression: every absence code resolves to localized, non-empty,
+  underscore-free prose in EVERY supported locale (de/en/es/fr/hi/zh) via
+  `lookupAppLocalizations`.
 
 Unit tests prove arithmetic, not clinical accuracy. The physiological
 validity of a submax estimate on any individual is not claimed and cannot be

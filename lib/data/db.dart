@@ -10531,6 +10531,28 @@ class LocalDb {
     return (bpm: v.toDouble(), date: d);
   }
 
+  /// The LATEST ceiling RECORDED STRICTLY BEFORE [dayLabel] — the as-of
+  /// anchor a HISTORICAL session may be graded against. Unlike
+  /// [observedHrCeiling] (the global max, today's view), this is
+  /// point-in-time: a ceiling first recorded AFTER the session is evidence
+  /// that did not exist when the session ran, and grading history against
+  /// it would smuggle a later measurement in as a historical one.
+  static Future<({double bpm, String date})?> observedHrCeilingAsOf(
+      String dayLabel) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      "SELECT date, value FROM metric_series "
+      "WHERE key = 'hr_ceiling_bpm' AND value IS NOT NULL "
+      "AND date < ? "
+      'ORDER BY date DESC LIMIT 1',
+      [dayLabel],
+    );
+    if (rows.isEmpty) return null;
+    final d = rows.first['date'], v = rows.first['value'];
+    if (d is! String || v is! num) return null;
+    return (bpm: v.toDouble(), date: d);
+  }
+
   /// The `device_family` of the most recent session that carries one, or null.
   ///
   /// The zone ceiling is a per-family constant, so a screen that prints zone
@@ -10711,6 +10733,18 @@ class LocalDb {
   ) async {
     final db = await instance;
     await db.transaction((txn) async {
+      // Orphan guard: the history pass resolves its session list from
+      // `workout_split` and writes LATER, so the session may have been
+      // deleted (by the user, on another screen) between the read and
+      // this write. There is no FK on this table (on-device only, like
+      // every session-owned table here), so a plain insert would leave
+      // rows under a dead session_id on the detail/list/trend reads.
+      // A deleted session writes NOTHING.
+      final n = Sqflite.firstIntValue(await txn.rawQuery(
+        'SELECT COUNT(*) FROM sessions WHERE id = ?',
+        [sessionId],
+      ));
+      if (n == 0) return;
       await txn.delete(
         'vo2max_history',
         where: 'session_id = ?',
@@ -10733,16 +10767,51 @@ class LocalDb {
     return db.query('vo2max_history', orderBy: 'activity_ts ASC');
   }
 
+  /// Median retrospective VO₂max for ONE session's qualifying rows — the
+  /// workout DETAIL needs one session's number, not a scan of the whole
+  /// history table for every opened workout. Same method (+ optional
+  /// version) comparability rule as [vo2maxHistoryMedians].
+  static Future<double?> vo2maxHistoryMedianForSession(String sessionId,
+      {String method = 'acsm_speed_swain_hrr',
+      String? formulaVersion}) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT vo2max FROM vo2max_history '
+      'WHERE session_id = ? AND vo2max IS NOT NULL AND method = ? '
+      '${formulaVersion == null ? '' : 'AND formula_version = ? '}'
+      'ORDER BY vo2max',
+      formulaVersion == null
+          ? [sessionId, method]
+          : [sessionId, method, formulaVersion],
+    );
+    if (rows.isEmpty) return null;
+    final xs = [
+      for (final r in rows) (r['vo2max'] as num?)?.toDouble(),
+    ].whereType<double>().where((v) => v.isFinite).toList();
+    if (xs.isEmpty) return null;
+    final mid = xs.length ~/ 2;
+    return xs.length.isOdd
+        ? xs[mid]
+        : (xs[mid - 1] + xs[mid]) / 2;
+  }
+
   /// Median retrospective VO₂max per session over its qualifying splits
   /// (rows with a value), one row per session_id that has at least one.
   /// The median — not the mean — so one outlier split cannot drag a
   /// session's aggregate; computed here so the whole list needs ONE query
   /// instead of a per-session round trip.
-  static Future<Map<String, double>> vo2maxHistoryMedians() async {
+  static Future<Map<String, double>> vo2maxHistoryMedians(
+      {String method = 'acsm_speed_swain_hrr',
+      String? formulaVersion}) async {
     final db = await instance;
     final rows = await db.rawQuery(
       'SELECT session_id, vo2max FROM vo2max_history '
-      'WHERE vo2max IS NOT NULL ORDER BY session_id, vo2max',
+      'WHERE vo2max IS NOT NULL AND method = ? '
+      '${formulaVersion == null ? '' : 'AND formula_version = ? '}'
+      'ORDER BY session_id, vo2max',
+      formulaVersion == null
+          ? [method]
+          : [method, formulaVersion],
     );
     final bySession = <String, List<double>>{};
     for (final r in rows) {
@@ -10791,18 +10860,16 @@ class LocalDb {
     );
     if (rows.isEmpty) return const [];
     final out = <Map<String, Object?>>[];
-    // Per-day buckets keyed on the LOCAL calendar day of activity_ts
-    // (the same convention as data/day_label.dart). A day-of-month number
-    // alone would merge the 5th of two different months.
+    // Per-day buckets keyed on the LOCAL calendar day of activity_ts via
+    // THE repo's one day-label helper (data/day_label.dart) — a private
+    // local formatter here was a second implementation of the same rule,
+    // and the two could drift.
     String? dayKey;
     int bucketTs = 0;
     var dayVals = <double>[];
     String? bucketVersion;
-    String labelOf(int ts) {
-      final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000).toLocal();
-      String two(int x) => x.toString().padLeft(2, '0');
-      return '${d.year.toString().padLeft(4, '0')}-${two(d.month)}-${two(d.day)}';
-    }
+    String labelOf(int ts) =>
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(ts * 1000));
     for (final r in rows) {
       final ts = (r['activity_ts'] as num?)?.toInt();
       final v = (r['vo2max'] as num?)?.toDouble();

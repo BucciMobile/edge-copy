@@ -27,7 +27,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
 import 'package:openstrap_edge/compute/vo2max_activity_gate.dart';
-import 'package:openstrap_edge/ui2/activity/summary.dart' show vo2maxAbsenceText;
+import 'dart:io';
+
+import 'package:openstrap_edge/l10n/app_localizations.dart';
+import 'package:openstrap_edge/ui2/activity/summary.dart'
+    show vo2maxAbsenceText;
+
+/// lib/**.dart sources, for the static no-Uth guard. The test file is not
+/// under lib/, so its own mention of 15.3 never trips the check.
+List<File> _edgeLibSources() => Directory('lib')
+    .listSync(recursive: true)
+    .whereType<File>()
+    .where((f) => f.path.endsWith('.dart'))
+    .toList();
 
 void main() {
   group('ACSM running equation (the pinned analytics formula)', () {
@@ -158,18 +170,16 @@ void main() {
   });
 
   group('method selection: NOT-implemented candidates stay out', () {
-    test('Uth HRmax/HRrest (15.3*HRmax/HRrest) is NOT part of the surface',
-        () {
-      // Uth reference case: 15.3 * 180/60 = 45.9 ml/kg/min. The analytics
-      // surface exposes exactly one VO2max estimator (the submax bout one);
-      // the RHR-ratio method was deleted deliberately (CV-02) and must not
-      // sneak back in. The 45.9 below is the formula's own reference value,
-      // asserted ONLY as arithmetic — no shipped code path may produce it
-      // from these two resting numbers alone.
+    // NOTE on the LIMIT of this guard: it pins that the ONE estimator the
+    // edge calls cannot produce a value from resting numbers alone (no
+    // bout, no value). It does NOT and cannot prove that no other code
+    // path anywhere implements 15.3*HRmax/HRrest — that is a
+    // whole-codebase property. The static half of that property is
+    // asserted separately (see the 'no Uth formula in edge sources'
+    // test below); this one pins the analytics surface only.
+    test('Uth HRmax/HRrest (15.3*HRmax/HRrest) is NOT part of the surface', () {
       const uthResult = 15.3 * (180 / 60); // = 45.9, the would-be value
       expect(uthResult, closeTo(45.9, 1e-9));
-      // The one estimator the edge calls needs a real bout: with no bout
-      // data there is no value, so the Uth number is unreachable by design.
       final m = ana.vo2maxSubmaxEstimate(
         speedMps: 0,
         avgHrBpm: 180,
@@ -178,6 +188,33 @@ void main() {
         hrMaxBpm: 180,
       );
       expect(m.present, isFalse);
+    });
+
+    test('no Uth formula in EDGE sources (static grep-level guard)', () {
+      // The honest half of the absence claim: the shipped edge code under
+      // lib/ contains no 15.3 coefficient and no vo2max symbol that could
+      // implement the RHR-ratio method. Run against the repo on disk, not
+      // against this test file itself (which legitimately MENTIONS 15.3).
+      // Comments legitimately MENTION the deleted method (its removal
+      // is part of this repo's history); only CODE lines may not contain
+      // the coefficient. Crude but honest about what it proves: a grep
+      // over stripped lines, not a semantic analysis.
+      final edge = _edgeLibSources();
+      for (final f in edge) {
+        for (final line in f.readAsLinesSync()) {
+          final code = line.split('//').first;
+          expect(
+            code.contains('15.3'),
+            isFalse,
+            reason: 'Uth coefficient in ${f.path}: $line',
+          );
+          expect(
+            code.contains('hrMax / rhr'),
+            isFalse,
+            reason: 'RHR-ratio in ${f.path}: $line',
+          );
+        }
+      }
     });
   });
 
@@ -220,5 +257,45 @@ void main() {
       expect(vo2maxAbsenceText('something_new'), isNotNull);
       expect(vo2maxAbsenceText(null), isNull);
     });
+  });
+
+  // L10N: every absence code must resolve to localized prose in EVERY
+  // supported locale — the ARB files carry one key per code, and a locale
+  // missing a key would fall back to English at runtime (acceptable), but a
+  // MISSING ARB ENTRY would break gen-l10n. The generated lookup is driven
+  // directly so no widget tree is needed.
+  group('absence codes are localized in every supported locale', () {
+    final codes = <String>[
+      'unsupported_activity',
+      'no_route',
+      'route_too_short',
+      'no_completed_km_split',
+      'no_steady_hr_for_split',
+      'no_qualifying_bout',
+      'no_hr_max_available',
+      'no_resting_hr_available',
+      'equation_domain_ambiguous',
+      'estimation_unavailable',
+    ];
+    for (final locale in AppLocalizations.supportedLocales) {
+      test('locale ${locale.languageCode}: every code has localized prose', () {
+        final l = lookupAppLocalizations(locale);
+        for (final code in codes) {
+          final text = vo2maxAbsenceText(code, l);
+          expect(text, isNotNull, reason: '$code / ${locale.languageCode}');
+          expect(
+            text!.contains('_'),
+            isFalse,
+            reason:
+                '$code leaked storage vocabulary in '
+                '${locale.languageCode}',
+          );
+          expect(text, isNotEmpty, reason: code);
+        }
+        // The fallback line localizes too, and null stays null.
+        expect(vo2maxAbsenceText('something_new', l), isNotNull);
+        expect(vo2maxAbsenceText(null, l), isNull);
+      });
+    }
   });
 }

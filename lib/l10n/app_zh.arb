@@ -2382,5 +2382,20 @@
   "ecgProgress": "已完成 {pct}%",
   "ecgWaveformEmpty": "此读数未保存波形。",
   "ecgWaveformLabel": "接受的波形，单位为手环发送的微伏。空隙为缺失的秒。",
-  "ecgSampleNote": "{rate} Hz 下 {count} 个样本，已滤波，输入参考 µV。不声明导联或极性。"
+  "ecgSampleNote": "{rate} Hz 下 {count} 个样本，已滤波，输入参考 µV。不声明导联或极性。",
+  "vo2maxStatLabel": "VO2max（估计）",
+  "vo2maxStatMethod": "{value} ml/kg/min（估计，ACSM 配速 + %HRR）",
+  "vo2maxHistoryStatLabel": "VO2max（来自历史）",
+  "vo2maxHistoryStatMethod": "{value} ml/kg/min（根据本次训练的分段事后估计）",
+  "vo2maxAbsenceUnsupportedActivity": "未对此活动类型估计（仅限 ACSM 行走/跑步）",
+  "vo2maxAbsenceNoRoute": "未估计 — 此次训练无 GPS 路线",
+  "vo2maxAbsenceRouteTooShort": "未估计 — GPS 路线过短",
+  "vo2maxAbsenceNoCompletedKmSplit": "未估计 — 没有完整的 1 公里分段",
+  "vo2maxAbsenceNoSteadyHr": "未估计 — 分段内无稳定心率",
+  "vo2maxAbsenceNoQualifyingBout": "未估计 — 无稳定的次极量运动段（段落过短、强度超出 40–90 %HRR 或结果不合理）",
+  "vo2maxAbsenceNoHrMax": "未估计 — 此次训练无可用的最大心率锚点",
+  "vo2maxAbsenceNoRestingHr": "未估计 — 此次训练前无可用的静息心率",
+  "vo2maxAbsenceDomainAmbiguous": "未估计 — 配速位于行走/跑步方程灰色地带（约 1.9–2.1 m/s），估计无意义",
+  "vo2maxAbsenceEstimationUnavailable": "未估计 — 无法读取输入数据",
+  "vo2maxAbsenceFallback": "未根据正次训练估计"
 }

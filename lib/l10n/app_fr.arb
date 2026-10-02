@@ -2382,5 +2382,20 @@
   "ecgProgress": "{pct} % terminé",
   "ecgWaveformEmpty": "Aucun tracé n’a été enregistré avec cette lecture.",
   "ecgWaveformLabel": "Tracé accepté en microvolts tel qu’envoyé par le bracelet. Les trous sont des secondes manquantes.",
-  "ecgSampleNote": "{count} échantillons à {rate} Hz, filtrés, µV rapportés à l’entrée. Aucune dérivation ni polarité n’est revendiquée."
+  "ecgSampleNote": "{count} échantillons à {rate} Hz, filtrés, µV rapportés à l’entrée. Aucune dérivation ni polarité n’est revendiquée.",
+  "vo2maxStatLabel": "VO2max (est.)",
+  "vo2maxStatMethod": "{value} ml/kg/min (est., allure ACSM + %HRR)",
+  "vo2maxHistoryStatLabel": "VO2max (historique)",
+  "vo2maxHistoryStatMethod": "{value} ml/kg/min (est. rétrospective des fractions de cette séance)",
+  "vo2maxAbsenceUnsupportedActivity": "Non estimé pour ce type d'activité (marche/course ACSM uniquement)",
+  "vo2maxAbsenceNoRoute": "Non estimé — pas de route GPS pour cette séance",
+  "vo2maxAbsenceRouteTooShort": "Non estimé — route GPS trop courte",
+  "vo2maxAbsenceNoCompletedKmSplit": "Non estimé — aucun kilomètre complet",
+  "vo2maxAbsenceNoSteadyHr": "Non estimé — pas de fréquence cardiaque stable sur le fraction",
+  "vo2maxAbsenceNoQualifyingBout": "Non estimé — pas d'effort sous-maximal stable (effort trop court, intensité hors 40–90 %HRR ou résultat invraisemblable)",
+  "vo2maxAbsenceNoHrMax": "Non estimé — aucune ancre de FC max pour cette séance",
+  "vo2maxAbsenceNoRestingHr": "Non estimé — aucune fréquence de repos avant cette séance",
+  "vo2maxAbsenceDomainAmbiguous": "Non estimé — l'allure est dans la zone grise de l'équation marche/course (env. 1,9–2,1 m/s), où l'estimation n'est pas significative",
+  "vo2maxAbsenceEstimationUnavailable": "Non estimé — les données d'entrée n'ont pas pu être lues",
+  "vo2maxAbsenceFallback": "Non estimé à partir de cette séance"
 }

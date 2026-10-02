@@ -51,7 +51,8 @@ import 'package:openstrap_analytics/onehz.dart' as ana;
 import '../data/db.dart';
 import '../data/day_label.dart' show dayLabelOf;
 import 'profile.dart' show Profile;
-import 'vo2max_activity_gate.dart' show vo2maxEligibleActivity;
+import 'vo2max_activity_gate.dart'
+    show acsmSpeedDomainReason, vo2maxEligibleActivity;
 
 /// Minimum metres a stored split must cover to count as a FULL kilometre for
 /// the retrospective estimate — the same rule as the live pass's `>=999 m`
@@ -68,7 +69,24 @@ const String kVo2maxHistoryMethod = 'acsm_speed_swain_hrr';
 /// can always be traced to the exact chain that produced it. v2: bouts of
 /// consecutive splits replace per-km grading (the 300 s steady-state gate
 /// now applies to the CONTIGUOUS EFFORT, not to each km in isolation).
-const String kVo2maxHistoryFormulaVersion = '2';
+/// v3: (a) as-of ceiling resolution (the latest ceiling recorded BEFORE
+/// the session, not the global max which may postdate it), (b) the
+/// equation-domain grey-zone gate, (c) the fingerprint now covers anchors
+/// and profile assumptions too — stored v2 rows are re-graded once on
+/// the next derive because the freshness payload's version no longer
+/// matches.
+const String kVo2maxHistoryFormulaVersion = '3';
+
+/// Anchor policy version — which anchors the history pass will grade
+/// against and how they are resolved. v2: HRmax from the latest ceiling
+/// OBSERVED STRICTLY BEFORE the session (as-of, not the global max) or
+/// Tanaka with the CURRENT profile age (an explicitly documented
+/// substitute assumption, see docs/VO2MAX.md); RHR from the last measured
+/// metric_series value on a day strictly before the session (imported
+/// days excluded), or the user's manual value (undated, a documented
+/// substitute). Stored per row via the fingerprint, so an anchor policy
+/// change re-walks every session.
+const String kVo2maxAnchorPolicyVersion = '2';
 
 /// `compute_freshness` key carrying the pass's progress. The payload holds
 /// [kVo2maxHistoryFormulaVersion], so a formula bump triggers ONE full
@@ -86,14 +104,18 @@ const String kVo2maxHistoryFreshnessKey = 'vo2max_history_v2';
 class Vo2maxHistorySplit {
   final String sessionId;
   final String? sessionType;
+
   /// Split index (1-based km), from `workout_split.km`.
   final int km;
+
   /// metres actually covered by this split (>= 999 for a full km).
   final double meters;
   final int durationSec;
+
   /// The split's own average HR (bpm), frozen at finalize. Null when the
   /// 1 Hz join came back empty — the split exists, its HR does not.
   final double? avgHrBpm;
+
   /// Net elevation over the split (m), or null when altitude was missing
   /// at either end. Null means "grade unknown", never "flat".
   final double? netElevM;
@@ -114,9 +136,11 @@ class Vo2maxHistorySplit {
 class Vo2maxHistorySplitResult {
   final String sessionId;
   final int km;
+
   /// ml/kg/min, UNROUNDED (rounding is a display concern). Null on
   /// abstention.
   final double? vo2max;
+
   /// Why [vo2max] is null, snake_case storage vocabulary — the prose map
   /// lives with the UI (`vo2maxAbsenceText`), storage stays code.
   final String? absenceReason;
@@ -141,13 +165,12 @@ Vo2maxHistorySplitResult vo2maxFromHistoricalSplit(
   required double restingHrBpm,
   required double hrMaxBpm,
 }) {
-  Vo2maxHistorySplitResult absent(String reason) =>
-      Vo2maxHistorySplitResult(
-        sessionId: s.sessionId,
-        km: s.km,
-        vo2max: null,
-        absenceReason: reason,
-      );
+  Vo2maxHistorySplitResult absent(String reason) => Vo2maxHistorySplitResult(
+    sessionId: s.sessionId,
+    km: s.km,
+    vo2max: null,
+    absenceReason: reason,
+  );
 
   if (!vo2maxEligibleActivity(s.sessionType)) {
     return absent('unsupported_activity');
@@ -224,25 +247,32 @@ Vo2maxHistorySplitResult vo2maxFromHistoricalBout(
   required double restingHrBpm,
   required double hrMaxBpm,
 }) {
-  assert(splits.isNotEmpty);
+  // Release-safe: an empty list has no first km to bank a row under. The
+  // pass never calls it empty (an unusable row is banked on its own), but
+  // this is a public function and an assert is not an empty-input policy.
+  if (splits.isEmpty) {
+    throw ArgumentError.value(
+      splits,
+      'splits',
+      'a bout needs at least one split',
+    );
+  }
   final first = splits.first;
-  Vo2maxHistorySplitResult absent(String reason) =>
-      Vo2maxHistorySplitResult(
-        sessionId: first.sessionId,
-        km: first.km,
-        vo2max: null,
-        absenceReason: reason,
-      );
+  Vo2maxHistorySplitResult absent(String reason) => Vo2maxHistorySplitResult(
+    sessionId: first.sessionId,
+    km: first.km,
+    vo2max: null,
+    absenceReason: reason,
+  );
   if (!vo2maxEligibleActivity(first.sessionType)) {
     return absent('unsupported_activity');
   }
+  // Per-row eligibility, same rules the pass applies before a row may
+  // join a bout (see _splitEligibilityReason). Kept here as a defensive
+  // re-check: this function is public and a caller can hand it any list.
   for (final s in splits) {
-    if (s.avgHrBpm == null) return absent('no_steady_hr_for_split');
-    if (s.durationSec <= 0 ||
-        !s.meters.isFinite ||
-        s.meters < kVo2maxFullSplitMinMeters) {
-      return absent('no_completed_km_split');
-    }
+    final reason = _splitEligibilityReason(s);
+    if (reason != null) return absent(reason);
   }
   for (var i = 1; i < splits.length; i++) {
     if (splits[i].km != splits[i - 1].km + 1) {
@@ -262,6 +292,9 @@ Vo2maxHistorySplitResult vo2maxFromHistoricalBout(
       elev += s.netElevM!;
     }
   }
+  final boutSpeed = meters / dur;
+  final domainReason = acsmSpeedDomainReason(boutSpeed);
+  if (domainReason != null) return absent(domainReason);
   final m = _estimateBout(
     meters: meters,
     durationSec: dur,
@@ -277,6 +310,32 @@ Vo2maxHistorySplitResult vo2maxFromHistoricalBout(
     vo2max: m.value,
     absenceReason: null,
   );
+}
+
+/// Machine-readable reason a split may NOT join a bout, or null when it
+/// may. PURE and public so the eligibility rules are testable without a
+/// database: everything the bout maths needs is checked HERE, before the
+/// row can poison or end a bout. The rules, in order:
+///   * activity type — the ACSM equations are foot-locomotion only.
+///   * full km — the >=999 m rule of the live pass (a trailing partial
+///     km has no fixed distance; its "speed" is not a pace anything
+///     claimed, and the >=999 tolerance exists because km binning can
+///     land slightly under 1000 m — a technical heuristic, not a
+///     physiological threshold).
+///   * finite positive distance and duration — NaN/Infinity/negative
+///     numbers are malformed rows, not physiologically unqualifying ones.
+///   * the split's OWN finite HR — the bout's duration-weighted HR mean
+///     is only as good as every member's own average.
+String? _splitEligibilityReason(Vo2maxHistorySplit s) {
+  if (!vo2maxEligibleActivity(s.sessionType)) return 'unsupported_activity';
+  if (!s.meters.isFinite || s.meters < kVo2maxFullSplitMinMeters) {
+    return 'no_completed_km_split';
+  }
+  if (s.durationSec <= 0) return 'no_completed_km_split';
+  if (s.avgHrBpm == null || !s.avgHrBpm!.isFinite || s.avgHrBpm! <= 0) {
+    return 'no_steady_hr_for_split';
+  }
+  return null;
 }
 
 /// HRmax (bpm) a HISTORICAL session may be graded against.
@@ -307,8 +366,10 @@ double? hrMaxForSession({double? observedCeilingBeforeSession, int? age}) {
 class Vo2maxHistoryResult {
   /// Sessions with at least one written row (estimate or abstention).
   final int sessions;
+
   /// Rows carrying an estimate.
   final int estimated;
+
   /// Rows carrying an abstention reason.
   final int abstained;
   const Vo2maxHistoryResult({
@@ -355,35 +416,97 @@ double? restingHrAsOfRows(
   return null;
 }
 
-
+/// A STABLE fingerprint of one session's compute-relevant inputs — ALL of
+/// them, not just the splits: session start and type, the split rows
+/// (km, metres, duration, avg HR, net elevation), the RESOLVED anchors
+/// (RHR and HRmax the session would be graded against) and the profile
+/// assumptions that feed them, plus the anchor-policy and formula
+/// versions. A later-arriving RHR measurement, a changed manual RHR, an
+/// added profile age, a corrected session timestamp or a changed anchor
+/// policy therefore all re-walk the session; unchanged inputs keep their
+/// fingerprint.
+///
+/// STABILITY CONTRACT: NOT a Dart hashCode (not stable across isolates or
+/// runs) and NOT wall-clock dependent (computed_at never enters). Built
+/// as a canonical '|'/';'-delimited string over UTF-16 code units — the
+/// inputs are ASCII/numeric session data, so code units == code points
+/// here — hashed with a 64-bit FNV-1a masked to 64 bits on every step, so
+/// the result is identical on web (where Dart ints are doubles) and VM
+/// targets alike. Collision risk at 64 bits is negligible for a
+/// per-session map of human-history size.
+String vo2maxInputFingerprint(
+  List<Map<String, dynamic>> splitRows, {
+  required int sessionStartTs,
+  required double? restingHrBpm,
+  required double? hrMaxBpm,
+  required int? profileAgeYears,
+  required int? profileRestingHrManual,
+}) {
+  final buf = StringBuffer();
+  buf.write(
+    'v|$kVo2maxHistoryFormulaVersion|'
+    '$kVo2maxAnchorPolicyVersion|$sessionStartTs|'
+    '$profileAgeYears|$profileRestingHrManual|'
+    '$restingHrBpm|$hrMaxBpm;',
+  );
+  for (final r in splitRows) {
+    buf.write(r['km']);
+    buf.write('|');
+    buf.write(r['meters']);
+    buf.write('|');
+    buf.write(r['duration_sec']);
+    buf.write('|');
+    buf.write(r['avg_hr']);
+    buf.write('|');
+    buf.write(r['net_elev_m']);
+    buf.write(';');
+  }
+  var h = 0xcbf29ce484222325;
+  for (final c in buf.toString().codeUnits) {
+    h ^= c;
+    h = (h * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF;
+  }
+  return h.toRadixString(16);
+}
 
 /// Run the retrospective pass over the stored history. INCREMENTAL by
-/// default: only sessions that have `workout_split` rows but no
-/// `vo2max_history` rows yet are walked, so a session finalized after the
-/// first pass is picked up by the next derive (the freshness payload's
-/// [kVo2maxHistoryFormulaVersion] no longer ends the pass — it only marks
-/// which chain the stored rows were produced by). A formula bump (or
-/// [force]) re-runs the FULL pass once, replacing every session's rows in
-/// place — repeated processing never duplicates.
+/// default: a session is walked when it has no `vo2max_history` rows yet
+/// OR when its input FINGERPRINT (splits + type, see
+/// [vo2maxInputFingerprint]) changed since the last pass — so
+/// later-arriving HR joins, corrected splits and retyped sessions are
+/// picked up by the next derive, while unchanged sessions cost one map
+/// lookup each. A formula bump (or [force]) re-runs the FULL pass once,
+/// replacing every session's rows in place — repeated processing never
+/// duplicates. The per-session fingerprints live in the freshness payload
+/// (one JSON map, bounded by the session count), not in a new column —
+/// no schema change.
 Future<Vo2maxHistoryResult> backfillVo2maxHistory({
   required Map<String, dynamic> Function() getProfileMap,
   bool force = false,
 }) async {
   const none = Vo2maxHistoryResult(sessions: 0, estimated: 0, abstained: 0);
   // Gate: a stored payload carrying the CURRENT formula version means the
-  // full pass already ran — run incrementally. A missing or version-mismatched
-  // payload (first run, or a bump) runs the FULL pass once. The old payload
-  // shape `{'done': true}` carries no version and therefore re-runs full
-  // exactly once, then upgrades itself to the versioned shape.
+  // full pass already ran — run incrementally. A missing or
+  // version-mismatched payload (first run, or a bump) runs the FULL pass
+  // once, then upgrades itself to the versioned shape.
   var full = force;
+  Map<String, String> knownFingerprints = {};
   if (!force) {
     final gate = await LocalDb.computeFreshness(kVo2maxHistoryFreshnessKey);
     String? gateVersion;
     if (gate != null) {
       try {
-        gateVersion =
-            (jsonDecode(gate['payload_json'] as String? ?? '') as Map?)
-                ?['formula_version'] as String?;
+        final payload =
+            jsonDecode(gate['payload_json'] as String? ?? '') as Map?;
+        gateVersion = payload?['formula_version'] as String?;
+        final fps = payload?['input_fingerprints'];
+        if (fps is Map) {
+          knownFingerprints = {
+            for (final e in fps.entries)
+              if (e.key is String && e.value is String)
+                e.key as String: e.value as String,
+          };
+        }
       } catch (_) {
         gateVersion = null;
       }
@@ -395,21 +518,23 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
 
   // One joined query: splits with their parent session's type/start_ts, so
   // the per-session anchors are resolved without a per-row round trip.
-  // Incremental mode keeps only sessions with no history rows yet — the
-  // (session_id, km) primary key makes the NOT EXISTS probe cheap.
+  // ALWAYS all sessions — the incremental decision is per-session on the
+  // input FINGERPRINT (a session with rows on disk but CHANGED inputs must
+  // be re-walked too, which NOT EXISTS cannot see), and the full/incremental
+  // distinction is only whether stored rows are overwritten in place.
   final db = await LocalDb.instance;
   final splitRows = await db.rawQuery(
     "SELECT ws.session_id, ws.km, ws.meters, ws.duration_sec, ws.avg_hr, "
     'ws.net_elev_m, s.type, s.start_ts '
     'FROM workout_split ws JOIN sessions s ON s.id = ws.session_id '
-    '${full ? '' : 'WHERE NOT EXISTS (SELECT 1 FROM vo2max_history h '
-        'WHERE h.session_id = ws.session_id) '}\n'
     'ORDER BY s.start_ts ASC, ws.km ASC',
   );
   if (splitRows.isEmpty) {
     if (full) {
-      await LocalDb.putComputeFreshness(kVo2maxHistoryFreshnessKey,
-          jsonEncode({'formula_version': kVo2maxHistoryFormulaVersion}));
+      await LocalDb.putComputeFreshness(
+        kVo2maxHistoryFreshnessKey,
+        jsonEncode({'formula_version': kVo2maxHistoryFormulaVersion}),
+      );
     }
     return none;
   }
@@ -418,12 +543,18 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
   // which is both an N+1 and a full scan of `metric_series` each time).
   final rhrRows = await LocalDb.metricSeries('rhr');
   final importedDates = await LocalDb.importedDates();
-  final ceiling = await LocalDb.observedHrCeiling();
-  final ceilingDay = ceiling?.date;
-  final ceilingBpm = ceiling?.bpm;
+  // The WHOLE ceiling series, ASC — the as-of anchor per session is the
+  // latest value with date < session day, resolved in Dart from one read.
+  // The global max ([LocalDb.observedHrCeiling]) is TODAY's view and may
+  // postdate any given session; grading a historical session against it
+  // would smuggle a later measurement in as a historical anchor.
+  final ceilingRows = await LocalDb.metricSeries('hr_ceiling_bpm');
 
   // Session-level anchors, resolved once per session id (splitRows are
-  // ordered by session, so consecutive rows share one lookup).
+  // ordered by session, so consecutive rows share one lookup). Resolved for
+  // ALL sessions, not only walked ones: the per-session input fingerprint
+  // covers the resolved anchors, so the anchor maps must exist before the
+  // fingerprint pass below can seal them.
   final hrMaxBy = <String, double?>{};
   final rhrBy = <String, double?>{};
   String? lastSessionId;
@@ -437,19 +568,85 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
       rhrBy[id] = null;
       continue;
     }
-    final day = dayLabelOf(
-        DateTime.fromMillisecondsSinceEpoch(startTs * 1000));
+    final day = dayLabelOf(DateTime.fromMillisecondsSinceEpoch(startTs * 1000));
+    // AS-OF ceiling: the LATEST ceiling recorded strictly BEFORE the
+    // session's day (ceilingRows are date-ASC). Sessions after the last
+    // ceiling see the global max; sessions BEFORE a later, harder workout
+    // never see that later evidence.
+    double? asOfCeilingBpm;
+    for (final cr in ceilingRows) {
+      final cd = cr['date'] as String?;
+      final cv = (cr['value'] as num?)?.toDouble();
+      if (cd == null || cv == null || !cv.isFinite) continue;
+      if (cd.compareTo(day) >= 0) break;
+      asOfCeilingBpm = cv;
+    }
     hrMaxBy[id] = hrMaxForSession(
-      observedCeilingBeforeSession:
-          (ceilingDay == null || ceilingBpm == null)
-              ? null
-              : (ceilingDay.compareTo(day) < 0 ? ceilingBpm : null),
+      observedCeilingBeforeSession: asOfCeilingBpm,
       age: profile.ageYears,
     );
-    rhrBy[id] = restingHrAsOfRows(rhrRows, importedDates, day,
-        manual: profile.restingHrManual);
+    rhrBy[id] = restingHrAsOfRows(
+      rhrRows,
+      importedDates,
+      day,
+      manual: profile.restingHrManual,
+    );
   }
 
+  // Per-session input fingerprints (rows are ordered by session), used to
+  // decide which sessions the incremental pass must (re-)walk. The
+  // fingerprint covers the RESOLVED ANCHORS and profile assumptions too,
+  // so an anchor/policy change re-walks without any split changing.
+  final fingerprintOf = <String, String>{};
+  {
+    final rowsOfSession = <Map<String, dynamic>>[];
+    String? cur;
+    var curStartTs = 0;
+    void seal() {
+      if (cur == null) return;
+      fingerprintOf[cur] = vo2maxInputFingerprint(
+        rowsOfSession,
+        sessionStartTs: curStartTs,
+        restingHrBpm: rhrBy[cur],
+        hrMaxBpm: hrMaxBy[cur],
+        profileAgeYears: profile.ageYears,
+        profileRestingHrManual: profile.restingHrManual,
+      );
+    }
+
+    for (final r in splitRows) {
+      final id = r['session_id'] as String?;
+      if (id == null) continue;
+      if (id != cur) {
+        seal();
+        cur = id;
+        curStartTs = (r['start_ts'] as num?)?.toInt() ?? 0;
+        rowsOfSession.clear();
+      }
+      rowsOfSession.add(r);
+    }
+    seal();
+  }
+  // The sessions the pass will actually (re-)walk. Full mode: everything.
+  // Incremental: sessions whose fingerprint is new or changed.
+  final walkSessions = full
+      ? null // everything
+      : <String>{
+          for (final e in fingerprintOf.entries)
+            if (knownFingerprints[e.key] != e.value) e.key,
+        };
+  if (walkSessions != null && walkSessions.isEmpty) {
+    // Nothing changed: refresh only the stored fingerprint map so it stays
+    // in sync with what is on disk (sessions may have been deleted).
+    await LocalDb.putComputeFreshness(
+      kVo2maxHistoryFreshnessKey,
+      jsonEncode({
+        'formula_version': kVo2maxHistoryFormulaVersion,
+        'input_fingerprints': fingerprintOf,
+      }),
+    );
+    return none;
+  }
   var estimated = 0, abstained = 0;
   final perSession = <String, List<Map<String, Object?>>>{};
   // BOUTS, not isolated splits: rows arrive ordered (session, km), so
@@ -472,8 +669,13 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
     );
   }
 
-  void bank(String id, int startTs, double? hrMax, double? rhr,
-      Vo2maxHistorySplitResult res) {
+  void bank(
+    String id,
+    int startTs,
+    double? hrMax,
+    double? rhr,
+    Vo2maxHistorySplitResult res,
+  ) {
     if (res.present) {
       estimated++;
     } else {
@@ -499,8 +701,11 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
 
   void flushBout() {
     if (bout.isEmpty) return;
-    final res = vo2maxFromHistoricalBout(bout,
-        restingHrBpm: boutRhr!, hrMaxBpm: boutHrMax!);
+    final res = vo2maxFromHistoricalBout(
+      bout,
+      restingHrBpm: boutRhr!,
+      hrMaxBpm: boutHrMax!,
+    );
     bank(boutSession!, boutStartTs, boutHrMax, boutRhr, res);
     bout = <Vo2maxHistorySplit>[];
   }
@@ -509,51 +714,69 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
     final id = r['session_id'] as String?;
     final km = (r['km'] as num?)?.toInt();
     if (id == null || km == null) continue;
+    if (walkSessions != null && !walkSessions.contains(id)) continue;
     final startTs = (r['start_ts'] as num?)?.toInt() ?? 0;
     final hrMax = hrMaxBy[id];
     final rhr = rhrBy[id];
-    final splitSessionChanged = id != boutSession;
-    if (bout.isNotEmpty &&
-        (splitSessionChanged || hrMax != boutHrMax || rhr != boutRhr)) {
-      flushBout();
-    }
+    // Anchors missing: machine-readable why, never a default value. The
+    // row is banked (per-km visibility of the reason), it ends any running
+    // bout, and it can never join one.
     if (hrMax == null || rhr == null) {
-      // Anchors missing: machine-readable why, never a default value. The
-      // row is still banked (per-km visibility of the reason), but it can
-      // never join a bout.
-      bank(
-          id,
-          startTs,
-          hrMax,
-          rhr,
-          Vo2maxHistorySplitResult(
-            sessionId: id,
-            km: km,
-            vo2max: null,
-            absenceReason: hrMax == null
-                ? 'no_hr_max_available'
-                : 'no_resting_hr_available',
-          ));
-      continue;
-    }
-    final usable = usableOf(r);
-    if (usable == null) {
-      // An unusable row ends the running bout and is banked with its own
-      // reason (computeSplits guarantees meters/duration; null here is a
-      // malformed row, and the honest answer is no estimate from it).
       flushBout();
       bank(
-          id,
-          startTs,
-          hrMax,
-          rhr,
-          Vo2maxHistorySplitResult(
-            sessionId: id,
-            km: km,
-            vo2max: null,
-            absenceReason: 'no_completed_km_split',
-          ));
+        id,
+        startTs,
+        hrMax,
+        rhr,
+        Vo2maxHistorySplitResult(
+          sessionId: id,
+          km: km,
+          vo2max: null,
+          absenceReason: hrMax == null
+              ? 'no_hr_max_available'
+              : 'no_resting_hr_available',
+        ),
+      );
       continue;
+    }
+    // ELIGIBILITY PER ROW, before the row can touch a bout: an invalid
+    // row (no HR of its own, partial km, non-finite numbers, unsupported
+    // activity) must END the running bout and be banked with its OWN
+    // reason — the valid predecessors keep their estimate. The previous
+    // shape added every well-formed row to the bout and graded the whole
+    // list in vo2maxFromHistoricalBout, so ONE invalid trailing row
+    // (a partial last km — the common case) abstained the entire bout
+    // and threw away every valid km before it.
+    final split = usableOf(r);
+    final reason = split == null
+        ? 'no_completed_km_split'
+        : _splitEligibilityReason(split);
+    if (reason != null) {
+      flushBout();
+      bank(
+        id,
+        startTs,
+        hrMax,
+        rhr,
+        Vo2maxHistorySplitResult(
+          sessionId: id,
+          km: km,
+          vo2max: null,
+          absenceReason: reason,
+        ),
+      );
+      continue;
+    }
+    // split is non-null here (a null usableOf row took the reason path
+    // above), but Dart's flow analysis needs the demotion spelled out.
+    final usableSplit = split;
+    if (usableSplit == null) continue;
+    // A bout is CONTIGUOUS: same session AND strictly consecutive km. A
+    // gap (km 1 -> km 3) ends the running bout and starts a new one
+    // instead of discarding the whole session — km 3's estimate is not
+    // poisoned by km 2's absence.
+    if (bout.isNotEmpty && (id != boutSession || km != bout.last.km + 1)) {
+      flushBout();
     }
     if (bout.isEmpty) {
       boutSession = id;
@@ -561,14 +784,22 @@ Future<Vo2maxHistoryResult> backfillVo2maxHistory({
       boutHrMax = hrMax;
       boutRhr = rhr;
     }
-    bout.add(usable);
+    bout.add(usableSplit);
   }
   flushBout();
   for (final e in perSession.entries) {
     await LocalDb.putVo2maxHistory(e.key, e.value);
   }
-  await LocalDb.putComputeFreshness(kVo2maxHistoryFreshnessKey, jsonEncode(
-      {'formula_version': kVo2maxHistoryFormulaVersion, 'estimated': estimated}));
+  await LocalDb.putComputeFreshness(
+    kVo2maxHistoryFreshnessKey,
+    jsonEncode({
+      'formula_version': kVo2maxHistoryFormulaVersion,
+      'input_fingerprints': fingerprintOf,
+    }),
+  );
   return Vo2maxHistoryResult(
-      sessions: perSession.length, estimated: estimated, abstained: abstained);
+    sessions: perSession.length,
+    estimated: estimated,
+    abstained: abstained,
+  );
 }

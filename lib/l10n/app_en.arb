@@ -12442,5 +12442,71 @@
         "type": "int"
       }
     }
+  },
+  "vo2maxStatLabel": "VO2max (est.)",
+  "@vo2maxStatLabel": {
+    "description": "Session stat row label for the estimated VO2max."
+  },
+  "vo2maxStatMethod": "{value} ml/kg/min (est., ACSM pace + %HRR)",
+  "@vo2maxStatMethod": {
+    "description": "Value line for the estimated VO2max stat; {value} is the estimate with one decimal.",
+    "placeholders": {
+      "value": {"type": "String"}
+    }
+  },
+  "vo2maxHistoryStatLabel": "VO2max (from history)",
+  "@vo2maxHistoryStatLabel": {
+    "description": "Session stat row label for the retrospective VO2max estimate from the history pass."
+  },
+  "vo2maxHistoryStatMethod": "{value} ml/kg/min (retrospective est. from this session's splits)",
+  "@vo2maxHistoryStatMethod": {
+    "description": "Value line for the retrospective VO2max stat; {value} has one decimal.",
+    "placeholders": {
+      "value": {"type": "String"}
+    }
+  },
+  "vo2maxAbsenceUnsupportedActivity": "Not estimated for this activity type (ACSM running/walking only)",
+  "@vo2maxAbsenceUnsupportedActivity": {
+    "description": "Absence reason: activity type outside the ACSM walking/running domain."
+  },
+  "vo2maxAbsenceNoRoute": "Not estimated \u2014 no GPS route for this session",
+  "@vo2maxAbsenceNoRoute": {
+    "description": "Absence reason: no GPS route."
+  },
+  "vo2maxAbsenceRouteTooShort": "Not estimated \u2014 GPS route too short",
+  "@vo2maxAbsenceRouteTooShort": {
+    "description": "Absence reason: GPS route too short."
+  },
+  "vo2maxAbsenceNoCompletedKmSplit": "Not estimated \u2014 no completed 1 km split",
+  "@vo2maxAbsenceNoCompletedKmSplit": {
+    "description": "Absence reason: no completed kilometre split."
+  },
+  "vo2maxAbsenceNoSteadyHr": "Not estimated \u2014 no steady HR over the split",
+  "@vo2maxAbsenceNoSteadyHr": {
+    "description": "Absence reason: no steady heart rate over the split."
+  },
+  "vo2maxAbsenceNoQualifyingBout": "Not estimated \u2014 no steady submaximal bout (bout too short, intensity outside 40–90 %HRR, or implausible result)",
+  "@vo2maxAbsenceNoQualifyingBout": {
+    "description": "Absence reason: no steady submaximal bout."
+  },
+  "vo2maxAbsenceNoHrMax": "Not estimated \u2014 no HR max anchor available for this session",
+  "@vo2maxAbsenceNoHrMax": {
+    "description": "Absence reason: no HR max anchor."
+  },
+  "vo2maxAbsenceNoRestingHr": "Not estimated \u2014 no resting HR available before this session",
+  "@vo2maxAbsenceNoRestingHr": {
+    "description": "Absence reason: no resting HR before the session."
+  },
+  "vo2maxAbsenceDomainAmbiguous": "Not estimated \u2014 pace sits in the walk/run equation grey zone (about 1.9–2.1 m/s) where the estimate is not meaningful",
+  "@vo2maxAbsenceDomainAmbiguous": {
+    "description": "Absence reason: pace in the walk/run equation grey zone."
+  },
+  "vo2maxAbsenceEstimationUnavailable": "Not estimated \u2014 the input data could not be read",
+  "@vo2maxAbsenceEstimationUnavailable": {
+    "description": "Absence reason: technical read failure."
+  },
+  "vo2maxAbsenceFallback": "Not estimated from this session",
+  "@vo2maxAbsenceFallback": {
+    "description": "Absence reason: unknown code fallback."
   }
 }

@@ -2382,5 +2382,20 @@
   "ecgProgress": "{pct} % abgeschlossen",
   "ecgWaveformEmpty": "Zu dieser Aufzeichnung wurde keine Kurve gespeichert.",
   "ecgWaveformLabel": "Akzeptierte Kurve in Mikrovolt, wie vom Band gesendet. Lücken sind fehlende Sekunden.",
-  "ecgSampleNote": "{count} Messwerte bei {rate} Hz, gefiltert, eingangsbezogene µV. Keine Ableitung oder Polarität wird behauptet."
+  "ecgSampleNote": "{count} Messwerte bei {rate} Hz, gefiltert, eingangsbezogene µV. Keine Ableitung oder Polarität wird behauptet.",
+  "vo2maxStatLabel": "VO2max (gesch.)",
+  "vo2maxStatMethod": "{value} ml/kg/min (gesch., ACSM-Tempo + %HRR)",
+  "vo2maxHistoryStatLabel": "VO2max (aus Verlauf)",
+  "vo2maxHistoryStatMethod": "{value} ml/kg/min (nachträgliche Schätzung aus den Splits dieser Session)",
+  "vo2maxAbsenceUnsupportedActivity": "Für diese Aktivitätsart nicht geschätzt (nur ACSM Gehen/Laufen)",
+  "vo2maxAbsenceNoRoute": "Nicht geschätzt — keine GPS-Route für diese Session",
+  "vo2maxAbsenceRouteTooShort": "Nicht geschätzt — GPS-Route zu kurz",
+  "vo2maxAbsenceNoCompletedKmSplit": "Nicht geschätzt — kein vollständiger 1-km-Split",
+  "vo2maxAbsenceNoSteadyHr": "Nicht geschätzt — keine stabile Herzfrequenz über den Split",
+  "vo2maxAbsenceNoQualifyingBout": "Nicht geschätzt — kein stabiler submaximaler Abschnitt (Abschnitt zu kurz, Intensität außerhalb 40–90 %HRR oder unplausibles Ergebnis)",
+  "vo2maxAbsenceNoHrMax": "Nicht geschätzt — kein Maximalpuls-Anker für diese Session verfügbar",
+  "vo2maxAbsenceNoRestingHr": "Nicht geschätzt — kein Ruhepuls vor dieser Session verfügbar",
+  "vo2maxAbsenceDomainAmbiguous": "Nicht geschätzt — das Tempo liegt in der Grauzone der Geh-/Laufgleichung (ca. 1,9–2,1 m/s), in der die Schätzung nicht aussagekräftig ist",
+  "vo2maxAbsenceEstimationUnavailable": "Nicht geschätzt — die Eingabedaten konnten nicht gelesen werden",
+  "vo2maxAbsenceFallback": "Für diese Session nicht geschätzt"
 }
