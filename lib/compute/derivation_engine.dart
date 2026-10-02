@@ -1952,9 +1952,9 @@ const int _baselineWindowDays = 28;
 /// day (#128: "morning it was 49, now 45"). Once today's overnight is genuinely
 /// COMPLETE we PIN the first such readiness as the headline so it stops moving.
 ///
-/// "Complete" must be stronger than `overnight_state == 'ready'` — that flips as
-/// soon as the FIRST sleep-bearing row lands (mid-drain), so pinning on it could
-/// freeze a partial-night value. We instead require the drained data edge to
+/// "Complete" cannot be "a sleep-bearing row exists" — that is true as soon as
+/// the FIRST one lands (mid-drain), so pinning on it could freeze a
+/// partial-night value. We instead require the drained data edge to
 /// have moved at least this far PAST the sleep offset (wake): the whole sleep
 /// window is then decoded and the segmentation-placed wake is settled, so the
 /// overnight inputs are final. Same "edge past the window" model finalisation
@@ -1962,6 +1962,28 @@ const int _baselineWindowDays = 28;
 /// reached within the first post-wake sync in practice; raise it to trade a
 /// slightly later freeze for more safety margin.
 const int _headlineFreezeMarginSec = 60 * 60;
+
+/// How long after a night's wake we stop waiting for the data edge to pass
+/// it. A strap that went quiet right after waking (flat battery, taken off and
+/// not recording) never moves the edge again, and the night we hold is then
+/// the whole night as far as any sync will ever know.
+// ponytail: wall-clock give-up; a persisted "drain complete" marker would be exact.
+const int _overnightGiveUpSec = 12 * 60 * 60;
+
+/// Whether a night whose sleep ends at [sleepOffsetSec] is SETTLED: the drained
+/// data edge has moved [_headlineFreezeMarginSec] past the wake, so the window
+/// is no longer just where the sync happened to stop (#448: mid-drain, the
+/// newest record is still inside the night and the stager closes the window at
+/// it, so a partial night and its readiness showed as this morning's). Home and
+/// the readiness freeze both read this, so the number first shown is the one
+/// that gets pinned.
+bool overnightSettled({
+  required int sleepOffsetSec,
+  required int dataEdgeSec,
+  required int nowSec,
+}) =>
+    dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
+    nowSec >= sleepOffsetSec + _overnightGiveUpSec;
 
 /// The frozen morning readiness headline that should be persisted/surfaced for
 /// [today], given the current pin and a fresh look at today's live readiness and
@@ -4859,8 +4881,11 @@ class DerivationEngine {
     if (day.date != todayLabel()) return;
     final hasSleep = day.sleepOffsetSec > day.sleepOnsetSec;
     if (!hasSleep) return;
-    final overnightComplete =
-        dataNowSec >= day.sleepOffsetSec + _headlineFreezeMarginSec;
+    final overnightComplete = overnightSettled(
+      sleepOffsetSec: day.sleepOffsetSec,
+      dataEdgeSec: dataNowSec,
+      nowSec: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
     final current = await LocalDb.frozenHeadline();
     final next = nextFrozenHeadline(
       today: day.date,

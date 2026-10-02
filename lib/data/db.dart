@@ -26,7 +26,7 @@ import '../compute/substrate.dart' show beatTimesMs;
 // version, which every day_result read applies as a CEILING (see [dayResult]).
 // `show` keeps the rest of the engine out of this namespace.
 import '../coach/coach_db.dart' show CoachDb;
-import '../compute/derivation_engine.dart' show kAlgoVersion;
+import '../compute/derivation_engine.dart' show kAlgoVersion, overnightSettled;
 import '../ble/adapters/adapter.dart' show NeutralSample;
 import '../ble/adapters/signals.dart' show InputSignal;
 import '../import/import_container.dart';
@@ -9754,6 +9754,7 @@ class LocalDb {
     final today = localDayLabelNow();
     final latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
     final todayWake = await wakeDayFeatures(today);
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     String? latestOvernightDay;
     int? latestOvernightComputedAt;
     String? latestRecoveryDay;
@@ -9767,6 +9768,20 @@ class LocalDb {
           SeriesCodec.decodePayloadJson(row['payload_json']) ??
           const <String, dynamic>{};
       if (decoded['skipped'] == true) continue;
+      // #448: today's night is not today's overnight until the drain has
+      // passed its wake. Mid-drain the window closes at the newest record, so
+      // serving it showed a partial night and its readiness as this morning's.
+      final offsetMs = (((decoded['sleep'] as Map?)?['window'] as Map?)?['value']
+          as Map?)?['offset_ms'];
+      if (dayId == today &&
+          offsetMs is num &&
+          !overnightSettled(
+            sleepOffsetSec: offsetMs ~/ 1000,
+            dataEdgeSec: latestRawTs ?? 0,
+            nowSec: nowSec,
+          )) {
+        continue;
+      }
       final scalars = ((decoded['scalars'] as Map?) ?? const {})
           .cast<String, dynamic>();
       if (latestOvernightDay == null) {
