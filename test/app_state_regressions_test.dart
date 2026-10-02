@@ -13,6 +13,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
@@ -109,6 +110,23 @@ void main() {
       expect(app.paired, isNull);
       // And the state machine is genuinely usable again.
       await app.syncNow();
+      expect(app.busy, isFalse);
+    });
+  });
+
+  // ── 6b. "Sync the band" on a link that is already up ───────────────────────
+  group('syncNow (already connected)', () {
+    test('asks the band for an offload instead of reusing the link', () async {
+      final engine = _ConnectedEngine();
+      final app = AppState.forTesting(engine: engine);
+      addTearDown(app.dispose);
+      app.paired = PairedDevice('r-1', '4C2248092');
+
+      // openSession on a live link reuses it and only joins an offload, so
+      // the tap never sent SEND_HISTORICAL and nothing came off the band.
+      await app.syncNow();
+
+      expect(engine.historyRequests, 1);
       expect(app.busy, isFalse);
     });
   });
@@ -563,4 +581,21 @@ void main() {
       expect(await LocalDb.liveWorkoutTally(id), isNull);
     });
   });
+}
+
+class _ConnectedEngine extends BleEngine {
+  _ConnectedEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
+  int historyRequests = 0;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<void> requestHistorySync() async => historyRequests++;
+
+  @override
+  Future<SyncReport> runSync({
+    Duration timeout = const Duration(seconds: 600),
+  }) async =>
+      SyncReport(0, 0, true);
 }

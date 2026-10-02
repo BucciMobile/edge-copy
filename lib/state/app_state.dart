@@ -5430,7 +5430,15 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> syncNow() => openSession();
+  /// "Sync the band". On a link that is already up in the foreground,
+  /// [openSession] just reuses it and joins an offload nobody asked the band
+  /// for, so the tap pulled nothing: ask for one over the current link, then
+  /// finalize whatever landed.
+  Future<void> syncNow() async {
+    if (_background || !engine.isConnected) return openSession();
+    await forceResync();
+    _deriveScheduler.requestHeavy();
+  }
 
   /// The ONE place the band's HIGH_FREQ_SYNC prompt is programmed. Two
   /// requesters, one decision (`BandPromptPolicy`): the smart-wake window
