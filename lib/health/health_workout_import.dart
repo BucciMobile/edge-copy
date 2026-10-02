@@ -283,7 +283,11 @@ class HealthWorkoutImporter {
   /// Never throws: an empty store, a denied permission and a locked device all
   /// come back as a zero result, which the caller reports as "nothing to
   /// import" rather than as a failure.
-  Future<WorkoutImportResult> sync({DateTime? now}) async {
+  ///
+  /// [prompt] is true only from the manual Import tap: it lets the route
+  /// fetch ask for the separate workoutRoute grant. The auto path leaves it
+  /// false so a cadence pass never pops a HealthKit sheet.
+  Future<WorkoutImportResult> sync({DateTime? now, bool prompt = false}) async {
     final end = now ?? DateTime.now();
     final start = end.subtract(Duration(
       days: _isApple ? kImportWindowDaysApple : kImportWindowDaysAndroid,
@@ -313,7 +317,8 @@ class HealthWorkoutImporter {
         if (!tombstones.contains(r.uuid)) r,
     ];
     await LocalDb.putImportedWorkouts([for (final r in alive) r.toRow()]);
-    final withRoutes = await _importRoutes(start, end, skip: tombstones);
+    final withRoutes =
+        await _importRoutes(start, end, skip: tombstones, prompt: prompt);
     return WorkoutImportResult(
       workouts: alive.length,
       withRoutes: withRoutes,
@@ -328,7 +333,7 @@ class HealthWorkoutImporter {
   /// async round trip, and 90 days of running is a lot of them to serialise
   /// across the channel one at a time.
   Future<int> _importRoutes(DateTime start, DateTime end,
-      {Set<String> skip = const {}}) async {
+      {Set<String> skip = const {}, bool prompt = false}) async {
     if (!routesSupported) return 0;
     List<Object?> payload;
     try {
@@ -337,6 +342,7 @@ class HealthWorkoutImporter {
         {
           'fromMs': start.millisecondsSinceEpoch,
           'toMs': end.millisecondsSinceEpoch,
+          'prompt': prompt,
         },
       );
       payload = res ?? const [];

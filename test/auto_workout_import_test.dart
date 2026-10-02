@@ -16,13 +16,15 @@ class _FakeImporter implements HealthWorkoutImporter {
   final bool granted;
   final int rows;
   int syncCalls = 0;
+  final List<bool> prompts = [];
 
   @override
   Future<bool> hasReadPermission() async => granted;
 
   @override
-  Future<WorkoutImportResult> sync({DateTime? now}) async {
+  Future<WorkoutImportResult> sync({DateTime? now, bool prompt = false}) async {
     syncCalls++;
+    prompts.add(prompt);
     return WorkoutImportResult(
       workouts: rows,
       withRoutes: 0,
@@ -108,6 +110,8 @@ void main() {
       expect(await AutoWorkoutImport.maybeRun(importer: imp),
           AutoImportOutcome.ran);
       expect(imp.syncCalls, 1);
+      expect(imp.prompts, [false],
+          reason: 'a cadence read must never let the route fetch prompt');
     });
 
     test('switch off → skipped, importer untouched', () async {
