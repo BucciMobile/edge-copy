@@ -91,4 +91,20 @@ class Prefs {
   /// Per-metric range toggle on the shared MetricScreen (Today/Week/Month/3M).
   /// Keyed by the metric id so Sleep / Heart / Body each remember independently.
   static String metricTab(String metric) => 'ui.metric_tab.$metric';
+
+  /// One-shot: a second framed band's ASK provisioning is requested and should
+  /// run at the next start-up, before anything touches flutter_blue_plus (the
+  /// only moment the ASK picker can show — see AppState._provisionAdditionalAccessory).
+  /// Cleared in a `finally` regardless of outcome.
+  static const String kAskAddPendingKey = 'ble.ask_add_pending';
+
+  /// The live-workout HR-zone-crossing haptic: buzz when HR crosses into or
+  /// out of [zoneAlertTargetZone]. Off by default — an existing user did not
+  /// ask their band to start buzzing mid-run.
+  static const String zoneAlertEnabled = 'workout.zone_alert_enabled';
+
+  /// The zone (1..5) the crossing alert watches. Zone 3 by default: a
+  /// reasonable "stay in this effort band" target with no session history to
+  /// personalise it from.
+  static const String zoneAlertTargetZone = 'workout.zone_alert_target_zone';
 }

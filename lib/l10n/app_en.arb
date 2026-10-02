@@ -244,11 +244,23 @@
   "@alarmArmedFor": {
     "description": "Armed-for section label."
   },
+  "alarmNextLabel": "NEXT",
+  "@alarmNextLabel": {
+    "description": "Next-occurrence section label."
+  },
+  "alarmScheduleGroup": "Weekly schedule",
+  "@alarmScheduleGroup": {
+    "description": "Settings group: the 7-day alarm schedule."
+  },
+  "alarmWakeTimeRowTitle": "Wake time",
+  "@alarmWakeTimeRowTitle": {
+    "description": "Row: a weekday's configured wake time."
+  },
   "alarmNotConnectedTitle": "The band is not connected",
   "@alarmNotConnectedTitle": {
     "description": "Status card: band not connected."
   },
-  "alarmNotConnectedBody": "Setting, testing and cancelling all write to the band, so they need a live connection. An alarm that is already armed is unaffected — it lives on the band.",
+  "alarmNotConnectedBody": "Changing the schedule, testing and cancelling all write to the band, so they need a live connection. An alarm that is already armed is unaffected — it lives on the band.",
   "@alarmNotConnectedBody": {
     "description": "Status card body: band not connected."
   },
@@ -634,6 +646,18 @@
   "@devicesAddASensorSub": {
     "description": "Row sub."
   },
+  "devicesWhichSourceWins": "Which source wins",
+  "@devicesWhichSourceWins": {
+    "description": "Row title: opens the per-signal priority editor."
+  },
+  "devicesWhichSourceWinsSub": "When two of your devices measure the same thing",
+  "@devicesWhichSourceWinsSub": {
+    "description": "Row sub for the priority-editor entry."
+  },
+  "devicesResetToDefault": "Back to the default order",
+  "@devicesResetToDefault": {
+    "description": "Per-signal reset-to-physics-ladder action in the priority editor."
+  },
   "devicesMySources": "My sources",
   "@devicesMySources": {
     "description": "Screen title."
@@ -738,6 +762,46 @@
   "devicesCouldNotReachRing": "Could not reach the ring. It has to be nearby, and not connected to another app.",
   "@devicesCouldNotReachRing": {
     "description": "Snackbar: sync failed."
+  },
+  "devicesCouldNotReachCorosWatch": "Could not reach it. It has to be nearby, and not connected to another app.",
+  "@devicesCouldNotReachCorosWatch": {
+    "description": "Snackbar: sync failed, for a paired Coros watch."
+  },
+  "devicesSyncingTheWatch": "Syncing the watch…",
+  "@devicesSyncingTheWatch": {
+    "description": "Snackbar: syncing Bangle.js."
+  },
+  "devicesConnectingZeTime": "Connecting…",
+  "@devicesConnectingZeTime": {
+    "description": "Snackbar: connecting to the ZeTime."
+  },
+  "devicesConnectedZeTime": "Connected.",
+  "@devicesConnectedZeTime": {
+    "description": "Snackbar: ZeTime connect succeeded."
+  },
+  "devicesCouldNotReachZeTime": "Could not reach the watch. It has to be nearby, and not connected to another app.",
+  "@devicesCouldNotReachZeTime": {
+    "description": "Snackbar: ZeTime connect failed."
+  },
+  "devicesSyncingTheSensor": "Syncing the sensor…",
+  "@devicesSyncingTheSensor": {
+    "description": "Snackbar: syncing a paired non-ring sensor (e.g. WearFit)."
+  },
+  "devicesCouldNotReachSensor": "Could not reach the sensor. It has to be nearby, and not connected to another app.",
+  "@devicesCouldNotReachSensor": {
+    "description": "Snackbar: sensor sync failed."
+  },
+  "devicesConnectingWatch": "Connecting…",
+  "@devicesConnectingWatch": {
+    "description": "Snackbar: connecting to the watch."
+  },
+  "devicesCouldNotReachWatch": "Could not reach the watch. It has to be nearby, and not connected to another app.",
+  "@devicesCouldNotReachWatch": {
+    "description": "Snackbar: sync failed."
+  },
+  "deviceFilterAllDevices": "All devices",
+  "@deviceFilterAllDevices": {
+    "description": "First pill in a metric screen's per-device filter — the merged view."
   },
   "devicesForgetSensor": "Forget {name}?",
   "@devicesForgetSensor": {
@@ -845,7 +909,11 @@
   },
   "devicesSyncNowSub": "Fetch whatever it has been holding",
   "@devicesSyncNowSub": {
-    "description": "Row sub: manual sync."
+    "description": "Row sub: manual sync, for a sensor that fetches held history off a cursor (e.g. Oura)."
+  },
+  "devicesSyncNowSubListen": "Listen for whatever it sends right now",
+  "@devicesSyncNowSubListen": {
+    "description": "Row sub: manual sync, for a sensor that only opens a bounded listen window with no history fetch."
   },
   "devicesName": "Name",
   "@devicesName": {
@@ -911,13 +979,105 @@
   "@pairSensorExplainer": {
     "description": "Explanatory body."
   },
-  "pairSensorSearchWouldHideSheet": "Searching would hide the WHOOP pairing sheet",
+  "pairSensorSearchWouldHideSheet": "Searching would hide the system pairing sheet",
   "@pairSensorSearchWouldHideSheet": {
     "description": "iOS-gate status card title."
   },
   "pairSensorSearchAnyway": "Search anyway",
   "@pairSensorSearchAnyway": {
     "description": "iOS-gate status card fix."
+  },
+  "devicePickerTitle": "Connect your devices",
+  "@devicePickerTitle": {
+    "description": "Unified pairing screen title."
+  },
+  "devicePickerSubtitle": "Bring whatever you use. You can add more anytime.",
+  "@devicePickerSubtitle": {
+    "description": "Unified pairing screen subtitle."
+  },
+  "devicePickerBrowseByCategory": "Browse by category",
+  "@devicePickerBrowseByCategory": {
+    "description": "Section header over the device category list."
+  },
+  "devicePickerPrivacyNote": "Everything stays on this phone. Nothing is sent anywhere unless you choose to export it.",
+  "@devicePickerPrivacyNote": {
+    "description": "Footer privacy note on the device picker."
+  },
+  "devicePickerSearchLabel": "Search devices or types",
+  "@devicePickerSearchLabel": {
+    "description": "Accessibility label for the device picker's search field."
+  },
+  "devicePickerSearchHint": "Search devices or types",
+  "@devicePickerSearchHint": {
+    "description": "Placeholder text in the device picker's search field."
+  },
+  "devicePickerNothingNearbyTitle": "Nothing found yet",
+  "@devicePickerNothingNearbyTitle": {
+    "description": "Status card title when the live scan has found nothing."
+  },
+  "devicePickerNothingNearbyBody": "A device answers only while it is awake, worn, and not already connected to another phone or app.",
+  "@devicePickerNothingNearbyBody": {
+    "description": "Status card body when the live scan has found nothing."
+  },
+  "devicePickerNearby": "Nearby",
+  "@devicePickerNearby": {
+    "description": "Section header over live scan results."
+  },
+  "devicePickerScanning": "Scanning for devices nearby…",
+  "@devicePickerScanning": {
+    "description": "Row shown while the live scan is running."
+  },
+  "devicePickerBlurbBand": "The strap this app is built around. WHOOP 4 or 5.",
+  "@devicePickerBlurbBand": {
+    "description": "Category row subtitle for the WHOOP band."
+  },
+  "devicePickerBlurbRing": "Reads the ring directly — no Oura account or subscription.",
+  "@devicePickerBlurbRing": {
+    "description": "Category row subtitle for the Oura ring."
+  },
+  "devicePickerBlurbPolarPmd": "A Polar Verity Sense or OH1. Beat timing measured optically, streamed during a workout, same as a chest strap.",
+  "@devicePickerBlurbPolarPmd": {
+    "description": "Category row subtitle for a Polar PMD optical sensor."
+  },
+  "devicePickerBlurbO2Ring": "Reads its battery, model and serial. No reading from the ring itself is decoded yet.",
+  "@devicePickerBlurbO2Ring": {
+    "description": "Category row subtitle for the Wellue O2Ring."
+  },
+  "devicePickerBlurbWearFit": "A Howear-branded band, paired through the WearFit app family.",
+  "@devicePickerBlurbWearFit": {
+    "description": "Category row subtitle for a WearFit-family band."
+  },
+  "devicePickerBlurbSensor": "A chest strap or armband, for beat timing during a workout.",
+  "@devicePickerBlurbSensor": {
+    "description": "Category row subtitle for a standard Bluetooth heart-rate sensor."
+  },
+  "devicePickerBlurbCoros": "A sports watch. Reads battery and live heart rate — recorded activities stay on the watch.",
+  "@devicePickerBlurbCoros": {
+    "description": "Category row subtitle for a Coros sports watch."
+  },
+  "devicePickerBlurbWithingsSteelHr": "Pairs and connects — nothing it captures is decoded into a number yet.",
+  "@devicePickerBlurbWithingsSteelHr": {
+    "description": "Category row subtitle for the Withings Steel HR / Activité."
+  },
+  "devicePickerBlurbMiband234": "A Mi Band 2, 3 or 4. Pairs and connects; nothing derives from it yet.",
+  "@devicePickerBlurbMiband234": {
+    "description": "Category row subtitle for a Mi Band 2/3/4."
+  },
+  "devicePickerBlurbZeTime": "Pairs and connects. Nothing is decoded from it yet beyond its own battery level.",
+  "@devicePickerBlurbZeTime": {
+    "description": "Category row subtitle for the MyKronoz ZeTime."
+  },
+  "devicePickerBlurbColmi": "A Colmi ring. Pairs and banks its history; nothing is decoded into a number yet.",
+  "@devicePickerBlurbColmi": {
+    "description": "Category row subtitle for a Colmi smart ring."
+  },
+  "devicePickerBlurbBangleJs": "Pairs any Espruino/Nordic-UART device generically, not just Bangle.js-branded watches. Banks raw bytes only; nothing is decoded into a number.",
+  "@devicePickerBlurbBangleJs": {
+    "description": "Category row subtitle for Bangle.js and other Nordic-UART devices."
+  },
+  "devicePickerCannotPairFromHere": "That device cannot be paired from this screen.",
+  "@devicePickerCannotPairFromHere": {
+    "description": "Shown when a tapped category has no pairing step behind it."
   },
   "pairSensorSearching": "Searching…",
   "@pairSensorSearching": {
@@ -1363,6 +1523,15 @@
   "welcomeJournalDaysReplaced": "{n, plural, one{1 journal day replaced} other{{n} journal days replaced}}",
   "@welcomeJournalDaysReplaced": {
     "description": "Import result sub: N journal days replaced.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "welcomeLabResultsWritten": "{n, plural, one{1 lab result written} other{{n} lab results written}}",
+  "@welcomeLabResultsWritten": {
+    "description": "Import result headline/sub: N lab results.",
     "placeholders": {
       "n": {
         "type": "int"
@@ -3419,6 +3588,13 @@
   "@dayTimelineTaggedTitle": {
     "description": "Fallback day-note title when a journal entry has tags but no written note."
   },
+  "dayTimelineDeviceBounded": "Per-device detail is kept for recent days only. Before {oldest} we know which device recorded, not what it said.",
+  "@dayTimelineDeviceBounded": {
+    "description": "Copy shown instead of a per-device curve when the day is outside decoded_onehz retention.",
+    "placeholders": {
+      "oldest": {"type": "String"}
+    }
+  },
   "dayTimelineTitle": "Breakdown of your day",
   "@dayTimelineTitle": {
     "description": "Day timeline screen title."
@@ -5403,6 +5579,55 @@
       }
     }
   },
+  "metricDetailUsingForX": "Using {device} for {metric}.",
+  "@metricDetailUsingForX": {
+    "description": "Which device currently feeds one metric, under the device filter row.",
+    "placeholders": {
+      "device": {"type": "String"},
+      "metric": {"type": "String"}
+    }
+  },
+  "metricDetailPreferX": "Prefer {device}",
+  "@metricDetailPreferX": {
+    "description": "Button: make the selected device win this metric's signal(s).",
+    "placeholders": {
+      "device": {"type": "String"}
+    }
+  },
+  "metricDetailHistoryKeepsSource": "Days already finished keep the source they were calculated with.",
+  "@metricDetailHistoryKeepsSource": {
+    "description": "Copy under the device-preference control explaining a priority change is not retroactive."
+  },
+  "metricDetailDimmedCaption": "These are the days {device} was involved. The line is your merged reading.",
+  "@metricDetailDimmedCaption": {
+    "description": "Caption under a metric-detail chart when a device pill is selected and dims non-contributing days.",
+    "placeholders": {
+      "device": {
+        "type": "String"
+      }
+    }
+  },
+  "metricDetailSlotNoValueRecording": "{day}, no value · {who}",
+  "@metricDetailSlotNoValueRecording": {
+    "description": "Screen-reader readout for a chart slot with no value but something was recording (multi-device only).",
+    "placeholders": {
+      "day": {
+        "type": "String"
+      },
+      "who": {
+        "type": "String"
+      }
+    }
+  },
+  "metricDetailSlotNothingRecording": "{day}, nothing was recording",
+  "@metricDetailSlotNothingRecording": {
+    "description": "Screen-reader readout for a chart slot with no value and nothing recording (multi-device only).",
+    "placeholders": {
+      "day": {
+        "type": "String"
+      }
+    }
+  },
   "metricDetailOpenDay": "Open {day}",
   "@metricDetailOpenDay": {
     "description": "Semantic label for the tappable row that opens a touched day's detail screen.",
@@ -7122,6 +7347,20 @@
   "@homeNothingDerivedBody": {
     "description": "Body shown on a first-run day with nothing derived yet."
   },
+  "homeSyncedThrough": "Synced through {when}",
+  "@homeSyncedThrough": {
+    "description": "Home header line: how far the data we hold reaches, on the band's own clock. {when} is a bare HH:mm when the record is from the day already on screen, or a full day + time otherwise.",
+    "placeholders": {
+      "when": {
+        "type": "String",
+        "example": "11:06"
+      }
+    }
+  },
+  "homeSyncedNever": "No band data yet",
+  "@homeSyncedNever": {
+    "description": "Home header line when no record has ever been banked from a band."
+  },
   "homeSyncingTitle": "Syncing with your band",
   "@homeSyncingTitle": {
     "description": "Title shown on a bare day while records are actively arriving from the band."
@@ -7205,6 +7444,14 @@
   "homeBreakdownSubtitle": "Hour by hour",
   "@homeBreakdownSubtitle": {
     "description": "Link row subtitle under the breakdown-of-your-day title."
+  },
+  "homeBriefingTitle": "Briefing",
+  "@homeBriefingTitle": {
+    "description": "Link row title under Today's plan: opens the AI briefing screen. Constant regardless of morning/evening period."
+  },
+  "homeBriefingSubtitleEmpty": "Tap to write today's summary",
+  "@homeBriefingSubtitleEmpty": {
+    "description": "Link row subtitle under the briefing title when nothing has been generated for today yet."
   },
   "homeIllnessRedTitle": "Several nights in a row are away from your normal",
   "@homeIllnessRedTitle": {
@@ -8197,6 +8444,10 @@
   "@sleepDetailNotSleep": {
     "description": "Button: reject this window entirely — it was not sleep at all."
   },
+  "sleepDetailEditNaps": "Naps",
+  "@sleepDetailEditNaps": {
+    "description": "Button: go to the Naps screen for this day, to log or remove a nap."
+  },
   "sleepDetailRejectedTitle": "Marked as not sleep",
   "@sleepDetailRejectedTitle": {
     "description": "Status card title for a night the user rejected outright as not sleep."
@@ -9155,6 +9406,18 @@
   "@activitySetupPrivateLabel": {
     "description": "Label for the private-session toggle on the activity setup screen"
   },
+  "activitySetupWorkLabel": "Work",
+  "@activitySetupWorkLabel": {
+    "description": "Label for the work-interval stepper on the interval activity setup screen"
+  },
+  "activitySetupRestLabel": "Rest",
+  "@activitySetupRestLabel": {
+    "description": "Label for the rest-interval stepper on the interval activity setup screen"
+  },
+  "activitySetupRoundsLabel": "Rounds",
+  "@activitySetupRoundsLabel": {
+    "description": "Label for the round-count stepper on the interval activity setup screen"
+  },
   "activitySetupPrivateDetail": "Hidden from summaries and exports",
   "@activitySetupPrivateDetail": {
     "description": "Detail text under the private-session toggle"
@@ -9520,6 +9783,34 @@
   "@activityZonesAnchorDefault": {
     "description": "Generic fallback explanation of what zone edges are"
   },
+  "activityZonesAnchorManual": "Set by you, not computed — these five thresholds override whatever your age or a measured ceiling would have given you.",
+  "@activityZonesAnchorManual": {
+    "description": "Explanation shown when the user's own manual zone boundaries are in effect"
+  },
+  "activityZonesSetYourOwnLink": "Set your own zones",
+  "@activityZonesSetYourOwnLink": {
+    "description": "Link opening the manual zone-boundary editor, shown when no manual override is set"
+  },
+  "activityZonesEditYourOwnLink": "Edit your own zones",
+  "@activityZonesEditYourOwnLink": {
+    "description": "Link opening the manual zone-boundary editor, shown when a manual override is already set"
+  },
+  "activityZonesEditYourOwnTitle": "Set your own zones",
+  "@activityZonesEditYourOwnTitle": {
+    "description": "Title of the manual zone-boundary editor sheet"
+  },
+  "activityZonesEditYourOwnBody": "Five bpm thresholds, lowest to highest — where each zone starts. Clear all five to go back to the zones we compute for you.",
+  "@activityZonesEditYourOwnBody": {
+    "description": "Explanation text in the manual zone-boundary editor sheet"
+  },
+  "activityZonesNeedAllFive": "All five thresholds are needed, lowest to highest. Nothing was saved.",
+  "@activityZonesNeedAllFive": {
+    "description": "Error shown when only some of the five manual zone fields were filled in"
+  },
+  "activityZonesMustAscend": "Each zone must start higher than the last. Nothing was saved.",
+  "@activityZonesMustAscend": {
+    "description": "Error shown when the five manual zone thresholds are not strictly ascending"
+  },
   "activityZonesNotShownTitle": "Not shown yet",
   "@activityZonesNotShownTitle": {
     "description": "Status card title when the 28-day intensity distribution is not yet shown"
@@ -9679,6 +9970,10 @@
   "activitySummaryChangeType": "Change activity type",
   "@activitySummaryChangeType": {
     "description": "Semantic label on the pencil icon that lets the user correct the activity type"
+  },
+  "activitySummaryShareToStrava": "Share to Strava",
+  "@activitySummaryShareToStrava": {
+    "description": "Label on the button that exports the recorded route as a GPX file to the OS share sheet for manual upload to Strava (or anywhere else that reads GPX) — no Strava account or API call involved"
   },
   "activitySummaryUnsavedTitle": "This session is not saved yet",
   "@activitySummaryUnsavedTitle": {
@@ -10901,6 +11196,27 @@
   "@settingsAlarmRowSub": {
     "description": "Settings row subtitle describing the band alarm"
   },
+  "settingsZoneAlertRowTitle": "HR zone alert",
+  "@settingsZoneAlertRowTitle": {
+    "description": "Settings row title for the live-workout HR zone crossing haptic"
+  },
+  "settingsZoneAlertRowSub": "Buzz when your heart rate crosses into or out of the target zone during a live workout",
+  "@settingsZoneAlertRowSub": {
+    "description": "Settings row subtitle for the HR zone alert toggle"
+  },
+  "settingsZoneAlertTargetRowTitle": "Target zone",
+  "@settingsZoneAlertTargetRowTitle": {
+    "description": "Settings row title for picking which HR zone the alert watches"
+  },
+  "settingsZoneAlertTargetRowValue": "Zone {zone}",
+  "@settingsZoneAlertTargetRowValue": {
+    "description": "Value shown on the target-zone row, e.g. Zone 3",
+    "placeholders": {
+      "zone": {
+        "type": "int"
+      }
+    }
+  },
   "settingsGroupThisPhone": "This phone",
   "@settingsGroupThisPhone": {
     "description": "Settings group heading for phone-side sensing rows"
@@ -11096,6 +11412,22 @@
   "settingsBandAlertsRowSub": "Flat battery, on the charger, gone quiet",
   "@settingsBandAlertsRowSub": {
     "description": "Notification row subtitle for band device alerts"
+  },
+  "settingsAlarmLatchFailedRowTitle": "Alarm not confirmed",
+  "@settingsAlarmLatchFailedRowTitle": {
+    "description": "Notification row title for the alarm latch-failure alert"
+  },
+  "settingsAlarmLatchFailedRowSub": "Warn when the band never confirms an alarm this app just armed",
+  "@settingsAlarmLatchFailedRowSub": {
+    "description": "Notification row subtitle for the alarm latch-failure alert"
+  },
+  "settingsAlarmNightCheckRowTitle": "No-alarm check-in",
+  "@settingsAlarmNightCheckRowTitle": {
+    "description": "Notification row title for the 7pm no-alarm-tonight check"
+  },
+  "settingsAlarmNightCheckRowSub": "A 7pm heads-up on any night with no wake alarm armed — silent otherwise",
+  "@settingsAlarmNightCheckRowSub": {
+    "description": "Notification row subtitle for the 7pm no-alarm-tonight check"
   },
   "settingsAlertMeAtRowTitle": "Alert me at",
   "@settingsAlertMeAtRowTitle": {
@@ -11704,5 +12036,410 @@
   "nudgeDontShowAgain": "Don't show this again",
   "@nudgeDontShowAgain": {
     "description": "Label and semantic label for the button that permanently dismisses a Home community nudge."
+  },
+  "signalRrIntervals": "Beat-to-beat intervals",
+  "@signalRrIntervals": {
+    "description": "Human name for the rrIntervals input signal."
+  },
+  "signalHr1Hz": "Continuous heart rate",
+  "@signalHr1Hz": {
+    "description": "Human name for the hr1Hz input signal."
+  },
+  "signalHrSparse": "Heart rate",
+  "@signalHrSparse": {
+    "description": "Human name for the hrSparse input signal."
+  },
+  "signalAccel1Hz": "Movement",
+  "@signalAccel1Hz": {
+    "description": "Human name for the accel1Hz input signal."
+  },
+  "signalAccelHighRate": "High-rate movement",
+  "@signalAccelHighRate": {
+    "description": "Human name for the accelHighRate input signal."
+  },
+  "signalPpgGreen": "Green PPG",
+  "@signalPpgGreen": {
+    "description": "Human name for the ppgGreen input signal."
+  },
+  "signalPpgRedIr": "Red/infrared PPG",
+  "@signalPpgRedIr": {
+    "description": "Human name for the ppgRedIr input signal."
+  },
+  "signalSkinTempRaw": "Skin temperature",
+  "@signalSkinTempRaw": {
+    "description": "Human name for the skinTempRaw input signal."
+  },
+  "signalVendorScalars": "The device\u2019s own numbers",
+  "@signalVendorScalars": {
+    "description": "Human name for the vendorScalars input signal."
+  },
+  "missingSignalRrIntervals": "no beat-to-beat intervals",
+  "@missingSignalRrIntervals": {
+    "description": "Sub-label on a device that cannot serve a metric because its hardware does not report beat-to-beat intervals. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalHr1Hz": "no continuous heart rate",
+  "@missingSignalHr1Hz": {
+    "description": "Sub-label on a device that cannot serve a metric because its hardware does not report continuous heart rate. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalHrSparse": "no heart rate",
+  "@missingSignalHrSparse": {
+    "description": "Sub-label on a device that cannot serve a metric because its hardware does not report heart rate at all. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalAccel1Hz": "no accelerometer",
+  "@missingSignalAccel1Hz": {
+    "description": "Sub-label on a device that cannot serve a metric because it has no accelerometer. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalAccelHighRate": "no high-rate accelerometer",
+  "@missingSignalAccelHighRate": {
+    "description": "Sub-label on a device that cannot serve a metric because its accelerometer does not report at a high sample rate. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalPpgGreen": "no green PPG",
+  "@missingSignalPpgGreen": {
+    "description": "Sub-label on a device that cannot serve a metric because it has no green photoplethysmography (optical) sensor. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalPpgRedIr": "no red/infrared PPG",
+  "@missingSignalPpgRedIr": {
+    "description": "Sub-label on a device that cannot serve a metric because it has no red or infrared photoplethysmography (optical) sensor. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalSkinTempRaw": "no temperature sensor",
+  "@missingSignalSkinTempRaw": {
+    "description": "Sub-label on a device that cannot serve a metric because it has no skin temperature sensor. Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalVendorScalars": "reports nothing of its own",
+  "@missingSignalVendorScalars": {
+    "description": "Sub-label on a device that cannot serve a metric because it publishes no pre-computed numbers of its own (only raw sensor signals). Names the physical absence, not the metric. Lower case: it is appended after the device name and a middle dot."
+  },
+  "missingSignalUnknown": "cannot supply this",
+  "@missingSignalUnknown": {
+    "description": "Fallback sub-label on a device that cannot serve a metric when no specific missing sensor can be named. Lower case: it is appended after the device name and a middle dot."
+  },
+  "devicesSensorLimit": "{count, plural, =1{One sensor is the most this phone will pair alongside your band. Remove it to add another.} other{This phone will pair at most {count} sensors alongside your band. Remove one to add another.}}",
+  "@devicesSensorLimit": {
+    "description": "Refusal shown when the paired-sensor cap is already reached.",
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "devicesOrderNotSaved": "That order could not be saved. Nothing changed.",
+  "@devicesOrderNotSaved": {
+    "description": "Shown when a signal-priority write fails."
+  },
+  "devicesRequestNotSaved": "That request could not be saved. Please try again.",
+  "@devicesRequestNotSaved": {
+    "description": "Shown when the add-a-band restart request could not be persisted."
+  },
+  "ecgTitle": "ECG",
+  "@ecgTitle": {
+    "description": "WHOOP MG ECG: ECG"
+  },
+  "ecgHeartScreener": "Heart Screener",
+  "@ecgHeartScreener": {
+    "description": "WHOOP MG ECG: Heart Screener"
+  },
+  "ecgEntryMeta": "WHOOP MG · band-reported",
+  "@ecgEntryMeta": {
+    "description": "WHOOP MG ECG: WHOOP MG · band-reported"
+  },
+  "ecgOpen": "Open",
+  "@ecgOpen": {
+    "description": "WHOOP MG ECG: Open"
+  },
+  "ecgTakeEcg": "Take ECG",
+  "@ecgTakeEcg": {
+    "description": "WHOOP MG ECG: Take ECG"
+  },
+  "ecgNeedsMg": "Take ECG needs a connected WHOOP MG.",
+  "@ecgNeedsMg": {
+    "description": "WHOOP MG ECG: Take ECG needs a connected WHOOP MG."
+  },
+  "ecgHistoryEmpty": "No readings yet.",
+  "@ecgHistoryEmpty": {
+    "description": "WHOOP MG ECG: No readings yet."
+  },
+  "ecgHistoryEmptyWhy": "Readings you take are saved here and stay readable while the band is away.",
+  "@ecgHistoryEmptyWhy": {
+    "description": "WHOOP MG ECG: Readings you take are saved here and stay readable while the band is away."
+  },
+  "ecgWristPrompt": "Which wrist is the band on?",
+  "@ecgWristPrompt": {
+    "description": "WHOOP MG ECG: Which wrist is the band on?"
+  },
+  "ecgWristLeft": "Left wrist",
+  "@ecgWristLeft": {
+    "description": "WHOOP MG ECG: Left wrist"
+  },
+  "ecgWristRight": "Right wrist",
+  "@ecgWristRight": {
+    "description": "WHOOP MG ECG: Right wrist"
+  },
+  "ecgInstruction": "Rest your arm. Touch both metal sides with your opposite thumb and index finger. Keep still.",
+  "@ecgInstruction": {
+    "description": "WHOOP MG ECG: Rest your arm. Touch both metal sides with your opposite thumb and index finger. Keep still."
+  },
+  "ecgIllustration": "Illustration: the band on your wrist, and the thumb and index finger of your other hand touching its two metal sides.",
+  "@ecgIllustration": {
+    "description": "WHOOP MG ECG: Illustration: the band on your wrist, and the thumb and index finger of your other hand touching its two metal sides."
+  },
+  "ecgContactLost": "Adjust your fingers and keep still",
+  "@ecgContactLost": {
+    "description": "WHOOP MG ECG: Adjust your fingers and keep still"
+  },
+  "ecgPreparing": "Preparing the band…",
+  "@ecgPreparing": {
+    "description": "WHOOP MG ECG: Preparing the band…"
+  },
+  "ecgRecovering": "Stopping a previous reading first…",
+  "@ecgRecovering": {
+    "description": "WHOOP MG ECG: Stopping a previous reading first…"
+  },
+  "ecgWaiting": "Waiting for contact",
+  "@ecgWaiting": {
+    "description": "WHOOP MG ECG: Waiting for contact"
+  },
+  "ecgMeasuring": "Measuring",
+  "@ecgMeasuring": {
+    "description": "WHOOP MG ECG: Measuring"
+  },
+  "ecgRestarting": "Restarting…",
+  "@ecgRestarting": {
+    "description": "WHOOP MG ECG: Restarting…"
+  },
+  "ecgSaving": "Saving…",
+  "@ecgSaving": {
+    "description": "WHOOP MG ECG: Saving…"
+  },
+  "ecgCleaningUp": "Stopping the band…",
+  "@ecgCleaningUp": {
+    "description": "WHOOP MG ECG: Stopping the band…"
+  },
+  "ecgCompleted": "Reading saved",
+  "@ecgCompleted": {
+    "description": "WHOOP MG ECG: Reading saved"
+  },
+  "ecgUnreadableTitle": "The band could not read this",
+  "@ecgUnreadableTitle": {
+    "description": "WHOOP MG ECG: The band could not read this"
+  },
+  "ecgInconclusiveTitle": "Inconclusive",
+  "@ecgInconclusiveTitle": {
+    "description": "WHOOP MG ECG: Inconclusive"
+  },
+  "ecgInconclusiveRetryHint": "The band could not decide. You can try once more.",
+  "@ecgInconclusiveRetryHint": {
+    "description": "WHOOP MG ECG: The band could not decide. You can try once more."
+  },
+  "ecgTryOnceMore": "Try once more",
+  "@ecgTryOnceMore": {
+    "description": "WHOOP MG ECG: Try once more"
+  },
+  "ecgTakeAnother": "Take another",
+  "@ecgTakeAnother": {
+    "description": "WHOOP MG ECG: Take another"
+  },
+  "ecgDone": "Done",
+  "@ecgDone": {
+    "description": "WHOOP MG ECG: Done"
+  },
+  "ecgViewReading": "View reading",
+  "@ecgViewReading": {
+    "description": "WHOOP MG ECG: View reading"
+  },
+  "ecgCancelledTitle": "Reading cancelled",
+  "@ecgCancelledTitle": {
+    "description": "WHOOP MG ECG: Reading cancelled"
+  },
+  "ecgFailedTitle": "Reading failed",
+  "@ecgFailedTitle": {
+    "description": "WHOOP MG ECG: Reading failed"
+  },
+  "ecgFailedDisconnected": "The band disconnected.",
+  "@ecgFailedDisconnected": {
+    "description": "WHOOP MG ECG: The band disconnected."
+  },
+  "ecgFailedTimeout": "No result within two minutes.",
+  "@ecgFailedTimeout": {
+    "description": "WHOOP MG ECG: No result within two minutes."
+  },
+  "ecgFailedGeneric": "The band did not accept the reading ({reason}).",
+  "@ecgFailedGeneric": {
+    "description": "WHOOP MG ECG: The band did not accept the reading ({reason}).",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "ecgBusy": "Finish the other live session first.",
+  "@ecgBusy": {
+    "description": "WHOOP MG ECG: Finish the other live session first."
+  },
+  "ecgIncompatible": "This band is not a WHOOP MG.",
+  "@ecgIncompatible": {
+    "description": "WHOOP MG ECG: This band is not a WHOOP MG."
+  },
+  "ecgDisconnected": "Connect your WHOOP MG first.",
+  "@ecgDisconnected": {
+    "description": "WHOOP MG ECG: Connect your WHOOP MG first."
+  },
+  "ecgCleanupIncomplete": "The band may still be generating. It will be stopped on the next connection.",
+  "@ecgCleanupIncomplete": {
+    "description": "WHOOP MG ECG: The band may still be generating. It will be stopped on the next connection."
+  },
+  "ecgLivePreview": "Live signal preview",
+  "@ecgLivePreview": {
+    "description": "WHOOP MG ECG: Live signal preview"
+  },
+  "ecgBandReported": "Band-reported result",
+  "@ecgBandReported": {
+    "description": "WHOOP MG ECG: Band-reported result"
+  },
+  "ecgNotDiagnosis": "The category comes from the band. This is not a diagnosis.",
+  "@ecgNotDiagnosis": {
+    "description": "WHOOP MG ECG: The category comes from the band. This is not a diagnosis."
+  },
+  "ecgCategorySinus": "Sinus rhythm",
+  "@ecgCategorySinus": {
+    "description": "WHOOP MG ECG: Sinus rhythm"
+  },
+  "ecgCategoryLowHr": "Low heart rate",
+  "@ecgCategoryLowHr": {
+    "description": "WHOOP MG ECG: Low heart rate"
+  },
+  "ecgCategoryPossibleAfib": "Possible AFib",
+  "@ecgCategoryPossibleAfib": {
+    "description": "WHOOP MG ECG: Possible AFib"
+  },
+  "ecgCategoryAfibHighHr": "AFib with high heart rate",
+  "@ecgCategoryAfibHighHr": {
+    "description": "WHOOP MG ECG: AFib with high heart rate"
+  },
+  "ecgCategoryHighHr": "High heart rate",
+  "@ecgCategoryHighHr": {
+    "description": "WHOOP MG ECG: High heart rate"
+  },
+  "ecgCategoryHighHrNoAfib": "High heart rate, no AFib detected",
+  "@ecgCategoryHighHrNoAfib": {
+    "description": "WHOOP MG ECG: High heart rate, no AFib detected"
+  },
+  "ecgCategoryInconclusive": "Inconclusive",
+  "@ecgCategoryInconclusive": {
+    "description": "WHOOP MG ECG: Inconclusive"
+  },
+  "ecgCategoryUnreadable": "Unreadable",
+  "@ecgCategoryUnreadable": {
+    "description": "WHOOP MG ECG: Unreadable"
+  },
+  "ecgReasonLowAmplitude": "Low amplitude",
+  "@ecgReasonLowAmplitude": {
+    "description": "WHOOP MG ECG: Low amplitude"
+  },
+  "ecgReasonNoise": "Significant noise",
+  "@ecgReasonNoise": {
+    "description": "WHOOP MG ECG: Significant noise"
+  },
+  "ecgReasonUnstable": "Unstable signal",
+  "@ecgReasonUnstable": {
+    "description": "WHOOP MG ECG: Unstable signal"
+  },
+  "ecgReasonNotEnoughData": "Not enough data",
+  "@ecgReasonNotEnoughData": {
+    "description": "WHOOP MG ECG: Not enough data"
+  },
+  "ecgAnalyzeNow": "Analyze now",
+  "@ecgAnalyzeNow": {
+    "description": "WHOOP MG ECG: Analyze now"
+  },
+  "ecgAnalyzeCloudTitle": "Send this reading to your model?",
+  "@ecgAnalyzeCloudTitle": {
+    "description": "WHOOP MG ECG: Send this reading to your model?"
+  },
+  "ecgAnalyzeCloudBody": "The reading summary and the full waveform (every sample the band recorded, 100 per second) will be sent to {host} as {model}. No raw frames, no band serial.",
+  "@ecgAnalyzeCloudBody": {
+    "description": "WHOOP MG ECG: The reading summary and a bounded waveform envelope will be sent to {host} as {model}. No raw frames, no band serial.",
+    "placeholders": {
+      "host": {
+        "type": "String"
+      },
+      "model": {
+        "type": "String"
+      }
+    }
+  },
+  "ecgContinue": "Continue",
+  "@ecgContinue": {
+    "description": "WHOOP MG ECG: Continue"
+  },
+  "ecgCancel": "Cancel",
+  "@ecgCancel": {
+    "description": "WHOOP MG ECG: Cancel"
+  },
+  "ecgDelete": "Delete reading",
+  "@ecgDelete": {
+    "description": "WHOOP MG ECG: Delete reading"
+  },
+  "ecgAvgHr": "Average heart rate",
+  "@ecgAvgHr": {
+    "description": "WHOOP MG ECG: Average heart rate"
+  },
+  "ecgQuality": "Signal quality",
+  "@ecgQuality": {
+    "description": "WHOOP MG ECG: Signal quality"
+  },
+  "ecgInterruptions": "Interruptions",
+  "@ecgInterruptions": {
+    "description": "WHOOP MG ECG: Interruptions"
+  },
+  "ecgDuration": "Duration",
+  "@ecgDuration": {
+    "description": "WHOOP MG ECG: Duration"
+  },
+  "ecgMissingSegments": "Missing segments",
+  "@ecgMissingSegments": {
+    "description": "WHOOP MG ECG: Missing segments"
+  },
+  "ecgWristLabel": "Wrist",
+  "@ecgWristLabel": {
+    "description": "WHOOP MG ECG: Wrist"
+  },
+  "ecgZoomIn": "Zoom in",
+  "@ecgZoomIn": {
+    "description": "WHOOP MG ECG: Zoom in"
+  },
+  "ecgZoomOut": "Zoom out",
+  "@ecgZoomOut": {
+    "description": "WHOOP MG ECG: Zoom out"
+  },
+  "ecgClose": "Close ECG",
+  "@ecgClose": {
+    "description": "WHOOP MG ECG: Close ECG"
+  },
+  "ecgProgress": "{pct}% complete",
+  "@ecgProgress": {
+    "description": "WHOOP MG ECG: {pct}% complete",
+    "placeholders": {
+      "pct": {
+        "type": "int"
+      }
+    }
+  },
+  "ecgWaveformEmpty": "No waveform was saved with this reading.",
+  "@ecgWaveformEmpty": {
+    "description": "WHOOP MG ECG: No waveform was saved with this reading."
+  },
+  "ecgWaveformLabel": "Accepted waveform, microvolts as the band sent them. Gaps are missing seconds.",
+  "@ecgWaveformLabel": {
+    "description": "WHOOP MG ECG: Accepted waveform, microvolts as the band sent them. Gaps are missing seconds."
+  },
+  "ecgSampleNote": "{count} samples at {rate} Hz, filtered, input-referred µV. No lead or polarity is claimed.",
+  "@ecgSampleNote": {
+    "description": "WHOOP MG ECG: {count} samples at {rate} Hz, filtered, input-referred µV. No lead or polarity is claimed.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "rate": {
+        "type": "int"
+      }
+    }
   }
 }

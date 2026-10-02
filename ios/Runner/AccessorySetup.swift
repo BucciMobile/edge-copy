@@ -29,6 +29,7 @@ import AccessorySetupKit
 ///
 /// Dart MethodChannel `openstrap/accessory_setup`:
 ///   - `isSupported`        -> Bool   (true only on iOS 18+)
+///   - `provisionedIds`     -> [String] (every ASK-provisioned accessory's uppercased UUID)
 ///   - `provisionedId`      -> String?(uppercased UUID of an already-provisioned band, or nil)
 ///   - `showPicker`         -> String (the band provisioned by THIS call; throws on cancel/error)
 ///                             optional Bool argument: true = add another accessory
@@ -41,18 +42,23 @@ import AccessorySetupKit
 enum AccessorySetup {
   private static let channelName = "openstrap/accessory_setup"
 
-  // Extra gen5-only fallback match criteria, layered on top of the
+  // Extra gen5-only fallback match criterion, layered on top of the
   // registry-driven items below. We do not yet know (no nRF Connect capture)
   // whether fd4b0001-… is in the primary advertisement or only the scan
-  // response, so these two give gen5 a second and third chance to match: the
-  // 16-bit SIG member UUID 0xFD4B (what still fits a 31-byte AD) and a name
-  // substring (`WHOOP MGB…` / `WHOOP 5A…`, survives even if iOS hashes the
-  // 128-bit UUID into the overflow area). `fileprivate` so Impl can read them.
-  // Every criterion used in an ASDiscoveryDescriptor must also be listed in
-  // Info.plist or iOS silently ignores it — these two are NOT services, so
-  // they deliberately do not go through the kBandRegistry-generated list.
+  // response, so this gives gen5 a second chance to match: the 16-bit SIG
+  // member UUID 0xFD4B (what still fits a 31-byte AD). `fileprivate` so Impl
+  // can read it. Every criterion used in an ASDiscoveryDescriptor must also
+  // be listed in Info.plist or iOS silently ignores it — this is NOT a
+  // service, so it deliberately does not go through the
+  // kBandRegistry-generated list.
+  //
+  // A name-substring-only fallback (no service UUID) used to sit alongside
+  // this one but was REMOVED: ASDiscoveryDescriptor requires
+  // bluetoothServiceUUID whenever bluetoothNameSubstring is set, and a
+  // name-only descriptor fails ASK validation with a FATAL trap in
+  // -[ASAccessorySession _validateDiscoveryDescriptor:] — not a catchable
+  // completion-handler error — which crashed every picker invocation.
   fileprivate static let whoopMemberUUID16 = "FD4B"
-  fileprivate static let nameSubstring = "WHOOP"
 
   static func register(messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
@@ -61,11 +67,19 @@ enum AccessorySetup {
       case "isSupported":
         if #available(iOS 18.0, *) { result(true) } else { result(false) }
 
+      case "provisionedIds":
+        if #available(iOS 18.0, *) {
+          Impl.shared.provisionedIds { result($0) }      // [String], possibly empty
+        } else {
+          result([String]())
+        }
+
+      // KEPT, not replaced: the old scalar case still answers, because a build of the
+      // app can be newer than the Dart it runs (Flutter attach/hot-restart during
+      // development) and because deleting a channel method to save four lines is how
+      // you get a MissingPluginException on a path nobody tests.
       case "provisionedId":
         if #available(iOS 18.0, *) {
-          // ponytail: the channel still hands Dart ONE id because the Dart side is
-          // still two SharedPreferences scalars (change-list E3). Swift holds the
-          // whole array; widen this to a list when the device table lands.
           Impl.shared.provisionedIds { result($0.first) }
         } else {
           result(nil)
@@ -230,13 +244,18 @@ private final class Impl {
         message: "No accessory services are declared in Info.plist.")))
       return
     }
-    // Extra gen5-only fallback items — see the constants' doc comment above.
+    // Extra gen5-only fallback item — see the constants' doc comment above.
     items.append(makeItem("WHOOP 5.0 / MG") {
       $0.bluetoothServiceUUID = CBUUID(string: AccessorySetup.whoopMemberUUID16)
     })
-    items.append(makeItem("WHOOP band") {
-      $0.bluetoothNameSubstring = AccessorySetup.nameSubstring
-    })
+    // ponytail: dropped the name-substring-only fallback item. ASDiscoveryDescriptor
+    // requires bluetoothServiceUUID whenever bluetoothNameSubstring is set — a
+    // name-only descriptor fails ASK's validation with a FATAL (uncatchable) trap in
+    // -[ASAccessorySession _validateDiscoveryDescriptor:], not a completion-handler
+    // error, so the existing gen4-retry-on-rejection logic below never even ran.
+    // This crashed every "search for devices" tap (TestFlight crashlog
+    // A3457926-FD0D-48A7-9C6B-DCC6958276BF, iOS 26.6, v0.9.29). Re-add only paired
+    // with a service UUID.
 
     pickerResult = completion
     present(items, known: known, allowGen4Retry: true)

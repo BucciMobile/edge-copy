@@ -273,6 +273,19 @@ class Substrate {
   /// guessing here is how a fabricated number gets published.
   final String? deviceFamily;
 
+  /// The distinct `device_id`s whose rows survive in this substrate — "which
+  /// devices actually became numbers", for `metric_series_version
+  /// .coverage_devices` (M5). Unlike [deviceFamily] this is NOT collapsed to
+  /// a singleton-or-null: a day with two contributing devices legitimately
+  /// has two entries, because the question this answers ("who contributed")
+  /// is different from "whose calibration applies" (which DOES need a
+  /// singleton, hence [deviceFamily]'s different collapse rule).
+  ///
+  /// Empty (never null) when nothing stamped a `device_id` — every row
+  /// predating the resolver, or a substrate built by a path that never reads
+  /// the column (e.g. the raw-hex replay path, imports).
+  final Set<String> deviceIds;
+
   /// Pack a `List<double>` into a `Float64List` (an already-packed list passes
   /// straight through).
   ///
@@ -306,9 +319,11 @@ class Substrate {
     List<int> stepCount = const [],
     List<int> hrValid = const [],
     String? deviceFamily,
+    Set<String> deviceIds = const {},
   }) =>
       Substrate._(
         deviceFamily: deviceFamily,
+        deviceIds: deviceIds,
         tsSec: tsSec,
         hr: hr,
         rrTsMs: _packed(rrTsMs),
@@ -339,6 +354,7 @@ class Substrate {
     this.stepCount = const [],
     this.hrValid = const [],
     this.deviceFamily,
+    this.deviceIds = const {},
   });
 
   static const Substrate empty = Substrate._(
@@ -485,6 +501,7 @@ class Substrate {
       stepCount: _stepSlice(lo, hi),
       hrValid: _perSecSlice(hrValid, lo, hi),
       deviceFamily: deviceFamily,
+      deviceIds: deviceIds,
       rrTsMs: rr.$1,
       rrMs: rr.$2,
     );
@@ -513,6 +530,7 @@ class Substrate {
       stepCount: _stepSlice(lo, hi),
       hrValid: _perSecSlice(hrValid, lo, hi),
       deviceFamily: deviceFamily,
+      deviceIds: deviceIds,
       rrTsMs: rr.$1,
       rrMs: rr.$2,
     );
@@ -531,6 +549,7 @@ class Substrate {
       skinTemp: const [],
       skinContact: const [],
       deviceFamily: deviceFamily,
+      deviceIds: deviceIds,
       rrTsMs: rr.$1,
       rrMs: rr.$2,
     );
@@ -578,6 +597,7 @@ class Substrate {
         'hr_valid': hrValid,
         // Null (unknown provenance) is a real answer — emit the key regardless.
         'device_family': deviceFamily,
+        'device_ids': deviceIds.toList(),
       };
 
   static Substrate fromJson(Map<String, dynamic> m) {
@@ -634,6 +654,9 @@ class Substrate {
         return l.length == n ? l : List<int>.filled(n, -1);
       }(),
       deviceFamily: m['device_family'] as String?,
+      deviceIds: ((m['device_ids'] as List?) ?? const [])
+          .map((e) => e.toString())
+          .toSet(),
     );
   }
 }
@@ -754,6 +777,10 @@ Substrate decodeSubstrate(List<String> hexes) {
       ..clear()
       ..addAll(sr);
   }
+  // The beats this path just placed can still overlap across a RECORD seam —
+  // see [monotonizeBeatAxis]. The sort above only runs when loose live beats
+  // were folded in, so it is not that guarantee.
+  monotonizeBeatAxis(rrTsMs);
 
   return Substrate(
     tsSec: tsSec,
@@ -776,6 +803,39 @@ Substrate decodeSubstrate(List<String> hexes) {
     // `hrValidAt` regardless.
     hrValid: List<int>.filled(n, -1),
   );
+}
+
+/// Hold a beat time axis non-decreasing — WITHOUT moving a single interval.
+///
+/// `beat_ts_ms` is a RECONSTRUCTED beat position: `beatTimesMs` anchors on the
+/// record's sub-second stamp under the model that the record's LAST beat sits
+/// at that stamp, then walks the intervals backwards from it. The anchor is
+/// measured; the placement is modelled. When two adjacent records' anchors sit
+/// closer together than one beat, the model puts record N+1's beat 0 EARLIER
+/// than record N's last beat, and beats are emitted in record order — so the
+/// axis steps backwards. Real, not theoretical: 94 inversions across 39,066
+/// beats in one day on a live install, every one at `beat_index = 0`, by
+/// 7-672 ms.
+///
+/// Analytics binary-searches this axis (`_cleanBeatsInWindow`) and asserts it
+/// is non-decreasing. That assert is compiled out in release, so a release
+/// build does not throw — it silently mis-selects each window's beats instead,
+/// which is the worse failure of the two.
+///
+/// THE ORDER IS NOT WHAT IS WRONG. Beats arrive in the order the strap detected
+/// them and that order IS the rhythm — `beat_clock_read_path_test` pins it as
+/// the contract it is. Only the modelled placement is repaired, and by the
+/// least it can be: each beat is held no earlier than the one before it. A sort
+/// would reshuffle a true interval series to satisfy an assert.
+///
+/// A held beat lands on a zero-length gap, which the axis already allows and
+/// already contains: the `rr_ts_ms` staircase fallback puts a whole record's
+/// beats on one millisecond, and analytics' window gather is written for those
+/// ties (its lower bound is inclusive precisely so tied beats are not dropped).
+void monotonizeBeatAxis(List<double> rrTsMs) {
+  for (var i = 1; i < rrTsMs.length; i++) {
+    if (rrTsMs[i] < rrTsMs[i - 1]) rrTsMs[i] = rrTsMs[i - 1];
+  }
 }
 
 /// Steps MEASURED by the band's own pedometer over [sub], or `null` when this

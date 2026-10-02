@@ -32,6 +32,8 @@ import 'findings.dart';
 import 'nap_edits.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
+import '../ble/adapters/signals.dart';
+import '../data/coverage_resolver.dart';
 import '../data/db.dart';
 import '../data/day_label.dart';
 import '../data/series_codec.dart';
@@ -1581,7 +1583,142 @@ import 'substrate.dart';
 // chain (nap.dart); `_attachNaps` tests that flag directly instead of
 // re-deriving it from the index. Real output change (nap minutes / sleep
 // need on days with a midnight-arousal-split nap), so the bump is real.
-const int kAlgoVersion = 86;
+//
+// 86 → 87 (M5, edge-only — no sibling repin): the multi-device coverage
+// resolver lands. Three real output changes, all gated on more than one
+// device actually having contributed to a day (a single-device install's
+// `day_result.payload_json` is byte-identical — see coverage_resolver.dart
+// §2 and test/multidevice_coverage_derive_test.dart's identity-case
+// assertion):
+//   1. THE SUBSTRATE ROW FILTER. `_loadSubstrateRange`'s page loop now
+//      admits a `decoded_onehz`/`decoded_rr` row only when its `device_id`
+//      matches the resolved span owner for its second, once more than one
+//      device has real coverage. Before this, two devices' rows for the
+//      same second both entered the substrate and the union/dedup logic in
+//      `addDecodedPage` kept whichever page happened to arrive first —
+//      order-dependent, not owner-decided.
+//   2. PER-OWNER wristOff/charging MASKING. A window owned by device A is
+//      masked by device A's own off-body/charging events only; before this,
+//      one unfiltered query over the whole nap/sleep window meant band B on
+//      the charger could exclude band A's real worn night.
+//   3. `series.coverage` is written into the bundle (omitted entirely, not
+//      `{}`, on any day with one contributor) — the per-signal span
+//      attribution a future device-aware UI reads (M6).
+// Do NOT read this as citing an analytics change: the baseline-dispersion-
+// below-quantum guard (readiness_composite.dart) some earlier draft of this
+// bump would have named is ALREADY IN the pinned SHA below — citing it here
+// would repeat the v43 mistake (a changelog naming a change the pin already
+// had) in exactly the shape that kept "readiness —" live for three releases.
+// kAnalyticsPin/kProtocolPin are UNCHANGED: M5 touches no analytics or
+// protocol code.
+// v88 — THE BEAT AXIS IS HELD NON-DECREASING (`monotonizeBeatAxis`,
+// substrate.dart). `beat_ts_ms` is a modelled beat position walked backwards
+// from the record's sub-second anchor, so two records whose anchors sit closer
+// than one beat place N+1's first beat before N's last. Measured on a live
+// install: 94 inversions across 39,066 beats in a single day.
+//
+// Analytics binary-searches that axis and asserts it ascends. The assert is
+// compiled out in RELEASE — so shipped builds did not throw, they mis-selected
+// each 300 s window's beats, and every affected day was banked at v87 from a
+// window gather that had silently skipped or duplicated beats. Those results
+// cannot be told apart from good ones after the fact, which is exactly what a
+// version bump is for: the days re-derive instead of being served from cache
+// (`finalizedDayIds` / `sleepSessionCandidate` both key on kAlgoVersion).
+//
+// Real output change on affected days — window membership moves by up to the
+// inversion depth (672 ms measured) — so the bump is real. Interval VALUES and
+// their order are untouched by the repair; only the modelled clock moves.
+// kAnalyticsPin/kProtocolPin are UNCHANGED: the repair is entirely edge-side.
+//
+// 88 → 89 (movement-floor DST fix): `daysSinceFrozen` (movement_floor_policy.dart)
+// used to run `.difference().inDays` on the parsed LOCAL `DateTime`s directly.
+// A span crossing a spring-forward transition loses that day's missing hour,
+// so a real 10-day gap floored to 9 — the same trap `dayLabelBefore` above is
+// built to avoid, just missed here. Now both dates are normalized to UTC
+// midnight before diffing. Changes the movement-floor staleness/re-freeze
+// decision (and therefore `active_min`) for any day whose gap from the
+// frozen-on date spans a DST transition. Real output change, so the bump is
+// real. kAnalyticsPin/kProtocolPin are UNCHANGED: edge-only fix.
+//
+// 89 → 90 (skin_temp_z quantum guard): onehz_pipeline.dart's `skinTempZ` was
+// gated only on `sd > 0` against the raw-ADC baseline history, with no floor
+// for the ADC channel's own quantization step. analytics already guards this
+// exact channel (`tempInput(..., quantum: 1)` in readiness_composite.dart),
+// refusing when the baseline SD sits below 1 ADC count even though a nonzero
+// SD passed the naive check. `skinTempZ` now requires `sd >= 1` too, so a
+// baseline oscillating between two adjacent ADC counts abstains instead of
+// reporting an inflated z. Feeds `tempIllnessFlag`/`multivariateAnomaly` and
+// the raw health_screen display value (readiness's own temp driver already
+// went through the guarded `tempInput` path and is unaffected). Real output
+// change on the affected sub-quantum-dispersion nights, so the bump is real.
+// kAnalyticsPin/kProtocolPin are UNCHANGED: edge-only fix.
+//
+// 91 → 92 (baevskyStressIndex is now gap-aware): passes `nnTimesMs` at the
+// one call site (onehz_pipeline.dart) so a charging/off-wrist hole inside a
+// sleep window segments the 256-beat sliding window instead of one window
+// straddling the gap and reading the pre/post-gap RR jump as MxDMn — the
+// same bug class `cvhrApneaScreen` already had a fix for. Real output change
+// for any night that had an internal gap. kAnalyticsPin bumped alongside
+// this (analytics PR #70).
+//
+// 90 → 91 (`_resolveOwnership` drops newly-paired devices): once a signal's
+// `signal_priority` had ANY stored row, a device that started declaring that
+// signal afterward (paired later, no stored row) was never added to the
+// candidate list `resolveOwnership` reads — its real `device_coverage` was
+// silently excluded from ownership resolution forever. Now any coverage-only
+// device is unioned in below the stored ranking (sorted, in-memory only,
+// never persisted — same property as the empty-priority fallback). Real
+// output change for any user who customized priority for a signal and then
+// paired another device that also declares it. kAnalyticsPin/kProtocolPin
+// UNCHANGED: edge-only fix.
+//
+// 92 → 93 (HRV frequency-domain Welch gap guard, analytics PR #72): the
+// Welch segmenter in hrv_freq.dart only rejected a segment by beat count,
+// never by time-completeness, so a mid-window gap (BLE reconnect, off-wrist
+// moment) could still publish a bogus LF/HF/VLF/ULF/lf_hf/nu_lf/nu_hf/total
+// reading at Tier.high. Now gated on both an endpoint-span check and a
+// largest-single-gap check. Real output change for any night with an
+// internal HRV-frequency-window gap. kAnalyticsPin bumped alongside this.
+// Verified: `git show 82857106e41c346b4edf9ad617829a5ddd1cc5c1:lib/src/onehz/clinical/hrv_freq.dart |
+//   grep -n 'segSec \* 0.8\|segSec \* 0.2'`
+//
+// 93 → 94 (`overreachingConjunction` rhr quantum guard, analytics PR #73):
+// an alternating whole-bpm rhr baseline (58/59) has a small nonzero MAD that
+// is unresolvable rounding noise, not real dispersion — the guard
+// `dispersionBelowQuantum` already applies on this same rhr channel in
+// illness_cusum/readiness_composite/event_detection. Without it, a 1bpm rise
+// could clear the gate and fire the "both facts point the same way" card on
+// nothing. kAnalyticsPin repinned to analytics PR #73's merged main SHA.
+//
+// 94 → 95 (`glassBoxReadiness` rhr/temp quantum guard, analytics PR #75):
+// same gap as #73, but on the stored "readiness_glassbox" narrative/drivers
+// key crossday_pipeline still writes — glassBoxReadiness never gated its
+// 0.5*scale rhr/temp standardization with dispersionBelowQuantum, so a
+// quantized baseline (e.g. alternating 58/59 bpm) could get named a driver
+// off rounding noise. edge's `_glassInput` calls now pass `quantum: 1` on
+// both channels. kAnalyticsPin repinned to analytics PR #75's merged main
+// SHA. This changes the stored drivers list for real users, so it gets a
+// version bump despite being narrative-only, not a headline-score change.
+// 95 → 96 (`_resolveOwnership`/substrate splice, accel1Hz/ppgRedIr/
+// skinTempRaw priority): `signal_priority` and the device-priority screen are
+// generic over every InputSignal a paired device declares, but the substrate
+// loader admitted a whole `decoded_onehz` row (accel + ppg + skin-temp
+// bundled with hr in one row) purely on the hr1Hz ownership winner for that
+// second — a user's explicit accel1Hz/ppgRedIr/skinTempRaw priority order had
+// no effect at all. `_resolveOwnership` now resolves those three signals too,
+// and a contended second splices each field group in from its OWN owner's row
+// when that device has one, instead of following hr1Hz. No output change for
+// any single-device install or any pairing where those three signals are not
+// actually contended (`group.length < 2` short-circuits to the unchanged row).
+// kAnalyticsPin/kProtocolPin UNCHANGED: edge-only fix.
+// 96 → 97 (temp_circadian zero-variance guard, analytics main @ 0441ef9):
+// `_nonparam` divided by `varTot/diffN` with no zero-variance guard, so a
+// flat or heavily-quantized skin-temp window reported
+// interdailyStability=0.0 / intradailyVariability=0.0 as measured instead of
+// withheld — a fabricated-metric bug on `circadian_lifestyle`'s stored
+// output. kAnalyticsPin repinned to analytics main's tip (one commit past
+// PR #75's merge SHA).
+const int kAlgoVersion = 97;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1695,8 +1832,103 @@ const int kAlgoVersion = 86;
 // main took analytics 7105256 → 187e026 (the v80 gate above); this branch
 // took protocol 19d7291 → 6664854. kAlgoVersion is main's 81 — this branch
 // moves no derivation maths, which is why its own note says NO bump.
-const String kAnalyticsPin = '1fa8144a5e3b728ce91eeed6ecbc15d482933b44';
-const String kProtocolPin = '471034cb84b85edb37e72b6f6add79a2d7929294';
+// REPIN (this branch) @ 96d47d7 — protocol `feat/garmin-gfdi-protocol`, on
+// top of the #42 merge above. Adds `garmin.dart` only: COBS + Multi-Link
+// framing, the GFDI frame/CRC16, the device-information parser, and a
+// minimal protobuf reader for one battery round trip — a new module, no
+// existing decoder touched. NO kAlgoVersion bump: nothing on the
+// derivation/persisted-record path moves.
+//
+// MERGE (main → this branch): main's own repin below (protocol tip fe1464d)
+// already contains 96d47d7 as an ancestor (verified: `git merge-base
+// --is-ancestor 96d47d7 fe1464d` on the protocol repo) — main's pin is
+// strictly ahead, nothing this branch's garmin repin added is lost by
+// taking it.
+//
+// REPIN (this branch): protocol PR #51 head @ 1caf448, on top of 471034c —
+// same reasoning as pubspec.yaml's comment beside the `ref:`. This branch
+// needs the Ultrahuman wire format that #51 adds and main doesn't have yet.
+// NO kAlgoVersion bump: Ultrahuman's `signals` stays `const {}`, so nothing
+// this pin adds is ever read by a decoder.
+//
+// MERGE (main → this branch): main's own repin below (protocol tip fe1464d)
+// already contains 1caf448 as an ancestor (verified: `git merge-base
+// --is-ancestor 1caf448 fe1464d` on the protocol repo) — main's pin is
+// strictly ahead, nothing this branch's repin added is lost by taking it.
+// REPIN (this branch) @ fbda904 — protocol OpenStrap/protocol#49 head, which
+// adds the o2ring frame envelope/parser. NO kAlgoVersion bump: o2ring's
+// adapter `signals` stays `const {}` (excluded from `kDerivableSources`), so
+// nothing this pin adds is ever read by a decoder the derivation pipeline
+// calls — no stored number can change.
+//
+// MERGE (main → this branch): main's own repin below (protocol tip fe1464d)
+// already contains fbda904 as an ancestor (verified: `git merge-base
+// --is-ancestor fbda904 fe1464d` — PR#49/o2ring-protocol is folded in via the
+// `d297055` merge commit) — main's pin is strictly ahead, nothing this
+// branch's repin added is lost by taking it.
+//
+// REPIN (this branch): protocol `feat/wearfit-howear-protocol` @ 1cf8e61, one
+// commit ahead of #42 (471034c). Adds the wearfit/howear frame codec
+// (parseWearFitFrame/wearFitCmdGetBattery/parseWearFitBattery) this branch's
+// adapter calls. `signals` for the new adapter is `const {}` (no derivable
+// source), so this touches no decoder any existing day_result reads. NO
+// kAlgoVersion bump.
+//
+// REPIN (main) @ b819ee0 — protocol `feat/ringconn`, 2 commits on top of
+// 471034c. Adds the ring's frame codec (`parseRingConnFrame` and friends);
+// no decoded field, so no kAlgoVersion move. Must match pubspec.yaml's
+// `ref:` — see this file's own note above.
+//
+// MERGE (main → this branch): this branch's repin (wearfit @ 1cf8e61) and
+// main's (ringconn @ b819ee0) are parallel protocol commits, neither an
+// ancestor of the other. protocol's own `origin/main` already merged both
+// (PR#50 wearfit-howear, PR#48 ringconn, and everything after) — this pin
+// moves to that tip (fe1464d) to match pubspec.yaml's `ref:` rather than
+// picking one single-device SHA over the other. Verified: `1cf8e61` (this
+// branch's own pin) IS an ancestor of `fe1464d` — the wearfit protocol
+// commit is already folded in, nothing is lost by moving to the tip.
+//
+// REPIN (main) @ 0441ef9 — analytics main, one commit past #75 above. Fixes
+// temp_circadian.dart's zero-variance division producing fabricated
+// interdailyStability/intradailyVariability=0.0 instead of null on a flat
+// skin-temp window (see pubspec.yaml's comment beside the `ref:` for the
+// verification command). kAlgoVersion bumped 96 -> 97, see the changelog
+// entry above.
+const String kAnalyticsPin = '0441ef9e6fc6d5681c309ce6341911285e829f20';
+// Repinned to analytics main's tip, which carries BOTH PR #72 (hrv_freq
+// Welch gap guard) and PR #73 (overreachingConjunction rhr quantum guard) —
+// the two independent kAlgoVersion bumps above (93 and 94). Verified both
+// fixes are present at this SHA:
+//   `git show eed6dc9:lib/src/onehz/human/overreaching_conjunction.dart |
+//      grep -n dispersionBelowQuantum`
+//   `git show eed6dc9:lib/src/onehz/clinical/hrv_freq.dart |
+//      grep -n 'segSec \* 0.8\|segSec \* 0.2'`
+// Previously repinned to analytics PR #70's merged main SHA (was the pre-squash branch
+// commit 47847fa, orphaned once the PR squash-merged) — same content, see
+// pubspec.yaml's comment for the verification command.
+// REPIN (this branch, superseded by the merge): polar pmd's own protocol
+// needs `feat/polar-pmd-protocol` (87ee803), but protocol's own `origin/main`
+// tip below is THAT SAME PR's merge commit — verified
+// (`git merge-base --is-ancestor 87ee803… fe1464d…`) — so main's pin already
+// carries this branch's wire format; nothing is lost by taking it as-is.
+// NO kAlgoVersion bump either way: polar pmd's adapter declares no signal.
+//
+// REPIN (main): protocol dafit/moyoung head @ 06cb5f2 — the DaFit/MOYOUNG-V2
+// frame envelope. NO kAlgoVersion bump: dafit carries no derivable signal.
+// Protocol's own origin/main has since merged dafit/moyoung along with #47
+// (zetime), #48 (ringconn) and #50 (wearfit) — 06cb5f2 is verified an
+// ancestor of the tip below.
+// REPIN (main, superseded further): the ring11m adapter's own protocol needs
+// `feat/ring11m-protocol` (c6cc5ef), but protocol's own `origin/main` tip
+// below is THAT SAME PR's merge commit — verified — so main's pin already
+// carries that wire format too. NO kAlgoVersion bump: ring11m declares no
+// signal either.
+// REPIN (main, superseded further): protocol main @ bc7d8d0 — PR#54 lands
+// the Labrador (WHOOP MG ECG) parser this branch's ECG capture pipeline
+// calls. NO kAlgoVersion bump: ECG is not a derived `day_result`/
+// `metric_series` output, it is its own store (`ecg_reading` etc., schema
+// v54) with nothing feeding the existing metrics.
+const String kProtocolPin = 'bc7d8d0df706e40a2546ffde4545263f09d0fecb';
 
 // Fold idempotency, the minimum-nights warm-up, and legacy-payload handling
 // all live in SleepProfilePolicy (pure, unit-tested) — see
@@ -1753,6 +1985,135 @@ const int _headlineFreezeMarginSec = 60 * 60;
     return (day: today, value: liveReadiness); // first complete settle → pin
   }
   return null; // nothing to pin yet for today
+}
+
+/// Composes one substrate-loader page's `decoded_onehz` rows into the frames
+/// the derive worker actually decodes — SIGNAL-LEVEL ownership, not row-level.
+///
+/// `decoded_onehz`'s key is `(device_id, ts_ms)`, so a contended second can
+/// have one row per paired device, each carrying hr AND accel AND ppg AND
+/// skin-temp together. A row is admitted by its hr1Hz ownership (hr/rr live
+/// nowhere else), but accel1Hz/ppgRedIr/skinTempRaw ride along in that same
+/// row — and a user can rank a DIFFERENT device for those via
+/// `signal_priority` (the device-priority screen, `LocalDb.setSignalPriority`)
+/// without that ranking ever taking effect, because the whole row followed
+/// whichever device won hr1Hz. This splices each field group in from
+/// whichever row that signal's OWN ownership actually names, when that
+/// device has a row at this second — never fabricated, just re-attributed.
+///
+/// A single-device day, or a signal never actually contended for a given
+/// second, never enters the splice path (`group.length < 2` / same owner
+/// short-circuits to the row unchanged) — byte-identical to before this
+/// existed. `@visibleForTesting` so the splice logic is checkable directly,
+/// without staging a whole night through the derive/DB machinery.
+@visibleForTesting
+List<Map<String, dynamic>> composeOneHzFrames(
+  List<Map<String, dynamic>> decodedRows,
+  Map<InputSignal, List<OwnedSpan>> ownership,
+) {
+  final oneHzSpans = ownership[InputSignal.hr1Hz] ?? const <OwnedSpan>[];
+  final accelSpans = ownership[InputSignal.accel1Hz] ?? const <OwnedSpan>[];
+  final ppgSpans = ownership[InputSignal.ppgRedIr] ?? const <OwnedSpan>[];
+  final skinTempSpans = ownership[InputSignal.skinTempRaw] ?? const <OwnedSpan>[];
+  if (accelSpans.isEmpty && ppgSpans.isEmpty && skinTempSpans.isEmpty) {
+    // No secondary ownership resolved for any spliced signal (the single-
+    // device/import case oneHzSpans itself already covers) — skip the
+    // grouping allocation entirely and fall back to the plain row filter.
+    if (oneHzSpans.isEmpty) return decodedRows;
+    return [
+      for (final r in decodedRows)
+        if (_ownedBy(oneHzSpans, r)) r,
+    ];
+  }
+
+  final byRecTs = <int, List<Map<String, dynamic>>>{};
+  for (final r in decodedRows) {
+    final ts = (r['rec_ts'] as num?)?.toInt();
+    if (ts != null) byRecTs.putIfAbsent(ts, () => []).add(r);
+  }
+
+  Map<String, dynamic> splice(
+    Map<String, dynamic> base,
+    List<OwnedSpan> spans,
+    List<String> cols,
+  ) {
+    final group = byRecTs[(base['rec_ts'] as num).toInt()]!;
+    if (spans.isEmpty || group.length < 2) return base;
+    final baseDeviceId = base['device_id'] as String? ?? LocalDb.kPrimaryDeviceId;
+    final owner = spanAt(spans, (base['rec_ts'] as num).toInt())?.deviceId;
+    if (owner == null || owner == baseDeviceId) return base;
+    Map<String, dynamic>? ownerRow;
+    for (final r in group) {
+      if ((r['device_id'] as String? ?? LocalDb.kPrimaryDeviceId) == owner) {
+        ownerRow = r;
+        break;
+      }
+    }
+    if (ownerRow == null) return base;
+    // COPY THE WHOLE GROUP, including a null column — `device_coverage`
+    // declares `ppgRedIr` when EITHER raw PPG channel is present (db.dart),
+    // so the owner's row can carry one channel and not the other, and both
+    // skin-temp columns are independently nullable. Copying only the
+    // non-null columns left the base (wrong device's) value sitting in the
+    // other column, combining fields from two devices in one frame.
+    //
+    // ponytail: `device_family`/`device_id` are deliberately NOT re-stamped
+    // here — the returned frame still carries the hr1Hz owner's. `_families`
+    // (derive_prepare.dart)'s day-wide family singleton, which
+    // `calibrationFor`/`estimatedMaxHr` read for ENMO-cut and HR-max
+    // constants, is therefore keyed off whichever device won hr1Hz, not off
+    // whoever actually supplied a spliced accel1Hz reading. A gen4+gen5
+    // pairing where the user ranks a DIFFERENT device for accel1Hz than for
+    // hr1Hz can apply the hr-owner's family calibration to the other
+    // family's accel — narrower than the row-level bug this fix closes (it
+    // needs both a cross-family pairing AND divergent per-signal priority),
+    // but real. Upgrade path: thread a per-signal device/family map through
+    // `Substrate` (a new field per anchor signal, not the single
+    // `deviceFamily`) to the ENMO/HR-max call sites — real scope, deferred
+    // rather than rushed into this fix.
+    return {...base, for (final c in cols) c: ownerRow[c]};
+  }
+
+  return [
+    for (final r in decodedRows)
+      if (_ownedBy(oneHzSpans, r))
+        splice(
+          splice(
+            splice(r, accelSpans, const ['ax', 'ay', 'az']),
+            ppgSpans,
+            const ['spo2_red_raw', 'spo2_ir_raw'],
+          ),
+          skinTempSpans,
+          const ['skin_temp_raw', 'skin_temp_c'],
+        ),
+  ];
+}
+
+bool _ownedBy(List<OwnedSpan> spans, Map<String, dynamic> r) {
+  if (spans.isEmpty) return true;
+  final owner = spanAt(spans, (r['rec_ts'] as num).toInt())?.deviceId;
+  if (owner == null) return true;
+  return owner == (r['device_id'] as String? ?? LocalDb.kPrimaryDeviceId);
+}
+
+/// The index where [rows]' trailing `rec_ts` group starts — 0 when every row
+/// shares one second, `rows.length - 1` when the last row's second is alone.
+///
+/// `rows` must already be rec_ts-ascending (`decodedOneHzBatchByRecTsRange`'s
+/// own order, and the substrate loader's `carry ++ page` concatenation
+/// preserves it — carry only ever holds rows from an EARLIER page). Used to
+/// hold a contended second's trailing rows back to the next page rather than
+/// splicing `composeOneHzFrames` against a group `decodedOneHzBatchByRecTsRange`'s
+/// LIMIT happened to cut in half. `@visibleForTesting` so the boundary walk
+/// is checkable without staging a 2000-row page through the DB.
+@visibleForTesting
+int trailingRecTsGroupStart(List<Map<String, dynamic>> rows) {
+  final boundaryTs = (rows.last['rec_ts'] as num).toInt();
+  var i = rows.length - 1;
+  while (i > 0 && (rows[i - 1]['rec_ts'] as num).toInt() == boundaryTs) {
+    i--;
+  }
+  return i;
 }
 
 /// Test seam: the rolling baseline window the readiness computation actually
@@ -1814,7 +2175,45 @@ class _DeriveScope {
 typedef _DatedValue = ({String date, double value});
 
 class _BaselineHistoryCache {
-  _BaselineHistoryCache(this._series);
+  _BaselineHistoryCache(this._series)
+      : _prefixMax = {
+          for (final entry in _series.entries)
+            entry.key: _buildPrefixMax(entry.value),
+        };
+
+  /// `_prefixMax[key][i]` = the largest value among `_series[key][0..i]`
+  /// inclusive. Built once here (the series is frozen for the sweep) so
+  /// [maxBefore] can answer in O(log n) instead of rescanning the whole
+  /// series on every call — a full-history rescan per target day, per
+  /// baseline key, made a sweep over N days of history O(N²).
+  static List<double> _buildPrefixMax(List<_DatedValue> series) {
+    final out = List<double>.filled(series.length, 0);
+    var best = double.negativeInfinity;
+    for (var i = 0; i < series.length; i++) {
+      if (series[i].value > best) best = series[i].value;
+      out[i] = best;
+    }
+    return out;
+  }
+
+  /// The count of entries in [series] (sorted ascending by date) whose date
+  /// is strictly before [beforeDate] — i.e. the exclusive end index of the
+  /// "before" window. Binary search: [series] is immutable for the sweep and
+  /// already date-ascending (see [_series]'s doc comment).
+  static int _beforeIndex(List<_DatedValue> series, String beforeDate) {
+    var lo = 0, hi = series.length;
+    while (lo < hi) {
+      final mid = (lo + hi) >> 1;
+      if (series[mid].date.compareTo(beforeDate) < 0) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
+    }
+    return lo;
+  }
+
+  final Map<String, List<double>> _prefixMax;
 
   /// The baseline series this cache carries, keyed by `metric_series.key`.
   static const List<String> keys = [
@@ -1961,18 +2360,22 @@ class _BaselineHistoryCache {
   /// saying why. The date it happened is shown next to it, so an old one is
   /// visible rather than anonymous.
   double? maxBefore(String key, String beforeDate) {
-    double? best;
-    for (final s in _series[key] ?? const <_DatedValue>[]) {
-      if (s.date.compareTo(beforeDate) >= 0) continue;
-      if (best == null || s.value > best) best = s.value;
-    }
-    return best;
+    final series = _series[key] ?? const <_DatedValue>[];
+    final end = _beforeIndex(series, beforeDate);
+    if (end == 0) return null;
+    // Every key present in _series has a matching _prefixMax entry by
+    // construction (built together in the constructor from the same
+    // entries) — this is unreachable today, but `?[...]` costs nothing and
+    // survives a future refactor that builds one map without the other.
+    return _prefixMax[key]?[end - 1];
   }
 
-  List<double> valuesBefore(String key, String beforeDate) => _trailing([
-        for (final s in _series[key] ?? const <_DatedValue>[])
-          if (s.date.compareTo(beforeDate) < 0) s,
-      ]);
+  List<double> valuesBefore(String key, String beforeDate) {
+    final series = _series[key] ?? const <_DatedValue>[];
+    final end = _beforeIndex(series, beforeDate);
+    final from = end <= _baselineWindowDays ? 0 : end - _baselineWindowDays;
+    return [for (var i = from; i < end; i++) series[i].value];
+  }
 
   static List<double> _trailing(List<_DatedValue> samples) {
     final from = samples.length <= _baselineWindowDays
@@ -2549,6 +2952,29 @@ class DerivationEngine {
     final candidate = await _sleepCandidateForDay(dayId, stats: stats);
     final dayStart = _localDayLabelToSec(dayId);
     final dayEnd = _localNextDayLabelToSec(dayId);
+
+    // M5: resolve ownership ONCE, over the union of every window this method
+    // loads, and pass the same span lists to both the row filter and the
+    // bundle write — the equality between them is then true by
+    // construction, not an agreement between separate computations.
+    // `_targetDayWindow` is cheap/pure (it has its own test seam,
+    // `debugTargetDayWindow`) — called again here rather than hoisting the
+    // call already inside `_sleepCandidateForDay`, which stays local to that
+    // function and runs before `candidate` exists.
+    final range = _targetDayWindow(dayId);
+    final unionFrom = [
+      dayStart,
+      range.$1,
+      if (candidate.present) candidate.sleepOnsetSec,
+    ].reduce(math.min);
+    final unionTo = [
+      dayEnd - 1 + napBoundaryBufferSec,
+      range.$2,
+      if (candidate.present) candidate.sleepOffsetSec,
+    ].reduce(math.max);
+
+    final (ownership, priority) = await _resolveOwnership(unionFrom, unionTo);
+
     // Load the day PLUS the nap boundary buffer in ONE pass (each
     // _loadSubstrateRange spawns its own isolate, so a second load would
     // double that cost) and slice the calendar day back out of it. Without
@@ -2560,6 +2986,7 @@ class DerivationEngine {
       dayEnd - 1 + napBoundaryBufferSec,
       dayId: dayId,
       stats: stats,
+      ownership: ownership,
     );
     final daySub = napSub.slice(dayStart, dayEnd);
     Substrate sleepSub = Substrate.empty;
@@ -2570,6 +2997,7 @@ class DerivationEngine {
         candidate.sleepOffsetSec - 1,
         dayId: dayId,
         stats: stats,
+        ownership: ownership,
       );
     }
     // Single safe merge into the shared max-tracking diagnostics — one
@@ -2585,7 +3013,77 @@ class DerivationEngine {
       daySub: daySub,
       napSub: napSub,
       sleepSub: sleepSub,
+      ownership: ownership,
+      priority: priority,
     );
+  }
+
+  /// Who owns each anchor signal over `[from, to]`, plus the order that
+  /// answer resolved under.
+  ///
+  /// ONE resolver for every substrate load, because a window staged from one
+  /// device's rows and scored from another's is two different nights. The two
+  /// call sites pass different windows — staging's is candidate-INDEPENDENT
+  /// (`_targetDayWindow`), the prepared day's is the union that includes the
+  /// candidate — so the spans differ, but the rule producing them does not.
+  Future<(Map<InputSignal, List<OwnedSpan>>, Map<InputSignal, List<String>>)>
+      _resolveOwnership(int from, int to) async {
+    final ownership = <InputSignal, List<OwnedSpan>>{};
+    // The order each signal ACTUALLY resolved under, carried on the prepared
+    // day so `priority_hash` names it by construction instead of re-reading
+    // `signal_priority` after the day computed (which could stamp an order
+    // the user changed mid-derive, and cost a query per signal per day).
+    final priority = <InputSignal, List<String>>{};
+    for (final sig in const [
+      InputSignal.hr1Hz,
+      InputSignal.rrIntervals,
+      // These three ride bundled inside the same `decoded_onehz` row as hr —
+      // resolved here so a contended second can be spliced field-by-field
+      // (see `composeOneHzFrames`) instead of the whole row silently
+      // following whichever device won hr1Hz.
+      InputSignal.accel1Hz,
+      InputSignal.ppgRedIr,
+      InputSignal.skinTempRaw,
+    ]) {
+      // BINDING: `signal_priority` ships EMPTY by design (M3 deliberately did
+      // not seed a physics ladder). "No priority row" means "the primary
+      // device owns this window", never "skip masking" and never "let every
+      // candidate in unranked" — so an empty read here becomes a
+      // single-candidate priority list of just the primary, not the raw
+      // empty list `resolveOwnership` would otherwise read as "nothing is a
+      // candidate; abstain". A second device's rows stay excluded from the
+      // substrate until the user (or a future milestone's physics ladder)
+      // gives it a rank — the conservative default, and the one that keeps
+      // today's single-device installs byte-identical.
+      final rawPriority = await LocalDb.signalPriority(sig);
+      final coverage = await LocalDb.coverageIntervals(sig, from, to);
+      final resolved = rawPriority.isEmpty
+          ? const [LocalDb.kPrimaryDeviceId]
+          // A device with a coverage row here is definitionally declaring
+          // this signal (db.dart's own contract for `device_coverage`).
+          // Union it in below the stored ranking rather than dropping it —
+          // otherwise any device paired after the user last customized
+          // priority for this signal is silently excluded from ownership
+          // forever, with no automatic re-seed path. Never persisted (see
+          // note above): same in-memory-only property as the empty-priority
+          // fallback.
+          : [
+              ...rawPriority,
+              ...{for (final iv in coverage) iv.deviceId}
+                  .difference(rawPriority.toSet())
+                  .toList()
+                ..sort(),
+            ];
+      priority[sig] = resolved;
+      ownership[sig] = resolveOwnership(
+        coverage: coverage,
+        priority: resolved,
+        from: from,
+        to: to,
+        signal: sig,
+      );
+    }
+    return (ownership, priority);
   }
 
   Future<SleepSessionCandidate> _sleepCandidateForDay(
@@ -2625,11 +3123,18 @@ class DerivationEngine {
       }
     }
     final range = _targetDayWindow(dayId);
+    // OWNED ROWS ONLY, the same as every other substrate load. This window is
+    // candidate-independent, so ownership CAN be resolved before the candidate
+    // exists — and it has to be: staging the night off both devices' rows
+    // while `napSub`/`sleepSub` score it off one device's is a window found in
+    // a night that was never scored.
+    final (searchOwnership, _) = await _resolveOwnership(range.$1, range.$2);
     final searchSub = await _loadSubstrateRange(
       range.$1,
       range.$2,
       dayId: dayId,
       stats: stats,
+      ownership: searchOwnership,
     );
     // PERSONALIZED STAGER (v42): stage on a WORKER isolate, NOT the main/UI
     // thread. cardioStager reads analytics "ambient" globals — the rolling sleep
@@ -2943,6 +3448,12 @@ class DerivationEngine {
     int toRecTs, {
     required String dayId,
     _PrepareStats? stats,
+    // M5: the resolved ownership spans for this call's window, keyed by
+    // anchor signal. Every production caller supplies them (see
+    // [_resolveOwnership]); the empty default is unfiltered, which is what a
+    // single-device install resolves to anyway and what the direct-load tests
+    // pass.
+    Map<InputSignal, List<OwnedSpan>> ownership = const {},
   }) async {
     if (toRecTs < fromRecTs) return Substrate.empty;
     final port = ReceivePort();
@@ -3001,6 +3512,16 @@ class DerivationEngine {
         fail(StateError('prepare worker exited without a result'));
       }
     });
+    // M5: the resolved spans for this call's window, one list per anchor
+    // signal. Read once, outside the loop — `ownership` never changes while
+    // this range loads.
+    final rrOwnedSpans = ownership[InputSignal.rrIntervals] ?? const <OwnedSpan>[];
+    bool owned(List<OwnedSpan> spans, Map<String, dynamic> r) {
+      if (spans.isEmpty) return true;
+      final owner = spanAt(spans, (r['rec_ts'] as num).toInt())?.deviceId;
+      if (owner == null) return true;
+      return owner == (r['device_id'] as String? ?? LocalDb.kPrimaryDeviceId);
+    }
     try {
       final worker = await ready.future;
       worker.send(const {'type': 'config', 'mode': 'substrate'});
@@ -3018,6 +3539,17 @@ class DerivationEngine {
       // beats from wherever the previous page stopped, and the tail is swept
       // after the loop — so the day's beat window is covered exactly once.
       var rrFrom = fromRecTs;
+      // A contended second's OTHER row can land on the far side of a page
+      // boundary — `decodedOneHzBatchByRecTsRange`'s LIMIT is applied after
+      // ordering by rec_ts, not aligned to rec_ts groups. Composing a page
+      // whose trailing rec_ts group is only half-present would keep the
+      // hr1Hz-owner's own accel/ppg/skin-temp value for that ONE boundary
+      // second instead of splicing in the other device's, so the group's
+      // rows that arrived this round are held here until the rest of the
+      // group is seen (or the range ends). Rare in practice — it takes a
+      // page-sized batch of rows to land exactly mid-group — but the fix is
+      // cheap and the alternative is a silent one-second attribution miss.
+      var carry = const <Map<String, dynamic>>[];
       while (true) {
         final decodedRows = await LocalDb.decodedOneHzBatchByRecTsRange(
           limit: _rawDecodeBatchSize,
@@ -3041,35 +3573,78 @@ class DerivationEngine {
             rangePages: rangePages,
             rangeRows: rangeRows,
           );
-          // The page is ordered rec_ts ASC, so last = max second. decoded_rr
-          // shares the rec_ts key, so [rrFrom, lastRecTs] is a PK range read —
-          // no counter span (which broke across the strap's reboot reset).
-          final lastRecTs = (decodedRows.last['rec_ts'] as num?)?.toInt();
-          final rrRows = lastRecTs == null
+          // THE CURSOR ADVANCES OFF THE UNFILTERED PAGE, ALWAYS. `afterRecTs`/
+          // `afterCursor` and the `decodedRows.length < _rawDecodeBatchSize`
+          // break are driven by `decodedRows` alone — never by `carry` or the
+          // filtered `frames`/`rrRows` sent to the worker. Filtering first
+          // would stall the keyset cursor on a page whose surviving rows are
+          // fewer than the batch size and silently truncate the day.
+          final isFinalPage = decodedRows.length < _rawDecodeBatchSize;
+          final combined =
+              carry.isEmpty ? decodedRows : [...carry, ...decodedRows];
+          final splitIdx = trailingRecTsGroupStart(combined);
+          // splitIdx == 0 means the WHOLE page-sized batch shares one
+          // rec_ts — a pathological amount of contention no real pairing
+          // produces. Send it as-is rather than risk carrying forever.
+          final toSend =
+              (isFinalPage || splitIdx == 0) ? combined : combined.sublist(0, splitIdx);
+          carry = (isFinalPage || splitIdx == 0)
               ? const <Map<String, dynamic>>[]
-              : await LocalDb.decodedRrByRecTsRange(
-                  fromRecTs: rrFrom,
-                  toRecTs: lastRecTs,
-                );
-          if (lastRecTs != null) rrFrom = lastRecTs + 1;
-          worker.send({'type': 'page', 'frames': decodedRows, 'rr': rrRows});
+              : combined.sublist(splitIdx);
+          if (toSend.isNotEmpty) {
+            // decoded_rr shares the rec_ts key with decoded_onehz, so
+            // [rrFrom, lastSentRecTs] is a PK range read — no counter span
+            // (which broke across the strap's reboot reset).
+            final lastSentRecTs = (toSend.last['rec_ts'] as num).toInt();
+            final rawRrRows = await LocalDb.decodedRrByRecTsRange(
+              fromRecTs: rrFrom,
+              toRecTs: lastSentRecTs,
+            );
+            rrFrom = lastSentRecTs + 1;
+            final frames = composeOneHzFrames(toSend, ownership);
+            final rrRows = [
+              for (final r in rawRrRows)
+                if (owned(rrOwnedSpans, r)) r,
+            ];
+            worker.send({'type': 'page', 'frames': frames, 'rr': rrRows});
+          }
           final last = decodedRows.last;
           afterRecTs = (last['rec_ts'] as num?)?.toInt() ?? afterRecTs;
           afterCursor = (last['counter'] as num?)?.toInt() ?? afterCursor;
-          if (decodedRows.length < _rawDecodeBatchSize) break;
+          if (isFinalPage) break;
           continue;
         }
         break;
+      }
+      // A page landed EXACTLY on `_rawDecodeBatchSize` as the true last page
+      // (the next fetch came back empty) — its trailing group is still held.
+      if (carry.isNotEmpty) {
+        final lastRecTs = (carry.last['rec_ts'] as num).toInt();
+        final rawRrRows = await LocalDb.decodedRrByRecTsRange(
+          fromRecTs: rrFrom,
+          toRecTs: lastRecTs,
+        );
+        rrFrom = lastRecTs + 1;
+        final frames = composeOneHzFrames(carry, ownership);
+        final rrRows = [
+          for (final r in rawRrRows)
+            if (owned(rrOwnedSpans, r)) r,
+        ];
+        worker.send({'type': 'page', 'frames': frames, 'rr': rrRows});
       }
       // The tail: beats after the last frame second (or, on a range with no
       // frames at all, the whole range). Usually zero rows and one indexed
       // lookup; when it is not, these are seconds the band recorded and only
       // reported beats for.
       if (rrFrom <= toRecTs) {
-        final tailRr = await LocalDb.decodedRrByRecTsRange(
+        final rawTailRr = await LocalDb.decodedRrByRecTsRange(
           fromRecTs: rrFrom,
           toRecTs: toRecTs,
         );
+        final tailRr = [
+          for (final r in rawTailRr)
+            if (owned(rrOwnedSpans, r)) r,
+        ];
         if (tailRr.isNotEmpty) {
           worker.send({
             'type': 'page',
@@ -3841,8 +4416,36 @@ class DerivationEngine {
       final spanLo = day.sleepOnsetSec > 0
           ? math.min(napLo, day.sleepOnsetSec)
           : napLo;
-      final wristOffSpans = await LocalDb.wristOffSpans(spanLo, napHi);
-      final chargingSpans = await LocalDb.chargingSpans(spanLo, napHi);
+      // M5: per-owner masking. A window owned by device A is masked by
+      // device A's off-body and charging events, NEVER by device B's —
+      // put B on the charger while A is worn and A's real night must not
+      // be excluded. Spans from different owners cannot overlap (ownership
+      // is exclusive) and `_toggleSpans` returns each owner's spans in time
+      // order, so concatenating owners in span order needs no merge pass.
+      //
+      // NO RESOLVED OWNER ⇒ MASK AS A SINGLE-DEVICE INSTALL DOES. The `??`
+      // alone covered only a MISSING key (the import path). A present key can
+      // still hold nothing but `deviceId: null` — `resolveOwnership` returns
+      // one null-owner span whenever no candidate device covers the window, so
+      // a day with no `device_coverage` rows, or one whose only covering
+      // device has no `signal_priority` rank, took the null branch below,
+      // asked for no spans at all, and lost wrist-off and charger masking
+      // outright. That is a derived-output change on a single-device install.
+      final resolvedOneHz = day.ownership[InputSignal.hr1Hz] ?? const [];
+      final oneHzOwnership = resolvedOneHz.any((s) => s.deviceId != null)
+          ? resolvedOneHz
+          : [(start: spanLo, end: napHi, deviceId: LocalDb.kPrimaryDeviceId)];
+      final wristOffSpans = <List<int>>[];
+      final chargingSpans = <List<int>>[];
+      for (final s in oneHzOwnership) {
+        final d = s.deviceId;
+        if (d == null) continue; // nothing recording: nothing to mask
+        final lo = math.max(spanLo, s.start);
+        final hi = math.min(napHi, s.end);
+        if (hi <= lo) continue;
+        wristOffSpans.addAll(await LocalDb.wristOffSpans(lo, hi, deviceId: d));
+        chargingSpans.addAll(await LocalDb.chargingSpans(lo, hi, deviceId: d));
+      }
 
       // PERSONAL movement floor — ESTIMATED ONCE, THEN FROZEN.
       //
@@ -3947,6 +4550,32 @@ class DerivationEngine {
             blocks.seriesPatch,
           );
       scMap?.addAll(blocks.scalarPatch);
+
+      // M5: COVERAGE. Same map, one key, written only when there is
+      // something to attribute. `ownersOf` counts DISTINCT NON-NULL owners
+      // across every anchor signal's spans: one owner means the day had one
+      // contributor and the key is omitted entirely — not `{}` — because
+      // `day_result` is permanent and nearly every install is single-device.
+      //
+      // REBUILT as a plain `Map<String, dynamic>`, not written through the
+      // existing `series` map's cast view: every other value under `series`
+      // is a curve (`List<Map<String, dynamic>>`), so Dart's map-literal
+      // inference locked THAT map's value type to exactly that shape —
+      // writing a differently-shaped value (this one is a `Map`) through a
+      // `.cast<String, dynamic>()` VIEW checks the write against the
+      // underlying (non-dynamic) value type and throws. Copying into a
+      // fresh dynamic-valued map first sidesteps that entirely.
+      final owners = ownersOf(day.ownership);
+      if (owners.length > 1) {
+        final seriesMap = Map<String, dynamic>.from(
+          (bundle['series'] as Map?) ?? const {},
+        );
+        seriesMap['coverage'] = {
+          for (final e in day.ownership.entries)
+            e.key.name: coverageToJson(e.value),
+        };
+        bundle['series'] = seriesMap;
+      }
 
       // ONE ANSWER FOR STRAIN. The second half just recomputed it from the same
       // nocturnal-or-user resting HR the pure pipeline gated on, and its scalar
@@ -4102,6 +4731,21 @@ class DerivationEngine {
       // day's substrate spans two straps or carries no stamp — the same
       // "unknown, never guessed" value the column is documented with.
       deviceFamily: daySub.deviceFamily,
+      // M5: the day's contributor set. Null exactly like `deviceFamily`
+      // above when there is nothing to attribute (the import path, which
+      // never populates `deviceIds`).
+      coverageDevices: daySub.deviceIds.isEmpty
+          ? null
+          : (daySub.deviceIds.toList()..sort()).join(','),
+      // M5: the priority order actually used to resolve this day — CARRIED
+      // from `_prepareTargetDay` (`day.priority`, empty-table fallback
+      // already applied there), not reconstructed from the resolved spans (a
+      // span list only names OWNERS, not the full ranked candidate list) and
+      // not re-read here. Re-reading could stamp an order the user changed
+      // while the day was computing, i.e. one no output of this day used.
+      // Null only when no resolve ran at all (the import path).
+      priorityHash:
+          day.priority.isEmpty ? null : priorityKey(day.priority),
       series: {
         'rhr': sc('rhr'),
         'rmssd': sc('rmssd'),
@@ -7547,10 +8191,16 @@ class DerivationEngine {
       }
       final motion = ana.AutoWorkoutDetector.motionPoints(mTs, mAx, mAy, mAz);
       // Exclude windows the user has already logged (manual/live wins).
+      // A still-running session (status='live') has a null end_ts — treat it
+      // as open through "now" rather than dropping it, or its own live
+      // minutes get mistaken for an undiscovered bout.
       final savedSpans = <ana.SavedWorkoutSpan>[
         for (final r in saved)
-          if (r['start_ts'] is int && r['end_ts'] is int)
-            ana.SavedWorkoutSpan(r['start_ts'] as int, r['end_ts'] as int),
+          if (r['start_ts'] is int)
+            ana.SavedWorkoutSpan(
+              r['start_ts'] as int,
+              r['end_ts'] is int ? r['end_ts'] as int : dataNowSec,
+            ),
       ];
       final rhr = rhrScalar?.round();
       // Auto-detection needs a real resting-HR baseline. Without one the detector

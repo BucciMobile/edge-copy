@@ -23,6 +23,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
@@ -33,6 +34,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../coach/coach_config.dart';
 import '../../data/day_label.dart';
+import '../../ecg/ecg_controller.dart';
+import '../../ecg/ecg_models.dart';
+import '../../ecg/ecg_waveform_buffer.dart';
 import '../../data/journal_fields.dart';
 import '../../data/med_store.dart';
 import '../../data/nutrition_store.dart';
@@ -171,6 +175,39 @@ Map<String, Widget> goldenCases() => {
       // shot because a 9:16 card is where the column's arithmetic has the
       // most room to go wrong, not because it is a different design.
       'share_card_story': _shareCard(photo: false, format: PosterFormat.story),
+      // WHOOP MG ECG: the touch illustration frozen at one phase, the live
+      // preview over a synthetic trace, the capture body mid-measurement, and
+      // one history row. The synthetic trace is a gallery fixture, labelled
+      // nowhere as a reading.
+      'ecg_illustration': const EcgTouchIllustration(
+          wrist: EcgWrist.right,
+          t: .3,
+          contact: true,
+          semanticLabel: 'Illustration: the band on your wrist, and the thumb '
+              'and index finger of your other hand touching its two metal sides.'),
+      'ecg_preview': EcgLivePreview(
+          buffer: _ecgDemoBuffer(),
+          scheduler: EcgPreviewScheduler(),
+          label: 'Live signal preview',
+          unit: 'µV'),
+      'ecg_capture_body': SizedBox(
+        height: 620,
+        child: EcgCaptureBody(
+          state: const EcgCaptureState(
+              phase: EcgCapturePhase.active, progress: 42, liveHr: 71),
+          wrist: EcgWrist.right,
+          phase: .3,
+          live: _ecgDemoBuffer(),
+          scheduler: EcgPreviewScheduler(),
+          onRetry: () {},
+          onTakeAnother: () {},
+          onDone: () {},
+          onView: () {},
+        ),
+      ),
+      'ecg_reading_row': Surface(
+          pad: EdgeInsets.zero,
+          child: EcgReadingRow(reading: _ecgDemoReading, onTap: () {})),
       'signal': const SignalCard(
           LucideIcons.heartPulse, C.blue, 'Resting heart rate', '52',
           unit: 'bpm', sub: '4 BELOW YOUR BASELINE'),
@@ -261,6 +298,29 @@ Map<String, Widget> goldenCases() => {
       'sub_tabs': SubTabs(
           const ['Today', 'Sleep', 'Recovery', 'Strain'], 1, (_) {},
           color: C.domHealth),
+      // The three states a metric screen's per-device filter draws: a
+      // selectable pill with real coverage, a selectable pill with no data in
+      // the visible range, and a non-selectable pill with a physical reason —
+      // exercises the 3.1x/tap-floor sweep on the disabled path (M6 §7.2).
+      'device_filter': DeviceFilter(
+        options: const [
+          (deviceId: '', label: 'Band', selectable: true, reason: null),
+          (
+            deviceId: 'ring-A1B2',
+            label: 'Ring',
+            selectable: true,
+            reason: 'no data in this range',
+          ),
+          (
+            deviceId: 'ble_hrs-0a1b2c',
+            label: 'Chest strap',
+            selectable: false,
+            reason: 'no accelerometer',
+          ),
+        ],
+        selected: null,
+        onSelect: (_) {},
+      ),
       'nav_bar': const NavBar('Last night', sub: 'MON 14 AUG'),
       // The stepper every single-day screen wears. Shot mid-history, where
       // both arrows are live and the middle opens the calendar — the state a
@@ -1265,6 +1325,7 @@ final _sessions = <String, ActivityResult>{
     // The drop in the minute after. Stored on every scored session and read by
     // nothing until now.
     hrr60: 27,
+    vo2max: 47.2,
     calories: 604,
     hr: [for (var i = 0; i < 45; i++) 140 + (i * 23 % 37) * 1.0],
     zoneMinutes: const [2, 8, 19, 13, 3],
@@ -2391,3 +2452,41 @@ class _GalleryScreenState extends State<GalleryScreen> {
     );
   }
 }
+
+// ── WHOOP MG ECG gallery fixtures ─────────────────────────────────────────
+
+/// A synthetic, ECG-shaped trace for the preview case: a slow wave with a
+/// sharp spike each second. A fixture for the eye, never presented as data.
+EcgWaveformBuffer _ecgDemoBuffer() {
+  final b = EcgWaveformBuffer(capacity: 600);
+  b.push(Int16List.fromList(List.generate(600, (i) {
+    final wave = (120 * sin(i / 100 * 2 * pi)).round();
+    final spike = (i % 100) == 30 ? 650 : (i % 100) == 32 ? -220 : 0;
+    return wave + spike;
+  })));
+  return b;
+}
+
+const EcgReading _ecgDemoReading = EcgReading(
+  id: 'ecg_gallery',
+  deviceId: '',
+  wrist: EcgWrist.left,
+  startTs: 1787823754,
+  endTs: 1787823784,
+  strapTerminalTs: 1787823784,
+  strapTerminalSubsec: 0,
+  resultCode: 1,
+  category: EcgCategory.sinusRhythm,
+  avgHr: 77,
+  quality: 3,
+  unreadableMask: 0,
+  interruptions: 0,
+  sampleCount: 3000,
+  minUv: -531,
+  maxUv: 731,
+  rmsUv: 126.8,
+  missingSegments: 0,
+  status: EcgReadingStatus.completed,
+  notes: null,
+  createdAt: 1787823784000,
+);

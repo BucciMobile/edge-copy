@@ -18,10 +18,12 @@ import 'theme/theme_switcher.dart';
 import 'widget/widget_service.dart';
 import 'ui2/activity/catalogue.dart';
 import 'ui2/activity/live.dart';
-import 'ui2/onboarding/pairing.dart';
+import 'ui2/onboarding/pairing.dart' show OnboardingBypass;
 import 'ui2/onboarding/profile_setup.dart';
+import 'ui2/pairing/device_picker.dart';
 import 'ui2/onboarding/splash.dart';
 import 'ui2/onboarding/welcome.dart';
+import 'ui2/profile/alarm.dart';
 import 'ui2/profile/profile.dart';
 import 'ui2/screens/ai_briefing.dart';
 import 'ui2/screens/calm_breathing.dart';
@@ -232,7 +234,7 @@ class _Gate extends StatelessWidget {
           AppRoute.loading => const _Loading(),
           AppRoute.failed => const _InitFailed(),
           AppRoute.welcome => const WelcomeScreen(),
-          AppRoute.pairing => PairingScreen(
+          AppRoute.pairing => DevicePickerScreen(
               onSkip: () => OnboardingBypass.mark(OnboardingBypass.kPairing)),
           AppRoute.profile => ProfileSetupScreen(
               onDone: () => OnboardingBypass.mark(OnboardingBypass.kProfile)),
@@ -362,6 +364,9 @@ ShellDomain domainForRoute(String route) => switch (routePath(route)) {
       // recap (`notification_center.dart`), and declared in `tap_router`
       // alongside every other deep link — see the note below.
       kRouteProfile => ShellDomain.home,
+      // The two alarm safety notifications. Reached the same way as the
+      // battery/band alerts above — Profile lives on Home.
+      kRouteAlarm => ShellDomain.home,
       // No recap screen exists. Health is where a week of sleep, strain and
       // recovery actually lives, so it is the nearest true destination — but
       // the notification promises a REPORT, and until one is built the honest
@@ -416,6 +421,9 @@ Widget? screenForRoute(String route) => switch (routePath(route)) {
         WorkoutSuggestionScreen(focusId: routeId(route)),
       // Battery, band and sources all live behind this one.
       kRouteProfile => const ProfileHome(),
+      // The alarm safety notifications land where either can actually be
+      // fixed — the schedule itself.
+      kRouteAlarm => const AlarmScreen(),
       // The weekly recap used to land on the Health tab and push nothing,
       // because there was no recap screen to push. There is now: the sweep's
       // findings, which the app has been computing every night and delivering
