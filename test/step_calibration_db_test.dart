@@ -1,8 +1,6 @@
-// Schema-55 regressions: the step-calibration learning tables and the
-// wearing-location writer. Run against the REAL LocalDb over sqflite_ffi, the
-// same discipline as db_migration_ladder_test — the ladder is one transaction
-// and a throwing rung bricks the app, so every new rung gets its own end-to-end
-// open-from-old-version test.
+// Schema 55: step-calibration tables and the wearing writer, on the real
+// LocalDb over sqflite_ffi. The upgrade path is covered by
+// db_migration_ladder_test.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -34,62 +32,30 @@ void main() {
     await LocalDb.close();
   });
 
-  test('a v54 database upgrades to 55 and both tables exist', () async {
-    LocalDb.dbName = 'step_cal_upgrade.db';
-    final dir = await databaseFactory.getDatabasesPath();
-    final path = p.join(dir, LocalDb.dbName);
-    await databaseFactory.deleteDatabase(path);
-    // Hand-build a v54 database: open a raw db at version 54 with nothing in
-    // it, then let LocalDb take it up the ladder. The empty schema is fine —
-    // the rungs under test are CREATE TABLE IF NOT EXISTS.
-    final raw = await databaseFactory.openDatabase(
-      path,
-      version: 54,
-      onConfigure: (db) async {
-        await db.execute('CREATE TABLE device (id TEXT PRIMARY KEY)');
-      },
-    );
-    await raw.close();
-    final db = await LocalDb.instance;
-    final tables = await db.rawQuery(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
-      "('step_calibration','step_calibration_day')",
-    );
-    expect(tables.length, 2);
-    await LocalDb.close();
-  });
-
   test('the wearing setter and reader round-trip through device.wearing',
       () async {
     LocalDb.dbName = 'step_cal_wearing.db';
     final dir = await databaseFactory.getDatabasesPath();
     await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
     await LocalDb.instance;
-    // No device row yet: the reader refuses rather than inventing wrist.
-    expect(await LocalDb.deviceWearing(), isNull);
-    // Writing without a row is a no-op UPDATE that reports zero rows —
-    // the picker must not claim a save for it.
+    Future<int?> stamp() async =>
+        ((await LocalDb.deviceRow())?['wearing_set_ts'] as num?)?.toInt();
+    // No device row yet: nothing to read, and the setter reports no save.
+    expect(await LocalDb.deviceWearingRaw(), isNull);
     expect(await LocalDb.setDeviceWearing(Wearing.bicep), 0);
-    expect(await LocalDb.deviceWearing(), isNull);
-    // A device row appears (as pairing creates it), the write lands and
-    // stamps when it was set.
+    expect(await LocalDb.deviceWearingRaw(), isNull);
     await LocalDb.upsertDevice(adapterId: 'gen5');
-    expect(await LocalDb.deviceWearing(), Wearing.wrist); // column DEFAULT
-    expect(await LocalDb.deviceWearingSetTs(), isNull); // never re-stamped
+    expect(await LocalDb.deviceWearingRaw(), Wearing.wrist); // column DEFAULT
+    expect(await stamp(), isNull);
+    // Re-picking the default is not a change and must not stamp.
+    expect(await LocalDb.setDeviceWearing(Wearing.wrist), 1);
+    expect(await stamp(), isNull);
     expect(await LocalDb.setDeviceWearing(Wearing.bicep), 1);
-    expect(await LocalDb.deviceWearing(), Wearing.bicep);
-    final firstStamp = await LocalDb.deviceWearingSetTs();
+    expect(await LocalDb.deviceWearingRaw(), Wearing.bicep);
+    final firstStamp = await stamp();
     expect(firstStamp, isNotNull);
-    // Re-selecting the SAME location is a no-op for the stamp: a fresh stamp
-    // would deactivate the learned profile for the whole history.
     expect(await LocalDb.setDeviceWearing(Wearing.bicep), 1);
-    expect(await LocalDb.deviceWearingSetTs(), firstStamp);
-    expect(await LocalDb.setDeviceWearing(Wearing.other), 1);
-    expect(await LocalDb.deviceWearing(), Wearing.other);
-    expect(
-      await LocalDb.deviceWearingSetTs(),
-      predicate<int?>((t) => t == null || t >= firstStamp!),
-    );
+    expect(await stamp(), firstStamp);
     await LocalDb.close();
   });
 

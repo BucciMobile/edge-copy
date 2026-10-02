@@ -208,16 +208,6 @@ class DayBundleInput {
   /// device.dart. Per-family figures (the HR ceiling, and everything banded on
   /// it) REFUSE rather than borrow another family's constants.
   final String? deviceFamily;
-  /// The learned step-counter calibration, FROZEN AT COORDINATE TIME — the
-  /// profile is a DB read and this input crosses an isolate boundary as
-  /// JSON. Null means uncalibrated; the pair (factor, nDays) is the whole
-  /// profile the steps rung needs, kept flat because `StepCalibrationProfile`
-  /// lives in edge's data layer and the pipeline stays dependency-light.
-  final double? counterProfileFactor;
-  final int? counterProfileNDays;
-  /// The wearing location the profile was keyed to: `Wearing.wrist`(1),
-  /// `bicep`(2), `other`(3). Default wrist — `device.wearing`'s own DEFAULT.
-  final int counterWearing;
 
   /// How the sleep window was chosen: `'manual'`/`'confirmed'` (the user's own
   /// word), `'auto'`, `'auto_fallback'`, `'none'`. Sleep-onset latency is only
@@ -251,9 +241,6 @@ class DayBundleInput {
     this.deviceFamily,
     this.sleepSource = 'auto',
     this.stepSpans = const [],
-    this.counterProfileFactor,
-    this.counterProfileNDays,
-    this.counterWearing = 1,
   });
 
   Map<String, dynamic> toJson() => {
@@ -282,9 +269,6 @@ class DayBundleInput {
     'day_confidence': dayConfidence,
     'day_flags': dayFlags,
     'device_family': deviceFamily,
-    'counter_profile_factor': counterProfileFactor,
-    'counter_profile_n_days': counterProfileNDays,
-    'counter_wearing': counterWearing,
     'sleep_source': sleepSource,
   };
 
@@ -333,9 +317,6 @@ class DayBundleInput {
       dayConfidence: (m['day_confidence'] as num?)?.toDouble() ?? 0,
       dayFlags: strs('day_flags'),
       deviceFamily: m['device_family'] as String?,
-      counterProfileFactor: (m['counter_profile_factor'] as num?)?.toDouble(),
-      counterProfileNDays: (m['counter_profile_n_days'] as num?)?.toInt(),
-      counterWearing: (m['counter_wearing'] as num?)?.toInt() ?? 1,
       sleepSource: m['sleep_source'] as String? ?? 'auto',
       stepSpans: [
         for (final r in (m['step_spans'] as List? ?? const []))

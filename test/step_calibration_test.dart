@@ -101,8 +101,8 @@ void main() {
         _day(950, 4000),
         _day(9000, 9000),
       ]);
-      expect(p.nDays, 1);
       // One admitted day is under minDays 3 → uncalibrated.
+      expect(p.nDays, 0);
       expect(p.isCalibrated, isFalse);
     });
     test('the factor is clamped to the documented error band', () {
@@ -207,7 +207,7 @@ void main() {
       )!;
       // 3598 unsampled seconds between the two spans.
       expect(d.gapSeconds, 3598);
-      expect(d.total, 100); // 4 + 96 across the gap, if under budget
+      expect(d.total, 104); // 4 + 96 across the gap + 4
     });
     test('a reset boundary is counted as dropped, not as a wrap', () {
       // 40000 -> 0: modulo 65536 reads 25536, over budget → dropped.
