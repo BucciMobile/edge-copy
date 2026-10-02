@@ -402,5 +402,16 @@ void main() {
       expect(on, DateTime(2026, 3, 1, 22, 45));
       expect(off, DateTime(2026, 3, 2, 6, 30));
     });
+
+    test('a wake moved far later on a truncated night lands the same day', () {
+      final (on, off) = correctedSleepWindow(
+        DateTime(2026, 3, 2, 0, 30),
+        DateTime(2026, 3, 2, 1, 0),
+        const TimeOfDay(hour: 0, minute: 30),
+        const TimeOfDay(hour: 13, minute: 30),
+      );
+      expect(on, DateTime(2026, 3, 2, 0, 30));
+      expect(off, DateTime(2026, 3, 2, 13, 30));
+    });
   });
 }

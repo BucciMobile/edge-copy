@@ -49,7 +49,7 @@ const _window = 28;
 /// lands on whichever calendar day puts it nearest the time it corrects, so a
 /// bedtime moved across midnight (23:50 → 00:20, or 00:30 → 23:40) stays on
 /// the same night instead of jumping a whole day. A wake still at or before
-/// the onset is the next morning. `day + k` rather than adding a Duration:
+/// the onset becomes the first `up` after it. `day + k` rather than adding a Duration:
 /// calendar arithmetic across a possible DST boundary, not elapsed time.
 (DateTime, DateTime) correctedSleepWindow(
     DateTime onset, DateTime wake, TimeOfDay bed, TimeOfDay up) {
@@ -67,8 +67,10 @@ const _window = 28;
 
   final newOnset = nearest(onset, bed);
   var newWake = nearest(wake, up);
-  if (!newWake.isAfter(newOnset)) {
-    newWake = DateTime(newOnset.year, newOnset.month, newOnset.day + 1,
+  // First occurrence of `up` after the onset, not onset.day + 1: the nearest
+  // pick can land a day early (truncated window, wake moved >12h later).
+  for (var k = 0; !newWake.isAfter(newOnset); k++) {
+    newWake = DateTime(newOnset.year, newOnset.month, newOnset.day + k,
         up.hour, up.minute);
   }
   return (newOnset, newWake);
