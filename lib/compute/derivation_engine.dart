@@ -1975,15 +1975,20 @@ const int _overnightGiveUpSec = 12 * 60 * 60;
 /// is no longer just where the sync happened to stop (#448: mid-drain, the
 /// newest record is still inside the night and the stager closes the window at
 /// it, so a partial night and its readiness showed as this morning's). Home and
-/// the readiness freeze both read this, so the number first shown is the one
-/// that gets pinned.
+/// the readiness freeze both read this, on the same band-only edge
+/// ([LocalDb.lastDecodedRecTs]).
+///
+/// [nowSec] enables the wall-clock give-up. Only Home passes it: a drain that
+/// stalled mid-night looks exactly like a strap that went quiet at wake, and
+/// Home recovers on the next derive, but the freeze pins for the whole day, so
+/// it waits for the edge.
 bool overnightSettled({
   required int sleepOffsetSec,
   required int dataEdgeSec,
-  required int nowSec,
+  int? nowSec,
 }) =>
     dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
-    nowSec >= sleepOffsetSec + _overnightGiveUpSec;
+    (nowSec != null && nowSec >= sleepOffsetSec + _overnightGiveUpSec);
 
 /// The frozen morning readiness headline that should be persisted/surfaced for
 /// [today], given the current pin and a fresh look at today's live readiness and
@@ -4884,7 +4889,6 @@ class DerivationEngine {
     final overnightComplete = overnightSettled(
       sleepOffsetSec: day.sleepOffsetSec,
       dataEdgeSec: dataNowSec,
-      nowSec: DateTime.now().millisecondsSinceEpoch ~/ 1000,
     );
     final current = await LocalDb.frozenHeadline();
     final next = nextFrozenHeadline(

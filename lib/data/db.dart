@@ -9755,6 +9755,9 @@ class LocalDb {
     final latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
     final todayWake = await wakeDayFeatures(today);
     final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // The band's edge, same as the readiness freeze: a peripheral streaming
+    // this morning says nothing about how far the band's night has drained.
+    final bandEdgeSec = await lastDecodedRecTs() ?? 0;
     String? latestOvernightDay;
     int? latestOvernightComputedAt;
     String? latestRecoveryDay;
@@ -9777,7 +9780,7 @@ class LocalDb {
           offsetMs is num &&
           !overnightSettled(
             sleepOffsetSec: offsetMs ~/ 1000,
-            dataEdgeSec: latestRawTs ?? 0,
+            dataEdgeSec: bandEdgeSec,
             nowSec: nowSec,
           )) {
         continue;

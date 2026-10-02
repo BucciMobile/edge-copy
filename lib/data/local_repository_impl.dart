@@ -69,10 +69,15 @@ class LocalRepositoryImpl extends LocalRepository {
   /// recovery". Fallbacks, in order: latest day with sleep → latest day with any
   /// scalars → newest decodable → null. This is what makes Today show yesterday's
   /// data when today hasn't filled yet (and the day-detail seams inherit it).
-  Future<Map<String, dynamic>?> _latestBundle() async {
+  ///
+  /// [skipDay] leaves one day out: getToday passes today when freshness says
+  /// today's night is not the overnight yet (#448), so a partial night can't
+  /// be served under the prior night's label.
+  Future<Map<String, dynamic>?> _latestBundle({String? skipDay}) async {
     final rows = await LocalDb.recentDayResults(14);
     Map<String, dynamic>? newest, withScalars;
     for (final row in rows) {
+      if (skipDay != null && row['day_id']?.toString() == skipDay) continue;
       final b = _decode(row['payload_json']);
       if (b == null) continue;
       newest ??= b;
@@ -285,9 +290,11 @@ class LocalRepositoryImpl extends LocalRepository {
     }
     final todayDay = todayFresh?['today_day']?.toString() ?? _todayLocalLabel();
     final todayBundle = await _bundle(todayDay);
-    final overnightBundle = await _latestBundle();
     final overnightState =
         todayFresh?['overnight_state']?.toString() ?? 'missing';
+    final overnightBundle = await _latestBundle(
+      skipDay: overnightState == 'ready' ? null : todayDay,
+    );
     final activityState =
         todayFresh?['activity_state']?.toString() ?? 'missing';
     final showingPriorOvernight =
