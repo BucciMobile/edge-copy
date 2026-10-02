@@ -598,6 +598,7 @@ class _NearbySection extends StatelessWidget {
     final l = AppLocalizations.of(c);
     final id = cand.device.remoteId.str;
     final tail = id.length <= 5 ? id : id.substring(id.length - 5);
+    final signal = cand.rssi == null ? 'connected' : '${cand.rssi} dBm';
     return SetRow(
       sensorIcon(cand.entryId),
       C.green,
@@ -605,8 +606,8 @@ class _NearbySection extends StatelessWidget {
       sub: busyRemoteId == id
           ? (l?.pairSensorPairing ?? 'Pairing…')
           : cand.label == null
-              ? '…$tail · ${cand.rssi} dBm'
-              : '${cand.rssi} dBm',
+              ? '…$tail · $signal'
+              : signal,
       chevron: !busy,
       onTap: busy || onTap == null ? null : () => onTap!(cand),
     );

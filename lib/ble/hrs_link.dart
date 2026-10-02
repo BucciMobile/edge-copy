@@ -96,7 +96,10 @@ export 'adapters/host.dart' show HrsReading;
 typedef BandCandidate = ({
   BluetoothDevice device,
   String? label,
-  int rssi,
+  // NULL when the peripheral is already connected to this phone and so is not
+  // advertising: there is no signal reading to report, and inventing one would
+  // be a number nobody measured.
+  int? rssi,
   // Which registry entry's service this result matched. Only meaningful when
   // a scan covers more than one entry at once (`scanForAny`); a single-entry
   // scan (`scanFor`) always stamps its own id, so existing callers reading
@@ -411,6 +414,32 @@ class HrsLink {
       }
       if (changed) onResults(_ranked(seen));
     });
+    // A peripheral already connected to this phone (the vendor's own app still
+    // holding a ring, typically) has stopped advertising, so the scan below
+    // never hears it. Ask the OS for those directly. iOS only: Android ignores
+    // the service filter here and would list every GATT link the phone has.
+    if (Platform.isIOS) {
+      for (final e in entries) {
+        try {
+          for (final d
+              in await FlutterBluePlus.systemDevices([Guid(e.service)])) {
+            final id = d.remoteId.str;
+            confirmed.putIfAbsent(id, () => e.id);
+            seen.putIfAbsent(
+                id,
+                () => (
+                      device: d,
+                      label: cleanDeviceLabel(d.platformName),
+                      rssi: null,
+                      entryId: e.id,
+                    ));
+          }
+        } catch (err) {
+          debugPrint('[hrs] systemDevices(${e.id}) failed: $err');
+        }
+      }
+      if (seen.isNotEmpty) onResults(_ranked(seen));
+    }
     try {
       // CLAIMED BEFORE THE START, not after it. `startScan` flips the radio on
       // partway through its own body and only THEN returns, so an owner set on
@@ -443,7 +472,10 @@ class HrsLink {
   }
 
   static List<BandCandidate> _ranked(Map<String, BandCandidate> seen) =>
-      seen.values.toList()..sort((a, b) => b.rssi.compareTo(a.rssi));
+      // Connected-to-the-phone rows (no rssi) first: it is almost always the
+      // one the user is holding.
+      seen.values.toList()
+        ..sort((a, b) => (b.rssi ?? 0).compareTo(a.rssi ?? 0));
 
   /// Why the phone's own stack cannot scan, or null when it can.
   ///
