@@ -155,6 +155,26 @@ PairedDevice? healedPairing(PairedDevice? current, String? reportedSerial) {
   return PairedDevice(current.remoteId, clean, generation: current.generation);
 }
 
+/// Whether [dayId]'s night is settled enough to announce its recovery: today's
+/// row goes through the same [overnightSettled] gate Home uses (#448), older
+/// rows are past it.
+@visibleForTesting
+bool recoveryNightSettled({
+  required String dayId,
+  required Map<String, dynamic>? payload,
+  required int dataEdgeSec,
+  required int nowSec,
+}) {
+  if (dayId != todayLabel()) return true;
+  final offsetMs = (((payload?['sleep'] as Map?)?['window'] as Map?)?['value']
+      as Map?)?['offset_ms'];
+  return overnightSettled(
+    sleepOffsetSec: offsetMs is num ? offsetMs ~/ 1000 : null,
+    dataEdgeSec: dataEdgeSec,
+    nowSec: nowSec,
+  );
+}
+
 class AppState extends ChangeNotifier {
   late final BleEngine engine;
 
@@ -1835,6 +1855,19 @@ class AppState extends ChangeNotifier {
       if (score == null) {
         return; // recovery not computed (no nocturnal HRV) → no fire
       }
+      final payload = SeriesCodec.decodePayloadJson(
+        (row['payload_json'] ?? '{}').toString(),
+      );
+      // Home holds a partial night back; announcing it would also spend the
+      // day's guard before the real recovery lands.
+      if (!recoveryNightSettled(
+        dayId: dayId,
+        payload: payload,
+        dataEdgeSec: await LocalDb.lastDecodedRecTs() ?? 0,
+        nowSec: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      )) {
+        return;
+      }
 
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getString(_kLastRecoveryNotifDay) == dayId) {
@@ -1844,9 +1877,6 @@ class AppState extends ChangeNotifier {
       // Sleep hours from the day's bundle accounting (tst), for the body copy.
       String slept = '';
       try {
-        final payload = SeriesCodec.decodePayloadJson(
-          (row['payload_json'] ?? '{}').toString(),
-        );
         if (payload != null) {
           final acct = ((payload['sleep'] as Map?)?['accounting'] as Map?);
           final tstSec = ((acct?['value'] as Map?)?['tst_sec'] as num?)

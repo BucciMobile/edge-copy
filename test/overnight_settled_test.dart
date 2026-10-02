@@ -10,6 +10,7 @@ import 'package:openstrap_edge/compute/derivation_engine.dart';
 import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/local_repository_impl.dart';
+import 'package:openstrap_edge/state/app_state.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -185,5 +186,35 @@ void main() {
         await LocalRepositoryImpl(getProfileMap: () => const {}).getToday();
     expect(today['status']['overnight_day'], yesterday);
     expect(today['hrv']['rmssd'], 77);
+  });
+
+  test('recovery push waits for the same settled night Home does', () {
+    final wake = nowSec - 2 * 60 * 60;
+    final payload = {
+      'sleep': {
+        'window': {
+          'value': {'offset_ms': wake * 1000},
+        },
+      },
+    };
+    // Drain stopped at the wake: the readiness is off a partial night.
+    expect(
+      recoveryNightSettled(
+        dayId: todayLabel(),
+        payload: payload,
+        dataEdgeSec: wake,
+        nowSec: nowSec,
+      ),
+      isFalse,
+    );
+    expect(
+      recoveryNightSettled(
+        dayId: todayLabel(),
+        payload: payload,
+        dataEdgeSec: wake + 61 * 60,
+        nowSec: nowSec,
+      ),
+      isTrue,
+    );
   });
 }
