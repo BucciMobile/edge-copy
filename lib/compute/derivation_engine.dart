@@ -2012,17 +2012,30 @@ bool overnightSettled({
 ///   drift — a re-derive that would RAISE or LOWER the score is ignored).
 /// - A new day → the prior day's pin no longer applies; re-pins once the new
 ///   day's overnight completes.
+/// - Same day, but the night's wake [wakeSec] moved a margin or more from the
+///   pinned one → a different sleep block is now the night (segmentation only
+///   bridges gaps under an hour, so a long mid-night awakening settles the
+///   first block, then a later one takes over as main sleep). Re-pins once that
+///   night settles; until then the old pin holds.
 @visibleForTesting
-({String day, int value})? nextFrozenHeadline({
+({String day, int value, int? wakeSec})? nextFrozenHeadline({
   required String today,
   required bool overnightComplete,
   required int? liveReadiness,
-  required ({String day, int value})? current,
+  required ({String day, int value, int? wakeSec})? current,
+  int? wakeSec,
 }) {
-  if (current != null && current.day == today) return current; // pinned; hold
+  final sameNight = current != null &&
+      current.day == today &&
+      (current.wakeSec == null ||
+          wakeSec == null ||
+          (wakeSec - current.wakeSec!).abs() < _headlineFreezeMarginSec);
+  if (sameNight) return current; // pinned; hold
   if (overnightComplete && liveReadiness != null) {
-    return (day: today, value: liveReadiness); // first complete settle → pin
+    // first complete settle of this night → pin
+    return (day: today, value: liveReadiness, wakeSec: wakeSec);
   }
+  if (current != null && current.day == today) return current;
   return null; // nothing to pin yet for today
 }
 
@@ -4907,15 +4920,17 @@ class DerivationEngine {
       overnightComplete: overnightComplete,
       liveReadiness: readiness?.round(),
       current: current,
+      wakeSec: day.sleepOffsetSec,
     );
     if (next == null) return;
     // Already pinned to this exact value → skip the redundant write.
     if (current != null &&
         current.day == next.day &&
-        current.value == next.value) {
+        current.value == next.value &&
+        current.wakeSec == next.wakeSec) {
       return;
     }
-    await LocalDb.setFrozenHeadline(next.day, next.value);
+    await LocalDb.setFrozenHeadline(next.day, next.value, wakeSec: next.wakeSec);
     _log('froze headline readiness ${next.value} for ${next.day}');
   }
 

@@ -3327,13 +3327,18 @@ class LocalDb {
   /// The pinned morning readiness headline (day + value), or null if unset /
   /// unparseable. The `day` must be compared to today's label by the caller — a
   /// pin left over from a previous day must NOT be surfaced.
-  static Future<({String day, int value})?> frozenHeadline() async {
+  static Future<({String day, int value, int? wakeSec})?> frozenHeadline() async {
     final raw = await getCursor(kFrozenHeadlineCursor);
     if (raw == null || raw.isEmpty) return null;
     try {
       final d = jsonDecode(raw);
       if (d is Map && d['day'] is String && d['value'] is num) {
-        return (day: d['day'] as String, value: (d['value'] as num).round());
+        final wake = d['wake_sec'];
+        return (
+          day: d['day'] as String,
+          value: (d['value'] as num).round(),
+          wakeSec: wake is num ? wake.toInt() : null,
+        );
       }
     } catch (_) {
       /* malformed → treat as unset */
@@ -3343,10 +3348,16 @@ class LocalDb {
 
   /// Pin [value] as the frozen readiness headline for [day] (overwrites any
   /// prior pin — first-complete-settle-per-day is enforced by the caller).
-  static Future<void> setFrozenHeadline(String day, int value) => setCursor(
-    kFrozenHeadlineCursor,
-    jsonEncode({'day': day, 'value': value}),
-  );
+  /// [wakeSec] is the wake of the night it was pinned on.
+  static Future<void> setFrozenHeadline(String day, int value, {int? wakeSec}) =>
+      setCursor(
+        kFrozenHeadlineCursor,
+        jsonEncode({
+          'day': day,
+          'value': value,
+          'wake_sec': ?wakeSec,
+        }),
+      );
 
   /// Persist a sync batch atomically: the raw records, their samples, AND the
   /// continuation cursor in ONE transaction. This is the durable half of the
