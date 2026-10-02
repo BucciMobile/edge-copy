@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/sync/paired_device.dart';
 import 'package:openstrap_edge/state/app_state.dart';
 import 'package:openstrap_edge/sync/reset_gate.dart';
 import 'package:openstrap_edge/sync/shortcut_sync_task.dart';
@@ -17,6 +18,7 @@ class _ConnectedEngine extends BleEngine {
   int disconnects = 0;
   int probes = 0;
   Duration quietFor = Duration.zero;
+  bool? background;
 
   _ConnectedEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
 
@@ -47,6 +49,9 @@ class _ConnectedEngine extends BleEngine {
 
   @override
   Future<void> disconnect() async => disconnects++;
+
+  @override
+  void setBackground(bool value) => background = value;
 }
 
 void main() {
@@ -189,5 +194,34 @@ void main() {
     expect(engine.reply.isCompleted, isFalse);
     expect(engine.disconnects, 0);
     engine.reply.complete(SyncReport(0, 0, true));
+  });
+
+  test('a deadline after waiting on a busy app reports partial', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)
+      ..initialized = true
+      ..busy = true;
+    addTearDown(app.dispose);
+    final task = ShortcutSyncTask('waited', const Duration(seconds: 5));
+    final work = app.syncForShortcut(task);
+    expect(task.phase, 'waiting');
+    app.busy = false;
+    while (engine.runs == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect(task.expired.status, 'partial');
+    task.stop();
+    await work;
+    engine.reply.complete(SyncReport(0, 0, true));
+  });
+
+  test('opening the app during an in-flight session foregrounds it', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)
+      ..paired = PairedDevice('r1', 's1', generation: 'gen4')
+      ..busy = true;
+    addTearDown(app.dispose);
+    await app.openSession();
+    expect(engine.background, isFalse);
   });
 }

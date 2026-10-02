@@ -5046,24 +5046,34 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> openSession({bool foreground = true}) async {
-    if (busy || paired == null) return;
-    BandOwnership.markForegroundIntent(true);
-    _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
+    if (paired == null) return;
     // Returning to the foreground with the connection still alive (kept during
     // background): don't tear it down and reconnect — just reclaim ownership.
     final wasBackground = _background;
+    // Applied even when a session is already in flight: a background
+    // Shortcut's openSession(foreground: false) can hold busy while the user
+    // opens the app, and nothing else clears _background. Back in the
+    // foreground with an OS CPU/memory budget again — let the scheduler drain
+    // any derive jobs that queued (durably) while backgrounded.
     if (foreground) {
       _background = false;
       engine.setBackground(false);
+      _deriveScheduler.setBackground(false);
     }
+    if (busy) {
+      if (foreground && wasBackground) {
+        _nudgeLive();
+        unawaited(_refreshHighFreqWakeWindow());
+      }
+      return;
+    }
+    BandOwnership.markForegroundIntent(true);
+    _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
     // Coming back after hours (or days) suspended: re-read the phone's steps
     // for whatever day it is NOW.
     if (foreground && phoneStepsEnabled) {
       unawaited(syncPhoneSteps());
     }
-    // Back in the foreground with an OS CPU/memory budget again — let the
-    // scheduler drain any derive jobs that queued (durably) while backgrounded.
-    if (foreground) _deriveScheduler.setBackground(false);
     if (foreground && wasBackground && engine.isConnected) {
       IosBleRestore.foregroundActive = true;
       await IosBleRestore.setOwnsBand(true);
@@ -5474,6 +5484,9 @@ class AppState extends ChangeNotifier {
       if (background && !engine.isConnected) await _armRecovery();
     }
     if (task.stopped || !engine.isConnected) return SyncReport(0, 0, false);
+    // The waits above left 'starting'/'waiting', which a deadline reads as
+    // timedOut even though the burst is banking records.
+    task.update('syncing');
     final burst = _kickSyncBurst(kickFirst: _syncBurst == null).then((report) {
       if (report.records > 0) _deriveScheduler.markStoredData();
       if (!_disposed) notifyListeners();
