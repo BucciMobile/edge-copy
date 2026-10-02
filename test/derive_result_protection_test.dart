@@ -427,6 +427,28 @@ void main() {
       expect(DerivationEngine.isRicherSleep(
           night(27000), night(9000, onset: 1500, offset: 1700, bandTrim: 300)), isTrue);
     });
+    // Each 60 s tolerance is inclusive: exactly 60 applies, 61 falls through
+    // to the ordinary compare (prev TST is larger, so prev wins = isTrue).
+    test('onset tolerance: 60 s apart applies, 61 s falls through', () {
+      expect(DerivationEngine.isRicherSleep(night(27000),
+          night(26750, onset: 1060, offset: 1700, bandTrim: 300)), isFalse);
+      expect(DerivationEngine.isRicherSleep(night(27000),
+          night(26750, onset: 1061, offset: 1700, bandTrim: 300)), isTrue);
+    });
+    test('end tolerance: banked end == untrimmed end + 60 applies, 1 s past falls through', () {
+      // 1700 + 240 + 60 == 2000 (applies); 1700 + 239 + 60 == 1999 < 2000.
+      expect(DerivationEngine.isRicherSleep(night(27000),
+          night(26750, offset: 1700, bandTrim: 240)), isFalse);
+      expect(DerivationEngine.isRicherSleep(night(27000),
+          night(26750, offset: 1700, bandTrim: 239)), isTrue);
+    });
+    test('TST-loss tolerance: loss == removed + 60 applies, 1 s more falls through', () {
+      // removed = 2000 - 1700 = 300; allowed loss 360.
+      expect(DerivationEngine.isRicherSleep(night(27000),
+          night(26640, offset: 1700, bandTrim: 300)), isFalse);
+      expect(DerivationEngine.isRicherSleep(night(27000),
+          night(26639, offset: 1700, bandTrim: 300)), isTrue);
+    });
     test('shorter WITHOUT trim still loses (pruning guard intact)', () {
       expect(DerivationEngine.isRicherSleep(night(27000), night(9000)), isTrue);
     });
