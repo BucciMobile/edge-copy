@@ -7891,12 +7891,18 @@ class LocalDb {
 
   /// The set of day_id labels that are FINALIZED at [algoVersion] (locked). A
   /// finalized day is never recomputed even on a version bump.
+  ///
+  /// An imported snapshot never locks: importers finalize a date the band has
+  /// no rows for yet, and band rows for it arriving later must still derive
+  /// and replace the snapshot ([isMeasuredDayRow]). Every caller intersects
+  /// this with days that have raw, so a raw-less import is still left alone.
   static Future<Set<String>> finalizedDayIds(int algoVersion) async {
     final db = await instance;
     final rows = await db.query(
       'day_result',
       columns: ['day_id'],
-      where: 'algo_version = ? AND finalized = 1',
+      where: 'algo_version = ? AND finalized = 1 '
+          "AND payload_json NOT LIKE '%\"imported\":true%'",
       whereArgs: [algoVersion],
     );
     return {for (final r in rows) r['day_id'] as String};
