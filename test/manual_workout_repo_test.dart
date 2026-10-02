@@ -532,6 +532,24 @@ void main() {
   });
 
   test(
+    'a different window on the same start second is refused, not replaced',
+    () async {
+      final start = sessionStart - 16 * 86400;
+      await repo.logManualWorkout(
+          startTs: start, endTs: start + 3600, type: 'strength');
+      await expectLater(
+        () => repo.logManualWorkout(
+            startTs: start, endTs: start + 1800, type: 'run'),
+        throwsA(isA<ManualWindowException>().having(
+            (e) => e.error, 'error', ManualWindowError.overlapsExisting)),
+      );
+      final row = await LocalDb.session(manualSessionId(start));
+      expect(row!['type'], 'strength');
+      expect(row['end_ts'], start + 3600);
+    },
+  );
+
+  test(
     're-logging the identical window replaces rather than duplicates',
     () async {
       final start = sessionStart - 15 * 86400;

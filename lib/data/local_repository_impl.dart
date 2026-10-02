@@ -2615,15 +2615,25 @@ class LocalRepositoryImpl extends LocalRepository {
     required int startTs,
     required int endTs,
     required String type,
-  }) => _writeManualSession(
-    startTs: startTs,
-    endTs: endTs,
-    type: type,
+  }) async {
     // A manual row's id is derived from its start second, so re-logging the
-    // same window is an UPDATE of that row, not a collision with it. Pass
-    // the id we are about to write as the one to skip in the overlap check.
-    validateAgainstId: manualSessionId(startTs),
-  );
+    // IDENTICAL window is an update of that row, not a collision with it. A
+    // different end or type on the same start second is a different entry:
+    // skipping it in the overlap check would let REPLACE overwrite it, so it
+    // has to be refused like any other overlap.
+    final id = manualSessionId(startTs);
+    final prior = await LocalDb.session(id);
+    final same = prior != null &&
+        (prior['end_ts'] as num?)?.toInt() == endTs &&
+        prior['type'] == type;
+    return _writeManualSession(
+      startTs: startTs,
+      endTs: endTs,
+      type: type,
+      existing: same ? prior : null,
+      validateAgainstId: same || prior == null ? id : null,
+    );
+  }
 
   @override
   Future<Map<String, dynamic>> setWorkoutWindow(
@@ -2676,7 +2686,7 @@ class LocalRepositoryImpl extends LocalRepository {
     required int startTs,
     required int endTs,
     required String type,
-    required String validateAgainstId,
+    required String? validateAgainstId,
     Map<String, dynamic>? existing,
     String? sessionId,
     String source = 'manual',
