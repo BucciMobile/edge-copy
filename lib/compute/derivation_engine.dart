@@ -1731,9 +1731,9 @@ import 'substrate.dart';
 // at `sleepOffsetSec + 1 h`, now freezes earlier on those mornings. UNCHANGED:
 // onset, stages, which day owns the night (decided on the untrimmed end),
 // gen4 (no band envelope), manual/confirmed overrides and the HR-led
-// fallback. kAnalyticsPin/pubspec repin to the analytics band-offset-trim
-// merge SHA is PENDING the analytics PR merge (developed against a local
-// path override).
+// fallback. Analytics change: OpenStrap/analytics PR #80 — pinned below to
+// that PR's head on the author's fork while this PR is a draft; repinned to
+// the OpenStrap/analytics merge SHA before it leaves draft.
 const int kAlgoVersion = 98;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
@@ -1910,7 +1910,11 @@ const int kAlgoVersion = 98;
 // skin-temp window (see pubspec.yaml's comment beside the `ref:` for the
 // verification command). kAlgoVersion bumped 96 -> 97, see the changelog
 // entry above.
-const String kAnalyticsPin = '0441ef9e6fc6d5681c309ce6341911285e829f20';
+// TEMPORARY @ b213e40 — OpenStrap/analytics PR #80 head (band-state night
+// end: bandTrimmedOffsetSec, segmentSleep(bandSleepState:),
+// SleepSegmentation.bandOffsetTrimSec) on the author's fork, for v98 above.
+// Repin to the OpenStrap/analytics merge SHA before this PR leaves draft.
+const String kAnalyticsPin = 'b213e40538ebe8ddd0bdb1ad9ab71d1d5ecbfe5b';
 // Repinned to analytics main's tip, which carries BOTH PR #72 (hrv_freq
 // Welch gap guard) and PR #73 (overreachingConjunction rhr quantum guard) —
 // the two independent kAlgoVersion bumps above (93 and 94). Verified both

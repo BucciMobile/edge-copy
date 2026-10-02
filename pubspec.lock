@@ -937,9 +937,9 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "0441ef9e6fc6d5681c309ce6341911285e829f20"
-      resolved-ref: "0441ef9e6fc6d5681c309ce6341911285e829f20"
-      url: "https://github.com/OpenStrap/analytics.git"
+      ref: b213e40538ebe8ddd0bdb1ad9ab71d1d5ecbfe5b
+      resolved-ref: b213e40538ebe8ddd0bdb1ad9ab71d1d5ecbfe5b
+      url: "https://github.com/DropTabl/analytics.git"
     source: git
     version: "1.0.0"
   openstrap_protocol:
