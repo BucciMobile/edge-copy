@@ -1936,6 +1936,25 @@ class LocalDb {
     );
   }
 
+  /// Carry an EARLIER explicit wearing choice onto a row that has none of its
+  /// own (`wearing_set_ts IS NULL`: fresh after a forget/re-pair, or a restore
+  /// target nobody has set yet). The stamp is kept, not renewed — the days
+  /// before it stay refused exactly as they were. Without this the row's
+  /// DEFAULT silently says wrist while the arm profile survives, and wrist
+  /// days start learning from arm-worn data.
+  static const String _adoptWearingSql =
+      'UPDATE device SET wearing = ?, wearing_set_ts = ? '
+      'WHERE id = ? AND wearing_set_ts IS NULL';
+
+  static Future<int> adoptDeviceWearing(
+    int wearing,
+    int setTs, [
+    String id = kPrimaryDeviceId,
+  ]) async {
+    final db = await instance;
+    return db.rawUpdate(_adoptWearingSql, [wearing, setTs, id]);
+  }
+
   /// Raw `device.wearing`, null when there is no device row.
   static Future<int?> deviceWearingRaw([String id = kPrimaryDeviceId]) async {
     final row = await deviceRow(id);
@@ -8977,7 +8996,20 @@ class LocalDb {
                 // same install needs nothing from here: the row is already
                 // present, and the SharedPreferences mirror re-establishes it
                 // if the database was rebuilt.
-                if (t == 'device' && row['id'] == kPrimaryDeviceId) continue;
+                //
+                // HOW the band is worn is the person's, not the install's, and
+                // `step_calibration*` (keyed by it) does come across — so the
+                // explicit choice rides along onto a local row that has none.
+                if (t == 'device' && row['id'] == kPrimaryDeviceId) {
+                  final w = row['wearing'];
+                  final ts = row['wearing_set_ts'];
+                  if (w is num && ts is num) {
+                    batch.rawUpdate(_adoptWearingSql,
+                        [w.toInt(), ts.toInt(), kPrimaryDeviceId]);
+                    if (++ops >= chunkOps) await flush();
+                  }
+                  continue;
+                }
                 if (t == 'day_result') {
                   if (protectedKeys.contains(
                     '${row['day_id']}|${row['algo_version']}',

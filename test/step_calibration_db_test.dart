@@ -180,4 +180,40 @@ void main() {
         (await LocalDb.stepCalibrationDays('gen5', Wearing.wrist)).length, 3);
     await LocalDb.close();
   });
+
+  test('a restore carries the wearing choice onto an unset local row',
+      () async {
+    LocalDb.dbName = 'step_cal_restore.db';
+    final dir = await databaseFactory.getDatabasesPath();
+    await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
+    final srcPath = p.join(dir, 'step_cal_restore_src.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute('CREATE TABLE device (id TEXT PRIMARY KEY, '
+        'remote_id TEXT, first_seen INTEGER, last_seen INTEGER, '
+        'wearing INTEGER, wearing_set_ts INTEGER)');
+    await src.insert('device', {
+      'id': LocalDb.kPrimaryDeviceId,
+      'remote_id': 'OLD-PHONE-UUID',
+      'first_seen': 1,
+      'last_seen': 1,
+      'wearing': Wearing.bicep,
+      'wearing_set_ts': 1786000000,
+    });
+    await src.close();
+
+    await LocalDb.upsertDevice(adapterId: 'gen5', remoteId: 'NEW-PHONE-UUID');
+    await LocalDb.importFromDbFile(srcPath);
+    final row = (await LocalDb.deviceRow())!;
+    expect(row['remote_id'], 'NEW-PHONE-UUID'); // pairing stays local
+    expect(row['wearing'], Wearing.bicep);
+    expect(row['wearing_set_ts'], 1786000000);
+
+    // A choice made on THIS install wins over the backup's.
+    await LocalDb.setDeviceWearing(Wearing.other);
+    await LocalDb.importFromDbFile(srcPath);
+    expect(await LocalDb.deviceWearingRaw(), Wearing.other);
+    await databaseFactory.deleteDatabase(srcPath);
+    await LocalDb.close();
+  });
 }
