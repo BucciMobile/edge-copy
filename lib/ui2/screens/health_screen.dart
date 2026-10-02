@@ -1731,15 +1731,23 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     // Strict, not DateTime.tryParse: that takes '20250101' and rolls
     // '2026-02-30' into March, and the raw text is the sort key and half the
     // primary key, so a compact date sorted above every dashed one.
-    if (v.value == null || !isValidDayLabel(date)) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(v.value == null
-            ? (loc?.healthValueMustBeNumber ??
-                'The value needs to be a number on its own, without the unit. '
-                    'Nothing was saved.')
-            : (loc?.healthDateFormatError ??
-                'The date needs to be YYYY-MM-DD. Nothing was saved.')),
-      ));
+    // A future draw is refused like the CSV import does: it is a typo far
+    // more often than a real blood test, and as the newest row it would sit
+    // on top of every real result.
+    final error = v.value == null
+        ? (loc?.healthValueMustBeNumber ??
+            'The value needs to be a number on its own, without the unit. '
+                'Nothing was saved.')
+        : !isValidDayLabel(date)
+            ? (loc?.healthDateFormatError ??
+                'The date needs to be YYYY-MM-DD. Nothing was saved.')
+            : date.compareTo(todayLabel()) > 0
+                ? (loc?.healthDateInFuture ??
+                    'That date is after today. Nothing was saved.')
+                : null;
+    if (error != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error)));
       return;
     }
     try {
