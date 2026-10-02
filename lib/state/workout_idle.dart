@@ -19,8 +19,8 @@
 /// Fed once per 1 Hz workout tick. A tick is ACTIVE when it carries a real
 /// reading (positive bpm) at or above the [gate] the caller passes. The app
 /// passes the calorie pipeline's `Calories.activeGateHr`, capped at the
-/// zone-1 floor when that sits above resting HR, so "quiet" means billed as
-/// rest AND shown as rest on the live zone bar. With no gate (a profile
+/// zone-1 floor but never below halfway from resting HR to that gate, so
+/// "quiet" means billed as rest AND shown as rest on the live zone bar. With no gate (a profile
 /// without calorie anchors), intensity cannot be judged and any real reading
 /// counts as active: a worn strap is never nudged on a guess, and only
 /// absence — off skin, or the link gone — builds the streak.

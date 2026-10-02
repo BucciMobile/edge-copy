@@ -500,6 +500,27 @@ void main() {
       expect(w.idleWatch.lastAskAt, isNotNull,
           reason: 'resting HR is quiet whatever zone 1 says');
     });
+
+    test('a zone-1 edge just above resting HR does not mute the watch', () {
+      // Resting HR is the night's lowest 30-min mean, so sleeping HR sits a
+      // few bpm above it. Zone 1 at 50 with RHR 49 must not turn 52 bpm of
+      // sleep into activity.
+      final app = connected(52);
+      addTearDown(app.dispose);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'manual-z1-near',
+        type: 'strength',
+        hrMax: 190,
+        restingHr: 49,
+        zoneSet: trainingZones(manualZoneLowerBpm: [50, 100, 130, 150, 170]),
+      );
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNotNull,
+          reason: 'sleeping HR just above RHR is quiet');
+    });
   });
 
   // ── a hard-kill relaunch mid-workout must not reset strain/calories/zone

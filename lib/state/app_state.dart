@@ -6834,19 +6834,21 @@ class AppState extends ChangeNotifier {
     // ask is a notification, once per session; the session itself is never
     // touched — there is deliberately no auto-stop.
     //
-    // The cap only applies while zone 1 sits above resting HR. A manual
-    // zone-1 edge at or below it (bounds only need >= 30 bpm) would make a
-    // session left open overnight read active forever, and the nudge would
-    // never go out.
+    // The cap never goes below halfway between resting HR and the calorie
+    // gate. Resting HR here is the night's LOWEST 30-min mean, so sleeping HR
+    // sits a few bpm above it: a zone-1 edge at or just above it (manual
+    // bounds only need >= 30 bpm, or zone 1 = 50 % HRmax at an older age)
+    // would make a session left open overnight read active forever, and the
+    // nudge would never go out.
     final wRhr = w.restingHr;
     final wMax = w.hrMax;
     final calGate = (wRhr != null && wMax != null)
         ? ana.Calories.activeGateHr(wMax, wRhr)
         : null;
     final z1Floor = w.zoneSet?.zones.first.lower;
-    final idleGate = (calGate == null || z1Floor == null || z1Floor <= wRhr!)
+    final idleGate = (calGate == null || z1Floor == null)
         ? calGate
-        : math.min(calGate, z1Floor);
+        : math.max(math.min(calGate, z1Floor), (wRhr! + calGate) / 2);
     if (w.idleWatch.onTick(DateTime.now(), hr: hr, gate: idleGate)) {
       unawaited(_nudgeIdleWorkout(w));
     }
