@@ -4823,6 +4823,9 @@ class AppState extends ChangeNotifier {
     // confirmation machine now; retrying the stale time would clobber it.
     if (_savedAlarm != epoch) return;
     if (_alarmAutoRetried || !isConnected) {
+      // Offline, the first window is also the last, but its timer fired just
+      // before it closes; end it so this rebuild lands on the warning.
+      _alarm.setAtMs = null;
       notifyListeners();
       _escalateAlarmLatchFailed(epoch);
       return;

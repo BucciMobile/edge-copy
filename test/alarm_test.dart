@@ -516,4 +516,16 @@ void main() {
     );
     expect(guard.hasMatch(src), isTrue);
   });
+
+  test('an offline first window ends before the warning rebuild', () {
+    // The first grace timer fires 250ms before its window closes; when the
+    // link is down that window is also the last, so the escalation branch must
+    // close it itself or the row sits on "waiting" next to the alert.
+    final src = File('lib/state/app_state.dart').readAsStringSync();
+    final branch = RegExp(
+      r'if \(_alarmAutoRetried \|\| !isConnected\) \{[^}]*?'
+      r'_alarm\.setAtMs = null;\s*\n\s*notifyListeners\(\);',
+    );
+    expect(branch.hasMatch(src), isTrue);
+  });
 }
