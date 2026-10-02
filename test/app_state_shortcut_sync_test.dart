@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/state/app_state.dart';
+import 'package:openstrap_edge/sync/paired_device.dart';
 import 'package:openstrap_edge/sync/reset_gate.dart';
 import 'package:openstrap_edge/sync/shortcut_sync_task.dart';
 import 'package:path/path.dart' as p;
@@ -84,6 +85,23 @@ void main() {
     const rearm =
         'if (_background && !engine.isConnected) await _armRecovery();';
     expect(body.substring(fin).contains(rearm), isTrue);
+  });
+
+  // A background Shortcut connect holds `busy`; opening the app mid-connect
+  // bounces off it. The foreground flip must still land, or the visible app
+  // runs in background mode (derive deferred, live HR off) until the next
+  // pause/resume.
+  test('opening the app during a background session still foregrounds', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)..initialized = true;
+    addTearDown(app.dispose);
+    await app.pauseForBackground();
+    expect(app.debugLiveOwners.foreground, isFalse);
+    app
+      ..paired = PairedDevice('band', null)
+      ..busy = true;
+    await app.openSession();
+    expect(app.debugLiveOwners.foreground, isTrue);
   });
 
   test(

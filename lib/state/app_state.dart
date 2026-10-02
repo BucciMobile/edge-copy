@@ -5047,24 +5047,37 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> openSession({bool foreground = true}) async {
-    if (busy || paired == null) return;
-    BandOwnership.markForegroundIntent(true);
-    _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
+    if (paired == null) return;
     // Returning to the foreground with the connection still alive (kept during
     // background): don't tear it down and reconnect — just reclaim ownership.
     final wasBackground = _background;
     if (foreground) {
       _background = false;
       engine.setBackground(false);
+      // Back in the foreground with an OS CPU/memory budget again — let the
+      // scheduler drain any derive jobs that queued (durably) while
+      // backgrounded.
+      _deriveScheduler.setBackground(false);
     }
+    if (busy) {
+      // A background session (a Shortcut connect) can still be running when
+      // the app comes to the front. The flips above must land anyway, or the
+      // visible app stays in background mode until the next pause/resume;
+      // re-apply the live owners and the band prompt now that `_background`
+      // changed.
+      if (foreground && wasBackground) {
+        _nudgeLive();
+        unawaited(_refreshHighFreqWakeWindow());
+      }
+      return;
+    }
+    BandOwnership.markForegroundIntent(true);
+    _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
     // Coming back after hours (or days) suspended: re-read the phone's steps
     // for whatever day it is NOW.
     if (foreground && phoneStepsEnabled) {
       unawaited(syncPhoneSteps());
     }
-    // Back in the foreground with an OS CPU/memory budget again — let the
-    // scheduler drain any derive jobs that queued (durably) while backgrounded.
-    if (foreground) _deriveScheduler.setBackground(false);
     if (foreground && wasBackground && engine.isConnected) {
       IosBleRestore.foregroundActive = true;
       await IosBleRestore.setOwnsBand(true);
