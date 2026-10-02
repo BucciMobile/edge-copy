@@ -311,6 +311,8 @@ const _specs = <String, MetricSpec>{
     requires: {InputSignal.rrIntervals},
   ),
   // Only the WHOOP importer writes this key today; the band derive does not.
+  // The old cloud_v2 importer's relative index under the same key is kept
+  // out on read (LocalDb.metricSeries).
   'spo2': MetricSpec(
     chartKey: 'spo2',
     title: 'Blood oxygen',
