@@ -4922,7 +4922,10 @@ class AppState extends ChangeNotifier {
   /// the protocol EventId names (strapDrivenAlarmSet == 56, …); the pure state
   /// machine matches the raw ids so it stays dependency-free.
   void _handleAlarmEvent(int id, int ts) {
-    final effect = _alarm.onEvent(id, DateTime.now().millisecondsSinceEpoch);
+    // The strap stamps events on its own RTC; the alarm was armed at
+    // `when - driftSec` in that frame, so map back the same way.
+    final effect = _alarm.onEvent(id, DateTime.now().millisecondsSinceEpoch,
+        tsSec: ts + (engine.clockRef?.driftSec ?? 0));
     if (effect == null) return;
     switch (effect) {
       case AlarmEffect.confirmed:
