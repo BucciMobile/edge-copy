@@ -1,27 +1,4 @@
-// Unit tests for the pure window computation behind the BP research capture.
-//
-// The rules under test are the ones the storage and UI lean on:
-//   · a window with no band data is NULL, not zeroes;
-//   · a stat the window cannot honestly compute (no valid HR, no
-//     CONTIGUOUS interval pair for RMSSD) is absent, never zero;
-//   · rows outside the window are ignored, whatever their table's epoch
-//     base is (decoded_onehz.rec_ts is SECONDS, decoded_rr.rr_ts_ms is ms);
-//   · the rest window lies BEFORE the measurement instant and is
-//     HALF-OPEN [start, end): the cuff's own inflation stays out of the
-//     feature window by construction, and coverage can never exceed 1.0
-//     by counting both endpoints;
-//   · duplicate timestamps are deduplicated, unsorted rows are sorted;
-//   · beats are keyed by BEAT IDENTITY (beat_ts_ms, else
-//     (rr_ts_ms, beat_index)) — never by the whole-second rr_ts_ms, which
-//     is identical for every beat of one record;
-//   · coverage counts VALID HR seconds only — a run of hr = 0 rows must
-//     not read as a worn band;
-//   · RMSSD never spans a sensor gap, and the rejected-PAIR fraction is
-//     reported under its honest name;
-//   · a window whose end lies in the future is 'pending' (an internal
-//     data-level state — the UI cannot produce one);
-//   · requested window bounds and OBSERVED data bounds are distinct, and
-//     observed bounds are built from VALID rows only.
+// Pure window computation behind the BP research capture.
 import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -362,5 +339,20 @@ void main() {
       dataThroughMs: at - 150000,
     );
     expect(w!.qualityStatus, 'pending');
+  });
+
+  test('an invalid beat breaks the RMSSD chain instead of being skipped', () {
+    final w = researchWindowFrom(
+      measuredAtMs: at,
+      onehzRows: const [],
+      rrRows: [
+        {'rr_ts_ms': at - 3000, 'beat_index': 0, 'rr_ms': 800},
+        {'rr_ts_ms': at - 2000, 'beat_index': 0, 'rr_ms': 0},
+        {'rr_ts_ms': at - 1000, 'beat_index': 0, 'rr_ms': 1000},
+      ],
+    )!;
+    expect(w.validIntervalCount, 2);
+    expect(w.validIntervalPairCount, isNull);
+    expect(w.rmssdMs, isNull);
   });
 }
