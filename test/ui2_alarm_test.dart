@@ -8,6 +8,7 @@
 // The screen is otherwise a rendering of AppState, and its layout is covered
 // by the profile goldens.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:openstrap_edge/ui2/profile/alarm.dart';
@@ -24,6 +25,28 @@ void main() {
       }
       expect(AlarmScreenView.stateLabel(AlarmArmState.confirmed),
           contains('Confirmed'));
+    });
+  });
+
+  group('the home door', () {
+    Future<void> pump(WidgetTester t, AlarmDoor door) => t.pumpWidget(
+        MaterialApp(home: Scaffold(body: door)));
+
+    testWidgets('no alarm offers to set one', (t) async {
+      await pump(t, AlarmDoor(onTap: () {}));
+      expect(find.text('Set an alarm'), findsOneWidget);
+    });
+
+    testWidgets('an armed alarm shows its day, time and real state',
+        (t) async {
+      // 2026-08-22 is a Saturday.
+      await pump(
+          t,
+          AlarmDoor(
+              armedAt: DateTime(2026, 8, 22, 7, 30),
+              state: AlarmArmState.unknown,
+              onTap: () {}));
+      expect(find.text('Sat 07:30 · Not confirmed'), findsOneWidget);
     });
   });
 }
