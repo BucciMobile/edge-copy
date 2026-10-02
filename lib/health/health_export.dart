@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/day_label.dart';
 import '../data/db.dart';
 import '../data/series_codec.dart';
 import 'health_heart_rate_batch.dart';
@@ -236,6 +237,16 @@ Future<PrioritySleepExportResult> exportPrioritySleepBeforeBulk({
   return priorityResult;
 }
 
+/// The export cursor that puts [date] back in front of it, or null when [date]
+/// is already ahead (an empty cursor means nothing has been skipped yet).
+/// exportAll skips every day at or before the cursor, so an edit to a day
+/// behind it would otherwise never be written again.
+String? healthExportCursorBefore(String cursor, String date) {
+  if (cursor.isEmpty || cursor.compareTo(date) < 0) return null;
+  final d = DateTime.parse(date);
+  return dayLabelOf(DateTime(d.year, d.month, d.day - 1));
+}
+
 class HealthExportSingleFlight {
   Future<int>? _inFlight;
 
@@ -321,6 +332,23 @@ class HealthExporter {
     } catch (e) {
       debugPrint('[health] exportWorkoutId $id: $e');
       return false;
+    }
+  }
+
+  /// Rewind the export cursor so the next [exportAll] re-writes [date] and
+  /// every day after it. Under the same lock as [exportAll], so a pass already
+  /// running can't advance the cursor back over it. Never throws.
+  static Future<void> reexportFrom(String date) async {
+    try {
+      await shared._workoutLock.run(() async {
+        final cursor = await LocalDb.getCursor('health_export_through') ?? '';
+        final next = healthExportCursorBefore(cursor, date);
+        if (next != null) {
+          await LocalDb.setCursor('health_export_through', next);
+        }
+      });
+    } catch (e) {
+      debugPrint('[health] reexportFrom $date: $e');
     }
   }
 

@@ -2045,13 +2045,13 @@ class LocalDb {
       'source': source,
       'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
-    await _releaseFrozenHeadline(dayId);
+    await releaseFrozenHeadline(dayId);
   }
 
   /// A sleep correction to the pinned day is the user's word, not drift: drop
   /// the morning pin so the re-derive pins the corrected readiness instead of
   /// holding the old night's value until midnight.
-  static Future<void> _releaseFrozenHeadline(String dayId) async {
+  static Future<void> releaseFrozenHeadline(String dayId) async {
     if ((await frozenHeadline())?.day == dayId) {
       await deleteCursor(kFrozenHeadlineCursor);
     }
@@ -2073,7 +2073,7 @@ class LocalDb {
   static Future<void> deleteSleepOverride(String dayId) async {
     final db = await instance;
     await db.delete('sleep_override', where: 'day_id = ?', whereArgs: [dayId]);
-    await _releaseFrozenHeadline(dayId);
+    await releaseFrozenHeadline(dayId);
   }
 
   /// Every day that currently has a user override — these must be force-derived

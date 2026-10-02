@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:openstrap_edge/compute/derivation_engine.dart';
+import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/state/app_state.dart';
 
@@ -45,6 +46,31 @@ void main() {
     DerivationEngine.debugRunning = false;
     await edit;
     expect(done, isTrue);
+  });
+
+  test('a pass already running when the edit lands can\'t re-pin the old night',
+      () async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    DerivationEngine.debugRunning = true; // a drain pass deriving today
+    addTearDown(() => DerivationEngine.debugRunning = false);
+
+    final day = todayLabel();
+    await LocalDb.setFrozenHeadline(day, 45);
+    final edit = app.setSleepOverride(
+      day,
+      DateTime(2026, 9, 30, 0, 30),
+      DateTime(2026, 9, 30, 7),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(await LocalDb.frozenHeadline(), isNull);
+
+    // The in-flight pass prepared today from the old window and pins it as
+    // it finishes; the force pass's nextFrozenHeadline would then hold it.
+    await LocalDb.setFrozenHeadline(day, 45);
+    DerivationEngine.debugRunning = false;
+    await edit;
+    expect(await LocalDb.frozenHeadline(), isNull);
   });
 
   test('correcting the pinned day releases the morning pin', () async {

@@ -923,5 +923,19 @@ void main() {
         );
       },
     );
+
+    test('a sleep edit behind the export cursor pulls that day back in', () {
+      // Finalized and already exported: exportAll skips it, so a rejected
+      // night's session would never be cleared from Health Connect.
+      expect(healthExportCursorBefore('2026-09-30', '2026-09-28'),
+          '2026-09-27');
+      expect(healthExportCursorBefore('2026-09-28', '2026-09-28'),
+          '2026-09-27');
+      expect(healthExportCursorBefore('2026-03-01', '2026-03-01'),
+          '2026-02-28');
+      // Still ahead of the cursor (or nothing exported yet): leave it alone.
+      expect(healthExportCursorBefore('2026-09-27', '2026-09-28'), isNull);
+      expect(healthExportCursorBefore('', '2026-09-28'), isNull);
+    });
   });
 }
