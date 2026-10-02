@@ -1,31 +1,16 @@
-// BP research capture — pair a cuff reading the user just took with the
-// band's own decoded data from the minutes around that instant.
-//
-// EXPERIMENTAL / DEVELOPER-ONLY. This exists to build a paired dataset a
-// human can analyse OUTSIDE this app (CSV export); it is not a blood
-// pressure feature and never becomes one. The same guard that fences
-// `imported_measurement` applies twice over here: nothing in `compute/`,
-// nothing that writes `day_result` / `metric_series`, and nothing that
-// writes to HealthKit / Health Connect may read these tables — a wrist
-// series regressed against cuff readings inside this app is a
-// cuffless-blood-pressure claim from an uncleared device, which is exactly
-// the category that earned WHOOP an FDA Warning Letter in Jul 2025.
-//
-// A capture with no band data at that instant is stored as a capture with a
-// NULL window. Missing is missing — never 0, never a fabricated average.
+// BP research capture (developer mode only): a cuff reading the user typed in,
+// paired with the band's decoded data from the minutes around it, for
+// analysis outside the app via the CSV export. Nothing derived reads these
+// tables (bp_research_isolation_test.dart). No band data = NULL window.
 
+import 'dart:math' as math;
 
-/// Window half-widths around the cuff instant (default ±2 min): the frozen
-/// window covers [kBpResearchWindowPreMs] before the reference instant and
-/// [kBpResearchWindowPostMs] after it. Lives here, next to the capture
-/// logic, so the model file has no dependency direction to argue about.
+/// Window half-widths around the cuff instant.
 const int kBpResearchWindowPreMs = 2 * 60 * 1000;
 const int kBpResearchWindowPostMs = 2 * 60 * 1000;
 
-/// The frozen band window around one reference instant. Every field is
-/// nullable for the same reason the storage layer's columns are: a stat the
-/// window could not honestly compute (no valid HR, no beats) is absent, not
-/// zero.
+/// The band window around one reference instant. A stat that can't be
+/// computed (no valid HR, no beats) is null, not zero.
 class BpResearchWindow {
   const BpResearchWindow({
     required this.windowStartMs,
@@ -50,8 +35,7 @@ class BpResearchWindow {
   final double? rrMsMax;
   final double? rmssdMs;
 
-  /// Provenance the analysis needs and nothing else: device_id, firmware
-  /// string if known, sample counts by table. JSON, written verbatim.
+  /// Optional provenance JSON, stored verbatim.
   final String? metaJson;
 }
 
@@ -83,20 +67,14 @@ class BpResearchCapture {
   final BpResearchWindow? window;
 }
 
-/// Same plausibility bounds as `health_measurement_import.dart`, for the
-/// same reason: 400 mmHg is a cuff error, and a clamped reading is a
-/// fabricated one. Out-of-bounds input is rejected, never corrected.
+/// Same bounds as `health_measurement_import.dart`. Out-of-range input is
+/// rejected, never clamped.
 const (double, double) kResearchSystolicBounds = (50, 300);
 const (double, double) kResearchDiastolicBounds = (20, 200);
 
-/// Compute the frozen band window around [measuredAtMs] from the decoded
-/// store, pure and testable without a database (pass the rows in).
-///
-/// Window: measured instant minus/plus [preMs]/[postMs] (default ±2 min,
-/// [kBpResearchWindowPreMs]/[kBpResearchWindowPostMs]). Reads ONLY already-decoded
-/// tables — `decoded_onehz` (HR) and `decoded_rr` (beat intervals). No raw
-/// archive, no re-decode, nothing derived: the point is to freeze exactly
-/// what the app already holds at the moment of the cuff reading.
+/// Window stats around [measuredAtMs] from `decoded_onehz` / `decoded_rr`
+/// rows (rr rows ordered by `rr_ts_ms, beat_index`). Null when neither table
+/// has a row in the window.
 BpResearchWindow? researchWindowFrom({
   required int measuredAtMs,
   required List<Map<String, Object?>> onehzRows,
@@ -127,8 +105,7 @@ BpResearchWindow? researchWindowFrom({
 
   if (onehz.isEmpty && rr.isEmpty) return null;
 
-  // HR mean over VALID HR rows only — a run of hr_valid = 0 rows must not
-  // drag an average toward zero, and absent validity is absent, not false.
+  // hr 0 / null is "no reading", not a heart rate.
   final hrs = onehz
       .map((r) => r['hr'])
       .whereType<int>()
@@ -148,15 +125,14 @@ BpResearchWindow? researchWindowFrom({
     rrMean = rrs.reduce((a, b) => a + b) / rrs.length;
     rrMin = rrs.reduce((a, b) => a < b ? a : b);
     rrMax = rrs.reduce((a, b) => a > b ? a : b);
-    // RMSSD over successive differences in window order (rr_ts_ms ASC is
-    // the caller's contract). Too few beats to form one difference: absent.
+    // Raw RMSSD over successive beats, no ectopic or gap rejection.
     if (rrs.length >= 2) {
       var sumSq = 0.0;
       for (var i = 1; i < rrs.length; i++) {
         final d = rrs[i] - rrs[i - 1];
         sumSq += d * d;
       }
-      rmssd = _sqrt(sumSq / (rrs.length - 1));
+      rmssd = math.sqrt(sumSq / (rrs.length - 1));
     }
   }
 
@@ -165,23 +141,11 @@ BpResearchWindow? researchWindowFrom({
     windowEndMs: end,
     onehzRows: onehz.isEmpty ? null : onehz.length,
     rrBeats: rr.isEmpty ? null : rr.length,
-    hrMean: hrMean?.toDouble(),
+    hrMean: hrMean,
     rrMsMean: rrMean,
     rrMsMin: rrMin,
     rrMsMax: rrMax,
     rmssdMs: rmssd,
     metaJson: metaJson,
   );
-}
-
-double _sqrt(double v) => v <= 0 ? 0.0 : _sqrtNewton(v);
-
-double _sqrtNewton(double v) {
-  var x = v;
-  var y = (x + 1) / 2;
-  while ((y - x).abs() > 1e-12) {
-    x = y;
-    y = (x + v / x) / 2;
-  }
-  return y;
 }

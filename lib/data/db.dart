@@ -1078,15 +1078,8 @@ class LocalDb {
           await _createEcgTables(db);
         }
         if (oldV < 55) {
-          // BP research capture: paired cuff reference readings plus the
-          // band's own decoded 1 Hz / R-R window frozen around the
-          // measurement instant, for out-of-app comparison only. Two new
-          // tables, CREATE TABLE IF NOT EXISTS and NOTHING else — no
-          // backfill, no rewrite, no ADD COLUMN — so a throw here has
-          // nothing to roll back onto (invariant 11). Ships without a
-          // kAlgoVersion bump: nothing derived moves, and nothing derived
-          // may ever read these (see the guard comment in
-          // [_createBpResearch]).
+          // BP research capture tables. Create-only, nothing derived reads
+          // them, so no kAlgoVersion bump.
           await _createBpResearch(db);
         }
       },
@@ -1179,6 +1172,7 @@ class LocalDb {
       'INTEGER NOT NULL DEFAULT 0',
     );
     await _createEcgTables(db);
+    await _createBpResearch(db);
     // Views LAST — they depend on metric_series / day_result / baselines / sessions
     // / notifications all existing. DROP+CREATE so a shape change takes effect.
     await _ensureCoachViews(db);
@@ -1599,25 +1593,10 @@ class LocalDb {
   }
 
 
-  /// BP research capture store (schema rung 55).
-  ///
-  /// EXPERIMENTAL, DEVELOPER-ONLY, and it stays that way. A cuff reading the
-  /// user types in next to the band data of the same instant is exactly the
-  /// pairing the `imported_measurement` guard exists to prevent becoming an
-  /// input: the moment a wrist series and a cuff series are regressed against
-  /// each other ON DEVICE, this app is making a cuffless-blood-pressure
-  /// claim from an uncleared device. So this is a SEPARATE store, read by
-  /// exactly one dev screen and one CSV export, and — like
-  /// `imported_measurement` and `observation` — the isolation is structural:
-  /// nothing in `compute/`, nothing that feeds `day_result` or
-  /// `metric_series`, and nothing that writes to HealthKit / Health Connect
-  /// may name either table. `bp_research_isolation_test.dart` fails the moment
-  /// anyone does.
-  ///
-  /// Captures are idempotent on `(measured_at_ms, device)`: retaking the same
-  /// cuff reading at the same instant re-states the window rather than
-  /// duplicating it. Legitimate repeat measurements minutes apart are
-  /// different instants and both stay.
+  /// BP research capture store (dev mode only). Read only by the dev screen
+  /// and the CSV export; bp_research_isolation_test.dart keeps it that way.
+  /// Foreign keys are off in this database, so the window's cascade is inert
+  /// and every delete takes the window row explicitly.
   static Future<void> _createBpResearch(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS bp_research_reference (
@@ -1638,9 +1617,6 @@ class LocalDb {
           REFERENCES bp_research_reference(id) ON DELETE CASCADE,
         window_start_ms INTEGER NOT NULL,
         window_end_ms INTEGER NOT NULL,
-        -- NULL-safe by design: the band may have had nothing to say at that
-        -- instant (not worn, not synced yet), and a missing window is recorded
-        -- as missing — never as zeroes.
         onehz_rows INTEGER,
         rr_beats INTEGER,
         hr_mean REAL,
@@ -1657,22 +1633,12 @@ class LocalDb {
     );
   }
 
-  /// Insert one cuff reference reading plus its frozen band window.
-  ///
-  /// Pure write; the caller computes the window stats (see
-  /// `lib/health/bp_research_capture.dart`). Idempotent on
-  /// `(measured_at_ms, device)`: `INSERT OR REPLACE` on the reference, then
-  /// the window row is restated in the same transaction so a retake can never
-  /// leave an old window under a new reference.
+  /// Insert one cuff reading plus its window, replacing any capture with the
+  /// same `(measured_at_ms, device)`.
   static Future<void> putBpResearchCapture(BpResearchCapture c) async {
     final db = await instance;
     await db.transaction((txn) async {
-      // NULL never equals NULL in a UNIQUE constraint, so a retake with no
-      // device text would duplicate the reference instead of replacing it.
-      // Normalizing to '' keeps (measured_at_ms, device) unique either way,
-      // and the window of the row being replaced is deleted explicitly —
-      // without PRAGMA foreign_keys the ON DELETE CASCADE never runs, and
-      // INSERT OR REPLACE assigns a fresh id that would orphan it.
+      // device is stored as '' rather than NULL so the UNIQUE key holds.
       await txn.rawDelete(
         'DELETE FROM bp_research_window WHERE reference_id IN '
         '(SELECT id FROM bp_research_reference '
@@ -1698,16 +1664,9 @@ class LocalDb {
           c.capturedAtMs,
         ],
       );
-      // A capture with no band data stores NO window row — the LEFT JOIN in
-      // [bpResearchCaptures] renders it as an empty window, and `NOT NULL`
-      // on the window bounds is what keeps a half-written window out of the
-      // store. A retake that now finds band data replaces the absent row.
+      // No band data = no window row.
       final w = c.window;
-      if (w == null) {
-        await txn.rawDelete(
-          'DELETE FROM bp_research_window WHERE reference_id = ?', [id]);
-        return;
-      }
+      if (w == null) return;
       await txn.rawInsert(
         'INSERT OR REPLACE INTO bp_research_window '
         '(reference_id, window_start_ms, window_end_ms, onehz_rows, '
@@ -1745,11 +1704,71 @@ class LocalDb {
     ''');
   }
 
-  /// Delete one capture (dev screen). The window cascades.
+  /// Fill the window of every capture that has none yet, once the primary
+  /// band's synced 1 Hz data reaches the window end. At capture time the
+  /// window is still in the future and the band hasn't offloaded it, so it
+  /// can only be read later. Returns that data edge in epoch ms (null when
+  /// nothing is decoded): a windowless capture before it is still pending,
+  /// one at or after it had no band data.
+  static Future<int?> fillBpResearchWindows() async {
+    final db = await instance;
+    final edgeSec = Sqflite.firstIntValue(await db.rawQuery(
+      'SELECT MAX(rec_ts) FROM decoded_onehz WHERE device_id = ?',
+      [kPrimaryDeviceId],
+    ));
+    if (edgeSec == null) return null;
+    final edgeMs = edgeSec * 1000;
+    final pending = await db.rawQuery(
+      'SELECT r.id, r.measured_at_ms FROM bp_research_reference r '
+      'LEFT JOIN bp_research_window w ON w.reference_id = r.id '
+      'WHERE w.reference_id IS NULL AND r.measured_at_ms <= ?',
+      [edgeMs - kBpResearchWindowPostMs],
+    );
+    for (final r in pending) {
+      final at = r['measured_at_ms'] as int;
+      final start = at - kBpResearchWindowPreMs;
+      final end = at + kBpResearchWindowPostMs;
+      final w = researchWindowFrom(
+        measuredAtMs: at,
+        onehzRows: await db.rawQuery(
+          'SELECT rec_ts, hr FROM decoded_onehz '
+          'WHERE device_id = ? AND rec_ts >= ? AND rec_ts <= ? '
+          'ORDER BY rec_ts ASC',
+          [kPrimaryDeviceId, start ~/ 1000, end ~/ 1000],
+        ),
+        // Beats of one record share rr_ts_ms; beat_index orders them.
+        rrRows: await db.rawQuery(
+          'SELECT rr_ts_ms, rr_ms FROM decoded_rr '
+          'WHERE device_id = ? AND rr_ts_ms >= ? AND rr_ts_ms <= ? '
+          'ORDER BY rr_ts_ms ASC, beat_index ASC',
+          [kPrimaryDeviceId, start, end],
+        ),
+      );
+      if (w == null) continue;
+      await db.insert(
+        'bp_research_window',
+        {
+          'reference_id': r['id'],
+          'window_start_ms': w.windowStartMs,
+          'window_end_ms': w.windowEndMs,
+          'onehz_rows': w.onehzRows,
+          'rr_beats': w.rrBeats,
+          'hr_mean': w.hrMean,
+          'rr_ms_mean': w.rrMsMean,
+          'rr_ms_min': w.rrMsMin,
+          'rr_ms_max': w.rrMsMax,
+          'rmssd_ms': w.rmssdMs,
+          'meta_json': w.metaJson,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    return edgeMs;
+  }
+
+  /// Delete one capture and its window.
   static Future<void> deleteBpResearchCapture(int id) async {
     final db = await instance;
-    // No PRAGMA foreign_keys here, so the window's ON DELETE CASCADE is
-    // inert — the delete has to take the window row explicitly.
     await db.transaction((txn) async {
       await txn.delete(
         'bp_research_window',
@@ -8870,21 +8889,8 @@ class LocalDb {
       final info = await db.rawQuery('PRAGMA table_info($t)');
       return {for (final c in info) (c['name'] as String)};
     }
-    Future<bool> srcHasTable(String t, Database s) async {
-      // A salvage source may predate the window table; `SELECT *` on a
-      // missing table throws, so probe for its existence first.
-      final rows = await s.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
-        [t],
-      );
-      return rows.isNotEmpty;
-    }
 
     final counts = <String, int>{};
-    // SOURCE→DEST id map for the BP research reference merge below: the
-    // window rows of a foreign export name their reference by the SOURCE
-    // database's AUTOINCREMENT id, which is meaningless here.
-    final bpIdMap = <int, int>{};
     // DISTINCT DAYS ACTUALLY WRITTEN — the number the caller reports as
     // "N days imported".
     //
@@ -8943,48 +8949,41 @@ class LocalDb {
             if (e.isNoSuchTableError()) continue;
             rethrow;
           }
-          // BP RESEARCH CAPTURES MERGE BY NATURAL KEY, NOT BY SOURCE ID. The
-          // reference's `id` is a device-local AUTOINCREMENT and the window's
-          // `reference_id` names it, so the generic REPLACE-by-PK path would
-          // let a foreign export's id=1 eat this install's id=1 capture. Both
-          // tables are hand-typed and tiny (nothing writes them but the dev
-          // screen), so a dedicated two-query merge beats threading a special
-          // case through the paged loop: the reference REPLACEs on its natural
-          // UNIQUE (measured_at_ms, device) key, the window follows onto the
-          // DESTINATION id, and a capture whose incoming window is absent
-          // keeps the window it already had. Re-import converges.
-          if (t == 'bp_research_reference' || t == 'bp_research_window') {
-            // The reference pass builds the id map; the window pass that
-            // follows (references merge first) only consumes it.
+          // BP research captures merge on (measured_at_ms, device), never by
+          // source id, and keep the destination id so a local window stays
+          // attached. Both tables go in one transaction on the reference pass.
+          if (t == 'bp_research_window') continue;
+          if (t == 'bp_research_reference') {
             try {
-              final refCols = await destCols('bp_research_reference');
+              final refs =
+                  await src.rawQuery('SELECT * FROM bp_research_reference');
+              var wins = const <Map<String, Object?>>[];
+              try {
+                wins = await src.rawQuery('SELECT * FROM bp_research_window');
+              } on DatabaseException catch (e) {
+                if (!e.isNoSuchTableError()) rethrow;
+              }
+              final winBySrcId = {
+                for (final w in wins)
+                  if (w['reference_id'] is num)
+                    (w['reference_id'] as num).toInt(): w,
+              };
               final winCols = await destCols('bp_research_window');
-              final srcRefs = t == 'bp_research_reference'
-                  ? await src.rawQuery('SELECT * FROM bp_research_reference')
-                  : const <Map<String, Object?>>[];
-              final srcWins = t == 'bp_research_window' &&
-                      await srcHasTable('bp_research_window', src)
-                  ? await src.rawQuery('SELECT * FROM bp_research_window')
-                  : const <Map<String, Object?>>[];
+              var winCount = 0;
               await db.transaction((txn) async {
-                for (final r in srcRefs) {
-                  final row = <String, Object?>{
-                    for (final e in r.entries)
-                      if (refCols.contains(e.key)) e.key: e.value,
-                  };
-                  final srcId = row.remove('id');
-                  // KEEP the destination id on collision. `INSERT OR
-                  // REPLACE` would delete the colliding local row and mint a
-                  // fresh AUTOINCREMENT id — stranding the local window row
-                  // under the old reference_id with no FK cascade to take
-                  // it, exactly the orphan putBpResearchCapture avoids by
-                  // deleting first. UPDATE preserves the id the window is
-                  // about to be re-attached to.
-                  final device = (row['device'] as String?) ?? '';
+                for (final r in refs) {
+                  final device = (r['device'] as String?) ?? '';
+                  final values = [
+                    r['posture'],
+                    r['conditions'],
+                    r['systolic_mmhg'],
+                    r['diastolic_mmhg'],
+                    r['captured_at_ms'],
+                  ];
                   final existing = await txn.rawQuery(
                     'SELECT id FROM bp_research_reference '
                     'WHERE measured_at_ms = ? AND device = ?',
-                    [row['measured_at_ms'], device],
+                    [r['measured_at_ms'], device],
                   );
                   final int destId;
                   if (existing.isNotEmpty) {
@@ -8993,71 +8992,34 @@ class LocalDb {
                       'UPDATE bp_research_reference SET posture = ?, '
                       'conditions = ?, systolic_mmhg = ?, diastolic_mmhg = ?, '
                       'captured_at_ms = ? WHERE id = ?',
-                      [
-                        row['posture'],
-                        row['conditions'],
-                        row['systolic_mmhg'],
-                        row['diastolic_mmhg'],
-                        row['captured_at_ms'],
-                        destId,
-                      ],
+                      [...values, destId],
                     );
                   } else {
                     destId = await txn.rawInsert(
                       'INSERT INTO bp_research_reference '
-                      '(measured_at_ms, device, posture, conditions, '
-                      'systolic_mmhg, diastolic_mmhg, captured_at_ms) '
+                      '(posture, conditions, systolic_mmhg, diastolic_mmhg, '
+                      'captured_at_ms, measured_at_ms, device) '
                       'VALUES (?, ?, ?, ?, ?, ?, ?)',
-                      [
-                        row['measured_at_ms'],
-                        device,
-                        row['posture'],
-                        row['conditions'],
-                        row['systolic_mmhg'],
-                        row['diastolic_mmhg'],
-                        row['captured_at_ms'],
-                      ],
+                      [...values, r['measured_at_ms'], device],
                     );
                   }
-                  if (srcId is num) {
-                    bpIdMap[srcId.toInt()] = destId;
-                  }
-                }
-                for (final w in srcWins) {
-                  final row = <String, Object?>{
-                    for (final e in w.entries)
-                      if (winCols.contains(e.key)) e.key: e.value,
-                  };
-                  final destRef = row.remove('reference_id');
-                  final mapped = destRef is num
-                      ? bpIdMap[destRef.toInt()]
-                      : null;
-                  if (mapped == null) continue;
-                  await txn.rawInsert(
-                    'INSERT OR REPLACE INTO bp_research_window '
-                    '(reference_id, window_start_ms, window_end_ms, '
-                    'onehz_rows, rr_beats, hr_mean, rr_ms_mean, rr_ms_min, '
-                    'rr_ms_max, rmssd_ms, meta_json) '
-                    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                    [
-                      mapped,
-                      row['window_start_ms'],
-                      row['window_end_ms'],
-                      row['onehz_rows'],
-                      row['rr_beats'],
-                      row['hr_mean'],
-                      row['rr_ms_mean'],
-                      row['rr_ms_min'],
-                      row['rr_ms_max'],
-                      row['rmssd_ms'],
-                      row['meta_json'],
-                    ],
+                  final srcId = r['id'];
+                  final w = srcId is num ? winBySrcId[srcId.toInt()] : null;
+                  if (w == null) continue;
+                  await txn.insert(
+                    'bp_research_window',
+                    {
+                      for (final e in w.entries)
+                        if (winCols.contains(e.key)) e.key: e.value,
+                      'reference_id': destId,
+                    },
+                    conflictAlgorithm: ConflictAlgorithm.replace,
                   );
+                  winCount++;
                 }
               });
-              counts[t] = t == 'bp_research_reference'
-                  ? srcRefs.length
-                  : srcWins.length;
+              counts[t] = refs.length;
+              counts['bp_research_window'] = winCount;
             } catch (_) {
               if (!tolerant) rethrow;
               counts[t] = 0;

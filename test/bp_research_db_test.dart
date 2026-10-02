@@ -305,4 +305,51 @@ void main() {
     expect(n, 1);
     await databaseFactory.deleteDatabase(srcPath);
   });
+
+  test('the window is filled once the band has synced past its end',
+      () async {
+    final at = _at + 10 * 86400000;
+    final sec = at ~/ 1000;
+    final db = await LocalDb.instance;
+    Future<void> onehz(int t, int hr) => db.insert('decoded_onehz', {
+          'device_id': LocalDb.kPrimaryDeviceId,
+          'ts_ms': t * 1000,
+          'rec_ts': t,
+          'counter': t,
+          'hr': hr,
+        });
+    Future<void> beat(int t, int i, int rr) => db.insert('decoded_rr', {
+          'device_id': LocalDb.kPrimaryDeviceId,
+          'ts_ms': t * 1000,
+          'rec_ts': t,
+          'beat_index': i,
+          'rr_ts_ms': t * 1000,
+          'rr_ms': rr,
+        });
+    // Beats of one record share rr_ts_ms; insert out of beat order.
+    await beat(sec, 1, 1000);
+    await beat(sec, 0, 800);
+    await beat(sec + 1, 0, 1100);
+    await onehz(sec, 60);
+    await onehz(sec + 1, 0);
+    await LocalDb.putBpResearchCapture(_capture(at));
+
+    Future<Map<String, Object?>> row() async => (await LocalDb
+            .bpResearchCaptures())
+        .firstWhere((r) => r['measured_at_ms'] == at);
+
+    // Synced data stops short of the window end: still pending.
+    final edge = await LocalDb.fillBpResearchWindows();
+    expect(edge, (sec + 1) * 1000);
+    expect((await row())['onehz_rows'], isNull);
+
+    await onehz(sec + 121, 61);
+    await LocalDb.fillBpResearchWindows();
+    final r = await row();
+    expect(r['onehz_rows'], 2);
+    expect(r['rr_beats'], 3);
+    expect(r['hr_mean'], 60);
+    // 800, 1000, 1100 in beat order.
+    expect(r['rmssd_ms'] as double, closeTo(158.11, 0.01));
+  });
 }

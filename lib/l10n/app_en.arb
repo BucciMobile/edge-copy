@@ -12446,7 +12446,7 @@
   "@settingsBpResearchRowTitle": {
     "description": "Developer settings row title for the experimental blood-pressure research capture screen"
   },
-  "settingsBpResearchRowSub": "EXPERIMENTAL. Pair a cuff reading with the band data of the same instant, for comparison outside this app. Never a health feature",
+  "settingsBpResearchRowSub": "Experimental. Pair cuff readings with band data for analysis outside the app",
   "@settingsBpResearchRowSub": {
     "description": "Developer settings row subtitle for the BP research capture screen"
   },
@@ -12454,7 +12454,7 @@
   "@bpResearchTitle": {
     "description": "Title of the experimental BP research capture screen"
   },
-  "bpResearchIntro": "EXPERIMENTAL. Take a cuff reading, type the pair in, press capture. The band data of the ±2 minutes around that instant is frozen next to it — for you to compare outside this app. Nothing here is a health feature, nothing here feeds any score, and nothing here is ever blended with what the band measured.",
+  "bpResearchIntro": "Experimental. Take a cuff reading, type it in and press capture. Band data from 2 minutes either side is added once the band has synced it.",
   "@bpResearchIntro": {
     "description": "Intro text of the BP research capture screen"
   },
@@ -12486,12 +12486,20 @@
   "@bpResearchHistory": {
     "description": "Section header for the stored capture list"
   },
-  "bpResearchBadValue": "That pair is outside the range this app supports (systolic 50–300, diastolic 20–200 mmHg, diastolic below systolic) — it was not saved. Check the numbers and try again.",
+  "bpResearchBadValue": "That pair is outside the supported range (systolic 50–300, diastolic 20–200 mmHg, diastolic below systolic). It was not saved.",
   "@bpResearchBadValue": {
     "description": "Snackbar text for an out-of-bounds reference pair, which is rejected, never clamped"
   },
-  "bpResearchExportHint": "Export all captures as CSV from Your data › Export CSV (set \"BP research captures\"). This is the dedicated export for BP research data; a full-database backup or an opt-in health share also contains it.",
+  "bpResearchExportHint": "Export as CSV from Your data › Export CSV (set \"BP research captures\"). Backups and an opt-in health share include them too.",
   "@bpResearchExportHint": {
     "description": "Hint under the capture list explaining the CSV export path"
+  },
+  "bpResearchWindowPending": "Waiting for the band to sync",
+  "@bpResearchWindowPending": {
+    "description": "Capture list subtitle while the band data around the reading has not synced yet"
+  },
+  "bpResearchWindowEmpty": "No band data in the window",
+  "@bpResearchWindowEmpty": {
+    "description": "Capture list subtitle when the band recorded nothing around the reading"
   }
 }

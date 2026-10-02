@@ -286,11 +286,7 @@ const kCsvExportSets = <CsvExportSet>[
   CsvExportSet(
     name: 'bp_research',
     title: 'BP research captures (EXPERIMENTAL)',
-    // Paired cuff reference readings plus the band window frozen around
-    // each instant. Research data, not health data: never blended, never a
-    // training input, and absent stats stay EMPTY here exactly as they are
-    // NULL in the store — a spreadsheet cannot tell a zero from a reading
-    // afterwards, and a column of zeroes is a fabrication.
+    // Cuff readings plus their band window. Absent stats stay empty.
     columns: [
       'measured_at_ms',
       'device',
