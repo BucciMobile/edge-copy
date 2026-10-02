@@ -4918,7 +4918,7 @@ class AppState extends ChangeNotifier {
   /// [disableAlarm] (the DISABLE_ALARM opcode).
   Future<void> clearAlarm() => disableAlarm();
 
-  /// Strap alarm-lifecycle events (56 set / 57–58 fired / 59 disabled). This is
+  /// Strap alarm-lifecycle events (56 set / 57 fired / 58 buzz / 59 disabled). This is
   /// the authoritative confirmation the SET write actually took. The edge DOES see
   /// the protocol EventId names (strapDrivenAlarmSet == 56, …); the pure state
   /// machine matches the raw ids so it stays dependency-free.
@@ -4957,6 +4957,9 @@ class AppState extends ChangeNotifier {
         // past the slot that just fired (see [alarmRearmFrom]) so a strap
         // running slightly fast doesn't re-arm the spent slot.
         unawaited(_armNextAlarmOccurrence(firedEpoch: firedEpoch));
+        break;
+      case AlarmEffect.buzzed:
+        _log('[alarm] RUN_ALARM buzz (event $id), armed slot unchanged.');
         break;
       case AlarmEffect.cleared:
         // Same persistence gap on the strap-driven clear (event 59): state was

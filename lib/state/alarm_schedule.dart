@@ -180,8 +180,9 @@ DateTime? nextAlarmOccurrence(List<AlarmScheduleEntry> schedule, DateTime now) {
 /// can land just BEFORE the slot on the phone's clock. Computing from plain
 /// `now` then re-picks the slot that just fired and leaves the next day
 /// unarmed. A fire within 30 s of the armed slot is that slot, so floor past
-/// it. A fire well before the slot is a RUN_ALARM buzz (smart wake early fire,
-/// test buzz) and the slot is still due, so `now` stands.
+/// it. A fire well before the slot isn't that slot, so `now` stands. (A
+/// RUN_ALARM buzz is event 58, which never reaches here: it doesn't consume
+/// the armed slot.)
 DateTime alarmRearmFrom(DateTime now, int? firedEpoch) {
   if (firedEpoch == null) return now;
   final slot = DateTime.fromMillisecondsSinceEpoch(firedEpoch * 1000);
