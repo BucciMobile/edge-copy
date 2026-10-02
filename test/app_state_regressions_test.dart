@@ -277,7 +277,11 @@ void main() {
       // with it the only thing this line could assert on.
     });
 
-    test('the app-side EXECUTED id (58) clears it too', () async {
+    test('the app-side EXECUTED id (58) is a RUN_ALARM buzz, the arm stays',
+        () async {
+      // Smart wake / test buzz send RUN_ALARM. Treating its 58 as the slot
+      // firing cleared the arm and, inside 30 s of the slot, re-armed
+      // tomorrow over today's still-pending alarm.
       SharedPreferences.setMockInitialValues({'alarm_epoch': 1785000000});
       await silenceOsPresent();
       final app = AppState.forTesting();
@@ -287,10 +291,10 @@ void main() {
       app.debugHandleAlarmEvent(58);
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      expect(app.alarmEpoch, isNull);
+      expect(app.alarmEpoch, 1785000000);
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
-      expect(prefs.getInt('alarm_epoch'), isNull);
+      expect(prefs.getInt('alarm_epoch'), 1785000000);
     });
 
     test('the strap-driven clear (event 59) also drops the persisted epoch',
