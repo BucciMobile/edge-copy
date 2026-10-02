@@ -8806,6 +8806,23 @@ class LocalDb {
               ))
                 coverageKey(r),
           };
+          // Phone rows are a per-day SNAPSHOT (replacePhoneCoverageForDay), not
+          // windows: a backup taken mid-hour holds a partial current-hour row
+          // whose key differs from the full hour this device has since written,
+          // and same-device phone rows sum. So a day this device already has a
+          // phone snapshot for keeps it whole; the backup's only fills days
+          // with none.
+          final havePhoneDays = <String>{
+            if (t == 'live_coverage')
+              for (final r in await db.query(
+                'live_coverage',
+                columns: ['day'],
+                where: 'source = ?',
+                whereArgs: [kStepSourcePhone],
+                distinct: true,
+              ))
+                '${r['day']}',
+          };
           var copied = 0;
           var page = firstPage;
           // ONE TRANSACTION PER PAGE, not per table. The whole-table transaction
@@ -8876,6 +8893,10 @@ class LocalDb {
                 }
                 if (t == 'live_coverage') {
                   row.remove('id');
+                  if (row['source'] == kStepSourcePhone &&
+                      havePhoneDays.contains('${row['day']}')) {
+                    continue;
+                  }
                   if (!haveCoverage.add(coverageKey(row))) continue;
                 }
                 // A LEGACY export's decoded_rr carries no rec_ts column; derive

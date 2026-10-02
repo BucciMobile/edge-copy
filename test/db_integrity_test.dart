@@ -317,6 +317,50 @@ void main() {
     expect([for (final r in cov) r['start_ts']], [1782900000, 1782904000]);
   });
 
+  test('import keeps a day\'s local phone snapshot, no partial-hour stacking',
+      () async {
+    // Local already wrote the full 10:00 hour; the backup holds the partial
+    // hour it saw mid-sync. Same device, same rank: summing them double counts.
+    const h = 1783000800;
+    await LocalDb.replacePhoneCoverageForDay('2026-07-02', [
+      (startTs: h, endTs: h + 3600, steps: 900),
+    ]);
+
+    final dir = await databaseFactory.getDatabasesPath();
+    final srcPath = p.join(dir, 'foreign_export_phone_test.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+      'CREATE TABLE live_coverage (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+      'start_ts INTEGER, end_ts INTEGER, steps INTEGER, day TEXT, '
+      "source TEXT DEFAULT 'band', device_id TEXT DEFAULT '')",
+    );
+    for (final r in [
+      (h, h + 2220, 400, '2026-07-02'),
+      (h + 86400, h + 86400 + 3600, 700, '2026-07-04'),
+    ]) {
+      await src.insert('live_coverage', {
+        'start_ts': r.$1,
+        'end_ts': r.$2,
+        'steps': r.$3,
+        'day': r.$4,
+        'source': 'phone',
+      });
+    }
+    await src.close();
+    await LocalDb.importFromDbFile(srcPath);
+    await databaseFactory.deleteDatabase(srcPath);
+
+    final db = await LocalDb.instance;
+    Future<List<Object?>> phone(String d) async => [
+          for (final r in await db.query('live_coverage',
+              where: 'day = ? AND source = ?', whereArgs: [d, 'phone']))
+            r['steps'],
+        ];
+    expect(await phone('2026-07-02'), [900]);
+    expect(await phone('2026-07-04'), [700]); // no local snapshot: backup's
+  });
+
   group('sync_ledger real per-chunk rows + sync_quarantine reader', () {
     test('distinct chunk_ids do not collide (the old "capture"-only bug)',
         () async {
