@@ -115,7 +115,7 @@ void main() {
       ]);
       expect(p.factor, kStepFactorMax);
     });
-    test('a version bump starts every profile from the prior', () {
+    test('the prior is factor 1.0 at the current version', () {
       final p = StepCalibrationProfile.uncalibrated('gen5', Wearing.wrist);
       expect(p.version, kStepCalibrationVersion);
       expect(p.factor, 1.0);
@@ -147,7 +147,7 @@ void main() {
       final big = const StepCalibrationProfile(
         deviceFamily: 'gen5',
         wearing: Wearing.wrist,
-        factor: 2.0,
+        factor: 3.0, // past the clamp, so only the output bound holds it
         nDays: 9,
         version: kStepCalibrationVersion,
       );
