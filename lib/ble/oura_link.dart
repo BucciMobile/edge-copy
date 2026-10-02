@@ -658,8 +658,11 @@ class OuraLink {
     var finished = false;
     final done = host.run(link).whenComplete(() => finished = true);
     var served = 0;
-    for (var spin = 0; spin < 800 && !finished; spin++) {
-      await Future<void>.delayed(Duration.zero);
+    // Bounded by wall time, not a spin count: a real sqflite commit between
+    // batches can outlast any fixed number of zero-length yields.
+    final clock = Stopwatch()..start();
+    while (!finished && clock.elapsed < const Duration(seconds: 5)) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {
           link.feed(kOuraNotifyChar, f, atSec: _now());
