@@ -478,13 +478,11 @@ class OuraAdapter extends BandAdapter {
         at: DateTime.fromMillisecondsSinceEpoch(
             a.$2 * 1000 + (h.$1 - a.$1) * 100),
         sourceKind: ObservationSource.vendor,
-        // Rendered verbatim as the timeline row title, so it is a label.
-        vendorKey: switch (h.$2) {
-          OuraSleepPhase.deep => 'Deep sleep',
-          OuraSleepPhase.light => 'Light sleep',
-          OuraSleepPhase.rem => 'REM sleep',
-          OuraSleepPhase.awake => 'Awake',
-        },
+        // A stable id, not a label: it is part of the row's identity, so a
+        // display string here would split every banked row from its re-read
+        // the day the wording or locale changed. The timeline maps it to a
+        // localized title (`observationTitle`).
+        vendorKey: 'oura_sleep_${h.$2.name}',
         value: h.$3,
         unit: 'min',
         attribution: 'Oura',

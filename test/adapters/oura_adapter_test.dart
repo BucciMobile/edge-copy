@@ -524,15 +524,15 @@ void main() {
     final byKey = {
       for (final o in scalars.rows) o.vendorKey: o,
     };
-    for (final stage in ['Deep sleep', 'Light sleep', 'REM sleep', 'Awake']) {
-      final o = byKey[stage]!;
+    for (final stage in ['deep', 'light', 'rem', 'awake']) {
+      final o = byKey['oura_sleep_$stage']!;
       expect(o.value, 2.0);
       expect(o.unit, 'min');
       expect(o.attribution, 'Oura');
       expect(o.sourceKind, ObservationSource.vendor);
       expect(o.key, isNull, reason: 'their staging, their name — vendorKey');
     }
-    final at = byKey['Deep sleep']!.at;
+    final at = byKey['oura_sleep_deep']!.at;
     expect(at.millisecondsSinceEpoch ~/ 1000, 1782043215 + 20);
   });
 
@@ -565,7 +565,7 @@ void main() {
       for (final o in rows) (o.at.millisecondsSinceEpoch, o.vendorKey),
     };
     expect(keys, hasLength(8), reason: 'no page may REPLACE the other');
-    final deep = rows.where((o) => o.vendorKey == 'Deep sleep').toList();
+    final deep = rows.where((o) => o.vendorKey == 'oura_sleep_deep').toList();
     expect(deep.map((o) => o.at.millisecondsSinceEpoch),
         [(1782043215 + 20) * 1000, (1782043215 + 20) * 1000 + 500]);
   });
