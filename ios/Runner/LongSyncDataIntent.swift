@@ -12,7 +12,7 @@ struct LongSyncDataIntent: LongRunningIntent, CancellableIntent {
   static var authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
 
   @Parameter(title: "Ignore Connectivity Errors", description:
-    "Skip when Bluetooth is unavailable or the band cannot be reached. Other errors and system progress UI are not suppressed.", default: false)
+    "Skip when Bluetooth is unavailable or the band cannot be reached. Pairing, permission, and other errors are still reported.", default: false)
   var ignoreConnectivityErrors: Bool
 
   static var parameterSummary: some ParameterSummary {

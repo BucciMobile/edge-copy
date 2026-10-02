@@ -19,11 +19,9 @@ The ordinary action has a 25-second native deadline, including Flutter startup. 
 
 ## Sync Data (Long Running)
 
-On iOS 27 and later, builds made with Xcode 27 or later also expose **Sync Data (Long Running)**. It uses Apple's `LongRunningIntent` and `CancellableIntent` in the main app process, with the same sync bridge, persistence path, and **Ignore Connectivity Errors** option. The ordinary action remains available on iOS 16 and later; the app's deployment target is unchanged.
+On iOS 27, builds made with Xcode 27 also expose **Sync Data (Long Running)**. It uses the same sync path and **Ignore Connectivity Errors** option as Sync Data, but asks iOS for extended background time. Edge caps it at ten minutes including startup; iOS may stop it sooner. Cancelling or timing out keeps everything already saved.
 
-The long-running action requests extended execution through `performBackgroundTask`. Its own deadline is ten minutes, including startup; this is a limit imposed by Edge, not a promise that iOS will grant ten minutes. System cancellation and timeouts cancel the matching sync request and preserve committed data.
-
-The system manages the progress Live Activity and its stop control. Progress counts actual saved batches and stays indeterminate because the band does not provide a reliable total batch count. Only a completed sync marks progress complete; partial, skipped, and already-running results do not. The connectivity-error option does not suppress this system UI. See [Apple's long-running intent walkthrough](https://developer.apple.com/videos/play/wwdc2026/345/).
+iOS shows its own progress Live Activity with a stop button, and the connectivity option does not hide it. Progress counts saved batches and stays indeterminate, since the band does not report a total up front. See [Apple's long-running intent walkthrough](https://developer.apple.com/videos/play/wwdc2026/345/).
 
 ## Lifecycle and data safety
 
