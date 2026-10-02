@@ -164,6 +164,22 @@ void main() {
     });
   });
 
+  group('healthWorkoutCaloriesToSubtract', () {
+    test('a private session stays in the day\'s active energy', () {
+      // Its WORKOUT sample is never written, so subtracting it too would drop
+      // its calories out of Health entirely.
+      expect(
+        healthWorkoutCaloriesToSubtract([
+          {..._session(), 'calories': 400, 'private': 1},
+          {..._session(), 'calories': 100},
+          {..._session(), 'calories': 50, 'status': 'live'},
+          {..._session(), 'calories': 30, 'end_ts_fabricated': 1},
+        ]),
+        100,
+      );
+    });
+  });
+
   group('deleteWorkoutWindow (retime cleanup)', () {
     // setWorkoutWindow only has the OLD [start,end] before it overwrites the
     // row — this is what it calls to clear that range so a narrowed/moved

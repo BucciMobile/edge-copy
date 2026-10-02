@@ -82,6 +82,12 @@ List<HealthHeartRateSample> normalizeHealthHeartRateSamples(
   return unique;
 }
 
+/// Where a day's minute-HR rewrite starts: its first sample, or null when
+/// there is none. The decoded rows behind it are pruned mid-day, so anything
+/// earlier was written from rows that are gone and must be left alone.
+DateTime? healthHeartRateRewriteFrom(List<HealthHeartRateSample> samples) =>
+    samples.isEmpty ? null : samples.first.time;
+
 Future<bool> exportContinuousHeartRateDay({
   required List<Map<String, Object?>> rows,
   required DateTime start,
@@ -96,7 +102,7 @@ Future<bool> exportContinuousHeartRateDay({
 
   if (useAndroidBatch) {
     try {
-      return await androidWriter.replaceDay(start, end, samples);
+      return await androidWriter.replaceDay(samples.first.time, end, samples);
     } catch (_) {
       return false;
     }

@@ -981,6 +981,55 @@ class HealthExporter {
     // Outside the success accounting on purpose — see the method doc.
     await _purgeLegacyStepsIfNeeded(date, dayStart, dayEnd);
 
+    // Continuous Heart Rate (minute-by-minute average).
+    List<Map<String, Object?>>? hrRows;
+    try {
+      final db = await LocalDb.instance;
+      final startTs = dayStart.millisecondsSinceEpoch ~/ 1000;
+      final endTs = dayEnd.millisecondsSinceEpoch ~/ 1000;
+      // Group by minute to downsample
+      hrRows = await db.rawQuery(
+        'SELECT (rec_ts / 60) * 60 AS minute_ts, AVG(hr) as avg_hr '
+        'FROM decoded_onehz '
+        // THE BAND'S OWN SECONDS, AND DELIBERATELY NOT `derivableSourceSql()`.
+        //
+        // This is the one read in the app where a wider predicate would be
+        // wrong even for a VERIFIED sensor, and it is the same argument the
+        // steps block below makes: a sample that lands in Apple Health or
+        // Health Connect carries no qualifier, no source seam and no way for
+        // the user to unpick it later. Every other app on the device then
+        // treats it as one continuous series measured one way.
+        //
+        // A chest strap's HR under the same identity as the wrist's is exactly
+        // the systematic-difference blending this project refuses everywhere
+        // else (ASSUMPTIONS D2) — except that here the blend happens inside a
+        // system store we do not own and cannot correct. Deleting our prior
+        // samples for the window (which this exporter already does on every
+        // re-derive) is the only reversal available, and it is ours to run, not
+        // the user's.
+        //
+        // So: no external sensor's HR is written to the OS health store, ever,
+        // whatever its verification tier. If a sensor's readings should reach
+        // HealthKit, that sensor's own app is the honest writer of them. A
+        // separate per-source export identity is the only thing that would
+        // change this call, and it needs a decision (F5-shaped) rather than a
+        // predicate.
+        'WHERE rec_ts >= ? AND rec_ts < ? AND hr > 0 AND $kPrimaryBandSourceSql '
+        'GROUP BY minute_ts',
+        [startTs, endTs],
+      );
+    } catch (e) {
+      debugPrint('[health] query continuous hr: $e');
+      success = false;
+    }
+    // Minute HR is rebuilt from decoded_onehz, which is pruned
+    // rawRetentionDays behind the data edge, mid-day. Only the span it still
+    // covers may be cleared, or re-exporting an older day deletes HR it can
+    // never write back.
+    final hrFrom = healthHeartRateRewriteFrom(
+      normalizeHealthHeartRateSamples(hrRows ?? const [], dayStart, dayEnd),
+    );
+
     // Idempotency: remove OUR previously-written samples for this day (HealthKit /
     // Health Connect only let an app delete its own data), then re-write fresh.
     // Sleep is not in this list — native replace already deleted it.
@@ -1004,7 +1053,9 @@ class HealthExporter {
     // per-session instead of day-wide.
     var workoutCleared = true;
     for (final t in _rewriteTypes) {
-      if (await _deleteOwnSamples(t, dayStart, dayEnd)) continue;
+      final from = t == HealthDataType.HEART_RATE ? hrFrom : dayStart;
+      if (from == null) continue;
+      if (await _deleteOwnSamples(t, from, dayEnd)) continue;
       debugPrint('[health] delete ${t.name} did not clear the day');
       success = false;
       if (t == HealthDataType.WORKOUT) workoutCleared = false;
@@ -1086,16 +1137,7 @@ class HealthExporter {
         dayStart.millisecondsSinceEpoch ~/ 1000,
         (dayEnd.millisecondsSinceEpoch ~/ 1000) - 1,
       );
-      var workoutCal = 0.0;
-      for (final r in rows) {
-        if ((r['status']?.toString() ?? '') == 'live') continue;
-        // A fabricated session's calories never get their own WORKOUT
-        // sample (_writeOneWorkout skips it) — subtracting them here too
-        // would make them vanish from the day entirely instead of just
-        // staying in the active-energy total where they still belong.
-        if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) continue;
-        workoutCal += (r['calories'] as num?)?.toDouble() ?? 0.0;
-      }
+      final workoutCal = healthWorkoutCaloriesToSubtract(rows);
       cal = (cal > workoutCal) ? cal - workoutCal : 0.0;
     } catch (e) {
       // Unknown whether cal is workout-adjusted — still write our best guess
@@ -1153,47 +1195,6 @@ class HealthExporter {
       }
     }
 
-    // Continuous Heart Rate (minute-by-minute average).
-    List<Map<String, Object?>>? hrRows;
-    try {
-      final db = await LocalDb.instance;
-      final startTs = dayStart.millisecondsSinceEpoch ~/ 1000;
-      final endTs = dayEnd.millisecondsSinceEpoch ~/ 1000;
-      // Group by minute to downsample
-      hrRows = await db.rawQuery(
-        'SELECT (rec_ts / 60) * 60 AS minute_ts, AVG(hr) as avg_hr '
-        'FROM decoded_onehz '
-        // THE BAND'S OWN SECONDS, AND DELIBERATELY NOT `derivableSourceSql()`.
-        //
-        // This is the one read in the app where a wider predicate would be
-        // wrong even for a VERIFIED sensor, and it is the same argument the
-        // steps block below makes: a sample that lands in Apple Health or
-        // Health Connect carries no qualifier, no source seam and no way for
-        // the user to unpick it later. Every other app on the device then
-        // treats it as one continuous series measured one way.
-        //
-        // A chest strap's HR under the same identity as the wrist's is exactly
-        // the systematic-difference blending this project refuses everywhere
-        // else (ASSUMPTIONS D2) — except that here the blend happens inside a
-        // system store we do not own and cannot correct. Deleting our prior
-        // samples for the window (which this exporter already does on every
-        // re-derive) is the only reversal available, and it is ours to run, not
-        // the user's.
-        //
-        // So: no external sensor's HR is written to the OS health store, ever,
-        // whatever its verification tier. If a sensor's readings should reach
-        // HealthKit, that sensor's own app is the honest writer of them. A
-        // separate per-source export identity is the only thing that would
-        // change this call, and it needs a decision (F5-shaped) rather than a
-        // predicate.
-        'WHERE rec_ts >= ? AND rec_ts < ? AND hr > 0 AND $kPrimaryBandSourceSql '
-        'GROUP BY minute_ts',
-        [startTs, endTs],
-      );
-    } catch (e) {
-      debugPrint('[health] query continuous hr: $e');
-      success = false;
-    }
     if (hrRows != null) {
       final wroteHeartRate = await exportContinuousHeartRateDay(
         rows: hrRows,
@@ -1443,6 +1444,22 @@ String? healthWorkoutTitleForType(String? type) {
       .split(' ')
       .map((w) => w[0].toUpperCase() + w.substring(1))
       .join(' ');
+}
+
+/// Calories of the day's sessions that get their own WORKOUT sample, and so
+/// come off the day's active energy. A session [HealthExporter] skips (live,
+/// fabricated end, private) keeps its calories in the active-energy total —
+/// subtracting them too would make them vanish from the day entirely.
+@visibleForTesting
+double healthWorkoutCaloriesToSubtract(List<Map<String, Object?>> rows) {
+  var total = 0.0;
+  for (final r in rows) {
+    if ((r['status']?.toString() ?? '') == 'live') continue;
+    if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) continue;
+    if ((r['private'] as num?)?.toInt() == 1) continue;
+    total += (r['calories'] as num?)?.toDouble() ?? 0.0;
+  }
+  return total;
 }
 
 /// Parameterised by [ios] rather than reading `Platform` directly so a unit

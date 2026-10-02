@@ -74,7 +74,12 @@ void main() {
       expect(calls, hasLength(1));
       expect(calls.single.method, 'replaceHeartRateDay');
       final args = (calls.single.arguments as Map).cast<String, Object?>();
-      expect(args['startTime'], start.millisecondsSinceEpoch);
+      expect(
+        args['startTime'],
+        DateTime(2026, 8, 5, 0, 1).millisecondsSinceEpoch,
+        reason: 'decoded rows before the first sample were pruned; the '
+            'minute HR written from them must survive the replace',
+      );
       expect(args['endTime'], end.millisecondsSinceEpoch);
       expect(args['samples'], [
         {
@@ -86,6 +91,19 @@ void main() {
           'beatsPerMinute': anyOf(81, 82),
         },
       ]);
+    });
+
+    test('a day with no samples left is not rewritten', () {
+      // The raw window is gone for an older day being re-exported. Clearing
+      // its HR anyway deletes what was written while the rows still existed.
+      expect(healthHeartRateRewriteFrom(const []), isNull);
+      expect(
+        healthHeartRateRewriteFrom([
+          HealthHeartRateSample(DateTime(2026, 8, 5, 14, 7), 70),
+          HealthHeartRateSample(DateTime(2026, 8, 5, 14, 8), 71),
+        ]),
+        DateTime(2026, 8, 5, 14, 7),
+      );
     });
 
     test('Android batch false result is retryable', () async {
