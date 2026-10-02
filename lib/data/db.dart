@@ -197,8 +197,6 @@ class LocalDb {
     'metric_series',
     'metric_series_version',
     'baselines',
-    // Step-calibration learning tables — the day observations are the
-    // estimator's input, unrecoverable once the substrate is pruned.
     'step_calibration',
     'step_calibration_day',
     'raw_archive',
@@ -1079,21 +1077,8 @@ class LocalDb {
           await _createEcgTables(db);
         }
         if (oldV < 55) {
-          // Step calibration profiles: one row per (device_family, wearing).
-          // CREATE TABLE IF NOT EXISTS and nothing else — same shape contract
-          // as the ECG rung above. The wearing LOCATION itself needs no
-          // migration: `device.wearing` has existed since the v51 rung with
-          // DEFAULT 1 (wrist) and no writer; this feature gives it its first
-          // one. No backfill: every existing row already says wrist, which is
-          // what a WHOOP on the wrist means and what the column default
-          // asserted all along.
-          //
-          // `wearing_set_ts` stamps WHEN the current wearing statement was
-          // made. A day derived BEFORE that stamp may have been worn at the
-          // PREVIOUS location — the calibration must not learn such a day
-          // under the new location's profile, nor apply the new profile's
-          // factor to it. NULL means "set before this feature existed" —
-          // treated as always-valid, because the wrist default never changed.
+          // Step calibration tables, plus when `device.wearing` was last
+          // changed (NULL = never; that column has had DEFAULT 1 since v51).
           await _addColumnIfMissing(
             db, 'device', 'wearing_set_ts', 'INTEGER',
           );
@@ -1866,15 +1851,8 @@ class LocalDb {
     );
   }
 
-  /// Step calibration profiles, one row per (device_family, wearing) pair.
-  ///
-  /// Written by the derivation pass after a day is derived (the estimator
-  /// needs the day's phone-covered reference and the counter's ticks in one
-  /// place), read by the steps rung before it publishes a counter total.
-  /// Versioned by [kStepCalibrationVersion] in step_calibration.dart: a
-  /// version the current code does not recognise is IGNORED (reads back
-  /// null), never re-applied — a factor learned by different math is not a
-  /// factor this math may use.
+  /// Step calibration: one profile per (device_family, wearing), and the
+  /// per-day observations it is fitted from.
   static Future<void> _createStepCalibration(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS step_calibration (
@@ -1899,10 +1877,7 @@ class LocalDb {
     ''');
   }
 
-  /// Bank one day's calibration observation. Written once per derived day,
-  /// idempotent by key. NULL reference_steps means "the phone did not cover
-  /// this day" — the row still lands so the estimator can see the day
-  /// happened, but it admits nothing (see stepCalibrationDayAdmissible).
+  /// Idempotent by key. NULL reference_steps = the phone did not cover the day.
   static Future<void> putStepCalibrationDay({
     required String day,
     required String deviceFamily,
@@ -1924,10 +1899,7 @@ class LocalDb {
     );
   }
 
-  /// The observed days for one (family, wearing) pair, most recent first.
-  /// The estimator reads this, not day_result payloads: the payload's shape
-  /// moves on every kAlgoVersion bump and a calibration must not be hostage
-  /// to bundle internals.
+  /// Observed days for one (family, wearing) pair, most recent first.
   static Future<List<Map<String, Object?>>> stepCalibrationDays(
     String deviceFamily,
     int wearing, {
@@ -1943,19 +1915,9 @@ class LocalDb {
     );
   }
 
-  /// The user's statement of where the band sits: `Wearing.wrist` (1),
-  /// `Wearing.bicep` (2), `Wearing.other` (3). The column has existed since
-  /// the v51 rung with DEFAULT 1 and no writer; this is its first.
-  /// Sets the wearing location and stamps WHEN the statement was made —
-  /// the derive path compares a day's timestamp against this stamp and
-  /// refuses to learn or apply a profile for days that PRECEDE a location
-  /// change (they may have been worn at the previous location).
-  /// Returns the number of rows updated: ZERO means the device row is gone
-  /// (an unpair racing the picker) — the caller must not report a save.
-  /// Re-selecting the SAME location must not re-stamp: a fresh stamp would
-  /// mark every existing day as predating a "change" that never happened,
-  /// silently deactivating the learned profile until three new days are
-  /// collected. Only a real CHANGE moves the stamp.
+  /// Sets `device.wearing` and stamps `wearing_set_ts` only on a real change
+  /// (re-picking the same location must not invalidate learned days).
+  /// Returns rows updated; 0 means the device row is gone.
   static Future<int> setDeviceWearing(
     int wearing, [
     String id = kPrimaryDeviceId,
@@ -1974,34 +1936,10 @@ class LocalDb {
     );
   }
 
-  /// [Wearing.parse] of the stored value — null when this build does not
-  /// know the code (future version) or there is no device row yet. Null is a
-  /// refusal: the calibration profile falls back to wrist ONLY on an actual
-  /// wrist row, never on an unknown one.
-  static Future<int?> deviceWearing([String id = kPrimaryDeviceId]) async {
-    final row = await deviceRow(id);
-    return row == null ? null : Wearing.parse(row['wearing']);
-  }
-
-  /// The RAW `device.wearing` integer, before [Wearing.parse] — null only
-  /// when there is no device row. Unlike [deviceWearing] this distinguishes
-  /// "no row yet" (null) from "a future build wrote a code this build does
-  /// not know" (a non-null integer outside `Wearing.known`): the derivation
-  /// path refuses the calibration profile on the latter and defaults to
-  /// wrist only on the former, because [deviceWearing]'s single null cannot
-  /// carry both meanings.
+  /// Raw `device.wearing`, null when there is no device row.
   static Future<int?> deviceWearingRaw([String id = kPrimaryDeviceId]) async {
     final row = await deviceRow(id);
     return (row?['wearing'] as num?)?.toInt();
-  }
-
-  /// The epoch-second stamp of the LAST wearing change, or null when the
-  /// statement predates the stamp (v54 rows) or there is no device row.
-  /// Null is treated as always-valid: the wrist default never changed, so
-  /// pre-stamp rows assert nothing new to invalidate.
-  static Future<int?> deviceWearingSetTs([String id = kPrimaryDeviceId]) async {
-    final row = await deviceRow(id);
-    return (row?['wearing_set_ts'] as num?)?.toInt();
   }
 
   /// The stored profile for a (family, wearing) pair, or null when none was
@@ -2030,8 +1968,6 @@ class LocalDb {
     );
   }
 
-  /// Upsert one profile. The estimator is the only writer and always writes
-  /// a complete row, so this is a plain replace keyed by the pair.
   static Future<void> putStepCalibrationProfile(
     StepCalibrationProfile p,
   ) async {
@@ -2048,26 +1984,6 @@ class LocalDb {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
-  }
-
-  /// Every stored profile — the estimator's re-fit reads them all so a
-  /// re-derivation keeps learned factors rather than forgetting them per
-  /// day. Rows with a foreign version are filtered by the reader, not here:
-  /// this returns the TABLE, and the table is append-history, not truth.
-  static Future<List<StepCalibrationProfile>> stepCalibrationProfiles() async {
-    final db = await instance;
-    final rows = await db.query('step_calibration');
-    return [
-      for (final row in rows)
-        if ((row['version'] as num?)?.toInt() == kStepCalibrationVersion)
-          StepCalibrationProfile(
-            deviceFamily: row['device_family'] as String? ?? '',
-            wearing: (row['wearing'] as num?)?.toInt() ?? 0,
-            factor: (row['factor'] as num?)?.toDouble() ?? 1.0,
-            nDays: (row['n_days'] as num?)?.toInt() ?? 0,
-            version: kStepCalibrationVersion,
-          ),
-    ];
   }
 
   /// Persist one accepted reading and its packets ATOMICALLY. Throws on any
@@ -8880,12 +8796,7 @@ class LocalDb {
       'sessions',
       'notifications',
       'baselines',
-      // The step-calibration learning tables. `step_calibration_day` is the
-      // estimator's persisted input, NOT data rebuilt from `day_result` —
-      // after the substrate is pruned a lost observation cannot be
-      // reconstructed, only re-collected over ≥3 new days. Parent before
-      // child: a merge cut short must not add day observations for a
-      // profile row that did not make it.
+      // Calibration observations cannot be rebuilt once raw is pruned.
       'step_calibration',
       'step_calibration_day',
       // The devices this phone knows about — so a SECONDARY device's identity

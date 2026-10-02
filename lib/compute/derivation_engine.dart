@@ -1720,42 +1720,12 @@ import 'substrate.dart';
 // withheld — a fabricated-metric bug on `circadian_lifestyle`'s stored
 // output. kAnalyticsPin repinned to analytics main's tip (one commit past
 // PR #75's merge SHA).
-// v98 — STEP CALIBRATION + COUNTER HONESTY (family × wearing). Three
-// changes to the steps rung, all disclosed in the bundle:
-//
-//   1. The gen5 on-chip counter total is now CALIBRATED per
-//      (device_family, wearing) with a multiplicative factor learned
-//      against phone-covered days (ratio-of-sums, shrunk toward 1.0,
-//      clamped to [0.5, 2.0]; see step_calibration.dart). Uncalibrated
-//      installs publish exactly the same number as before — factor 1.0 is
-//      the prior, and it takes >=3 admissible days before a learned factor
-//      exists at all. The user's wearing statement (device.wearing,
-//      1=wrist default, 2=bicep, 3=other, set from the band's device page)
-//      routes which profile applies.
-//   2. The counter's own coverage is now IN the bundle
-//      (`counter_coverage`: samples, gap_seconds, dropped_boundaries) — a
-//      day with long sync gaps publishes its total as a partial
-//      observation instead of standing in for the whole day.
-//   3. `confidence` on a strap_counter day is now earned (0.9 uncalibrated
-//      up to 0.98 with days of evidence) rather than the constant 0.9.
-//
-// GENERATIONS, and what each one gets out of this bump:
-//   - gen4 gains NOTHING and loses nothing: it has no on-chip counter
-//      (verified in the protocol R24 decode), so it is not in
-//      `_stepCounterModulus`, its days keep resolving through the source
-//      ladder exactly as before, and the calibration tables simply never
-//      see a gen4 counter day. Absence stays absence — never 0.
-//   - gen5 is the only family with a VERIFIED counter and the full
-//      beneficiary: calibration, coverage disclosure, earned confidence.
-//   - MG rides gen5's path on an ASSUMPTION (same fd4b/Maverick offload,
-//      same `stepMotionCounter`); if an MG export proves the field absent,
-//      the counter path silently degrades to the gen4 behaviour (absent,
-//      ladder fallback) and can never fabricate steps. See
-//      `_stepCounterModulus` for the full evidence status per family.
-//
-// `band_measured` stays the RAW counter ticks and `counter_calibration`
-// discloses the applied factor, so corrected vs raw is auditable without
-// re-deriving. Schema 55 carries the two learning tables.
+// 97 → 98 (gen5 step counter calibration): the strap_counter total is
+// scaled by a per-(family, wearing) factor learned against phone-only days
+// (step_calibration.dart; factor 1.0 until 3 admissible days exist), the
+// steps bundle gains `counter_wearing` / `counter_calibration` /
+// `counter_coverage`, and strap_counter confidence is 0.9..0.98 by evidence.
+// `band_measured` stays the raw ticks. gen4 has no counter and is unchanged.
 const int kAlgoVersion = 98;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
@@ -4208,51 +4178,25 @@ class DerivationEngine {
     final stepSpans = [
       for (final s in liveSteps.spans) [s.startTs, s.endTs, s.steps],
     ];
-    // The step-counter calibration, read HERE — the DB lives on this isolate
-    // and the pipeline input is frozen data. Keyed by (family, wearing): the
-    // user's wearing statement routes which profile applies. Distinct
-    // three-valued semantics, deliberately NOT coalesced:
-    //   null, no row    = no device row yet -> wrist, the column DEFAULT,
-    //                     identical to every pre-v98 day
-    //   null, raw>0    = a code THIS build does not know (a future build wrote
-    //                     it) -> REFUSE the profile lookup, never fall to
-    //                     wrist: a wrist-learned factor applied to an unnamed
-    //                     placement would mis-correct silently.
-    // `deviceWearing()` alone cannot distinguish the two nulls, so the raw
-    // column is read once alongside it.
-    final rawWearing = await LocalDb.deviceWearingRaw();
-    final counterWearing =
-        rawWearing == null ? Wearing.wrist : (Wearing.parse(rawWearing) ?? Wearing.wrist);
-    final counterWearingUnknown =
-        rawWearing != null && !Wearing.known.contains(rawWearing);
-    // A day is only safe under the CURRENT wearing statement when the
-    // statement predates the day's FIRST sample. A change made MID-day
-    // leaves the day's first half worn at the previous location — such a
-    // day is refused for both learning and profile application, exactly
-    // like a fully-past day. Refusing on the day's END would let the
-    // switch day itself through, half-worn at the old location. This is
-    // the conservative arm of the alternative ("exclude rather than
-    // assign"). Null stamp = the statement predates this feature (v54
-    // rows): always valid, because the wrist default never changed under
-    // it.
-    final wearingSetTs = await LocalDb.deviceWearingSetTs();
+    // Step-counter calibration profile, keyed by (family, wearing). Wearing
+    // is 0 (refused: no profile, no learning) when the stored code is one
+    // this build does not know, or the day started before the last wearing
+    // change and may have been worn at the old location.
+    final devRow = await LocalDb.deviceRow();
+    final rawWearing = (devRow?['wearing'] as num?)?.toInt();
+    final wearingSetTs = (devRow?['wearing_set_ts'] as num?)?.toInt();
     final dayStartTs = daySub.tsSec.isEmpty ? null : daySub.tsSec.first;
-    final counterWearingStale = !counterWearingUnknown &&
-        wearingSetTs != null &&
-        dayStartTs != null &&
-        dayStartTs < wearingSetTs;
-    final counterProfile = (counterWearingUnknown || counterWearingStale)
+    final counterWearing = rawWearing == null
+        ? Wearing.wrist
+        : (wearingSetTs != null &&
+                dayStartTs != null &&
+                dayStartTs < wearingSetTs)
+            ? 0
+            : (Wearing.parse(rawWearing) ?? 0);
+    final counterProfile = counterWearing == 0 || daySub.deviceFamily == null
         ? null
-        : daySub.deviceFamily == null
-            ? null
-            : await LocalDb.stepCalibrationProfile(
-                daySub.deviceFamily!, counterWearing);
-    // Carried to the pipeline as 0 when the wearing statement was REFUSED
-    // for this day — 0 is not a wearing code, it is the pipeline's absent
-    // marker: the bundle then omits `counter_wearing` rather than naming
-    // 'wrist' for a routing decision that never happened (see _writeSteps).
-    final counterWearingRouted =
-        (counterWearingUnknown || counterWearingStale) ? 0 : counterWearing;
+        : await LocalDb.stepCalibrationProfile(
+            daySub.deviceFamily!, counterWearing);
     final input = DayBundleInput(
       date: day.date,
       dayTsSec: daySub.tsSec,
@@ -4280,9 +4224,6 @@ class DerivationEngine {
       // guess — sleep-onset latency only means what people think it means on a
       // forced window.
       sleepSource: day.sleepSource,
-      counterProfileFactor: counterProfile?.factor,
-      counterProfileNDays: counterProfile?.nDays,
-      counterWearing: counterWearingRouted,
     );
     final withHistory = _attachHistory(input, history);
 
@@ -4591,9 +4532,8 @@ class DerivationEngine {
         maxHrUsed: (bundle['max_hr_used'] as num?)?.round(),
         liveStepsReal: liveSteps.total,
         liveStepsFromStrap: liveSteps.strap,
-        counterProfileFactor: counterProfile?.factor,
-        counterProfileNDays: counterProfile?.nDays,
-        counterWearing: counterWearingRouted,
+        counterProfile: counterProfile,
+        counterWearing: counterWearing,
         // The same resolution's credited spans, so the walking-cadence term
         // prices exactly the steps the day's total already counted — never a
         // raw row the ladder took back.
@@ -4931,59 +4871,23 @@ class DerivationEngine {
       '(sleep=${day.sleepOffsetSec > day.sleepOnsetSec}, final=$finalized)',
     );
     await _maybeFreezeHeadlineReadiness(day, dataNowSec, sc('readiness'));
-    // Bank today's step-calibration observation and refit the profile. AFTER
-    // the day result so a derive that never produced a day leaves the
-    // learning tables untouched; idempotent by key, so re-derives only
-    // refresh the same day's row. The observation itself is PURE FACTS
-    // (phone total, counter ticks) — the estimate runs on the banked rows,
-    // never on this pass's in-memory bundle, so a re-derive cannot double-
-    // count a day the table already holds.
-    //
-    // SKIPPED for unknown wearing codes (banking an unnamed placement
-    // under `Wearing.wrist` would corrupt the wrist profile) and for days
-    // that predate the last wearing change (they may have been worn at
-    // the previous location — see the stale check at the input build).
-    if (!counterWearingUnknown && !counterWearingStale) {
-      // MIXED days are excluded from learning: `liveSteps.phone` is the
-      // CREDITED total after the ladder, and on a day where band spans
-      // claimed windows the phone figure is no longer an independent
-      // full-day reference — the ratio against counter ticks would
-      // mis-learn (the reference excludes exactly the steps the band
-      // covered). An independent phone total is not read here today; a
-      // clean phone-only day is the admissible reference.
-      if (!liveSteps.mixed) {
-        await _updateStepCalibration(
-          day.date,
-          daySub,
-          counterWearing,
-          phoneReference: liveSteps.phone,
-        );
-      }
+    // Learn the step-counter calibration from finalized days only (a partial
+    // day has the phone running ahead of the last offload), and only from
+    // phone-only days: on a mixed day `liveSteps.phone` is what is left after
+    // band spans claimed their windows, not an independent reference.
+    if (finalized && counterWearing != 0 && !liveSteps.mixed) {
+      await _updateStepCalibration(
+        day.date,
+        daySub,
+        counterWearing,
+        phoneReference: liveSteps.phone,
+      );
     }
   }
 
-  /// One day's contribution to the (family × wearing) step-calibration
-  /// profile: bank the observed (reference, ticks) pair, then refit the
-  /// factor over the banked days. Fire-and-forget-safe (all writes are
-  /// idempotent keyed replaces) and never throws into the derive: a
-  /// calibration failure must not cost the day its result.
-  ///
-  /// WHAT THIS LEARNS FROM, and what it refuses:
-  ///   - Reference = the phone's own pedometer total for the day
-  ///     (`liveSteps.phone`), banked ONLY when > 0. A day the phone did not
-  ///     cover banks null — "phone absent" must not masquerade as "user
-  ///     walked nowhere", or the estimator would read a real walking day
-  ///     as counter-overcount and pull the factor down.
-  ///   - Ticks = this day's counter deltas via [counterDeltasFromSubstrate].
-  ///     Gen4 has no counter, so its days bank absent ticks and can never
-  ///     enter a profile — the learning set is gen5(-stamped) only, which
-  ///     includes MG under the fd4b assumption (see `_stepCounterModulus`).
-  ///   - The fit itself (which days are admissible, shrinkage, clamping)
-  ///     lives in step_calibration.dart; this method only banks and refits.
-  ///     A day that fails the estimator's evidence gates still gets banked —
-  ///     the gate is re-evaluated on every refit, so a profile activates
-  ///     the moment the third admissible day exists, without re-deriving
-  ///     the days that supplied the evidence.
+  /// Bank one day's (phone steps, counter ticks) pair for the (family,
+  /// wearing) profile and refit it over the banked days. Never throws into
+  /// the derive.
   Future<void> _updateStepCalibration(
     String date,
     Substrate daySub,
@@ -4998,14 +4902,14 @@ class DerivationEngine {
         cumulativeCounterModulus:
             ana.calibrationFor(_stepCounterModulus, family),
       );
+      // No counter on this family (gen4): nothing to learn, nothing to bank.
+      if (counter == null) return;
       await LocalDb.putStepCalibrationDay(
         day: date,
         deviceFamily: family,
         wearing: wearing,
-        // Null, not 0: "the phone did not cover this day" is the absent case
-        // — a zero here would tell the estimator the user walked nowhere.
         referenceSteps: phoneReference > 0 ? phoneReference : null,
-        counterTicks: counter?.total,
+        counterTicks: counter.total,
       );
       final rows = await LocalDb.stepCalibrationDays(family, wearing);
       final profile = estimateStepCalibration(
@@ -6155,13 +6059,8 @@ class DerivationEngine {
     /// zero-coverage credit below. Defaults to none — every existing caller
     /// keeps its old behaviour until it is threaded through.
     List<Map<String, dynamic>> sessions = const [],
-    /// The learned step-calibration profile for (daySub.deviceFamily,
-    /// counterWearing), read by the caller BEFORE the isolate/input boundary
-    /// — this method is pure. Null (the default) is the uncalibrated case.
+    /// Step-counter calibration, read by the caller; null = uncalibrated.
     StepCalibrationProfile? counterProfile,
-    /// The wearing location the profile is keyed to. Default wrist: the
-    /// `device.wearing` column's own DEFAULT, so a caller that never reads
-    /// the user's setting gets exactly the pre-setting behaviour.
     int counterWearing = Wearing.wrist,
   }) {
     final wake = _buildWakeDayFeatures(
@@ -6465,20 +6364,8 @@ class DerivationEngine {
   /// inference, so it outranks the phone. Null on every gen4 day, and on a gen5
   /// day whose records predate schema v34; that is the absent case, not zero.
   ///
-  /// v98 PARAMETERS, and what each one decides:
-  ///   - [counter] replaces the bare [bandSteps] integer with the full
-  ///     [CounterDeltas] walk: the total that feeds the ladder, plus the
-  ///     gap/reset disclosure (`counter_coverage`) that keeps a half-synced
-  ///     day honest. Null = this family has no counter (gen4, or MG if the
-  ///     fd4b assumption fails) — the strap rung is then simply not offered.
-  ///   - [profile] is the (family × wearing) calibration factor learned from
-  ///     the user's own phone-covered days (see `_updateStepCalibration`).
-  ///     Null or uncalibrated means factor 1.0 — the published number is the
-  ///     raw counter total, exactly what v97 published.
-  ///   - [wearing] routes WHICH profile applies (the user's own statement,
-  ///     `device.wearing`). It is carried here so the applied factor and the
-  ///     wearing it was learned for land in the SAME bundle — a bicep factor
-  ///     audited against a wrist profile would be untraceable.
+  /// [profile] scales the counter total (null/uncalibrated = raw); [wearing]
+  /// is the placement it was learned for, 0 when refused for this day.
   static void _writeSteps(
     Map<String, dynamic> bundle,
     Map<String, dynamic>? scMap,
@@ -6488,7 +6375,6 @@ class DerivationEngine {
     StepCalibrationProfile? profile,
     int wearing = Wearing.wrist,
   }) {
-    final bandSteps = counter == null ? null : counter.total;
     // THE SOURCE LADDER, and where each rung is actually decided.
     //
     // Rungs 1 (band 100 Hz) and 3 (phone) are WINDOWED and were already settled
@@ -6509,7 +6395,7 @@ class DerivationEngine {
     // 18,856 on a day the strap synced for part of).
     final strap = liveStepsFromStrap.clamp(0, liveStepsReal);
     final phone = liveStepsReal - strap;
-    final rawBand = bandSteps;
+    final rawBand = counter?.total;
     final calibratedBand =
         rawBand == null ? null : applyStepCalibration(rawBand, profile);
     final useBand =
@@ -6525,32 +6411,16 @@ class DerivationEngine {
       'value': haveRealSteps ? steps : null,
       'real_measured': liveStepsReal,
       // What the strap's own pedometer counted, independent of which source
-      // won. Null (never 0) when this generation has no counter at all. The
-      // RAW counter ticks — the calibration is disclosed separately, so a
-      // reader can audit corrected vs raw without re-deriving.
+      // won. Null (never 0) when this generation has no counter at all. Raw
+      // ticks; `counter_calibration` carries the factor applied to `value`.
       'band_measured': rawBand,
-      // The wearing location the profile was keyed to. Absent when no
-      // counter ran (there is nothing to calibrate); 'wrist' when the user
-      // never said otherwise, which is what the device.wearing default has
-      // always meant; and ABSENT (not 'wrist') when the wearing statement
-      // was refused for this day — an unknown code this build cannot name,
-      // or a day that predates the last wearing change. Naming 'wrist' there
-      // would disclose a routing decision the derive never made.
       if (counter != null && wearing != 0)
         'counter_wearing': wearingName(wearing),
-      // The calibration actually applied, when one was learned. Absent
-      // (not 1.0) when the profile is pure prior — a factor of exactly 1.0
-      // published as "calibrated" would claim learning that never happened.
-      if (counter != null && profile != null && profile.isCalibrated)
+      if (useBand && profile != null && profile.isCalibrated)
         'counter_calibration': <String, dynamic>{
           'factor': profile.factor,
           'n_days': profile.nDays,
         },
-      // The counter's OWN honesty report: how much of the day it saw, and
-      // how many boundaries it had to drop. Absent when no counter ran.
-      // `gap_seconds > 0` does NOT veto the number — the deltas that were
-      // admitted are still real counts — it discloses that the total stands
-      // on partial observation.
       if (counter != null)
         'counter_coverage': <String, dynamic>{
           'samples': counter.sampleCount,
@@ -7513,26 +7383,7 @@ class DerivationEngine {
   /// cannot be told apart from a wrap afterwards. See
   /// [hardwareStepsFromCounter].
   ///
-  /// GENERATION COVERAGE, with evidence status:
-  ///   - gen4: VERIFIED ABSENT. The R24 record has no pedometer field
-  ///     (protocol gen4 decoder), so gen4 is deliberately NOT a key here —
-  ///     an absent counter must surface as "no band steps", never as 0.
-  ///     Gen4 days keep resolving through the existing source ladder
-  ///     (phone pedometer / live session / 1 Hz movement), unchanged by v98.
-  ///   - gen5: VERIFIED PRESENT. `stepMotionCounter` (u16, cumulative,
-  ///     wraps at 65536, no midnight reset) decoded in protocol
-  ///     gen5_records.dart; the entry below is that fact.
-  ///   - MG: ASSUMED PRESENT, NOT YET VERIFIED. MG offloads through the same
-  ///     fd4b/Maverick record path as gen5, so the working assumption is that
-  ///     the same counter arrives and is stamped family 'gen5' — but no MG
-  ///     history export has been inspected to confirm the field is populated.
-  ///     Consequence if the assumption is WRONG: `counterDeltasFromSubstrate`
-  ///     sees no counter samples (`!seen`), returns absent, and the day falls
-  ///     back through the source ladder exactly like gen4 — it can never
-  ///     fabricate steps. To verify: decode an MG export through the gen5
-  ///     records path and check for non-absent stepMotionCounter samples.
-  ///     If MG is ever given its own family stamp, its verified modulus goes
-  ///     here — until then it inherits gen5's entry only via that stamp.
+  /// gen4 has no counter and is deliberately absent.
   static const Map<String, int> _stepCounterModulus = {'gen5': 65536};
 
   static const Map<String, double> _quietEnmoCutG = {
@@ -8291,16 +8142,7 @@ class DerivationEngine {
       dynFloorG: inp.dynFloorG,
       liveStepsReal: inp.liveStepsReal,
       liveStepsFromStrap: inp.liveStepsFromStrap,
-      counterProfile: (inp.counterProfileFactor == null ||
-              inp.counterProfileNDays == null)
-          ? null
-          : StepCalibrationProfile(
-              deviceFamily: daySub.deviceFamily ?? '',
-              wearing: inp.counterWearing,
-              factor: inp.counterProfileFactor!,
-              nDays: inp.counterProfileNDays!,
-              version: kStepCalibrationVersion,
-            ),
+      counterProfile: inp.counterProfile,
       counterWearing: inp.counterWearing,
       dynHistoryDays: inp.dynHistoryDays,
       stepSpans: inp.stepSpans,
@@ -9002,13 +8844,9 @@ class _DayBlocksInput {
   final double? rhr;
   final int? maxHrUsed;
   final int liveStepsReal;
-  /// The learned step-counter calibration for (daySub.deviceFamily,
-  /// counterWearing), read on the MAIN isolate (the DB lives there) and
-  /// carried in as plain data. Null factor = uncalibrated.
-  final double? counterProfileFactor;
-  final int? counterProfileNDays;
-  /// Wearing location the profile is keyed to. 1 = wrist (device.wearing's
-  /// own DEFAULT), 2 = bicep, 3 = other.
+  /// Step-counter calibration read on the main isolate; null = uncalibrated.
+  final StepCalibrationProfile? counterProfile;
+  /// `Wearing` code the profile is keyed to, 0 when refused for this day.
   final int counterWearing;
 
   /// How much of [liveStepsReal] the BAND's own 100 Hz pedometer was credited
@@ -9073,9 +8911,8 @@ class _DayBlocksInput {
     required this.rhr,
     required this.maxHrUsed,
     required this.liveStepsReal,
-    this.counterProfileFactor,
-    this.counterProfileNDays,
-    this.counterWearing = 1,
+    this.counterProfile,
+    this.counterWearing = Wearing.wrist,
     this.liveStepsFromStrap = 0,
     this.stepSpans = const [],
     required this.dynFloorG,

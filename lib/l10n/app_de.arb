@@ -2386,7 +2386,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "Wo das Band sitzt. Die Schrittkalibrierung wird pro Position gelernt.",
+  "devicesWornOnSub": "Wo das Band sitzt. Schritte werden dafür korrigiert.",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },

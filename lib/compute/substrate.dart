@@ -892,34 +892,20 @@ int? hardwareStepsFromCounter(
             maxStepsPerSecond: maxStepsPerSecond)
         ?.total;
 
-/// How trustworthy [hardwareStepsFromCounter]'s total is: what the counter
-/// SAW versus what it had to drop. A day with a dense, gap-free counter run
-/// publishes its total as a clean whole-day measurement; a day with long
-/// inter-record gaps or reset boundaries publishes the same total as a
-/// partial one, and the disclosure rides with the number instead of the
-/// number silently standing in for the whole day.
+/// [hardwareStepsFromCounter]'s walk with its coverage: the total plus how
+/// much of the day the counter did not see.
 class CounterDeltas {
   const CounterDeltas({required this.total, required this.droppedBoundaries,
       required this.gapSeconds, required this.sampleCount});
   final int total;
-  /// Reset/overshoot boundaries whose delta failed the budget and was
-  /// dropped (see the reset hazard in the doc above).
+  /// Boundaries whose delta failed the budget (resets) and were dropped.
   final int droppedBoundaries;
-  /// Wall-clock seconds BETWEEN consecutive seen records — the part of the
-  /// day the counter never observed. Sampling gaps inside one offload span
-  /// are short; multi-hour sync gaps land here.
+  /// Seconds between consecutive counter records beyond the 1 s cadence.
   final int gapSeconds;
-  /// Records that carried a step counter at all. Zero means the generation
-  /// has no counter (or the day predates the column) — the ABSENT case,
-  /// never "measured zero".
+  /// Records that carried a counter value (always >= 1).
   final int sampleCount;
 }
 
-/// The counter walk of [hardwareStepsFromCounter], kept as data instead of a
-/// bare total. Same math, same guards, one caller fewer per fact: the total
-/// feeds the ladder, the dropped/gap counts feed the honesty report, and
-/// both must come from ONE walk or the disclosure could disagree with the
-/// number it describes.
 CounterDeltas? counterDeltasFromSubstrate(
   Substrate sub, {
   required int? cumulativeCounterModulus,

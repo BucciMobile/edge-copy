@@ -1822,11 +1822,7 @@ class _DeviceDetailState extends State<DeviceDetail> {
   /// a fresh `batteryHealth()` on every build would rescan the sample table on
   /// every connection tick.
   Map<String, dynamic>? _health;
-  /// The user's wearing statement, loaded once like `_health`. Held so a
-  /// rebuild does not re-read the device row on every connection tick.
-  /// Non-null but OUTSIDE `Wearing.known` when a future build wrote a code
-  /// this one cannot name — the row then shows "Unknown" instead of lying
-  /// "Wrist", and `_pickWearing` overwrites it on the next choice.
+  /// `device.wearing`, loaded once like `_health`.
   int? _wornOn;
   bool _wornOnUnknown = false;
 
@@ -1899,17 +1895,18 @@ class _DeviceDetailState extends State<DeviceDetail> {
       status: app?.engine.bandStatus,
       wornOn: _wornOn,
       wornOnUnknown: _wornOnUnknown,
-      onWearing: () async {
-        final w = await _pickWearing(c);
-        // Refresh the row from what the picker SAVED, not from a stale
-        // screen-local cache — and only while this screen is still on top.
-        if (w != null && mounted) {
-          setState(() {
-            _wornOn = w;
-            _wornOnUnknown = false;
-          });
-        }
-      },
+      // Only the gen5 counter is calibrated per wearing location.
+      onWearing: s.family != 'gen5'
+          ? null
+          : () async {
+              final w = await _pickWearing(c);
+              if (w != null && mounted) {
+                setState(() {
+                  _wornOn = w;
+                  _wornOnUnknown = false;
+                });
+              }
+            },
       health: _health,
       forecast: _forecast,
       onFind: app?.buzzBand,
@@ -2561,18 +2558,13 @@ class DeviceDetailView extends StatelessWidget {
   /// The band's own state, from `bandStatusFor`. Null for a non-band source.
   final BandStatus? status;
 
-  /// The user's wearing-location statement, read from `device.wearing` by
-  /// the screen that owns the DB. Null means "not loaded" — the row then
-  /// shows wrist, the column's own DEFAULT, without writing it. A code this
-  /// build does not know can never reach here (parsed on load), so
-  /// `wornName` never claims "Wrist" for a placement it cannot name.
+  /// `device.wearing`; null until loaded (shown as the wrist default).
   final int? wornOn;
 
-  /// True when the stored code is outside `Wearing.known` (a future build
-  /// wrote it). The row then shows "Unknown" — never "Wrist" — and the
-  /// derivation path refuses the calibration profile for it.
+  /// The stored code is one this build does not know; shown as "Unknown".
   final bool wornOnUnknown;
-  /// Open the wearing-location sheet. Null for a non-band source.
+
+  /// Opens the wearing sheet. Null hides the row.
   final VoidCallback? onWearing;
   /// `LocalDb.batteryHealth()` — the recent `band_battery` series, which is the
   /// one table nothing prunes. Null until it loads, and on a non-band source.
@@ -2741,21 +2733,18 @@ class DeviceDetailView extends StatelessWidget {
                           chevron: onRename != null,
                           onTap: onRename),
                       Divider(color: p.line, height: 1),
-                      // Where the band sits — the one thing about step
-                      // accuracy only the user knows. Not a "sensor
-                      // setting": the bicep and the wrist are different
-                      // measurement contexts, and the step calibration
-                      // profile is keyed to this answer.
-                      SetRow(LucideIcons.personStanding, C.teal,
-                          l?.devicesWornOn ?? 'Worn on',
-                          value: wornOnUnknown
-                              ? (l?.devicesWornUnknown ?? 'Unknown')
-                              : wornName(c, wornOn ?? Wearing.wrist),
-                          sub: l?.devicesWornOnSub ??
-                              'Where the band sits. Step calibration is '
-                              'learned per location.',
-                          chevron: onWearing != null, onTap: onWearing),
-                      Divider(color: p.line, height: 1),
+                      if (onWearing != null) ...[
+                        SetRow(LucideIcons.personStanding, C.teal,
+                            l?.devicesWornOn ?? 'Worn on',
+                            value: wornOnUnknown
+                                ? (l?.devicesWornUnknown ?? 'Unknown')
+                                : wornName(c, wornOn ?? Wearing.wrist),
+                            sub: l?.devicesWornOnSub ??
+                                'Where the band sits. Steps are corrected '
+                                'for it.',
+                            onTap: onWearing),
+                        Divider(color: p.line, height: 1),
+                      ],
                       SetRow(LucideIcons.batteryMedium, C.green,
                           l?.devicesBattery ?? 'Battery',
                           value: battery == null ? '' : '${battery.round()}%',
@@ -2880,8 +2869,6 @@ String? _chargeHistory(Map<String, dynamic>? h) {
       '${mv == null ? '' : ', up to $mv mV'}';
 }
 
-/// The wearing location as the row shows it. Presentation only: it names
-/// what the user chose, not what any profile is keyed to.
 String wornName(BuildContext c, int w) {
   final l = AppLocalizations.of(c);
   return switch (w) {
@@ -2891,10 +2878,7 @@ String wornName(BuildContext c, int w) {
   };
 }
 
-/// The wearing-location sheet: three options, one tap, saved immediately —
-/// freely reversible, so no confirmation; each option's sub line says what
-/// it means for steps. Returns the chosen code so the caller can show the
-/// new location in the row without waiting for an unrelated rebuild.
+/// One tap saves; returns the saved code, or null if nothing was saved.
 Future<int?> _pickWearing(BuildContext c) async {
   final p = P.of(c);
   final l = AppLocalizations.of(c);
@@ -2942,12 +2926,8 @@ Future<int?> _pickWearing(BuildContext c) async {
     ),
   );
   if (chosen == null) return null;
+  // 0 rows = the device row is gone (an unpair raced the sheet).
   final saved = await LocalDb.setDeviceWearing(chosen);
-  // Zero rows updated = the device row is gone — an unpair was racing this
-  // picker on a detail route still open. Report NOT saved: the caller would
-  // otherwise show the new location while nothing was persisted, and
-  // re-creating the row here (upsertDevice) would resurrect a device the
-  // user is currently removing.
   return saved > 0 ? chosen : null;
 }
 

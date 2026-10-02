@@ -12446,7 +12446,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "Where the band sits. Step calibration is learned per location.",
+  "devicesWornOnSub": "Where the band sits. Steps are corrected for it.",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },

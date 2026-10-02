@@ -2386,7 +2386,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "Où se trouve le bracelet. L'étalonnage des pas s'apprend séparément pour chaque position.",
+  "devicesWornOnSub": "Où se trouve le bracelet. Les pas sont corrigés en conséquence.",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },
@@ -2394,7 +2394,7 @@
   "@devicesWornWrist": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornBicep": "Bras",
+  "devicesWornBicep": "Haut du bras",
   "@devicesWornBicep": {
     "description": "Step calibration wearing-location setting"
   },
@@ -2406,7 +2406,7 @@
   "@devicesWornSheetTitle": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornWristSub": "Par défaut. La meilleure précision de pas que le bandeau puisse offrir.",
+  "devicesWornWristSub": "Par défaut. La meilleure précision de pas que le bracelet puisse offrir.",
   "@devicesWornWristSub": {
     "description": "Step calibration wearing-location setting"
   },
@@ -2418,7 +2418,7 @@
   "@devicesWornUnknown": {
     "description": "Détail de l'appareil : l'emplacement enregistré n'est pas connu par cette version"
   },
-  "devicesWornOtherSub": "Une poche ou un sac. Le bandeau y voit mal la marche.",
+  "devicesWornOtherSub": "Une poche ou un sac. Le bracelet y voit mal la marche.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
   }

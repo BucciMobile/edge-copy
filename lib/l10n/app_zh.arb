@@ -2386,7 +2386,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "手环戴在哪里。步数校准按位置分别学习。",
+  "devicesWornOnSub": "手环戴在哪里。步数会据此校正。",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },
