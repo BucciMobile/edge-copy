@@ -727,15 +727,7 @@ class AppState extends ChangeNotifier {
     if (ok) {
       unawaited(() async {
         await syncPhoneSteps(days: PhonePedometer.fullSyncDays);
-        // `_reanalyzeForOverride` no-ops while another derive is running, and
-        // the full sync above takes long enough (7 days of hourly platform
-        // reads) that a drain-triggered pass can easily have started. Dropping
-        // it silently leaves the freshly-banked rows out of `day_result` and
-        // the tile on a dash — the exact "looks broken" symptom this call was
-        // added to prevent. Wait for the other pass, bounded, then run.
-        for (var i = 0; i < 60 && reanalyzing; i++) {
-          await Future<void>.delayed(const Duration(seconds: 1));
-        }
+        // Waits out any derive already running (see _reanalyzeForOverride).
         await _reanalyzeForOverride();
       }());
     }
@@ -2263,10 +2255,19 @@ class AppState extends ChangeNotifier {
   /// Force-derive after a sleep-override change so the affected day restages from
   /// the user's window (the engine force-includes override days even if locked).
   Future<void> _reanalyzeForOverride() async {
-    if (reanalyzing) return;
+    // run() returns 0 without queueing while ANY pass holds the derive latch
+    // (a drain's light pass, the post-drain rescan, another edit), and only a
+    // force pass reaches a finalized edited day. Wait our turn rather than
+    // drop the edit; the latch is released in a finally, so this ends.
+    while (reanalyzing) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
     reanalyzing = true;
     notifyListeners();
     try {
+      while (_derive.running) {
+        await Future<void>.delayed(const Duration(milliseconds: 250));
+      }
       await _derive.run(_profile, force: true);
       await LocalDb.refreshComputeFreshness();
       // The day_result rows just changed — without this no RevisionReload screen
