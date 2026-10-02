@@ -26,7 +26,7 @@ import '../compute/substrate.dart' show beatTimesMs;
 // version, which every day_result read applies as a CEILING (see [dayResult]).
 // `show` keeps the rest of the engine out of this namespace.
 import '../coach/coach_db.dart' show CoachDb;
-import '../compute/derivation_engine.dart' show kAlgoVersion, overnightSettled;
+import '../compute/derivation_engine.dart' show kAlgoVersion, kOvernightGiveUpSec, overnightSettled;
 import '../ble/adapters/adapter.dart' show NeutralSample;
 import '../ble/adapters/signals.dart' show InputSignal;
 import '../import/import_container.dart';
@@ -9763,6 +9763,7 @@ class LocalDb {
     String? latestRecoveryDay;
     int? latestRecoveryComputedAt;
     Map<String, dynamic>? todayRow;
+    int? overnightRecheckAt;
     for (final row in recent) {
       final dayId = row['day_id']?.toString();
       if (dayId == null || dayId.isEmpty) continue;
@@ -9774,15 +9775,20 @@ class LocalDb {
       // #448: today's night is not today's overnight until the drain has
       // passed its wake. Mid-drain the window closes at the newest record, so
       // serving it showed a partial night and its readiness as this morning's.
+      // A row with no window is held too: mid-drain the edge can still sit
+      // before sleep onset, and that read as a settled 'no sleep' night.
       final offsetMs = (((decoded['sleep'] as Map?)?['window'] as Map?)?['value']
           as Map?)?['offset_ms'];
+      final wakeSec = offsetMs is num ? offsetMs ~/ 1000 : null;
       if (dayId == today &&
-          offsetMs is num &&
           !overnightSettled(
-            sleepOffsetSec: offsetMs ~/ 1000,
+            sleepOffsetSec: wakeSec,
             dataEdgeSec: bandEdgeSec,
             nowSec: nowSec,
           )) {
+        // When the give-up lands; getToday re-checks then, since a quiet
+        // strap triggers no derive to do it.
+        overnightRecheckAt = (wakeSec ?? bandEdgeSec) + kOvernightGiveUpSec;
         continue;
       }
       final scalars = ((decoded['scalars'] as Map?) ?? const {})
@@ -9842,6 +9848,7 @@ class LocalDb {
         'overnight_day': latestOvernightDay,
         'overnight_state': overnightState,
         'overnight_computed_at': latestOvernightComputedAt,
+        'overnight_recheck_at': overnightRecheckAt,
         'recovery_day': latestRecoveryDay,
         'recovery_computed_at': latestRecoveryComputedAt,
         'showing_prior_overnight':

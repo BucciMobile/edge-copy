@@ -282,9 +282,16 @@ class LocalRepositoryImpl extends LocalRepository {
     // kept serving yesterday's finished bundle as today: yesterday's steps,
     // kcal and strain on Home, yesterday's date in the greeting, and the
     // frozen headline matching so the readiness went un-flagged too.
+    //
+    // Also once a held-back night's give-up has passed: the strap that went
+    // quiet at wake never drains again, so no derive would ever refresh it.
     var todayFresh = await _freshness('today');
+    final recheckAt = (todayFresh?['overnight_recheck_at'] as num?)?.toInt();
     if (todayFresh == null ||
-        todayFresh['today_day']?.toString() != _todayLocalLabel()) {
+        todayFresh['today_day']?.toString() != _todayLocalLabel() ||
+        (todayFresh['overnight_state'] == 'building' &&
+            recheckAt != null &&
+            DateTime.now().millisecondsSinceEpoch ~/ 1000 >= recheckAt)) {
       await LocalDb.refreshComputeFreshness();
       todayFresh = await _freshness('today');
     }

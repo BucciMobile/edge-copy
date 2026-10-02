@@ -115,6 +115,57 @@ void main() {
     expect(await overnightDay(), isNot(todayLabel()));
   });
 
+  test('no window yet with the edge hours behind → not a settled no-sleep night',
+      () async {
+    // Asleep at 00:30, drain paused at 00:20: today has no window at all.
+    await db.insert('day_result', {
+      'day_id': todayLabel(),
+      'algo_version': kAlgoVersion,
+      'payload_json': jsonEncode({
+        'flags': ['NO_SLEEP_DETECTED'],
+      }),
+      'window_json': '{}',
+      'computed_at': 1,
+      'finalized': 0,
+    });
+    final edge = nowSec - 3 * 3600;
+    await db.insert('decoded_onehz', {
+      'ts_ms': edge * 1000,
+      'rec_ts': edge,
+      'counter': edge,
+      'hr': 60,
+    });
+    expect(await overnightDay(), isNot(todayLabel()));
+  });
+
+  test('no window with the edge caught up → no sleep is the answer', () {
+    expect(
+      overnightSettled(
+        sleepOffsetSec: null,
+        dataEdgeSec: nowSec - 10 * 60,
+        nowSec: nowSec,
+      ),
+      isTrue,
+    );
+  });
+
+  test('a warm app picks up the give-up without another derive', () async {
+    // Strap went quiet at wake, 13 h ago; the last derive stamped 'building'.
+    final wake = nowSec - 13 * 3600;
+    await seed(wakeSec: wake, edgeSec: wake);
+    await LocalDb.putComputeFreshness(
+      'today',
+      jsonEncode({
+        'today_day': todayLabel(),
+        'overnight_state': 'building',
+        'overnight_recheck_at': wake + 12 * 3600,
+      }),
+    );
+    final today =
+        await LocalRepositoryImpl(getProfileMap: () => const {}).getToday();
+    expect(today['status']['overnight_day'], todayLabel());
+  });
+
   test('getToday serves the prior night, not the partial one under its label',
       () async {
     final y = DateTime.now().subtract(const Duration(days: 1));

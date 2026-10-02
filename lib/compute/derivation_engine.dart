@@ -1968,7 +1968,7 @@ const int _headlineFreezeMarginSec = 60 * 60;
 /// not recording) never moves the edge again, and the night we hold is then
 /// the whole night as far as any sync will ever know.
 // ponytail: wall-clock give-up; a persisted "drain complete" marker would be exact.
-const int _overnightGiveUpSec = 12 * 60 * 60;
+const int kOvernightGiveUpSec = 12 * 60 * 60;
 
 /// Whether a night whose sleep ends at [sleepOffsetSec] is SETTLED: the drained
 /// data edge has moved [_headlineFreezeMarginSec] past the wake, so the window
@@ -1982,13 +1982,24 @@ const int _overnightGiveUpSec = 12 * 60 * 60;
 /// stalled mid-night looks exactly like a strap that went quiet at wake, and
 /// Home recovers on the next derive, but the freeze pins for the whole day, so
 /// it waits for the edge.
+///
+/// A null [sleepOffsetSec] is a night with no window yet. Mid-drain that is
+/// usually an edge still before sleep onset, not a night without sleep, so it
+/// only settles once the band edge has caught up to [nowSec], or gone quiet
+/// for the give-up.
 bool overnightSettled({
-  required int sleepOffsetSec,
+  required int? sleepOffsetSec,
   required int dataEdgeSec,
   int? nowSec,
-}) =>
-    dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
-    (nowSec != null && nowSec >= sleepOffsetSec + _overnightGiveUpSec);
+}) {
+  if (sleepOffsetSec == null) {
+    return nowSec != null &&
+        (dataEdgeSec >= nowSec - _headlineFreezeMarginSec ||
+            nowSec >= dataEdgeSec + kOvernightGiveUpSec);
+  }
+  return dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
+      (nowSec != null && nowSec >= sleepOffsetSec + kOvernightGiveUpSec);
+}
 
 /// The frozen morning readiness headline that should be persisted/surfaced for
 /// [today], given the current pin and a fresh look at today's live readiness and
