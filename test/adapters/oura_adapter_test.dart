@@ -536,6 +536,40 @@ void main() {
     expect(at.millisecondsSinceEpoch ~/ 1000, 1782043215 + 20);
   });
 
+  test('two hypnogram pages inside one second keep distinct stamps', () async {
+    // The observation key is (device, ts_ms, source, vendorKey) with REPLACE,
+    // so two pages stamped to the same second would overwrite each other.
+    final (events, _) = await _drive(
+      OuraAdapter(
+        key: _kKey,
+        anchor: (1000, 1782043215),
+        confirmTimeout: _kFast,
+        replyTimeout: _kFast,
+      ),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtSleepPhaseInformation, 1200, hypnogramBody()),
+            _event(kOuraEvtSleepPhaseData, 1205, hypnogramBody()),
+            _summary(2, 0),
+          ];
+        }
+        return const [];
+      },
+    );
+    final rows = events.whereType<VendorScalars>().single.rows;
+    expect(rows, hasLength(8));
+    final keys = {
+      for (final o in rows) (o.at.millisecondsSinceEpoch, o.vendorKey),
+    };
+    expect(keys, hasLength(8), reason: 'no page may REPLACE the other');
+    final deep = rows.where((o) => o.vendorKey == 'Deep sleep').toList();
+    expect(deep.map((o) => o.at.millisecondsSinceEpoch),
+        [(1782043215 + 20) * 1000, (1782043215 + 20) * 1000 + 500]);
+  });
+
   test('a hypnogram decoded before any origin is held, then stamped by the '
       'sync that finally carries one', () async {
     // Two batches in ONE session: the hold is adapter state, and a sync in

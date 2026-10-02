@@ -469,10 +469,14 @@ class OuraAdapter extends BandAdapter {
     });
     final stageRows = <Observation>[];
     _heldStages.removeWhere((h) {
-      final unix = _anchorUnixFor(h.$1);
-      if (unix == null) return false;
+      final a = _anchor;
+      if (a == null) return false;
       stageRows.add(Observation(
-        at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
+        // To the decisecond, not the second: each event is its own page of
+        // counts, and two pages in one second would share an observation key
+        // and REPLACE each other. A re-read of the same event still dedupes.
+        at: DateTime.fromMillisecondsSinceEpoch(
+            a.$2 * 1000 + (h.$1 - a.$1) * 100),
         sourceKind: ObservationSource.vendor,
         // Rendered verbatim as the timeline row title, so it is a label.
         vendorKey: switch (h.$2) {
