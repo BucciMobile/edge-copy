@@ -4607,7 +4607,7 @@ class AppState extends ChangeNotifier {
   /// edited schedule or a just-fired alarm re-arms with no manual step, and a
   /// fired one-shot (which clears `_savedAlarm`) picks up its next occurrence
   /// on the very next connect.
-  Future<void> _armNextAlarmOccurrence() async {
+  Future<void> _armNextAlarmOccurrence({int? firedEpoch}) async {
     if (!isConnected) return;
     try {
       // A headless re-arm (background_sync.dart) can have rewritten
@@ -4630,6 +4630,7 @@ class AppState extends ChangeNotifier {
         engine: engine,
         schedule: _schedule,
         currentArmedEpoch: _savedAlarm ?? device.alarmEpoch,
+        now: alarmRearmFrom(DateTime.now(), firedEpoch),
       );
       if (result.disabled) {
         // Every weekday got disabled since the last arm — the strap doesn't
@@ -4948,11 +4949,14 @@ class AppState extends ChangeNotifier {
         // row went on advertising e.g. "06:30 (7/25)" as the CURRENT alarm
         // indefinitely — with live "Test buzz"/"Clear" affordances for an alarm
         // that is no longer armed. Clear state AND the persisted epoch.
+        final firedEpoch = _savedAlarm ?? device.alarmEpoch;
         _clearArmedAlarmState();
         // ...and arm the schedule's next occurrence now. Otherwise nothing
         // re-arms until the next reconnect, so a link that stays up all day
-        // leaves tomorrow unarmed and Home saying "Set an alarm".
-        unawaited(_armNextAlarmOccurrence());
+        // leaves tomorrow unarmed and Home saying "Set an alarm". Computed
+        // past the slot that just fired (see [alarmRearmFrom]) so a strap
+        // running slightly fast doesn't re-arm the spent slot.
+        unawaited(_armNextAlarmOccurrence(firedEpoch: firedEpoch));
         break;
       case AlarmEffect.cleared:
         // Same persistence gap on the strap-driven clear (event 59): state was
