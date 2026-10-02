@@ -355,7 +355,8 @@ class ExerciseDef {
   final List<String> equipment;
   final List<String> aliases;
 
-  /// Upstream translations; missing falls back to [label].
+  /// Upstream translations for wger rows, hand-written for the core lifts;
+  /// missing falls back to [label].
   final Map<String, String> localizedLabels;
 
   /// The plate/dumbbell increment this lift is normally loaded in, kg. A
@@ -416,6 +417,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['chest', 'triceps', 'shoulders'],
     category: 'Chest',
     equipment: ['Barbell', 'Bench'],
+    localizedLabels: {
+      'de': 'Bankdrücken',
+      'es': 'Press de banca',
+      'fr': 'Développé couché',
+    },
   ),
   ExerciseDef(
     'incline_db_press',
@@ -425,6 +431,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     equipment: ['Dumbbell', 'Incline bench'],
     aliases: ['incline dumbbell press'],
     step: 2,
+    localizedLabels: {
+      'de': 'Schrägbankdrücken mit Kurzhanteln',
+      'es': 'Press inclinado con mancuernas',
+      'fr': 'Développé incliné haltères',
+    },
   ),
   ExerciseDef(
     'cable_fly',
@@ -432,6 +443,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['chest', 'shoulders'],
     category: 'Chest',
     equipment: ['Cable machine'],
+    localizedLabels: {
+      'de': 'Fliegende am Kabelzug',
+      'es': 'Aperturas en polea',
+      'fr': 'Écarté à la poulie',
+    },
   ),
   ExerciseDef(
     'overhead_press',
@@ -440,6 +456,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     category: 'Shoulders',
     equipment: ['Barbell'],
     aliases: ['OHP'],
+    localizedLabels: {
+      'de': 'Schulterdrücken',
+      'es': 'Press militar',
+      'fr': 'Développé militaire',
+    },
   ),
   ExerciseDef(
     'triceps_pushdown',
@@ -447,6 +468,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['triceps'],
     category: 'Arms',
     equipment: ['Cable machine'],
+    localizedLabels: {
+      'de': 'Trizepsdrücken am Kabel',
+      'es': 'Extensión de tríceps en polea',
+      'fr': 'Extension des triceps à la poulie',
+    },
   ),
   ExerciseDef(
     'overhead_extension',
@@ -454,6 +480,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['triceps'],
     category: 'Arms',
     aliases: ['overhead triceps extension'],
+    localizedLabels: {
+      'de': 'Trizepsstrecken über Kopf',
+      'es': 'Extensión de tríceps sobre la cabeza',
+      'fr': 'Extension des triceps au-dessus de la tête',
+    },
   ),
   ExerciseDef(
     'barbell_row',
@@ -461,6 +492,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['back', 'biceps', 'core'],
     category: 'Back',
     equipment: ['Barbell'],
+    localizedLabels: {
+      'de': 'Langhantelrudern',
+      'es': 'Remo con barra',
+      'fr': 'Rowing barre',
+    },
   ),
   ExerciseDef(
     'lat_pulldown',
@@ -468,6 +504,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['back', 'biceps'],
     category: 'Back',
     equipment: ['Cable machine'],
+    localizedLabels: {
+      'de': 'Latziehen',
+      'es': 'Jalón al pecho',
+      'fr': 'Tirage vertical',
+    },
   ),
   ExerciseDef(
     'pull_up',
@@ -476,6 +517,7 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     category: 'Back',
     equipment: ['Pull-up bar'],
     aliases: ['pull up', 'pull-ups'],
+    localizedLabels: {'de': 'Klimmzug', 'es': 'Dominada', 'fr': 'Traction'},
   ),
   ExerciseDef(
     'barbell_curl',
@@ -483,6 +525,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['biceps'],
     category: 'Arms',
     equipment: ['Barbell'],
+    localizedLabels: {
+      'de': 'Langhantelcurl',
+      'es': 'Curl con barra',
+      'fr': 'Curl barre',
+    },
   ),
   ExerciseDef(
     'back_squat',
@@ -490,6 +537,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['legs', 'glutes', 'core'],
     category: 'Legs',
     equipment: ['Barbell'],
+    localizedLabels: {
+      'de': 'Kniebeuge',
+      'es': 'Sentadilla trasera',
+      'fr': 'Squat arrière',
+    },
   ),
   ExerciseDef(
     'front_squat',
@@ -497,6 +549,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['legs', 'glutes', 'core'],
     category: 'Legs',
     equipment: ['Barbell'],
+    localizedLabels: {
+      'de': 'Frontkniebeuge',
+      'es': 'Sentadilla frontal',
+      'fr': 'Squat avant',
+    },
   ),
   ExerciseDef(
     'deadlift',
@@ -504,6 +561,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     ['back', 'legs', 'glutes', 'core'],
     category: 'Back',
     equipment: ['Barbell'],
+    localizedLabels: {
+      'de': 'Kreuzheben',
+      'es': 'Peso muerto',
+      'fr': 'Soulevé de terre',
+    },
   ),
   ExerciseDef(
     'romanian_deadlift',
@@ -512,9 +574,34 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     category: 'Legs',
     equipment: ['Barbell'],
     aliases: ['RDL'],
+    localizedLabels: {
+      'de': 'Rumänisches Kreuzheben',
+      'es': 'Peso muerto rumano',
+      'fr': 'Soulevé de terre roumain',
+    },
   ),
-  ExerciseDef('hip_thrust', 'Hip thrust', ['glutes', 'legs'], category: 'Legs'),
-  ExerciseDef('leg_press', 'Leg press', ['legs', 'glutes'], category: 'Legs'),
+  ExerciseDef(
+    'hip_thrust',
+    'Hip thrust',
+    ['glutes', 'legs'],
+    category: 'Legs',
+    localizedLabels: {
+      'de': 'Hip Thrust',
+      'es': 'Empuje de cadera',
+      'fr': 'Hip thrust',
+    },
+  ),
+  ExerciseDef(
+    'leg_press',
+    'Leg press',
+    ['legs', 'glutes'],
+    category: 'Legs',
+    localizedLabels: {
+      'de': 'Beinpresse',
+      'es': 'Prensa de piernas',
+      'fr': 'Presse à cuisses',
+    },
+  ),
   ExerciseDef(
     'plank',
     'Plank',
@@ -522,6 +609,7 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     category: 'Abs',
     equipment: ['none (bodyweight exercise)'],
     step: 0,
+    localizedLabels: {'de': 'Unterarmstütz', 'es': 'Plancha', 'fr': 'Gainage'},
   ),
   ExerciseDef(
     'hanging_leg_raise',
@@ -530,6 +618,11 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     category: 'Abs',
     equipment: ['Pull-up bar'],
     step: 0,
+    localizedLabels: {
+      'de': 'Hängendes Beinheben',
+      'es': 'Elevación de piernas colgado',
+      'fr': 'Relevé de jambes suspendu',
+    },
   ),
 ];
 

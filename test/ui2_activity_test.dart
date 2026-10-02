@@ -282,6 +282,21 @@ void main() {
           isTrue);
     });
 
+    test('the core lifts are named and searchable in the shipped languages',
+        () {
+      for (final e in exerciseLibrary.take(coreExerciseCount)) {
+        for (final code in ['de', 'es', 'fr']) {
+          expect(e.localizedLabels[code], isNotEmpty,
+              reason: '${e.key} has no $code name');
+        }
+      }
+      final bench = exerciseByKey('bench_press')!;
+      expect(bench.labelFor('de'), 'Bankdrücken');
+      expect(bench.matches('Bankdrücken', 'de'), isTrue);
+      expect(bench.matches('soulevé', 'fr'), isFalse);
+      expect(exerciseByKey('deadlift')!.matches('soulevé', 'fr'), isTrue);
+    });
+
     test('the lifting catalogue excludes other workouts and mobility drills', () {
       final labels = exerciseLibrary.map((e) => e.label).toSet();
       for (final excluded in [
@@ -1541,13 +1556,13 @@ void main() {
 
       await tester.enterText(find.byType(TextField), 'Rücken');
       await tester.pumpAndSettle();
-      expect(find.text('Barbell row'), findsOneWidget,
+      expect(find.text('Langhantelrudern'), findsOneWidget,
           reason: 'the chip says Rücken, so typing it finds Back lifts');
       expect(find.text('Rücken · Langhantel'), findsWidgets);
 
       await tester.enterText(find.byType(TextField), 'Kurzhantel');
       await tester.pumpAndSettle();
-      expect(find.text('Incline DB press'), findsOneWidget);
+      expect(find.text('Schrägbankdrücken mit Kurzhanteln'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
