@@ -1719,7 +1719,12 @@ import 'substrate.dart';
 // withheld — a fabricated-metric bug on `circadian_lifestyle`'s stored
 // output. kAnalyticsPin repinned to analytics main's tip (one commit past
 // PR #75's merge SHA).
-const int kAlgoVersion = 97;
+// 97 → 98 (manual HR zones reach the day derive): Profile.toMap dropped
+// `hr_zone_bounds`, so every derived day's zone timeline/zone_source banded on
+// the automatic set while the zones screen showed the user's own edges.
+// Unfinalized days re-derive onto the manual set. kAnalyticsPin/kProtocolPin
+// UNCHANGED: edge-only fix.
+const int kAlgoVersion = 98;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
