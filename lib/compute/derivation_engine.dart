@@ -4724,7 +4724,11 @@ class DerivationEngine {
     await LocalDb.putDayResult(
       dayId: day.date,
       algoVersion: kAlgoVersion,
-      payloadJson: jsonEncode(bundle),
+      // The data edge this row was derived against. The cross-day settled
+      // test compares the row's wake with THIS edge, not a fresher one read
+      // later: ingest keeps committing during a pass, and a newer edge would
+      // call a night settled whose wake came from a truncated substrate.
+      payloadJson: jsonEncode({...bundle, 'data_edge_sec': dataNowSec}),
       windowJson: jsonEncode(
         ((day.sleepJson['window'] as Map?) ?? const {}).cast<String, dynamic>(),
       ),
@@ -5294,7 +5298,6 @@ class DerivationEngine {
     // both static, so this whole transform+encode step is isolate-safe.
     final rows = await LocalDb.recentDayResults(_crossDayWindow);
     final today = LocalDb.localDayLabelNow();
-    final dataEdgeSec = await LocalDb.lastDecodedRecTs();
     final imported = await LocalDb.importedDates();
     final (days, json) = await _runIsolateCancellable(() {
       final days = <Map<String, dynamic>>[];
@@ -5306,7 +5309,6 @@ class DerivationEngine {
           row,
           payload,
           today: today,
-          dataEdgeSec: dataEdgeSec,
           imported: imported,
         );
         if (rec != null) days.add(rec);
@@ -5503,7 +5505,6 @@ class DerivationEngine {
     Map<String, dynamic> row,
     Map<String, dynamic> payload, {
     required String today,
-    required int? dataEdgeSec,
     required Set<String> imported,
   }) {
     final rec = _crossDayRecord(row, payload);
@@ -5534,7 +5535,11 @@ class DerivationEngine {
     // "not finalized" alone held the alerts off all day, every day. The night
     // is done once the data edge is [_headlineFreezeMarginSec] past its wake,
     // the same test the headline pin uses; no wake yet is no complete night.
+    // The edge is the one the row was derived against (`data_edge_sec`), so
+    // the wake and the edge come from the same substrate; a row without one
+    // stays unsettled.
     final wakeSec = (rec['wake_sec'] as num?)?.toInt();
+    final dataEdgeSec = (payload['data_edge_sec'] as num?)?.toInt();
     if (row['day_id'] == today &&
         (row['finalized'] as num?) != 1 &&
         (wakeSec == null ||

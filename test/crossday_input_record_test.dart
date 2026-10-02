@@ -26,8 +26,9 @@ void main() {
       };
   Map<String, dynamic>? rec(Map<String, dynamic> r, Map<String, dynamic> p,
           {int? edge, Set<String> imported = const {}}) =>
-      DerivationEngine.crossDayInputRecord(r, p,
-          today: today, dataEdgeSec: edge, imported: imported);
+      DerivationEngine.crossDayInputRecord(
+          r, {...p, 'data_edge_sec': ?edge},
+          today: today, imported: imported);
 
   group('today is unsettled only while its night is still draining', () {
     test('edge well past the wake: settled, alerts can read it', () {
@@ -39,6 +40,15 @@ void main() {
     test('edge still at the wake: unsettled', () {
       final r = rec(row(today), payload(), edge: wake + 600)!;
       expect(r['unsettled'], isTrue);
+    });
+
+    test('row derived before the drain caught up stays unsettled', () {
+      // The derive saw data only up to the truncated wake. Whatever the edge
+      // is now, this row's wake came from that substrate, so it is not settled.
+      final r = rec(row(today), payload(), edge: wake)!;
+      expect(r['unsettled'], isTrue);
+      final noEdge = rec(row(today), payload())!;
+      expect(noEdge['unsettled'], isTrue);
     });
 
     test('no night yet: unsettled', () {
