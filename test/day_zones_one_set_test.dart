@@ -33,8 +33,17 @@ void main() {
     await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
   });
 
-  test('day zone bars are binned on the same set as zone_timeline', () async {
+  var seeded = false;
+  Future<Map<String, dynamic>> derive(Profile profile) async {
     final db = await LocalDb.instance;
+    if (seeded) {
+      final done =
+          await DerivationEngine().runDays(profile, {_dayId}, force: true);
+      expect(done, 1);
+      final row = await LocalDb.dayResult(_dayId);
+      return SeriesCodec.decodePayloadJson(row!['payload_json'])!;
+    }
+    seeded = true;
     final night = (_sec(2025, 9, 11, 23, 0), _sec(2025, 9, 12, 6, 0));
     final wake = (_sec(2025, 9, 12, 8, 0), _sec(2025, 9, 12, 11, 0));
     final batch = db.batch();
@@ -72,26 +81,38 @@ void main() {
     // A measured ceiling ABOVE the age line (30 -> 187), so the day's set is
     // the observed one. 115 bpm is Z1 on 200 (57.5 %) but Z2 on 187 (61.5 %).
     await LocalDb.putMetricSeriesValue('2025-09-10', 'hr_ceiling_bpm', 200);
+    return derive(profile);
+  }
 
-    final done = await DerivationEngine()
-        .runDays(const Profile(ageYears: 30), {_dayId}, force: true);
-    expect(done, 1);
-
-    final row = await LocalDb.dayResult(_dayId);
-    final bundle = SeriesCodec.decodePayloadJson(row!['payload_json'])!;
-    expect(bundle['zone_source'], 'observed');
-
+  Map<String, int> timelineCounts(Map<String, dynamic> bundle) {
     final timeline = ((bundle['series'] as Map)['zone_timeline'] as List)
         .cast<Map>();
     expect(timeline, isNotEmpty);
-    final fromTimeline = <String, int>{
+    return {
       for (var z = 1; z <= 5; z++)
         'z$z': timeline.where((e) => e['z'] == z).length,
     };
+  }
+
+  test('day zone bars are binned on the same set as zone_timeline', () async {
+    final bundle = await derive(const Profile(ageYears: 30));
+    expect(bundle['zone_source'], 'observed');
+
+    final fromTimeline = timelineCounts(bundle);
     final zones = (bundle['zones'] as Map).cast<String, dynamic>();
     expect(zones, fromTimeline,
         reason: 'bars and timeline are two views of one day on one set');
     expect(zones['z1'], greaterThan(0));
     expect(zones['z2'], 0, reason: '115 bpm is Z2 only on the age estimate');
+  });
+
+  // No age: the observed set needs none, so the bars must not go absent
+  // asking for one while the timeline beside them is binned on that set.
+  test('day zone bars do not need an age when the set does not', () async {
+    final bundle = await derive(const Profile());
+    expect(bundle['zone_source'], 'observed');
+    final zones = (bundle['zones'] as Map).cast<String, dynamic>();
+    expect(zones, timelineCounts(bundle));
+    expect((bundle['absent_notes'] as Map?)?['zones'], isNull);
   });
 }

@@ -1726,7 +1726,9 @@ import 'substrate.dart';
 // age-estimate bars under a footnote naming the measured ceiling. The
 // recompute is gone; `zones` is the pipeline's, binned off the same per-minute
 // wake series and set as the timeline. Moves `zones` for those users, and
-// marginally for everyone (per-minute means instead of raw 1 Hz). Edge-only.
+// marginally for everyone (per-minute means instead of raw 1 Hz). The bars
+// also gate on the set, not the age estimate, so a manual or observed set with
+// no age gets bars instead of "add your age". Edge-only.
 const int kAlgoVersion = 98;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
@@ -6116,8 +6118,8 @@ class DerivationEngine {
     // every surface reads for the figures it owns, so its reasons win. NOTE
     // `bundle` here is the isolate's PATCH map, not the pure pipeline's bundle
     // — the two are merged at the `bundle.addAll(blocks.bundlePatch)` call
-    // site, and that merge is where `trimp` (the pipeline's alone; nothing here
-    // recomputes it) is carried across.
+    // site, and that merge is where `trimp` and `zones` (the pipeline's alone;
+    // nothing here recomputes them) are carried across.
     bundle['absent_notes'] = <String, String>{
       for (final e in ((wake['absent_notes'] as Map?) ?? const {}).entries)
         e.key.toString(): e.value.toString(),
