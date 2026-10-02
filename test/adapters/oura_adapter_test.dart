@@ -524,15 +524,15 @@ void main() {
     final byKey = {
       for (final o in scalars.rows) o.vendorKey: o,
     };
-    for (final stage in ['deep', 'light', 'rem', 'awake']) {
-      final o = byKey['sleep_${stage}_min']!;
+    for (final stage in ['Deep sleep', 'Light sleep', 'REM sleep', 'Awake']) {
+      final o = byKey[stage]!;
       expect(o.value, 2.0);
       expect(o.unit, 'min');
       expect(o.attribution, 'Oura');
       expect(o.sourceKind, ObservationSource.vendor);
       expect(o.key, isNull, reason: 'their staging, their name — vendorKey');
     }
-    final at = byKey['sleep_deep_min']!.at;
+    final at = byKey['Deep sleep']!.at;
     expect(at.millisecondsSinceEpoch ~/ 1000, 1782043215 + 20);
   });
 

@@ -474,7 +474,13 @@ class OuraAdapter extends BandAdapter {
       stageRows.add(Observation(
         at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
         sourceKind: ObservationSource.vendor,
-        vendorKey: 'sleep_${h.$2.name}_min',
+        // Rendered verbatim as the timeline row title, so it is a label.
+        vendorKey: switch (h.$2) {
+          OuraSleepPhase.deep => 'Deep sleep',
+          OuraSleepPhase.light => 'Light sleep',
+          OuraSleepPhase.rem => 'REM sleep',
+          OuraSleepPhase.awake => 'Awake',
+        },
         value: h.$3,
         unit: 'min',
         attribution: 'Oura',
