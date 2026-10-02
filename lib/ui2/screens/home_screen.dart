@@ -1756,7 +1756,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
                 switch (k) {
                   HomeRingKind.recovery => const ReadinessDetail(),
                   HomeRingKind.strain => const DayStrainDetail(),
-                  HomeRingKind.sleep => const SleepDetail(),
+                  // The night the ring was drawn from, not last night.
+                  HomeRingKind.sleep => SleepDetail(day: _day),
                 }),
           )
         else
@@ -1806,7 +1807,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         detailLinkRow(c, LucideIcons.chartGantt,
             l?.homeBreakdownTitle ?? 'Breakdown of your day',
             l?.homeBreakdownSubtitle ?? 'Hour by hour',
-            () => go(c, const DayTimelineScreen())),
+            () => go(c, DayTimelineScreen(day: _day))),
       ],
     ]));
   }
