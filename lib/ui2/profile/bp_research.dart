@@ -183,55 +183,17 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     setState(() => _busy = true);
     var stored = false;
     try {
-      // The rest window BEFORE the measurement: the feature window ends at
-      // the measurement start, so the cuff's own inflation stays out of it
-      // by construction. See lib/health/bp_research_capture.dart.
-      final start = measuredAtMs - kResearchRestPreMs;
-      final end = measuredAtMs + kResearchWindowPostMs;
-      final db = await LocalDb.instance;
-      // Read exactly what the app already holds around the MEASUREMENT
-      // instant — historical rows for a back-dated capture. Two narrow
-      // range reads, never a day dump, never the raw archive.
-      final onehz = await db.rawQuery(
-        'SELECT rec_ts, hr FROM decoded_onehz '
-        'WHERE device_id = ? AND rec_ts >= ? AND rec_ts <= ? '
-        'ORDER BY rec_ts ASC',
-        [LocalDb.kPrimaryDeviceId, start ~/ 1000, end ~/ 1000],
-      );
-      // The full beat identity rides along: beat_index (always present in
-      // decoded_rr) and beat_ts_ms (the measured sub-second instant, NULL
-      // on rows banked before that column existed — _ensureBeatTimeColumn
-      // guarantees the COLUMN on every open, old data keeps NULL values).
-      // Window membership uses the beat's real position when known:
-      // COALESCE(beat_ts_ms, rr_ts_ms) — a beat whose record second lies
-      // in the window but whose measured instant does not (or vice versa)
-      // is filtered by where the beat actually was, not by its record.
-      final rr = await db.rawQuery(
-        'SELECT rr_ts_ms, rr_ms, beat_index, beat_ts_ms FROM decoded_rr '
-        'WHERE device_id = ? '
-        'AND COALESCE(beat_ts_ms, rr_ts_ms) >= ? '
-        'AND COALESCE(beat_ts_ms, rr_ts_ms) < ? '
-        'ORDER BY rr_ts_ms ASC, beat_index ASC',
-        [LocalDb.kPrimaryDeviceId, start, end],
-      );
-      // SYNC FINALITY: a window is only final when the locally decoded
-      // data provably reaches its end. Both series are checked separately
-      // (they decode from different packets); the EARLIER watermark decides
-      // — the window cannot be judged final until BOTH series could have
-      // delivered their tail. A series with NO decoded rows at all counts
-      // as watermark 0: not provably through, conservative pending.
-      final through = await LocalDb.bpResearchDataThroughMs(
+      final rows = await LocalDb.bpResearchRows(
         LocalDb.kPrimaryDeviceId,
+        measuredAtMs - kResearchRestPreMs,
+        measuredAtMs + kResearchWindowPostMs,
       );
-      final onehzThrough = through.onehzThroughMs ?? 0;
-      final rrThrough = through.rrThroughMs ?? 0;
-      final dataThroughMs = onehzThrough < rrThrough ? onehzThrough : rrThrough;
       final window = researchWindowFrom(
         measuredAtMs: measuredAtMs,
-        onehzRows: onehz,
-        rrRows: rr,
+        onehzRows: rows.onehz,
+        rrRows: rows.rr,
         nowMs: enteredAtMs,
-        dataThroughMs: dataThroughMs,
+        dataThroughMs: rows.dataThroughMs,
       );
       await LocalDb.putBpResearchCapture(
         BpResearchCapture(
@@ -257,8 +219,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
               : _sessionId.text.trim(),
           window: window,
         ),
-        snapshotOnehzRows: onehz,
-        snapshotRrRows: rr,
+        snapshotOnehzRows: rows.onehz,
+        snapshotRrRows: rows.rr,
       );
       stored = true;
       _sys.clear();

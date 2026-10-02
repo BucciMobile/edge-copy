@@ -1813,4 +1813,89 @@ void main() {
     );
     expect(w, isNull);
   });
+
+  test('reprocess after the decoded rows were pruned keeps the frozen window',
+      () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    await db.delete('decoded_onehz');
+    await db.delete('decoded_rr');
+    final rows = [
+      for (var s = 0; s < 300; s++) {'rec_ts': (_at - 300000) ~/ 1000 + s, 'hr': 60},
+    ];
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'pruned',
+        window: researchWindowFrom(
+          measuredAtMs: _at,
+          onehzRows: rows,
+          rrRows: const [],
+        ),
+      ),
+      snapshotOnehzRows: rows,
+      snapshotRrRows: const [],
+    );
+    // Newer data exists, so the window is final, but its own rows are gone.
+    await db.insert('decoded_onehz', {
+      'device_id': LocalDb.kPrimaryDeviceId,
+      'ts_ms': 1,
+      'rec_ts': _at ~/ 1000 + 3600,
+      'counter': 0,
+      'hr': 60,
+    });
+    final refId = (await db.rawQuery('SELECT id FROM bp_research_reference'))
+        .first['id'] as int;
+    await LocalDb.reprocessBpResearchCapture(refId);
+    final win = await db.rawQuery(
+      'SELECT hr_mean, snapshot_revision FROM bp_research_window '
+      'WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win, hasLength(1));
+    expect(win.first['hr_mean'], 60.0);
+    expect(win.first['snapshot_revision'], 1);
+  });
+
+  test('reprocess of a capture stored without a window creates the window',
+      () async {
+    final db = await LocalDb.instance;
+    await db.delete('bp_research_snapshot');
+    await db.delete('bp_research_window');
+    await db.delete('bp_research_reference');
+    await db.delete('decoded_onehz');
+    await db.delete('decoded_rr');
+    await LocalDb.putBpResearchCapture(
+      BpResearchCapture(
+        measuredAtMs: _at,
+        systolicMmHg: 120,
+        diastolicMmHg: 80,
+        capturedAtMs: _at,
+        device: 'late',
+      ),
+    );
+    for (var s = 0; s < 300; s++) {
+      await db.insert('decoded_onehz', {
+        'device_id': LocalDb.kPrimaryDeviceId,
+        'ts_ms': s,
+        'rec_ts': (_at - 300000) ~/ 1000 + s,
+        'counter': s,
+        'hr': 60,
+      });
+    }
+    final refId = (await db.rawQuery('SELECT id FROM bp_research_reference'))
+        .first['id'] as int;
+    await LocalDb.reprocessBpResearchCapture(refId);
+    final win = await db.rawQuery(
+      'SELECT snapshot_revision FROM bp_research_window WHERE reference_id = ?',
+      [refId],
+    );
+    expect(win, hasLength(1));
+    expect(win.first['snapshot_revision'], 1);
+  });
 }

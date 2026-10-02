@@ -353,7 +353,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 56;
+  static const int schemaVersion = 54;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -466,7 +466,6 @@ class LocalDb {
         await _createNotifSlots(db);
         await _createAlarmSchedule(db);
         await _createBpResearch(db);
-        await _upgradeBpResearchV2(db);
         await _ensureCoachViews(db);
       },
       onUpgrade: (db, oldV, newV) async {
@@ -1079,26 +1078,6 @@ class LocalDb {
           // next free rung rather than collide with any of them.
           await _createEcgTables(db);
         }
-        if (oldV < 55) {
-          // BP research capture: paired cuff reference readings plus the
-          // band's own decoded 1 Hz / R-R window frozen around the
-          // measurement instant, for out-of-app comparison only. Two new
-          // tables, CREATE TABLE IF NOT EXISTS and NOTHING else — no
-          // backfill, no rewrite, no ADD COLUMN — so a throw here has
-          // nothing to roll back onto (invariant 11). Ships without a
-          // kAlgoVersion bump: nothing derived moves, and nothing derived
-          // may ever read these (see the guard comment in
-          // [_createBpResearch]).
-          await _createBpResearch(db);
-        }
-        if (oldV < 56) {
-          // BP research v2: measurement vs entry time, the rest window
-          // with quality counts, and immutable raw-row snapshots. All
-          // ADDITIVE: new nullable columns on the existing tables plus one
-          // new table — no rewrite, no backfill (v1 rows keep NULL in the
-          // new columns; absent stays absent). Same isolation as rung 55.
-          await _upgradeBpResearchV2(db);
-        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1180,12 +1159,8 @@ class LocalDb {
     await _createNotifFired(db);
     await _createNotifSlots(db);
     await _createAlarmSchedule(db);
-    // BP research (rung 55 + v2 rung 56): both helpers are fully idempotent
-    // (CREATE TABLE IF NOT EXISTS plus per-column guarded ALTERs), so a
-    // same-version merged build whose schema lineage skipped a rung gets
-    // repaired here instead of bricking on the first BP read or write.
+    // Dev-mode BP research capture tables. Additive, no rung.
     await _createBpResearch(db);
-    await _upgradeBpResearchV2(db);
     // CREATE TABLE IF NOT EXISTS on the every-open repair path, no schema
     // version bump needed — additive, no backfill (see _createImportedWorkout
     // just above for the same reasoning).
@@ -1614,131 +1589,26 @@ class LocalDb {
     );
   }
 
-  /// BP research capture store (schema rung 55).
-  ///
-  /// EXPERIMENTAL, DEVELOPER-ONLY, and it stays that way. A cuff reading the
-  /// user types in next to the band data of the same instant is exactly the
-  /// pairing the `imported_measurement` guard exists to prevent becoming an
-  /// input: the moment a wrist series and a cuff series are regressed against
-  /// each other ON DEVICE, this app is making a cuffless-blood-pressure
-  /// claim from an uncleared device. So this is a SEPARATE store, read by
-  /// exactly one dev screen and one CSV export, and — like
-  /// `imported_measurement` and `observation` — the isolation is structural:
-  /// nothing in `compute/`, nothing that feeds `day_result` or
-  /// `metric_series`, and nothing that writes to HealthKit / Health Connect
-  /// may name either table. `bp_research_isolation_test.dart` fails the moment
-  /// anyone does.
-  ///
-  /// Captures are idempotent on `(measured_at_ms, device)`: retaking the same
-  /// cuff reading at the same instant re-states the window rather than
-  /// duplicating it. Legitimate repeat measurements minutes apart are
-  /// different instants and both stay.
-  /// Rung 56: the v2 research columns and the snapshot table. Additive only —
-  /// nullable columns and a new table, no rewrite, no backfill. Idempotent
-  /// (every ADD COLUMN guarded by _columnsOf) so it can serve both the
-  /// onUpgrade ladder and a fresh install that ran rung 55's CREATE first.
-  static Future<void> _upgradeBpResearchV2(Database db) async {
-    // SELF-SUFFICIENT rung: the ALTERs below assume the rung-55 tables exist.
-    // A v55 database whose bp_research tables are missing (an interrupted
-    // foreign build, an unusual merge lineage) would throw "no such table"
-    // inside the ONE exclusive onUpgrade transaction and brick every launch
-    // with no rollback target. CREATE TABLE IF NOT EXISTS is a no-op in every
-    // normal path (the ladder created the tables one rung earlier).
-    await _createBpResearch(db);
-    final refCols = await _columnsOf(db, 'bp_research_reference');
-    // Measurement vs entry time. NULL on v1 rows: their measured_at_ms
-    // doubles as both, and absent stays absent — no backfill.
-    if (!refCols.contains('measurement_started_at_ms')) {
-      await db.execute(
-        'ALTER TABLE bp_research_reference '
-        'ADD COLUMN measurement_started_at_ms INTEGER',
-      );
-    }
-    if (!refCols.contains('measurement_finished_at_ms')) {
-      await db.execute(
-        'ALTER TABLE bp_research_reference '
-        'ADD COLUMN measurement_finished_at_ms INTEGER',
-      );
-    }
-    // Band identity and session grouping, kept beside the capture so signal
-    // provenance survives a device swap or a second band.
-    if (!refCols.contains('band_device_id')) {
-      await db.execute(
-        'ALTER TABLE bp_research_reference ADD COLUMN band_device_id TEXT',
-      );
-    }
-    if (!refCols.contains('measurement_session_id')) {
-      await db.execute(
-        'ALTER TABLE bp_research_reference '
-        'ADD COLUMN measurement_session_id TEXT',
-      );
-    }
-    // Precision of the recorded measurement instant ('minute' for the
-    // current UI) — the analysis must know the pairing instant is not
-    // second-accurate.
-    if (!refCols.contains('time_precision')) {
-      await db.execute(
-        'ALTER TABLE bp_research_reference ADD COLUMN time_precision TEXT',
-      );
-    }
-
-    final winCols = await _columnsOf(db, 'bp_research_window');
-    // Requested vs OBSERVED window bounds: what the data actually covered.
-    if (!winCols.contains('observed_start_ms')) {
-      await db.execute(
-        'ALTER TABLE bp_research_window ADD COLUMN observed_start_ms INTEGER',
-      );
-    }
-    if (!winCols.contains('observed_end_ms')) {
-      await db.execute(
-        'ALTER TABLE bp_research_window ADD COLUMN observed_end_ms INTEGER',
-      );
-    }
-    // Quality counts (v2): honest coverage and continuity metrics, never a
-    // fabricated confidence number.
-    for (final c in [
-      'valid_hr_seconds INTEGER',
-      'valid_interval_count INTEGER',
-      'valid_interval_pair_count INTEGER',
-      'coverage_fraction REAL',
-      'rejected_interval_fraction REAL',
-      'quality_status TEXT',
-      'feature_version INTEGER',
-      'snapshot_revision INTEGER',
-    ]) {
-      final name = c.split(' ').first;
-      if (!winCols.contains(name)) {
-        await db.execute('ALTER TABLE bp_research_window ADD COLUMN $c');
-      }
-    }
-
-    // Immutable raw-row snapshots: the exact onehz/rr rows a window
-    // revision was computed from, frozen as JSON. Re-processing writes a
-    // NEW revision row; old revisions stay. Research-only, same isolation
-    // as the rung-55 tables.
-    await db.execute(
-      'CREATE TABLE IF NOT EXISTS bp_research_snapshot ('
-      'id INTEGER PRIMARY KEY AUTOINCREMENT, '
-      'reference_id INTEGER NOT NULL, '
-      'revision INTEGER NOT NULL, '
-      'onehz_json TEXT NOT NULL, '
-      'rr_json TEXT NOT NULL, '
-      'created_at_ms INTEGER NOT NULL, '
-      'UNIQUE (reference_id, revision))',
-    );
-  }
-
+  /// Dev-mode BP research store: cuff readings typed in next to the band's
+  /// own decoded window before them, for CSV export only. Nothing derived,
+  /// nothing in `compute/` and no health-store writer may read these;
+  /// `bp_research_isolation_test.dart` enforces it.
   static Future<void> _createBpResearch(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS bp_research_reference (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         measured_at_ms INTEGER NOT NULL,
+        measurement_started_at_ms INTEGER,
+        measurement_finished_at_ms INTEGER,
         device TEXT,
         posture TEXT,
         conditions TEXT,
         systolic_mmhg REAL NOT NULL,
         diastolic_mmhg REAL NOT NULL,
         captured_at_ms INTEGER NOT NULL,
+        band_device_id TEXT,
+        measurement_session_id TEXT,
+        time_precision TEXT,
         UNIQUE (measured_at_ms, device)
       )
     ''');
@@ -1748,9 +1618,8 @@ class LocalDb {
           REFERENCES bp_research_reference(id) ON DELETE CASCADE,
         window_start_ms INTEGER NOT NULL,
         window_end_ms INTEGER NOT NULL,
-        -- NULL-safe by design: the band may have had nothing to say at that
-        -- instant (not worn, not synced yet), and a missing window is recorded
-        -- as missing — never as zeroes.
+        observed_start_ms INTEGER,
+        observed_end_ms INTEGER,
         onehz_rows INTEGER,
         rr_beats INTEGER,
         hr_mean REAL,
@@ -1758,7 +1627,28 @@ class LocalDb {
         rr_ms_min REAL,
         rr_ms_max REAL,
         rmssd_ms REAL,
+        valid_hr_seconds INTEGER,
+        valid_interval_count INTEGER,
+        valid_interval_pair_count INTEGER,
+        coverage_fraction REAL,
+        rejected_interval_fraction REAL,
+        quality_status TEXT,
+        feature_version INTEGER,
+        snapshot_revision INTEGER,
         meta_json TEXT
+      )
+    ''');
+    // The exact rows a window revision was computed from. Insert-only: a
+    // refresh writes revision n+1 and never rewrites an older one.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS bp_research_snapshot (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        reference_id INTEGER NOT NULL,
+        revision INTEGER NOT NULL,
+        onehz_json TEXT NOT NULL,
+        rr_json TEXT NOT NULL,
+        created_at_ms INTEGER NOT NULL,
+        UNIQUE (reference_id, revision)
       )
     ''');
     await db.execute(
@@ -1767,63 +1657,63 @@ class LocalDb {
     );
   }
 
-  /// Insert one cuff reference reading plus its frozen band window.
-  ///
-  /// Pure write; the caller computes the window stats (see
-  /// `lib/health/bp_research_capture.dart`). Idempotent on
-  /// `(measured_at_ms, device)`: `INSERT OR REPLACE` on the reference, then
-  /// the window row is restated in the same transaction so a retake can never
-  /// leave an old window under a new reference.
-  /// Insert one cuff reference reading plus its frozen band window and the
-  /// immutable snapshot of the rows the window was computed from.
-  ///
-  /// Pure write; the caller computes the window stats (see
-  /// `lib/health/bp_research_capture.dart`). Idempotent on
-  /// `(measured_at_ms, device)`: the colliding row is deleted explicitly
-  /// first (window, snapshots, then the reference — no PRAGMA foreign_keys
-  /// here, so nothing cascades on its own), then re-inserted.
-  /// The SYNC WATERMARK of exactly one band: up to which instant do we
-  /// provably hold DECODED local data for this device? HR and RR are
-  /// answered SEPARATELY — the two series decode from different packets
-  /// and a shared watermark would be a fabrication. NULL means no decoded
-  /// row exists for the device. The BP research window classification
-  /// uses this as its pending criterion: a window whose end lies beyond
-  /// the watermark is 'pending', never a final 'no_data'/'gappy' — the
-  /// missing tail may still arrive with the next sync.
-  static Future<({int? onehzThroughMs, int? rrThroughMs})>
-  bpResearchDataThroughMs(String deviceId) async {
+  /// The decoded rows of one band inside the half-open window
+  /// `[startMs, endMs)`, plus how far that band's decoded data reaches: the
+  /// earlier of the HR and RR watermarks, 0 for a series with no rows yet.
+  static Future<
+    ({
+      List<Map<String, Object?>> onehz,
+      List<Map<String, Object?>> rr,
+      int dataThroughMs,
+    })
+  >
+  bpResearchRows(String deviceId, int startMs, int endMs) async {
     final db = await instance;
-    final onehz = Sqflite.firstIntValue(
+    final onehz = await db.rawQuery(
+      'SELECT rec_ts, hr FROM decoded_onehz '
+      'WHERE device_id = ? AND rec_ts >= ? AND rec_ts < ? '
+      'ORDER BY rec_ts ASC',
+      [deviceId, (startMs + 999) ~/ 1000, (endMs + 999) ~/ 1000],
+    );
+    // A beat sits a few seconds before its record at most; the rr_ts_ms
+    // bound is only there so the query can use its index.
+    final rr = await db.rawQuery(
+      'SELECT rr_ts_ms, rr_ms, beat_index, beat_ts_ms FROM decoded_rr '
+      'WHERE device_id = ? AND rr_ts_ms >= ? AND rr_ts_ms < ? '
+      'AND COALESCE(beat_ts_ms, rr_ts_ms) >= ? '
+      'AND COALESCE(beat_ts_ms, rr_ts_ms) < ? '
+      'ORDER BY rr_ts_ms ASC, beat_index ASC',
+      [deviceId, startMs - 60000, endMs + 60000, startMs, endMs],
+    );
+    final onehzThrough = Sqflite.firstIntValue(
       await db.rawQuery(
-        'SELECT MAX(rec_ts) FROM decoded_onehz WHERE device_id = ?',
+        'SELECT MAX(rec_ts) * 1000 FROM decoded_onehz WHERE device_id = ?',
         [deviceId],
       ),
-    );
-    final rr = Sqflite.firstIntValue(
+    ) ?? 0;
+    final rrThrough = Sqflite.firstIntValue(
       await db.rawQuery(
-        'SELECT MAX(COALESCE(beat_ts_ms, rr_ts_ms)) / 1 FROM decoded_rr '
-        'WHERE device_id = ?',
+        'SELECT MAX(rr_ts_ms) FROM decoded_rr WHERE device_id = ?',
         [deviceId],
       ),
-    );
+    ) ?? 0;
     return (
-      onehzThroughMs: onehz == null ? null : onehz * 1000,
-      rrThroughMs: rr,
+      onehz: onehz,
+      rr: rr,
+      dataThroughMs: onehzThrough < rrThrough ? onehzThrough : rrThrough,
     );
   }
 
-  /// EXPLICIT RE-PROCESSING of ONE stored capture (developer-mode action).
-  /// Re-reads the CURRENT local WHOOP data for the capture's ORIGINAL
-  /// window bounds, re-classifies the window, and writes a NEW snapshot
-  /// revision — the old revisions stay byte-identical. The reference
-  /// itself (cuff values, measurement time) is NEVER touched. A window
-  /// whose data basis still does not reach the window end stays
-  /// 'pending' — no fabricated finality.
+  /// Re-read the current local data for a stored capture's original window
+  /// and write it as a new snapshot revision. The cuff reference is never
+  /// touched.
   static Future<void> reprocessBpResearchCapture(int referenceId) async {
     final db = await instance;
     final refs = await db.rawQuery(
       'SELECT r.measured_at_ms, r.band_device_id, '
-      'w.window_start_ms, w.window_end_ms '
+      'w.window_start_ms, w.window_end_ms, '
+      '(SELECT MAX(revision) FROM bp_research_snapshot s '
+      'WHERE s.reference_id = r.id) AS max_rev '
       'FROM bp_research_reference r '
       'LEFT JOIN bp_research_window w ON w.reference_id = r.id '
       'WHERE r.id = ?',
@@ -1831,171 +1721,51 @@ class LocalDb {
     );
     if (refs.isEmpty) return;
     final r = refs.first;
-    final bandDeviceId = (r['band_device_id'] as String?) ?? kPrimaryDeviceId;
-    // The ORIGINAL window bounds: re-processing must not silently move
-    // the feature window, only refresh the data inside it.
-    final start =
-        (r['window_start_ms'] as num?)?.toInt() ??
-        (r['measured_at_ms'] as num).toInt() - kResearchRestPreMs;
-    final end =
-        (r['window_end_ms'] as num?)?.toInt() ??
-        (r['measured_at_ms'] as num).toInt() + kResearchWindowPostMs;
-    final onehz = await db.rawQuery(
-      'SELECT rec_ts, hr FROM decoded_onehz '
-      'WHERE device_id = ? AND rec_ts >= ? AND rec_ts <= ? '
-      'ORDER BY rec_ts ASC',
-      [bandDeviceId, start ~/ 1000, (end - 1) ~/ 1000],
+    final at = (r['measured_at_ms'] as num).toInt();
+    final start = (r['window_start_ms'] as num?)?.toInt() ??
+        at - kResearchRestPreMs;
+    final end = (r['window_end_ms'] as num?)?.toInt() ??
+        at + kResearchWindowPostMs;
+    final rows = await bpResearchRows(
+      (r['band_device_id'] as String?) ?? kPrimaryDeviceId,
+      start,
+      end,
     );
-    final rr = await db.rawQuery(
-      'SELECT rr_ts_ms, rr_ms, beat_index, beat_ts_ms FROM decoded_rr '
-      'WHERE device_id = ? '
-      'AND COALESCE(beat_ts_ms, rr_ts_ms) >= ? '
-      'AND COALESCE(beat_ts_ms, rr_ts_ms) < ? '
-      'ORDER BY rr_ts_ms ASC, beat_index ASC',
-      [bandDeviceId, start, end],
-    );
-    final through = await bpResearchDataThroughMs(bandDeviceId);
-    // CONSERVATIVE WATERMARK: a series with NO decoded rows at all has
-    // watermark 0 (nothing provably decoded); the EARLIER of the two
-    // series decides — the window cannot be final until BOTH could have
-    // delivered their tail.
-    final onehzThrough = through.onehzThroughMs ?? 0;
-    final rrThrough = through.rrThroughMs ?? 0;
-    final dataThroughMs = onehzThrough < rrThrough ? onehzThrough : rrThrough;
+    // Nothing local any more but a snapshot exists: the decoded rows were
+    // pruned, and the frozen window is the only copy. Keep it.
+    // ponytail: a partially pruned window still overwrites; compare row
+    // counts against the last snapshot if that ever matters.
+    if (rows.onehz.isEmpty && rows.rr.isEmpty && r['max_rev'] != null) return;
     final window = researchWindowFrom(
-      measuredAtMs: (r['measured_at_ms'] as num).toInt(),
-      onehzRows: onehz,
-      rrRows: rr,
-      preMs: (r['measured_at_ms'] as num).toInt() - start,
-      postMs: end - (r['measured_at_ms'] as num).toInt(),
+      measuredAtMs: at,
+      onehzRows: rows.onehz,
+      rrRows: rows.rr,
+      preMs: at - start,
+      postMs: end - at,
       nowMs: DateTime.now().millisecondsSinceEpoch,
-      dataThroughMs: dataThroughMs,
+      dataThroughMs: rows.dataThroughMs,
     );
-    await db.transaction((txn) async {
-      if (window == null) {
-        // FINAL and provably empty: the honest no-data case — the window
-        // row goes, the reference stays.
-        await txn.rawDelete(
-          'DELETE FROM bp_research_window WHERE reference_id = ?',
-          [referenceId],
-        );
-        return;
-      }
-      final onehzEmpty = onehz.isEmpty;
-      final rrEmpty = rr.isEmpty;
-      if (onehzEmpty && rrEmpty) {
-        // NOT final and still nothing locally: keep the window as
-        // 'pending' — it must survive so a later re-process can attach
-        // a new snapshot revision. A new revision over EMPTY rows would
-        // be fabricated evidence, so the window KEEPS whatever revision
-        // it already points at (or stays snapshotless).
-        await txn.rawInsert(
-          'INSERT OR REPLACE INTO bp_research_window '
-          '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
-          'observed_end_ms, onehz_rows, rr_beats, hr_mean, rr_ms_mean, '
-          'rr_ms_min, rr_ms_max, rmssd_ms, valid_hr_seconds, '
-          'valid_interval_count, valid_interval_pair_count, '
-          'coverage_fraction, rejected_interval_fraction, quality_status, '
-          'feature_version, snapshot_revision, meta_json) '
-          'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-          [
-            referenceId,
-            window.windowStartMs,
-            window.windowEndMs,
-            window.observedStartMs,
-            window.observedEndMs,
-            window.onehzRows,
-            window.rrBeats,
-            window.hrMean,
-            window.rrMsMean,
-            window.rrMsMin,
-            window.rrMsMax,
-            window.rmssdMs,
-            window.validHrSeconds,
-            window.validIntervalCount,
-            window.validIntervalPairCount,
-            window.coverageFraction,
-            window.rejectedIntervalFraction,
-            window.qualityStatus,
-            window.featureVersion,
-            // Keep the EXISTING revision: no new snapshot was computed, so
-            // no new revision may be claimed (snapshot-invariant).
-            (await txn.rawQuery(
-                  'SELECT snapshot_revision FROM bp_research_window '
-                  'WHERE reference_id = ?',
-                  [referenceId],
-                )).firstOrNull?['snapshot_revision']
-                as int?,
-            window.metaJson,
-          ],
-        );
-        return;
-      }
-      final maxRev = Sqflite.firstIntValue(
-        await txn.rawQuery(
-          'SELECT MAX(revision) FROM bp_research_snapshot '
-          'WHERE reference_id = ?',
-          [referenceId],
-        ),
-      );
-      final rev = (maxRev ?? 0) + 1;
-      await txn.rawInsert(
-        'INSERT INTO bp_research_snapshot '
-        '(reference_id, revision, onehz_json, rr_json, created_at_ms) '
-        'VALUES (?, ?, ?, ?, ?)',
-        [
-          referenceId,
-          rev,
-          jsonEncode(onehz),
-          jsonEncode(rr),
-          DateTime.now().millisecondsSinceEpoch,
-        ],
-      );
-      await txn.rawUpdate(
-        'UPDATE bp_research_window SET '
-        'window_start_ms = ?, window_end_ms = ?, observed_start_ms = ?, '
-        'observed_end_ms = ?, onehz_rows = ?, rr_beats = ?, hr_mean = ?, '
-        'rr_ms_mean = ?, rr_ms_min = ?, rr_ms_max = ?, rmssd_ms = ?, '
-        'valid_hr_seconds = ?, valid_interval_count = ?, '
-        'valid_interval_pair_count = ?, coverage_fraction = ?, '
-        'rejected_interval_fraction = ?, quality_status = ?, '
-        'feature_version = ?, snapshot_revision = ? WHERE reference_id = ?',
-        [
-          window.windowStartMs,
-          window.windowEndMs,
-          window.observedStartMs,
-          window.observedEndMs,
-          window.onehzRows,
-          window.rrBeats,
-          window.hrMean,
-          window.rrMsMean,
-          window.rrMsMin,
-          window.rrMsMax,
-          window.rmssdMs,
-          window.validHrSeconds,
-          window.validIntervalCount,
-          window.validIntervalPairCount,
-          window.coverageFraction,
-          window.rejectedIntervalFraction,
-          window.qualityStatus,
-          window.featureVersion,
-          rev,
-          referenceId,
-        ],
-      );
-    });
+    await db.transaction(
+      (txn) => _putBpResearchWindow(
+        txn,
+        referenceId,
+        window,
+        rows.onehz,
+        rows.rr,
+        DateTime.now().millisecondsSinceEpoch,
+      ),
+    );
   }
 
+  /// Insert or restate one cuff reading plus its band window and the
+  /// snapshot of the rows the window was computed from. Idempotent on
+  /// `(measured_at_ms, device)`: a retake keeps the reference id and every
+  /// older snapshot revision. Invalid pairs throw before anything is written.
   static Future<void> putBpResearchCapture(
     BpResearchCapture c, {
     List<Map<String, Object?>>? snapshotOnehzRows,
     List<Map<String, Object?>>? snapshotRrRows,
   }) async {
-    // STORE-SIDE validation, not just UI: any caller (a future import, a
-    // second screen) meets the same research bounds. Enforced BEFORE the
-    // transaction opens, so a rejected capture leaves no partial row, no
-    // window, no snapshot behind. Out-of-bounds is REJECTED, never
-    // corrected or clamped — a clamped reading is a fabricated one.
     if (!c.systolicMmHg.isFinite ||
         !c.diastolicMmHg.isFinite ||
         c.systolicMmHg < kResearchSystolicBounds.$1 ||
@@ -2011,19 +1781,7 @@ class LocalDb {
     }
     final db = await instance;
     await db.transaction((txn) async {
-      // NULL never equals NULL in a UNIQUE constraint, so a retake with no
-      // device text would duplicate the reference instead of replacing it.
-      // Normalizing to '' keeps (measured_at_ms, device) unique either way,
-      // and the window of the row being replaced is deleted explicitly —
-      // without PRAGMA foreign_keys the ON DELETE CASCADE never runs, and
-      // a fresh id would orphan the old window.
-      // A retake KEEPS the destination reference id (UPDATE in place, not
-      // delete + reinsert — a fresh id would strand the window row, and
-      // deleting the reference would destroy the snapshot history) and
-      // KEEPS every historical snapshot revision — the immutable-snapshot
-      // contract. Only the window summary row is restated, because it
-      // describes the CURRENT revision. NULL never equals NULL in a UNIQUE
-      // constraint, so the device text is normalized to '' either way.
+      // NULL never equals NULL in a UNIQUE constraint, so no device is ''.
       final device = c.device ?? '';
       final existing = await txn.rawQuery(
         'SELECT id FROM bp_research_reference '
@@ -2077,111 +1835,87 @@ class LocalDb {
           ],
         );
       }
-      // A capture with no band data stores NO window row — the LEFT JOIN in
-      // [bpResearchCaptures] renders it as an empty window, and `NOT NULL`
-      // on the window bounds is what keeps a half-written window out of the
-      // store. A retake that now finds band data replaces the absent row.
-      final w = c.window;
-      if (w == null) {
-        await txn.rawDelete(
-          'DELETE FROM bp_research_window WHERE reference_id = ?',
-          [id],
-        );
-        return;
-      }
-      // SNAPSHOT/WINDOW INVARIANT: a window may only name a snapshot
-      // revision that ACTUALLY exists for THIS reference. The revision is
-      // decided HERE, from the snapshot lists of THIS operation — never
-      // from a caller-set w.snapshotRevision, which could point at a
-      // foreign or non-existent revision (the window would reference raw
-      // data that is not what its features were computed from).
-      //   · snapshot lists passed → new revision (max + 1) is created
-      //     below and the window is pointed at it in the SAME transaction;
-      //   · no snapshot lists → snapshot_revision = NULL: the window is
-      //     stored SNAPSHOTLESS (a legacy-style summary), never claiming
-      //     an old or foreign revision it cannot prove.
-      // Same content rule as the snapshot below: lists that are empty
-      // carry no evidence, so the window stays snapshotless.
-      final hasSnapshotRows =
-          (snapshotOnehzRows != null && snapshotOnehzRows.isNotEmpty) ||
-          (snapshotRrRows != null && snapshotRrRows.isNotEmpty);
-      await txn.rawInsert(
-        'INSERT OR REPLACE INTO bp_research_window '
-        '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
-        'observed_end_ms, onehz_rows, rr_beats, hr_mean, rr_ms_mean, '
-        'rr_ms_min, rr_ms_max, rmssd_ms, valid_hr_seconds, '
-        'valid_interval_count, valid_interval_pair_count, '
-        'coverage_fraction, rejected_interval_fraction, quality_status, '
-        'feature_version, snapshot_revision, meta_json) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [
-          id,
-          w.windowStartMs,
-          w.windowEndMs,
-          w.observedStartMs,
-          w.observedEndMs,
-          w.onehzRows,
-          w.rrBeats,
-          w.hrMean,
-          w.rrMsMean,
-          w.rrMsMin,
-          w.rrMsMax,
-          w.rmssdMs,
-          w.validHrSeconds,
-          w.validIntervalCount,
-          w.validIntervalPairCount,
-          w.coverageFraction,
-          w.rejectedIntervalFraction,
-          w.qualityStatus,
-          w.featureVersion,
-          // NULL without snapshot lists — no revision is claimed that
-          // does not exist; with lists the UPDATE below sets the real
-          // new revision before the transaction commits.
-          hasSnapshotRows ? w.snapshotRevision : null,
-          w.metaJson,
-        ],
+      await _putBpResearchWindow(
+        txn,
+        id,
+        c.window,
+        snapshotOnehzRows ?? const [],
+        snapshotRrRows ?? const [],
+        c.capturedAtMs,
       );
-      // The immutable snapshot: the next free revision (max + 1), so a
-      // re-processed capture writes a NEW revision and every older revision
-      // survives. Plain INSERT — the UNIQUE (reference_id, revision) key
-      // makes an overwrite of an existing revision a database-integrity
-      // error instead of a silent history rewrite. Rows frozen as JSON
-      // exactly as the window computation saw them.
-      // NO SNAPSHOT OVER EMPTY ROWS: a revision frozen over zero onehz
-      // AND zero rr rows is fabricated evidence — a pending window keeps
-      // its row without claiming any revision; the FIRST real data
-      // creates revision 1.
-      final snapshotHasContent =
-          (snapshotOnehzRows != null && snapshotOnehzRows.isNotEmpty) ||
-          (snapshotRrRows != null && snapshotRrRows.isNotEmpty);
-      if (snapshotHasContent) {
-        final maxRev = Sqflite.firstIntValue(
-          await txn.rawQuery(
-            'SELECT MAX(revision) FROM bp_research_snapshot '
-            'WHERE reference_id = ?',
-            [id],
-          ),
-        );
-        final rev = (maxRev ?? 0) + 1;
-        await txn.rawInsert(
-          'INSERT INTO bp_research_snapshot '
-          '(reference_id, revision, onehz_json, rr_json, created_at_ms) '
-          'VALUES (?, ?, ?, ?, ?)',
-          [
-            id,
-            rev,
-            jsonEncode(snapshotOnehzRows ?? const []),
-            jsonEncode(snapshotRrRows ?? const []),
-            c.capturedAtMs,
-          ],
-        );
-        await txn.rawUpdate(
-          'UPDATE bp_research_window SET snapshot_revision = ? '
-          'WHERE reference_id = ?',
-          [rev, id],
-        );
-      }
     });
+  }
+
+  /// Restate the window row of [id]. No window deletes the row. Rows freeze
+  /// into the next snapshot revision and the window names it; no rows means
+  /// no revision is claimed (snapshot_revision NULL).
+  static Future<void> _putBpResearchWindow(
+    Transaction txn,
+    int id,
+    BpResearchWindow? w,
+    List<Map<String, Object?>> onehz,
+    List<Map<String, Object?>> rr,
+    int createdAtMs,
+  ) async {
+    if (w == null) {
+      await txn.rawDelete(
+        'DELETE FROM bp_research_window WHERE reference_id = ?',
+        [id],
+      );
+      return;
+    }
+    int? rev;
+    if (onehz.isNotEmpty || rr.isNotEmpty) {
+      final maxRev = Sqflite.firstIntValue(
+        await txn.rawQuery(
+          'SELECT MAX(revision) FROM bp_research_snapshot '
+          'WHERE reference_id = ?',
+          [id],
+        ),
+      );
+      rev = (maxRev ?? 0) + 1;
+      // Plain INSERT: UNIQUE (reference_id, revision) makes rewriting an
+      // existing revision an error, never a silent overwrite.
+      await txn.rawInsert(
+        'INSERT INTO bp_research_snapshot '
+        '(reference_id, revision, onehz_json, rr_json, created_at_ms) '
+        'VALUES (?, ?, ?, ?, ?)',
+        [id, rev, jsonEncode(onehz), jsonEncode(rr), createdAtMs],
+      );
+    }
+    await txn.rawInsert(
+      'INSERT OR REPLACE INTO bp_research_window '
+      '(reference_id, window_start_ms, window_end_ms, observed_start_ms, '
+      'observed_end_ms, onehz_rows, rr_beats, hr_mean, rr_ms_mean, '
+      'rr_ms_min, rr_ms_max, rmssd_ms, valid_hr_seconds, '
+      'valid_interval_count, valid_interval_pair_count, '
+      'coverage_fraction, rejected_interval_fraction, quality_status, '
+      'feature_version, snapshot_revision, meta_json) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        id,
+        w.windowStartMs,
+        w.windowEndMs,
+        w.observedStartMs,
+        w.observedEndMs,
+        w.onehzRows,
+        w.rrBeats,
+        w.hrMean,
+        w.rrMsMean,
+        w.rrMsMin,
+        w.rrMsMax,
+        w.rmssdMs,
+        w.validHrSeconds,
+        w.validIntervalCount,
+        w.validIntervalPairCount,
+        w.coverageFraction,
+        w.rejectedIntervalFraction,
+        w.qualityStatus,
+        w.featureVersion,
+        rev,
+        w.metaJson,
+      ],
+    );
   }
 
   /// All captures, newest first, for the dev screen and the CSV export.
