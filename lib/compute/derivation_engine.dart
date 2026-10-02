@@ -5647,7 +5647,7 @@ class DerivationEngine {
     if (cutoffSec <= 0) return null;
     final pending = rawDayIds.where((d) => !derivedDayIds.contains(d)).toList()
       ..sort();
-    if (pending.isEmpty) return cutoffSec;
+    if (pending.isEmpty) return _localDayStartOf(cutoffSec);
     // Hold at the START of the oldest day still owed a result — its own rows
     // survive, everything before it goes — floored so a permanently stuck day
     // cannot hold the whole install (see [_maxRawHoldDays]).
@@ -5655,8 +5655,17 @@ class DerivationEngine {
       _localDayLabelToSec(pending.first),
       dataNowSec - _maxRawHoldDays * 86400,
     );
-    return barrier < cutoffSec ? barrier : cutoffSec;
+    return _localDayStartOf(barrier < cutoffSec ? barrier : cutoffSec);
   }
+
+  /// Local midnight of the day [sec] falls in. The prune deletes WHOLE days:
+  /// a cutoff mid-day left that day half-pruned, still in `decodedRecTsMaxByDay`,
+  /// so the next rescan re-derived it from the surviving afternoon and replaced
+  /// its full curve/wear with one starting wherever the cutoff happened to sit
+  /// (#450). A fully-pruned day drops out of the rescan and keeps its result.
+  static int _localDayStartOf(int sec) => _localDayLabelToSec(
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(sec * 1000)),
+      );
 
   /// Prune raw older than [rawRetentionDays] BEHIND THE DATA EDGE. Retention is
   /// measured against the last record timestamp we actually drained
