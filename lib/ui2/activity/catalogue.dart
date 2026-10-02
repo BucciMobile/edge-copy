@@ -48,9 +48,9 @@ class Activity {
   /// Metabolic equivalent of task — the honest basis for a calorie estimate.
   /// Compendium of Physical Activities, Ainsworth et al.
   ///
-  /// NULL for a row the compendium cannot price, which is exactly one:
-  /// 'General workout' means the user did not say what they did, and the
-  /// compendium prices named activities. Every number that could go here
+  /// NULL for a row the compendium cannot price. 'General workout' means the
+  /// user did not say what they did, and the compendium prices named
+  /// activities; 'Padel' is named but has no compendium row at all. Every number that could go here
   /// would be a stand-in — which is the 'Custom activity' mistake below,
   /// whose MET of 4.0 was invented. So [kcal] returns null, the picker and
   /// the setup screen show no estimate, and the session still gets a REAL
@@ -149,6 +149,10 @@ const activityLibrary = <ActGroup>[
     Activity(
         'Table tennis', LucideIcons.volleyball, C.blue, Track.duration, 4.0),
     Activity('Squash', LucideIcons.volleyball, C.red, Track.duration, 12.0),
+    // No MET: the compendium has no padel row. Tennis doubles and paddleball
+    // are different games, and borrowing either would be a stand-in. The
+    // post-session estimate still works from heart rate.
+    Activity('Padel', LucideIcons.volleyball, C.yellow, Track.duration, null),
     Activity('Volleyball', LucideIcons.volleyball, C.orange, Track.duration, 6.0),
     Activity('Hockey', LucideIcons.target, C.blue, Track.duration, 8.0),
     Activity('Baseball', LucideIcons.target, C.red, Track.duration, 5.0),
@@ -191,6 +195,10 @@ const activityLibrary = <ActGroup>[
         gps: true),
     Activity('Skating', LucideIcons.circleDashed, C.purple, Track.distance, 7.0,
         gps: true),
+    // Compendium 15580, "skateboarding, general, moderate effort". Timed, not
+    // a route: a park session goes nowhere, and cruising is the longboard rows.
+    Activity(
+        'Skateboarding', LucideIcons.circleDashed, C.orange, Track.duration, 5.0),
     Activity('Horse riding', LucideIcons.rabbit, C.orange, Track.duration, 5.5),
   ]),
   ActGroup('Mind & body', LucideIcons.leaf, [
@@ -360,6 +368,8 @@ const exerciseLibrary = <ExerciseDef>[
       {'chest': .5, 'shoulders': .3, 'triceps': .2},
       step: 2),
   ExerciseDef('cable_fly', 'Cable fly', {'chest': .8, 'shoulders': .2}),
+  ExerciseDef('push_up', 'Push-up',
+      {'chest': .6, 'triceps': .25, 'shoulders': .15}),
   ExerciseDef('overhead_press', 'Overhead press',
       {'shoulders': .6, 'triceps': .3, 'core': .1}),
   ExerciseDef('triceps_pushdown', 'Triceps pushdown', {'triceps': 1.0}),

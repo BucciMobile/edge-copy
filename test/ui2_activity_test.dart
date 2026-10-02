@@ -187,10 +187,21 @@ void main() {
         expect(met, lessThanOrEqualTo(25.0), reason: a.name);
       }
       // A null MET is not a gap to be filled later — it is the catch-all row
-      // saying it was told nothing. Exactly one row may say that, or the
-      // exception has quietly become a habit.
+      // saying it was told nothing, or a named sport the compendium has no
+      // row for. Pinned by name, or the exception quietly becomes a habit.
       final unpriced = allActivities.where((a) => a.met == null).toList();
-      expect(unpriced.map((a) => a.name), ['General workout']);
+      expect(unpriced.map((a) => a.name), ['Padel', 'General workout']);
+    });
+
+    test('padel, skateboarding and push-ups resolve by their stored keys', () {
+      final padel = activityByName('padel')!;
+      expect(padel.met, isNull, reason: 'no compendium row for padel');
+      expect(archOf(padel), Arch.match);
+      final skate = activityByName('skateboarding')!;
+      expect(skate.met, 5.0, reason: 'compendium 15580');
+      expect(skate.track, Track.duration);
+      expect(skate.gait, isFalse, reason: 'pushing off is not walking');
+      expect(exerciseByKey('push_up')?.label, 'Push-up');
     });
 
     test('Intimacy is a normal entry with a privacy default', () {

@@ -59,7 +59,7 @@ enum Arch { route, strength, interval, flow, laps, journey, match, basic }
 
 const _sports = {
   'Football', 'Basketball', 'Cricket', 'Tennis', 'Badminton', 'Table tennis',
-  'Squash', 'Volleyball', 'Hockey', 'Baseball', 'Rugby', 'Boxing',
+  'Squash', 'Padel', 'Volleyball', 'Hockey', 'Baseball', 'Rugby', 'Boxing',
   'Martial arts', 'Wrestling',
 };
 const _laps = {'Swimming', 'Rowing'};
