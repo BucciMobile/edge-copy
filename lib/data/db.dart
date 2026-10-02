@@ -8961,7 +8961,9 @@ class LocalDb {
               try {
                 wins = await src.rawQuery('SELECT * FROM bp_research_window');
               } on DatabaseException catch (e) {
-                if (!e.isNoSuchTableError()) rethrow;
+                // A missing or unreadable window table only costs the
+                // windows; the hand-entered references still come across.
+                if (!e.isNoSuchTableError() && !tolerant) rethrow;
               }
               final winBySrcId = {
                 for (final w in wins)
@@ -11163,6 +11165,12 @@ class LocalDb {
   /// TIME (epoch seconds) is strictly before [cutoffSec].
   static Future<int> pruneDecodedBeforeRecTs(int cutoffSec) async {
     final db = await instance;
+    // A pending BP research window can only be read from the decoded rows this
+    // is about to delete, so fill it first. Best effort: a dev-only capture
+    // must not stall retention.
+    try {
+      await fillBpResearchWindows();
+    } catch (_) {}
     // `deleted` used to just stay 0 forever - none of the txn.delete() calls'
     // return values (rows actually deleted) were ever added to it, so the
     // caller's `if (deleted > 0) log(...)` never fired even on a real prune.

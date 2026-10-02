@@ -7,6 +7,8 @@
 //   · a retake that now finds band data replaces the old window instead
 //     of orphaning it under the replaced reference's old id.
 // Runs the REAL LocalDb over sqflite_common_ffi.
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/bp_research_capture.dart';
@@ -351,5 +353,59 @@ void main() {
     expect(r['hr_mean'], 60);
     // 800, 1000, 1100 in beat order.
     expect(r['rmssd_ms'] as double, closeTo(158.11, 0.01));
+  });
+
+  test('the prune fills a pending window before deleting its rows',
+      () async {
+    final at = _at + 20 * 86400000;
+    final sec = at ~/ 1000;
+    final db = await LocalDb.instance;
+    for (final t in [sec, sec + 121]) {
+      await db.insert('decoded_onehz', {
+        'device_id': LocalDb.kPrimaryDeviceId,
+        'ts_ms': t * 1000,
+        'rec_ts': t,
+        'counter': t,
+        'hr': 70,
+      });
+    }
+    await LocalDb.putBpResearchCapture(_capture(at));
+    // Nobody opened the dev screen; retention moves past the window.
+    await LocalDb.pruneDecodedBeforeRecTs(sec + 120);
+    final r = (await LocalDb.bpResearchCaptures())
+        .firstWhere((r) => r['measured_at_ms'] == at);
+    expect(r['onehz_rows'], 1);
+    expect(r['hr_mean'], 70);
+  });
+
+  test('a salvage with an unreadable window table keeps the references',
+      () async {
+    const name = 'bp_research_salvage_test.db';
+    final path = p.join(await databaseFactory.getDatabasesPath(), name);
+    await LocalDb.close();
+    await databaseFactory.deleteDatabase(path);
+    LocalDb.dbName = name;
+    await LocalDb.putBpResearchCapture(_capture(_at, device: 'salvage'));
+    await LocalDb.close();
+    // Brick the ladder (see startup_and_rebuild_recovery_test.dart) and make
+    // every read of the window table fail with something other than
+    // "no such table".
+    final raw = await databaseFactory.openDatabase(path);
+    await raw.execute('CREATE TABLE _raw_old (hex TEXT)');
+    await raw.execute('DROP TABLE bp_research_window');
+    await raw.execute('CREATE VIEW bp_research_window AS '
+        'SELECT abs(-9223372036854775807 - 1) AS reference_id');
+    await raw.execute('PRAGMA user_version = 2');
+    await raw.close();
+    LocalDb.lastRebuild = null;
+
+    final db = await LocalDb.instance;
+    expect(LocalDb.lastRebuild, isNotNull);
+    final refs = await db.query('bp_research_reference');
+    expect(refs, hasLength(1));
+    expect(refs.first['device'], 'salvage');
+    expect(LocalDb.lastRebuild!.salvaged['bp_research_reference'], 1);
+    final q = File(LocalDb.lastRebuild!.quarantinePath);
+    if (q.existsSync()) q.deleteSync();
   });
 }
