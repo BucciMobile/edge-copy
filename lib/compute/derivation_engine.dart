@@ -5406,8 +5406,13 @@ class DerivationEngine {
       }
       // The headline readiness the ring shows and the findings log reads, not
       // the glass-box score, which is a different model and can land on the
-      // other side of the threshold.
-      final score = await LocalDb.metricValueOn(date, 'readiness');
+      // other side of the threshold. The morning pin wins for its day, same as
+      // getToday and getChart: later re-derives rewrite metric_series, so the
+      // live value can drift across the line while the ring still reads the pin.
+      final pin = await LocalDb.frozenHeadline();
+      final score = pin != null && pin.day == date
+          ? pin.value.toDouble()
+          : await LocalDb.metricValueOn(date, 'readiness');
       if (score != null && score < kLowReadiness) {
         findings.add(Finding(FindingKind.lowReadiness, date));
       }

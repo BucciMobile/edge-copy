@@ -73,4 +73,21 @@ void main() {
     expect(shown, hasLength(1));
     expect(shown.single.title, contains('readiness'));
   });
+
+  test('the morning pin wins over a drifted series value', () async {
+    // Pin 36 (ring shows 36, not low); a later re-derive drifted the series
+    // to 31. Must not buzz.
+    await seed(glassBox: 70, readiness: 31);
+    await LocalDb.setFrozenHeadline(todayLabel(), 36);
+    await DerivationEngine().runNotificationsForTest();
+    expect(shown, isEmpty);
+  });
+
+  test('a low pin buzzes even after the series drifted above the line',
+      () async {
+    await seed(glassBox: 70, readiness: 40);
+    await LocalDb.setFrozenHeadline(todayLabel(), 30);
+    await DerivationEngine().runNotificationsForTest();
+    expect(shown, hasLength(1));
+  });
 }
