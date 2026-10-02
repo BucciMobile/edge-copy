@@ -1729,6 +1729,14 @@ class _PastWorkout {
   /// split. Carried for the same reason [hrr60] is: opening the detail screen
   /// converts this row straight to an `ActivityResult`.
   final double? vo2max;
+  /// `sessions.vo2max_absence_reason` — WHY the estimate above is null, the
+  /// banked snake_case code the summary maps to prose. Same carriage reason.
+  final String? vo2maxAbsenceReason;
+  /// Median of this session's `vo2max_history` split estimates — the
+  /// RETROSPECTIVE "Schätzung aus bisherigen Aktivitäten", computed after
+  /// the fact. Kept separate from the live estimate for the same reason the
+  /// summary renders them as two rows.
+  final double? vo2maxFromHistory;
 
   /// `sessions.steps` — banked at finish from the live 100 Hz pedometer and
   /// never recomputed. It is a COLUMN, so unlike the trace it does not depend
@@ -1765,6 +1773,8 @@ class _PastWorkout {
       this.maxHr,
       this.hrr60,
       this.vo2max,
+      this.vo2maxAbsenceReason,
+      this.vo2maxFromHistory,
       this.steps,
       this.zoneMinutes = const [],
       this.private = false,
@@ -1812,6 +1822,8 @@ class _PastWorkout {
         maxHr: maxHr,
         hrr60: hrr60,
         vo2max: vo2max,
+        vo2maxAbsenceReason: vo2maxAbsenceReason,
+        vo2maxFromHistory: vo2maxFromHistory,
         steps: steps,
         zoneMinutes: zoneMinutes,
       );
@@ -1987,6 +1999,9 @@ Future<_WorkoutData> _loadWorkoutData(AppState app) async {
             maxHr: (r['max_hr'] as num?)?.toInt(),
             hrr60: (r['hrr60'] as num?)?.round(),
             vo2max: (r['vo2max_estimate'] as num?)?.toDouble(),
+            vo2maxAbsenceReason: r['vo2max_absence_reason'] as String?,
+            vo2maxFromHistory:
+                (r['vo2max_history_median'] as num?)?.toDouble(),
             steps: (r['steps'] as num?)?.toInt(),
             zoneMinutes: _decodeZoneMinutes(r['zone_min']),
             private: r['private'] == true,

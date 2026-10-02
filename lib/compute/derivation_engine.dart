@@ -26,6 +26,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'strain_backfill.dart' show backfillStrainScale;
+import 'vo2max_history.dart' show backfillVo2maxHistory;
 
 import 'package:flutter/foundation.dart';
 import 'findings.dart';
@@ -2800,6 +2801,24 @@ class DerivationEngine {
         }
       } catch (e) {
         _log('[derive] strain rescale failed (kept old values): $e');
+      }
+      // ONE-SHOT: retrospective VO₂max from stored history (frozen km
+      // splits), AFTER the strain rescale and under the same `_running`
+      // hold. No-ops after the first pass (`compute_freshness`), never
+      // fatal — a failed history pass must not take the derive cycle down.
+      // Writes only to `vo2max_history`; session rows stay untouched.
+      _diag['stage'] = 'vo2max_history';
+      try {
+        final history = await backfillVo2maxHistory(
+          getProfileMap: profile.toMap,
+        );
+        if (history.didWork) {
+          _log('[derive] vo2max history: ${history.estimated} split(s) '
+              'estimated, ${history.abstained} abstained across '
+              '${history.sessions} session(s)');
+        }
+      } catch (e) {
+        _log('[derive] vo2max history failed (no rows written): $e');
       }
       _running = false;
       final finishedAt = DateTime.now().millisecondsSinceEpoch;
