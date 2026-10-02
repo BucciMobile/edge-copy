@@ -5,7 +5,10 @@
 
 import 'dart:ui' show PlatformDispatcher;
 
+import 'package:flutter/foundation.dart' show SynchronousFuture;
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:intl/intl.dart' as intl;
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum ClockFormat { system, h24, h12 }
@@ -121,3 +124,57 @@ String formatClockMinute(int minuteOfDay) {
   final m = minuteOfDay % 1440; // Dart's % is never negative here
   return formatClock(m ~/ 60, m % 60);
 }
+
+/// The time picker only takes `alwaysUse24HourFormat` as a way to force
+/// 24-hour; `false` leaves a 24-hour-native locale (de, es, fr) on its 24-hour
+/// dial. When the clock resolves to 12-hour this hands those locales the same
+/// translations with a 12-hour order, so pickers match [formatClock].
+class ClockMaterialLocalizationsDelegate
+    extends LocalizationsDelegate<MaterialLocalizations> {
+  const ClockMaterialLocalizationsDelegate({required this.twelveHour});
+  final bool twelveHour;
+
+  // ponytail: only the 24-hour-native languages the app ships; a new one
+  // falls through to the stock delegate (24-hour dial) until listed here.
+  static const _langs = {'de', 'es', 'fr'};
+
+  @override
+  bool isSupported(Locale locale) =>
+      twelveHour && _langs.contains(locale.languageCode);
+
+  @override
+  Future<MaterialLocalizations> load(Locale locale) {
+    // Loads intl's date symbols (cached), which the formats below need.
+    GlobalMaterialLocalizations.delegate.load(locale);
+    final n = locale.languageCode;
+    final make = switch (n) {
+      'de' => _De12.new,
+      'es' => _Es12.new,
+      _ => _Fr12.new,
+    };
+    return SynchronousFuture(make(
+      fullYearFormat: intl.DateFormat.y(n),
+      compactDateFormat: intl.DateFormat.yMd(n),
+      shortDateFormat: intl.DateFormat.yMMMd(n),
+      mediumDateFormat: intl.DateFormat.MMMEd(n),
+      longDateFormat: intl.DateFormat.yMMMMEEEEd(n),
+      yearMonthFormat: intl.DateFormat.yMMMM(n),
+      shortMonthDayFormat: intl.DateFormat.MMMd(n),
+      decimalFormat: intl.NumberFormat.decimalPattern(n),
+      twoDigitZeroPaddedFormat: intl.NumberFormat('00', n),
+    ));
+  }
+
+  @override
+  bool shouldReload(ClockMaterialLocalizationsDelegate old) =>
+      old.twelveHour != twelveHour;
+}
+
+mixin _TwelveHour on GlobalMaterialLocalizations {
+  @override
+  TimeOfDayFormat get timeOfDayFormatRaw => TimeOfDayFormat.h_colon_mm_space_a;
+}
+
+class _De12 = MaterialLocalizationDe with _TwelveHour;
+class _Es12 = MaterialLocalizationEs with _TwelveHour;
+class _Fr12 = MaterialLocalizationFr with _TwelveHour;

@@ -123,6 +123,8 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
   Widget build(BuildContext context) {
     final theme = context.watch<ThemeController>();
     final locale = context.watch<LocaleController>();
+    final twelveHour = !context.watch<ClockFormatController>().resolve24h(
+        MediaQuery.alwaysUse24HourFormatOf(context));
     return MaterialApp(
       title: 'OpenStrap',
       debugShowCheckedModeBanner: false,
@@ -131,7 +133,11 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
       darkTheme: buildTheme(Brightness.dark),
       themeMode: theme.materialThemeMode,
       locale: locale.locale, // null = follow the OS locale
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      // First, so a 12-hour choice reaches the time pickers (see the delegate).
+      localizationsDelegates: [
+        ClockMaterialLocalizationsDelegate(twelveHour: twelveHour),
+        ...AppLocalizations.localizationsDelegates,
+      ],
       supportedLocales: AppLocalizations.supportedLocales,
       // Runs even when `locale:` above has a user override — Flutter still
       // calls this callback, just with [locale.locale] as the sole
@@ -161,10 +167,11 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
   }
 }
 
-/// Applies the 12/24-hour choice: overrides MediaQuery for time pickers, hands
-/// the locale's AM/PM text to `formatClock*`, and rebuilds everything below
-/// once when either flips, since those context-free helpers can't register a
-/// dependency.
+/// Applies the 12/24-hour choice: overrides MediaQuery for time pickers (a
+/// 12-hour dial in de/es/fr also needs [ClockMaterialLocalizationsDelegate]),
+/// hands the locale's AM/PM text to `formatClock*`, and rebuilds everything
+/// below once when either flips, since those context-free helpers can't
+/// register a dependency.
 class _ClockScope extends StatefulWidget {
   const _ClockScope({required this.child});
   final Widget child;

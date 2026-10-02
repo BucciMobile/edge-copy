@@ -2,7 +2,7 @@
 // screen, so a bedtime cannot read `22:40` on Home and `10:40 PM` two screens
 // away — and so the choice the user makes in Settings reaches all of them.
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -84,6 +84,47 @@ void main() {
 
       ClockFormatController.seed(ClockFormat.h12);
       expect(formatClock(19, 30), '7:30 PM');
+    });
+  });
+
+  group('time picker', () {
+    Future<void> openPicker(WidgetTester tester, {required bool h12}) async {
+      await tester.pumpWidget(MaterialApp(
+        locale: const Locale('de'),
+        supportedLocales: const [Locale('de')],
+        localizationsDelegates: [
+          ClockMaterialLocalizationsDelegate(twelveHour: h12),
+          ...GlobalMaterialLocalizations.delegates,
+        ],
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: !h12),
+          child: child!,
+        ),
+        home: Builder(
+          builder: (context) => TextButton(
+            onPressed: () => showTimePicker(
+                context: context,
+                initialTime: const TimeOfDay(hour: 22, minute: 0)),
+            child: const Text('open'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('12-hour in German gets an AM/PM dial, still in German',
+        (tester) async {
+      await openPicker(tester, h12: true);
+      expect(find.text('PM'), findsOneWidget);
+      expect(find.text('10'), findsWidgets);
+      expect(find.text('Abbrechen'), findsOneWidget);
+    });
+
+    testWidgets('24-hour in German keeps the 24-hour dial', (tester) async {
+      await openPicker(tester, h12: false);
+      expect(find.text('PM'), findsNothing);
+      expect(find.text('22'), findsWidgets);
     });
   });
 
