@@ -937,8 +937,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: b213e40538ebe8ddd0bdb1ad9ab71d1d5ecbfe5b
-      resolved-ref: b213e40538ebe8ddd0bdb1ad9ab71d1d5ecbfe5b
+      ref: "9fc1d6a9b13240ee668e74940e03cb5646113a5c"
+      resolved-ref: "9fc1d6a9b13240ee668e74940e03cb5646113a5c"
       url: "https://github.com/DropTabl/analytics.git"
     source: git
     version: "1.0.0"
