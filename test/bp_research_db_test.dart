@@ -1,12 +1,4 @@
-// The BP research store guarantees the review fixes made explicit:
-//   · a retake with NO device text replaces the reference instead of
-//     duplicating it (NULL never equals NULL in a UNIQUE constraint, so
-//     the store normalizes to '' — the rows must stay one, not two);
-//   · deleting a capture removes its window row in the same transaction
-//     (no PRAGMA foreign_keys here, so the ON DELETE CASCADE is inert);
-//   · a retake that now finds band data replaces the old window instead
-//     of orphaning it under the replaced reference's old id.
-// Runs the REAL LocalDb over sqflite_common_ffi.
+// BP research store over the real LocalDb (sqflite_common_ffi).
 import 'dart:convert' show jsonEncode;
 
 import 'package:flutter_test/flutter_test.dart';
@@ -1113,7 +1105,7 @@ void main() {
     await db.delete('bp_research_reference');
   }
 
-  test('restore TEST 1: a FRESH target restores reference + snapshot + window '
+  test('restore: a FRESH target restores reference + snapshot + window '
       'as one unit (the regression)', () async {
     await clearBpTables();
     // FRESH target: no local BP rows at all. The source carries a
@@ -1157,7 +1149,7 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
-  test('restore TEST 2: an IDENTICAL snapshot re-import is idempotent and the '
+  test('restore: an IDENTICAL snapshot re-import is idempotent and the '
       'window converges', () async {
     await clearBpTables();
     // LOCAL: reference + snapshot rev 1 (rows A) + a LOCAL window with
@@ -1234,7 +1226,7 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
-  test('restore TEST 3: a CONFLICTING snapshot skips the snapshot AND the '
+  test('restore: a CONFLICTING snapshot skips the snapshot AND the '
       'window, counters rise', () async {
     await clearBpTables();
     // LOCAL: reference + snapshot rev 1 (rows A) + window A.
@@ -1307,7 +1299,7 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
-  test('restore TEST 4: a window whose snapshot is MISSING in the source is '
+  test('restore: a window whose snapshot is MISSING in the source is '
       'never imported', () async {
     await clearBpTables();
     // SOURCE: a reference and a window naming snapshot revision 1 —
@@ -1337,7 +1329,7 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
-  test('restore TEST 5: a LEGACY snapshotless window (snapshot_revision NULL) '
+  test('restore: a LEGACY snapshotless window (snapshot_revision NULL) '
       'imports snapshotless, no fabricated revision', () async {
     await clearBpTables();
     // SOURCE: v1-style capture — a window with snapshot_revision NULL
@@ -1373,7 +1365,7 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
-  test('restore TEST 6: a reference ID collision maps snapshot and window to '
+  test('restore: a reference ID collision maps snapshot and window to '
       'the CORRECT destination reference', () async {
     await clearBpTables();
     // LOCAL: one capture whose AUTOINCREMENT id is 1 (deliberately the
@@ -1434,7 +1426,7 @@ void main() {
     await databaseFactory.deleteDatabase(srcPath);
   });
 
-  test('restore TEST 7: a repeated re-import of the SAME source creates no '
+  test('restore: a repeated re-import of the SAME source creates no '
       'duplicates and stable counts', () async {
     await clearBpTables();
     final srcPath = await makeForeignBpDb(
@@ -1524,7 +1516,7 @@ void main() {
   });
 
   test('reprocess: a pending capture with a later watermark becomes final, '
-      'writes revision 2, keeps revision 1 byte-identical (A3)', () async {
+      'writes revision 2, keeps revision 1 byte-identical', () async {
     final db = await LocalDb.instance;
     await db.delete('bp_research_snapshot');
     await db.delete('bp_research_window');
@@ -1630,7 +1622,7 @@ void main() {
   });
 
   test('reprocess stays pending when the sync still does not reach the '
-      'window end (A3, smoke 3)', () async {
+      'window end', () async {
     final db = await LocalDb.instance;
     await db.delete('bp_research_snapshot');
     await db.delete('bp_research_window');
@@ -1680,7 +1672,7 @@ void main() {
     );
     expect(win.first['quality_status'], 'pending');
   });
-  test('A: an empty, not-final window is PENDING, keeps its row, and '
+  test('an empty, not-final window is PENDING, keeps its row, and '
       're-processing attaches a new revision once data arrives', () async {
     final db = await LocalDb.instance;
     await db.delete('bp_research_snapshot');
@@ -1799,7 +1791,7 @@ void main() {
     expect(rev1After, rev1);
   });
 
-  test('A: a final, provably empty window is still an honest NULL window '
+  test('a final, provably empty window is still an honest NULL window '
       '(no pending-forever regression)', () async {
     // Watermark provably covers the window end, the window is in the
     // past, and there is STILL nothing: null is CORRECT (no_data

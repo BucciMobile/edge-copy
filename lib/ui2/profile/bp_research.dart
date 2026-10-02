@@ -1,26 +1,5 @@
-// BP research capture — DEVELOPER MODE ONLY.
-//
-// One flow: take a cuff blood pressure reading, type the pair in, press
-// capture. The app freezes the band's own decoded data around the
-// MEASUREMENT instant — by default the 5 minutes of rest BEFORE the
-// measurement, so the cuff's own inflation stays out of the feature window
-// — next to the reference pair, and keeps every capture so a human can
-// compare them over weeks: here in a list, or out of the app through the
-// `bp_research` CSV export set.
-//
-// The measurement instant can be back-dated: a cuff reading taken this
-// morning and typed in this evening is paired with the historical sensor
-// data of the MEASUREMENT time, never with whatever the band holds at
-// entry time.
-//
-// This is data COLLECTION, not a blood pressure feature:
-//   · Nothing derived reads these tables. No score, no baseline, no chart
-//     of ours takes a capture as an input.
-//   · Nothing here is ever blended with, averaged against, or corrected
-//     against anything the band measured.
-//   · Nothing here is exported to HealthKit / Health Connect.
-// A window with no band data is stored as a capture with an EMPTY window —
-// missing is missing, never zero.
+// BP research capture (developer mode): type in a cuff reading and the band's
+// decoded window before it is saved next to it. See bp_research_capture.dart.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -77,18 +56,20 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     if (mounted) setState(() => _rows = rows);
   }
 
-  /// Parse the optional measurement-time field (MINUTE precision — the
-  /// recorded instant is stored with time_precision = 'minute' and is never
-  /// claimed to be second-accurate). Returns null when empty (= the entry
-  /// moment anchors the pairing, valid only because the reading was taken
-  /// just now) or unparseable (the caller refuses the capture: a wrong
-  /// pairing instant silently pairs the reference with the wrong five
-  /// minutes of band data — worse than refusing).
-  ///
-  /// STRICT calendar validation: Dart's DateTime rolls overflowing dates
-  /// over (2024-02-31 becomes March 2), so every component is re-checked
-  /// against the parsed result — an invalid date is REJECTED, never
-  /// silently reinterpreted as a different day.
+  Future<void> _rowAction(Future<void> Function() action) async {
+    try {
+      await action();
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  /// The measurement time field, minute precision. Empty is [now]; anything
+  /// unparseable (including a rolled-over date like 2024-02-31) is null.
   DateTime? _parseMeasuredAt(DateTime now) {
     final text = _measuredAt.text.trim();
     if (text.isEmpty) return now;
@@ -171,9 +152,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
           SnackBar(
             content: Text(
               l?.bpResearchFutureTime ??
-                  'The measurement time lies in the future \u2014 the window '
-                      'would pair the reference with data that does not exist yet. '
-                      'Nothing was stored.',
+                  'The measurement time is in the future. Nothing was stored.',
             ),
           ),
         );
@@ -198,10 +177,6 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
       await LocalDb.putBpResearchCapture(
         BpResearchCapture(
           measuredAtMs: measuredAtMs,
-          // A single MINUTE-precision instant is all the UI records. It is
-          // the pairing anchor, NOT a claimed inflation start: leaving
-          // measurement_started_at_ms NULL keeps the "unknown start"
-          // honest instead of dressing the typed instant up as one.
           measurementStartedAtMs: null,
           measurementFinishedAtMs: null,
           timePrecision: 'minute',
@@ -233,8 +208,10 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
           SnackBar(
             content: Text(
               stored
-                  ? 'Capture saved, but refreshing the history failed. ($e)'
-                  : 'Capture failed \u2014 nothing was stored. ($e)',
+                  ? (l?.bpResearchListFailed('$e') ??
+                        'Capture saved, but the list did not refresh. ($e)')
+                  : (l?.bpResearchSaveFailed('$e') ??
+                        'Capture failed, nothing was stored. ($e)'),
             ),
           ),
         );
@@ -255,12 +232,9 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
         children: [
           Text(
             l?.bpResearchIntro ??
-                'EXPERIMENTAL. Take a cuff reading, type the pair in, '
-                    'press capture. The band data of the minutes before that '
-                    'instant is frozen next to it \u2014 for you to compare outside '
-                    'this app. Nothing here is a health feature, nothing here '
-                    'feeds any score, and nothing here is ever blended with what '
-                    'the band measured.',
+                'Experimental. Take a cuff reading, type it in and press '
+                    'capture. The 5 minutes of band data before the reading are '
+                    'saved next to it for CSV export.',
             style: F.cap.copyWith(color: p.ink2, height: 1.5),
           ),
           const SizedBox(height: S.x4),
@@ -314,8 +288,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
               labelText: l?.bpResearchSessionId ?? 'Session id (optional)',
               helperText:
                   l?.bpResearchSessionIdHint ??
-                  'Group readings of one sitting \u2014 they are not '
-                      'independent states, and an analysis must be able to tell.',
+                  'Groups readings taken in one sitting.',
             ),
           ),
           const SizedBox(height: S.x2),
@@ -353,28 +326,22 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // EXPLICIT REPROCESSING (developer mode): re-read the
-                    // CURRENT local data for this capture's ORIGINAL window
-                    // bounds, write a NEW snapshot revision, re-classify
-                    // (pending → final once the sync provably reaches the
-                    // window end). Reference values are never touched.
                     IconButton(
                       icon: const Icon(LucideIcons.refreshCw, size: 18),
                       tooltip:
                           l?.bpResearchRefreshTooltip ?? 'Refresh band window',
-                      onPressed: () async {
-                        await LocalDb.reprocessBpResearchCapture(
+                      onPressed: () => _rowAction(
+                        () => LocalDb.reprocessBpResearchCapture(
                           r['id'] as int,
-                        );
-                        await _refresh();
-                      },
+                        ),
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(LucideIcons.trash2, size: 18),
-                      onPressed: () async {
-                        await LocalDb.deleteBpResearchCapture(r['id'] as int);
-                        await _refresh();
-                      },
+                      tooltip: l?.bpResearchDeleteTooltip ?? 'Delete capture',
+                      onPressed: () => _rowAction(
+                        () => LocalDb.deleteBpResearchCapture(r['id'] as int),
+                      ),
                     ),
                   ],
                 ),
@@ -382,10 +349,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
             const SizedBox(height: S.x4),
             Text(
               l?.bpResearchExportHint ??
-                  'Export all captures as CSV from Your data \u203a Export CSV '
-                      '(set \u201cBP research captures\u201d). This is the dedicated '
-                      'export for BP research data; a full-database backup or an '
-                      'opt-in health share also contains it.',
+                  'Export the captures from Your data \u203a Export CSV, set '
+                      '\u201cBP research captures\u201d.',
               style: F.cap.copyWith(color: p.ink2, height: 1.5),
             ),
           ],
@@ -394,18 +359,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     );
   }
 
-  /// A window is summarised as what it actually holds. A NULL stat is shown
-  /// as absent — a dash, never a zero, and never a value that would read as
-  /// a measurement.
-  ///
-  /// INVARIANT: pending ≠ no_data. 'pending' means the window is NOT
-  /// FINALIZABLE yet — the local sync provably does not reach the window
-  /// end, so the missing tail may still arrive after a sync + refresh. It
-  /// is never "no band data": that verdict is reserved for a FINAL window
-  /// that provably holds nothing. Pending is checked FIRST so a NULL stat
-  /// can never be misread as a final verdict; whatever HAS arrived is
-  /// still shown honestly alongside the hint. A non-medical, non-claiming
-  /// message.
+  /// One line per capture. Null stats are left out; a pending window says
+  /// it is still syncing rather than "no band data".
   static String _windowSummary(Map<String, Object?> r, AppLocalizations? l) {
     final onehz = r['onehz_rows'];
     final beats = r['rr_beats'];
@@ -413,8 +368,6 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
     final rmssd = r['rmssd_ms'];
     final status = r['quality_status'];
     if (status == 'pending') {
-      // Not final YET — never "no band data". Show whatever has arrived
-      // (partial data is honest data), plus the sync hint.
       final parts = <String>[
         l?.bpResearchPendingSync ??
             'Band data is still syncing — refresh this window after '

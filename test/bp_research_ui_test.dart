@@ -1,6 +1,4 @@
-// Tests for the BP research window summary: pending must never read as a
-// final "no band data" verdict, while a final empty window keeps its honest
-// no-data text. Missing stays missing — never a fabricated zero.
+// BP research window summary: pending never reads as "no band data".
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ui2/profile/bp_research.dart';
 

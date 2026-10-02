@@ -797,9 +797,9 @@ class MoreSettingsView extends StatelessWidget {
                     SetRow(LucideIcons.heartPulse, C.purple,
                         l?.settingsBpResearchRowTitle ?? 'BP research capture',
                         sub: l?.settingsBpResearchRowSub ??
-                            'EXPERIMENTAL. Pair a cuff reading with the band '
-                                'data of the same instant, for comparison '
-                                'outside this app. Never a health feature',
+                            'Experimental. Pair a cuff reading with the band '
+                                'data from the 5 minutes before it, for CSV '
+                                'export',
                         onTap: () => goto(c, const BpResearchScreen())),
                     SetRow(LucideIcons.code, C.n500,
                         l?.settingsDeveloperModeRowTitle ?? 'Developer mode',
