@@ -23,6 +23,7 @@ class ShortcutSyncTask {
   ShortcutSyncTask(this.id, this.budget, {this.onProgress});
 
   bool get stopped => _stopped.isCompleted;
+  Future<void> get whenStopped => _stopped.future;
   Duration get remaining {
     final value = budget - _clock.elapsed;
     return value.isNegative ? Duration.zero : value;

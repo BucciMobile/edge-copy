@@ -5472,6 +5472,7 @@ class AppState extends ChangeNotifier {
       await openSession(foreground: !_background);
     }
     if (task.stopped || !engine.isConnected) return SyncReport(0, 0, false);
+    task.update('syncing');
     final report = await _kickSyncBurst(kickFirst: _syncBurst == null);
     if (report.records > 0) _deriveScheduler.markStoredData();
     if (!_disposed) notifyListeners();

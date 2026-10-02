@@ -146,7 +146,12 @@ class IosShortcutSync {
       task.onStop = progress.cancel;
       try {
         // A cancelled Shortcut must not tear down the app's own live session.
-        final report = await liveSync(task);
+        // The app's burst can outlive the deadline; stop waiting (and release
+        // the gate) when the task stops instead of when the burst ends.
+        final report = await Future.any([
+          liveSync(task),
+          task.whenStopped.then((_) => SyncReport(0, 0, false)),
+        ]);
         if (task.stopped) return task.expired;
         final blocker = _blockerResult(liveEngine.bluetoothBlocker);
         if (blocker != null) return blocker;

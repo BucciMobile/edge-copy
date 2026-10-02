@@ -156,6 +156,25 @@ void main() {
     },
   );
 
+  test('joining the burst after waiting reports syncing, not waiting', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)
+      ..initialized = true
+      ..busy = true;
+    addTearDown(app.dispose);
+    final task = ShortcutSyncTask('join', const Duration(seconds: 5));
+    final work = app.syncForShortcut(task);
+    expect(task.phase, 'waiting');
+    app.busy = false;
+    while (engine.runs == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect(task.phase, 'syncing');
+    expect(task.expired.status, 'partial');
+    engine.reply.complete(SyncReport(0, 0, true));
+    await work;
+  });
+
   test('cancelling a waiter preserves the app-owned transfer', () async {
     final engine = _ConnectedEngine();
     final app = AppState.forTesting(engine: engine)..initialized = true;
