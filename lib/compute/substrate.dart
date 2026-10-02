@@ -887,13 +887,54 @@ int? hardwareStepsFromCounter(
   required int? cumulativeCounterModulus,
   int maxStepsPerSecond = 5,
 }) {
-  final wrap = cumulativeCounterModulus;
-  if (wrap == null || wrap <= 0) return null;
+  var total = 0;
+  final seen = _walkCounterDeltas(sub, cumulativeCounterModulus,
+      maxStepsPerSecond, (_, _, delta) => total += delta);
+  return seen ? total : null;
+}
+
+/// The same credited deltas as [hardwareStepsFromCounter], placed on the
+/// clock: every delta happened between the two records it was read across, so
+/// the counter DOES carry times — one per record. Grouped into one span per
+/// clock hour (by the delta's closing record), each span running from the
+/// first credited delta's opening record to the last one's closing record.
+/// The spans sum to exactly [hardwareStepsFromCounter]'s total. Null whenever
+/// that is null.
+// ponytail: UTC-hour buckets; a half-hour-offset zone gets spans straddling
+// its local hour lines, which the day chart apportions by time anyway.
+List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
+  Substrate sub, {
+  required int? cumulativeCounterModulus,
+  int maxStepsPerSecond = 5,
+}) {
+  final out = <({int startTs, int endTs, int steps})>[];
+  final seen = _walkCounterDeltas(sub, cumulativeCounterModulus,
+      maxStepsPerSecond, (fromTs, ts, delta) {
+    final last = out.isEmpty ? null : out.last;
+    if (last != null && last.endTs ~/ 3600 == ts ~/ 3600) {
+      out[out.length - 1] =
+          (startTs: last.startTs, endTs: ts, steps: last.steps + delta);
+    } else {
+      out.add((startTs: fromTs, endTs: ts, steps: delta));
+    }
+  });
+  return seen ? out : null;
+}
+
+/// Walks [sub]'s counter and calls [credit] once per delta that passes the
+/// wrap/reset/budget rules documented on [hardwareStepsFromCounter]. Returns
+/// whether any record carried a counter at all.
+bool _walkCounterDeltas(
+  Substrate sub,
+  int? wrap,
+  int maxStepsPerSecond,
+  void Function(int fromTs, int ts, int delta) credit,
+) {
+  if (wrap == null || wrap <= 0) return false;
   const minGapSecForBudget = 60;
   const maxGapSecForBudget = 3600;
   int? prev;
   int? prevTs;
-  var total = 0;
   var seen = false;
   for (var i = 0; i < sub.length; i++) {
     final c = sub.stepCounterAt(i);
@@ -906,12 +947,12 @@ int? hardwareStepsFromCounter(
           gap.clamp(minGapSecForBudget, maxGapSecForBudget) * maxStepsPerSecond;
       var delta = c - prev;
       if (delta < 0) delta += wrap; // wrap candidate; a reset overshoots below
-      if (delta > 0 && delta <= budget) total += delta;
+      if (delta > 0 && delta <= budget) credit(prevTs, ts, delta);
     }
     prev = c;
     prevTs = ts;
   }
-  return seen ? total : null;
+  return seen;
 }
 
 class _Rec {

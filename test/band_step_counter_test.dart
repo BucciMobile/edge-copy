@@ -34,6 +34,26 @@ Substrate _sub(List<int> counters, {int startTs = 1_700_000_000, int step = 1}) 
 }
 
 void main() {
+  group('hardwareStepSpansFromCounter', () {
+    test('no counter -> null, same as the total', () {
+      expect(hardwareStepSpansFromCounter(_sub([-1, -1]), cumulativeCounterModulus: 65536), isNull);
+    });
+
+    test('one span per clock hour, summing to the total, reset dropped', () {
+      // 10-minute records from an hour boundary. The delta closing at +3600 is
+      // the second hour's; the jump to 39998 and the reset to 0 are dropped.
+      const t0 = 1_699_999_200; // a whole UTC hour
+      final s = _sub([0, 10, 20, 20, 30, 40, 50, 39998, 40000, 0, 7],
+          startTs: t0, step: 600);
+      final spans = hardwareStepSpansFromCounter(s, cumulativeCounterModulus: 65536)!;
+      expect(spans.length, 2);
+      expect((spans[0].startTs, spans[0].endTs, spans[0].steps), (t0, t0 + 3000, 40));
+      expect((spans[1].startTs, spans[1].endTs, spans[1].steps), (t0 + 3000, t0 + 6000, 19));
+      expect(spans.fold<int>(0, (a, x) => a + x.steps),
+          hardwareStepsFromCounter(s, cumulativeCounterModulus: 65536));
+    });
+  });
+
   group('hardwareStepsFromCounter', () {
     test('gen4 (no counter on any record) returns NULL, not zero', () {
       // The distinction the whole feature rests on: "this hardware cannot count

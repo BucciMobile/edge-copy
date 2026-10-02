@@ -1323,11 +1323,33 @@ class LocalRepositoryImpl extends LocalRepository {
     // spans come from this date's coverage rows, and pairing them with another
     // day's published total is the one mismatch this screen must not show.
     final st = _sub(await _bundle(date), 'steps');
+    final dayTotal = (st?['value'] as num?)?.toInt();
+    // A day answered by the strap's on-chip counter has no coverage spans;
+    // its own hourly spans (stamped by the derive) stand in for them.
+    final counter = r.spans.isEmpty &&
+            st?['source'] == 'strap_counter' &&
+            st?['spans'] is List
+        ? st!['spans'] as List
+        : null;
+    if (counter != null) {
+      return {
+        'total': dayTotal ?? 0,
+        'strap': dayTotal ?? 0,
+        'phone': 0,
+        'day_total': dayTotal,
+        'day_source': 'strap_counter',
+        'note': st?['note'] as String?,
+        'spans': [
+          for (final s in counter)
+            if (s is Map) {...s, 'source': LocalDb.kStepSourceBand},
+        ],
+      };
+    }
     return {
       'total': r.total,
       'strap': r.strap,
       'phone': r.phone,
-      'day_total': (st?['value'] as num?)?.toInt(),
+      'day_total': dayTotal,
       'day_source': st?['source'] as String?,
       'note': st?['note'] as String?,
       'spans': [
