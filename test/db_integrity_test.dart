@@ -254,6 +254,69 @@ void main() {
     expect(await payload('2026-06-30'), '{"src":"foreign"}');
   });
 
+  test('import keeps a finalized day\'s series + baselines, merges step windows',
+      () async {
+    // 2026-07-01 is locally finalized (previous test); 2026-07-03 is not.
+    await LocalDb.putMetricSeriesValue('2026-07-01', 'readiness', 62);
+    await LocalDb.putMetricSeriesValue('2026-07-03', 'readiness', 40);
+    await LocalDb.putBaseline('movement_floor', '{"src":"local"}');
+    await LocalDb.addLiveCoverage(1782900000, 1782900600, 500, '2026-07-01');
+
+    final dir = await databaseFactory.getDatabasesPath();
+    final srcPath = p.join(dir, 'foreign_export_series_test.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+      'CREATE TABLE metric_series (date TEXT, key TEXT, value REAL, '
+      'PRIMARY KEY (date, key))',
+    );
+    await src.execute(
+      'CREATE TABLE baselines (key TEXT PRIMARY KEY, payload_json TEXT, '
+      'updated_at INTEGER)',
+    );
+    await src.execute(
+      'CREATE TABLE live_coverage (id INTEGER PRIMARY KEY AUTOINCREMENT, '
+      'start_ts INTEGER, end_ts INTEGER, steps INTEGER, day TEXT, '
+      "source TEXT DEFAULT 'band', device_id TEXT DEFAULT '')",
+    );
+    for (final d in ['2026-07-01', '2026-07-03']) {
+      await src.insert('metric_series', {'date': d, 'key': 'readiness', 'value': 55});
+    }
+    await src.insert('baselines', {
+      'key': 'movement_floor',
+      'payload_json': '{"src":"foreign"}',
+      'updated_at': 1,
+    });
+    // id 1 collides with the local row's id; the first window is a replay of
+    // the local one, the second is new.
+    for (final w in [(1782900000, 1782900600), (1782904000, 1782904600)]) {
+      await src.insert('live_coverage', {
+        'start_ts': w.$1,
+        'end_ts': w.$2,
+        'steps': 500,
+        'day': '2026-07-01',
+      });
+    }
+    await src.close();
+    await LocalDb.importFromDbFile(srcPath);
+    await databaseFactory.deleteDatabase(srcPath);
+
+    final db = await LocalDb.instance;
+    Future<Object?> readiness(String d) async => (await db.query(
+          'metric_series',
+          where: 'date = ? AND key = ?',
+          whereArgs: [d, 'readiness'],
+        ))
+            .single['value'];
+    expect(await readiness('2026-07-01'), 62); // finalized: ours
+    expect(await readiness('2026-07-03'), 55); // not finalized: import wins
+    expect((await LocalDb.baseline('movement_floor'))!['payload_json'],
+        '{"src":"local"}');
+    final cov = await db.query('live_coverage',
+        where: 'day = ?', whereArgs: ['2026-07-01'], orderBy: 'start_ts');
+    expect([for (final r in cov) r['start_ts']], [1782900000, 1782904000]);
+  });
+
   group('sync_ledger real per-chunk rows + sync_quarantine reader', () {
     test('distinct chunk_ids do not collide (the old "capture"-only bug)',
         () async {
