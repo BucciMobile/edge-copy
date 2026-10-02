@@ -1079,8 +1079,31 @@ bool _isNextDay(String a, String b) {
   // out the half-unobserved weekend the floor exists for, and it does NOT move
   // the published SRI: every accepted epoch counts toward the total whether or
   // not its pair is emitted.
+  final m =
+      ana.phillipsSri(sleepWake, epochsPerDay, valid: valid, minPairCases: 240);
+  final r = m.value;
+  if (r == null) return (m, gridDates);
+  // phillipsSri sizes `days` and confidence off the grid length, so every
+  // padded (all-invalid) day above would count as a comparison. Size them off
+  // the pairs actually observed on both days instead, same formula.
+  var observed = 0;
+  for (var d = 1; d < gridDates.length; d++) {
+    for (var e = 0; e < epochsPerDay; e++) {
+      if (valid[(d - 1) * epochsPerDay + e] && valid[d * epochsPerDay + e]) {
+        observed++;
+        break;
+      }
+    }
+  }
   return (
-    ana.phillipsSri(sleepWake, epochsPerDay, valid: valid, minPairCases: 240),
+    ana.Metric<ana.SriResult>(
+      value: ana.SriResult(r.sri, observed + 1, r.cases, r.pairs),
+      confidence: (observed / 7.0).clamp(0.3, 0.95),
+      tier: m.tier,
+      inputs_used: m.inputs_used,
+      drivers: m.drivers,
+      note: m.note,
+    ),
     gridDates,
   );
 }

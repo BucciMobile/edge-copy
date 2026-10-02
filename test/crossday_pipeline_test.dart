@@ -525,6 +525,16 @@ void _wiredFamilies() {
             reason: '${p['prev_date']} → ${p['date']} is not a 24 h pair');
       }
     });
+
+    test('padded gap days do not count toward days or confidence', () {
+      // Rows on day 1, 2 and 10: a 10-day grid with one observed pair.
+      final all = _synthDays(10);
+      final reg = (buildCrossDayBundle([all[0], all[1], all[9]], const {})[
+              'regularity'] as Map)
+          .cast<String, dynamic>();
+      expect((reg['value'] as Map)['days'], 2);
+      expect(reg['confidence'] as num, lessThanOrEqualTo(0.3));
+    });
   });
 
   group('sleep performance is last night only', () {
