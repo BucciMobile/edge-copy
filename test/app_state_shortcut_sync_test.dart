@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
@@ -67,6 +68,23 @@ void main() {
   });
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  // openSession needs the plugin stack and an iOS host to reach the restore
+  // bridge, so this pins the source instead. A background Shortcut whose
+  // connect fails must hand the band back to the restore path, or
+  // foregroundActive stays true with no link and every restore wake and
+  // BG-task sync skips until the user next opens the app.
+  test('a failed background openSession re-arms iOS recovery', () {
+    final src = File('lib/state/app_state.dart').readAsStringSync();
+    final start = src.indexOf('Future<void> openSession(');
+    expect(start, isNot(-1));
+    final body = src.substring(start, src.indexOf('\n  }\n', start));
+    final fin = body.lastIndexOf('} finally {');
+    expect(fin, isNot(-1));
+    const rearm =
+        'if (_background && !engine.isConnected) await _armRecovery();';
+    expect(body.substring(fin).contains(rearm), isTrue);
+  });
 
   test(
     'a data reset prevents a Shortcut from touching the app-owned band',

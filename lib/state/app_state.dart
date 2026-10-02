@@ -5205,6 +5205,12 @@ class AppState extends ChangeNotifier {
         _log('[OWNERSHIP] foreground intent off (${BandOwnership.debugState})');
         _releaseForegroundLease();
       }
+      // A background connect that failed (a Shortcut while the band is out of
+      // range) left foregroundActive true with no link, and no later
+      // background transition will clear it: every restore wake and BG-task
+      // sync would skip until the user next opens the app. Hand the band back
+      // to the restore path, same as the background cold-launch does.
+      if (_background && !engine.isConnected) await _armRecovery();
       _setBusy(false);
     }
   }
