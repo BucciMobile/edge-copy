@@ -162,9 +162,7 @@ Future<void> main() async {
   }
 
   // Local 12/24-hour clock preference. Best-effort; defaults to the OS setting.
-  // Timeout is applied INSIDE bootstrap() to SharedPreferences loading, so a
-  // late prefs load cannot construct a controller and assign it to _active
-  // after we have already fallen back to the seeded system controller.
+  // The timeout lives inside bootstrap() so a late load can't replace the seed.
   ClockFormatController clockFormat;
   try {
     clockFormat = await ClockFormatController.bootstrap(timeout: _kStartupInitTimeout);

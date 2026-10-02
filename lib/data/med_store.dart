@@ -169,9 +169,7 @@ class MedSlot {
   /// Display only, per the user's clock format — never a storage key.
   String get timeLabel => formatClockMinute(slotMin);
 
-  /// Machine-readable 24-hour time (HH:mm), stable across clock format changes.
-  /// Use this for payloads, storage keys, and coach actions — never [timeLabel],
-  /// which follows the user's 12/24-hour preference.
+  /// `HH:mm` for payloads and the coach, whatever the clock format.
   String get timeMachine {
     final h = slotMin ~/ 60;
     final m = slotMin % 60;

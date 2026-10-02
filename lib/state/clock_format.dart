@@ -1,14 +1,7 @@
-// Clock format — a LOCAL display preference (system / 24-hour / 12-hour).
-// Persisted on-device via SharedPreferences, mirroring UnitsController. It only
-// changes how a time of day is DRAWN; nothing stored, exported or sent to the
-// coach is formatted through it (those stay `HH:mm`, which is machine-readable).
-//
-// The formatters below are top-level and context-free on purpose: the app
-// formats clock times in ~100 places, many of them pure functions with no
-// BuildContext (notification bodies, labels computed in the read seam). They
-// read the ACTIVE controller — the one [ClockFormatController.bootstrap] or
-// [ClockFormatController.seed] built last — and fall back to the OS setting
-// when there is none (a background isolate that never bootstrapped one).
+// Clock format: a local display preference (system / 24-hour / 12-hour),
+// persisted like UnitsController. Display only; stored, exported and coach
+// values stay `HH:mm`. The formatters are context-free and read the last
+// controller built, falling back to the OS setting when there is none.
 
 import 'dart:ui' show PlatformDispatcher;
 
@@ -41,9 +34,6 @@ class ClockFormatController extends ChangeNotifier {
   static Future<ClockFormatController> bootstrap({
     Duration timeout = const Duration(seconds: 6),
   }) async {
-    // Timeout applied to preference loading BEFORE constructing the controller,
-    // so a late SharedPreferences load cannot assign a controller to _active
-    // after main.dart has already fallen back to the seeded system controller.
     final prefs = await SharedPreferences.getInstance().timeout(timeout);
     return ClockFormatController._(_parse(prefs.getString(_kClockFormat)));
   }
@@ -87,10 +77,8 @@ bool get use24HourClock {
   return ClockFormatController._active?.resolve24h(system) ?? system;
 }
 
-/// The OS's answer, read through the binding when there is one — the same
-/// dispatcher `MediaQuery` reads, so a formatted string and a time picker
-/// cannot disagree. An isolate that never initialised a binding (a bare
-/// background entry) reads the raw dispatcher instead.
+/// The OS setting, via the binding's dispatcher when there is one (the one
+/// MediaQuery reads).
 bool _systemUse24h() {
   try {
     return WidgetsBinding.instance.platformDispatcher.alwaysUse24HourFormat;
@@ -112,7 +100,6 @@ String formatClockOf(DateTime d) => formatClock(d.hour, d.minute);
 
 /// Local minutes past midnight, as [formatClock]. Wraps past 24 h.
 String formatClockMinute(int minuteOfDay) {
-  // Normalize negative values: -30 becomes 1410 (23:30), not -30.
-  final m = ((minuteOfDay % 1440) + 1440) % 1440;
+  final m = minuteOfDay % 1440; // Dart's % is never negative here
   return formatClock(m ~/ 60, m % 60);
 }

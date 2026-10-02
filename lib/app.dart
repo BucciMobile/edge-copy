@@ -161,17 +161,9 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
   }
 }
 
-/// Applies the user's 12/24-hour choice to the whole app.
-///
-/// Two halves, because the app formats clock times two ways. Flutter's own
-/// widgets (`showTimePicker`, `TimeOfDay.format`) read
-/// [MediaQueryData.alwaysUse24HourFormat], so that is overridden here. Every
-/// other time goes through the context-free `formatClock*` helpers in
-/// `state/clock_format.dart`, which no widget can depend on — so when the
-/// resolved format flips (the user's choice, or the OS setting under
-/// "System"), every element below is marked dirty once. Screens further down
-/// the navigator stack are rebuilt too; nothing is remounted, so no state or
-/// route is lost.
+/// Applies the 12/24-hour choice: overrides MediaQuery for time pickers, and
+/// rebuilds everything below once when it flips, since the context-free
+/// `formatClock*` helpers can't register a dependency.
 class _ClockScope extends StatefulWidget {
   const _ClockScope({required this.child});
   final Widget child;
