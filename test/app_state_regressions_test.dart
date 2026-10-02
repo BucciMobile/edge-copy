@@ -18,6 +18,9 @@ import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
 import 'package:openstrap_edge/state/app_state.dart';
+import 'package:openstrap_edge/state/prefs.dart';
+import 'package:openstrap_edge/ui2/activity/catalogue.dart';
+import 'package:openstrap_edge/ui2/activity/live.dart';
 import 'package:openstrap_edge/sync/paired_device.dart';
 
 void main() {
@@ -416,6 +419,32 @@ void main() {
       expect(w.zoneSeconds.reduce((x, y) => x + y), billed,
           reason: 'no zone-second for a second with no measurement');
       expect(w.maxHrSeen, peak, reason: 'the peak is untouched by an absence');
+    });
+
+    test('a paused session holds its clock and its tallies', () async {
+      await Prefs.ensureLoaded();
+      final app = connected(150);
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 50)),
+        targetKcal: 300,
+        workoutId: 'w1',
+        type: 'run',
+      );
+      app.activeWorkout = w;
+      final d = LiveDraft.begin(activityByName('running')!);
+      // 20 of the 50 minutes were spent paused.
+      d.pausedSec = 20 * 60;
+      app.debugTickWorkout();
+      expect(w.elapsed.inMinutes, 30);
+      final billed = w.zoneSeconds.reduce((x, y) => x + y);
+
+      d.setPaused(true);
+      app.debugTickWorkout();
+      expect(w.elapsed.inMinutes, 30, reason: 'the clock holds while paused');
+      expect(w.zoneSeconds.reduce((x, y) => x + y), billed,
+          reason: 'no zone-second billed while paused');
     });
 
     test('the tick consults the idle watch — a quiet session asks', () {

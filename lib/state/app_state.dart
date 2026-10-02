@@ -63,6 +63,7 @@ import 'alarm_schedule.dart';
 import 'smart_wake.dart';
 import 'prefs.dart';
 import '../ble/adapters/signals.dart' show InputSignal;
+import '../ui2/activity/live.dart' show LiveDraft;
 import '../ui2/profile/devices.dart' show liveSources, rankSources;
 import '../data/db.dart';
 import '../ecg/ble_ecg_transport.dart';
@@ -6798,7 +6799,13 @@ class AppState extends ChangeNotifier {
     final w = activeWorkout;
     if (w == null) return;
 
-    w.elapsed = DateTime.now().difference(w.startTime);
+    // Pause is held by the live screen's draft. While paused the clock and
+    // every tally (zones, strain, calories, the idle watch) hold too, so the
+    // saved duration_min and the history row match the summary's clock.
+    final draft = LiveDraft.current;
+    if (draft?.pausedAt != null) return;
+    w.elapsed = DateTime.now().difference(w.startTime) -
+        Duration(seconds: draft?.pausedSec ?? 0);
     // [liveHr], not `device.liveHr`: a reading that is stale or arriving from a
     // band that has dropped is NOT a measurement of this second, and billing it
     // into the peak, the per-zone seconds and (through accrueHr) strain and
