@@ -1,13 +1,10 @@
 // Refresh lib/ui2/activity/wger_exercises.g.dart from wger's public API.
 //
-// This is a maintainer tool, never app code: Edge remains fully offline while
-// browsing or logging exercises. Run from the repository root:
+// Maintainer tool, not app code. Run from the repo root:
 //
 //   dart run tool/update_wger_exercises.dart
 //
-// The generated file intentionally excludes descriptions, notes, videos and
-// images. They are not needed by the picker, substantially increase the
-// shipped data, and carry attribution/content concerns of their own.
+// Only names, aliases, muscles, equipment and categories are kept.
 
 import 'dart:convert';
 import 'dart:io';
@@ -239,6 +236,8 @@ Future<List<Object?>> _fetchAll(
     if (++pages > 100) throw StateError('wger pagination did not terminate.');
 
     final request = await client.getUrl(next);
+    // a redirect would skip the host check above; the non-200 check rejects it
+    request.followRedirects = false;
     request.headers.set(HttpHeaders.acceptHeader, 'application/json');
     final response = await request.close();
     if (response.statusCode != HttpStatus.ok) {
