@@ -1,12 +1,6 @@
-// Reviewed additions to Edge's weightlifting catalogue, keyed by wger UUID.
-// Labels retain the per-entry credits in wger_exercises.g.dart; see NOTICE.md.
-// The labels record what was reviewed; the updater refuses renamed records
-// until this selection is reviewed again. Do not auto-expand by category or
-// equipment: wger also files stretching and breathing under muscle groups.
-//
-// Add a UUID only for a lifting/resistance movement suitable for sets and reps.
-// Running, cycling, swimming, mobility, yoga and breathing are separate workouts.
-// The original eighteen Edge exercises keep their existing keys in catalogue.dart.
+// Reviewed wger lifting exercises, uuid -> label. The updater refuses renamed
+// or missing records. Add sets-and-reps movements only; wger also files
+// stretches and breathing drills under muscle categories.
 const wgerWeightliftingSelection = <String, String>{
   "a8a4ea81-9531-48e1-b6dc-f7621c7b9283": "1-Arm Half-Kneeling Lat Pulldown",
   "1b020b3a-3732-4c7e-92fd-a0cec90ed69b": "2 Handed Kettlebell Swing",

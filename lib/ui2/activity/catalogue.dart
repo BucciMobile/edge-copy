@@ -334,15 +334,9 @@ Activity? activityByName(String? type) =>
     type == null ? null : _byKey[type.toLowerCase().replaceAll(' ', '_')];
 
 // ── EXERCISES ──────────────────────────────────────────────────────────────
-// The strength catalogue. The short hand-written list stays first as the
-// familiar quick list and, more importantly, keeps the storage keys already
-// present in strength_set stable. The generated tail comes from wger at build
-// time; the app never contacts wger while it is running.
-//
-// wger says which muscles are primary and secondary. It does NOT attach a
-// percentage of a set's work to either list, so this model does not manufacture
-// one. Likewise, its equipment and category are vocabulary for finding an
-// exercise, not inputs to a load or calorie calculation.
+// The strength catalogue. The hand-written list keeps the strength_set keys
+// already in use; the generated tail is a wger snapshot (see
+// tool/update_wger_exercises.dart).
 
 class ExerciseCredit {
   final String licenseName;
@@ -361,8 +355,7 @@ class ExerciseDef {
   final List<String> equipment;
   final List<String> aliases;
 
-  /// Labels supplied by the upstream record for locales Edge already ships.
-  /// Missing means the English [label], not a guessed translation.
+  /// Upstream translations; missing falls back to [label].
   final Map<String, String> localizedLabels;
 
   /// The plate/dumbbell increment this lift is normally loaded in, kg. A
@@ -370,10 +363,7 @@ class ExerciseDef {
   /// makes every strength app feel like a spreadsheet.
   final double step;
 
-  /// Present only for generated wger rows. The base exercise and each
-  /// translation are separately licensed upstream, so one row can have more
-  /// than one credit. Keeping all distinct author/license pairs prevents a
-  /// translated name from being falsely attributed to the base-data author.
+  /// wger rows only. Base data and each translation carry their own credit.
   final String? sourceId;
   final String? sourceUpdatedAt;
   final List<ExerciseCredit> sourceCredits;
@@ -395,9 +385,7 @@ class ExerciseDef {
 
   bool get fromWger => sourceId != null;
 
-  /// A public record containing the exact title, authors and licenses used by
-  /// this snapshot. Opened only when the user asks to inspect attribution; the
-  /// app itself never fetches exercise content.
+  /// The upstream record with its authors and licenses.
   String? get sourceUrl => sourceId == null
       ? null
       : 'https://wger.de/api/v2/exerciseinfo/?uuid=$sourceId';
@@ -405,8 +393,6 @@ class ExerciseDef {
   String labelFor(String languageCode) =>
       localizedLabels[languageCode] ?? label;
 
-  /// Local, deliberately small search: even the full generated catalogue is
-  /// under a thousand rows, and this runs only as the picker query changes.
   bool matches(String query, String languageCode) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return true;

@@ -1206,7 +1206,7 @@ class _LiveStrengthState extends State<LiveStrength> {
   void initState() {
     super.initState();
     _restore();
-    if (plan.isNotEmpty) _seedFromHistory();
+    _seedFromHistory();
   }
 
   @override
@@ -1217,12 +1217,9 @@ class _LiveStrengthState extends State<LiveStrength> {
   }
 
   /// Plan and sets written before this screen was rebuilt — the session was
-  /// minimised, or the process was killed and relaunched. Exercises with zero
-  /// sets matter too: without the plan they disappeared on resume.
+  /// minimised, or the process was killed and relaunched.
   void _restore() {
     final draft = LiveDraft.current;
-    // A crash-rehydrated or gesture-started real session can have no draft,
-    // just like a preview can. Neither is evidence that the user bench-pressed.
     if (draft == null) return;
     final savedPlan = draft.data['exercise_plan'];
     if (savedPlan is List) {
@@ -1364,9 +1361,8 @@ class _LiveStrengthState extends State<LiveStrength> {
     _seedFromHistory();
   }
 
-  /// Change an empty slot in place. Once it owns logged sets, "change" means
-  /// switch/add: silently relabelling completed sets would rewrite what the
-  /// user said they performed.
+  /// Replace an empty slot; once it has sets, switch/add instead so logged
+  /// sets keep their exercise.
   Future<void> changeExercise() async {
     if (plan.isEmpty) return addExercise();
     final oldIndex = index;

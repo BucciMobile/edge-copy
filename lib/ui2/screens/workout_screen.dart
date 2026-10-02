@@ -1366,9 +1366,7 @@ Future<ActivityResult> _finishSession(
   return draft;
 }
 
-/// Previous and best per lift, from this user's own log. The store returns two
-/// candidate sets over exercises actually used; catalogue size does not turn
-/// into one SQL query per definition.
+/// Previous and best per lift, from this user's own log.
 Future<Map<String, SetHistory>> loadSetHistory() async {
   final history = <String, SetHistory>{};
   try {

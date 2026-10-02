@@ -4154,18 +4154,9 @@ class LocalDb {
     );
   }
 
-  /// One previous-set candidate and one best-set candidate per exercise.
-  ///
-  /// The live strength screen used to call [recentSetsFor] once for every
-  /// catalogue row. That was tolerable for eighteen built-ins and becomes an
-  /// app-starting thundering herd for a real exercise library. These two
-  /// queries scale with exercises the USER HAS LOGGED, not definitions the app
-  /// happens to ship.
-  ///
-  /// Deliberately no ROW_NUMBER(): Android minSdk 26 can provide SQLite 3.18,
-  /// while window functions arrived in 3.25. GROUP BY finds the newest time and
-  /// heaviest load; the ORDER BY makes ties deterministic for the Dart caller,
-  /// which keeps the first row for each key (most reps wins a best-set tie).
+  /// Newest-set and heaviest-set candidates per logged exercise, in two
+  /// queries. The caller keeps the first row per key (most reps wins a tie).
+  /// No window functions: minSdk 26 can ship SQLite older than 3.25.
   static Future<({
     List<Map<String, Object?>> previous,
     List<Map<String, Object?>> best,
