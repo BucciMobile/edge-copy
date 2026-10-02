@@ -349,6 +349,37 @@ const _specs = <String, MetricSpec>{
     citation: 'Record-presence, not heart-rate validity',
     requires: {InputSignal.accel1Hz},
   ),
+  // RETROSPECTIVE VO₂max — the "Schätzung aus bisherigen Aktivitäten" pass.
+  // A DIFFERENT kind of series from every row above: not a nightly metric
+  // but a day-median over qualifying per-km estimates from stored workouts,
+  // and always an ESTIMATE — never a lab measurement. The trend charts ONLY
+  // this retrospective series (one method, machine-enforced in the DB layer);
+  // the per-session LIVE estimate stays on the workout screen, and the two
+  // are never averaged together.
+  'vo2max': MetricSpec(
+    chartKey: 'vo2max',
+    title: 'VO₂max (est.)',
+    unit: 'ml/kg/min',
+    color: C.red,
+    icon: LucideIcons.heartPulse,
+    higherBetter: true,
+    method: 'Estimated — never measured. Each point is the median over a '
+        'day\'s qualifying full-km workout splits, each graded by the ACSM '
+        'walking/running pace equation for the oxygen cost of the bout, then '
+        'extrapolated to maximum via the heart-rate-reserve equivalence '
+        '(Swain & Leutholtz 1997). A submaximal estimate from FREE-RECORDED '
+        'activities, not a lab or standardised test protocol; the individual '
+        'error of this extrapolated chain on free-recorded bouts is not '
+        'quantified — no individual confidence interval exists for it and '
+        'none is shown. Sessions whose heart rate or route data did not '
+        'qualify contribute nothing rather than a guess.',
+    citation: 'ACSM metabolic equations · Swain & Leutholtz 1997 (%HRR ≅ %VO₂R)',
+    // The BAND's only contribution is dense heart rate — the pace comes from
+    // the phone's GPS route, which is not an InputSignal a band declares.
+    // Requiring anything beyond hr1Hz would wrongly refuse a strap that can
+    // serve this chart.
+    requires: {InputSignal.hr1Hz},
+  ),
 
   // ── charted nowhere, on purpose ──
   'skin_temp': MetricSpec(

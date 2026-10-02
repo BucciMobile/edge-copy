@@ -244,6 +244,19 @@ class ActivityResult {
   /// number: null on almost every session, including every indoor one, and
   /// that absence is the honest answer, not a gap to fill with a guess.
   final double? vo2max;
+  /// Machine-readable snake_case code for WHY [vo2max] is null — banked on
+  /// the same forward-only pass the estimate itself is, so the reason
+  /// outlives the substrate it was derived from. Never rendered raw: the
+  /// stats list maps it to prose so "no estimate" says why, not just "—".
+  final String? vo2maxAbsenceReason;
+  /// RETROSPECTIVE estimate — "Schätzung aus bisherigen Aktivitäten": the
+  /// median over this session's qualifying splits in `vo2max_history`,
+  /// computed AFTER the fact by the one-shot history pass. A SEPARATE claim
+  /// from [vo2max]: that one is the live backfill; this one is explicitly a
+  /// nachträgliche Berechnung and renders as its own row, never merged with
+  /// the live value. Null when the history pass produced nothing for this
+  /// session (or has not run) — displayed as absent, never as 0.
+  final double? vo2maxFromHistory;
   final double? strain;
   // Per-MINUTE mean heart rate, live (`LiveWorkoutState.perMinuteHr`) and
   // stored (`getWorkout()['hr']`) alike. Nothing on this screen has ever been
@@ -328,6 +341,8 @@ class ActivityResult {
     this.maxHr,
     this.hrr60,
     this.vo2max,
+    this.vo2maxAbsenceReason,
+    this.vo2maxFromHistory,
     this.calories,
     this.strain,
     this.hr = const [],
@@ -364,6 +379,8 @@ class ActivityResult {
     int? maxHr,
     int? hrr60,
     double? vo2max,
+    String? vo2maxAbsenceReason,
+    double? vo2maxFromHistory,
     List<double?>? hr,
     List<double>? zoneMinutes,
     String? zoneSource,
@@ -390,6 +407,9 @@ class ActivityResult {
         maxHr: maxHr ?? this.maxHr,
         hrr60: hrr60 ?? this.hrr60,
         vo2max: vo2max ?? this.vo2max,
+        vo2maxAbsenceReason: vo2maxAbsenceReason ?? this.vo2maxAbsenceReason,
+        vo2maxFromHistory:
+            vo2maxFromHistory ?? this.vo2maxFromHistory,
         calories: calories,
         strain: strain,
         hr: hr ?? this.hr,
@@ -528,6 +548,36 @@ IconData statIcon(String name) => switch (name) {
       _ => posterStatIcon(name),
     };
 
+/// Prose for a banked VO₂max absence code. Unknown codes map to a generic
+/// "not computable" line rather than leaking a snake_case token onto a
+/// screen — the codes are storage vocabulary, not UI copy. Public + pure so
+/// the widget test can pin each mapping without a widget tree.
+/// Covers the live-estimate codes AND the history-pass codes
+/// (`no_hr_max_available`, `no_resting_hr_available`,
+/// `estimation_unavailable`) — the summary's history row is silent, but the
+/// codes are shared storage vocabulary and every one must map to prose.
+String? vo2maxAbsenceText(String? code) {
+  if (code == null) return null;
+  return switch (code) {
+    'unsupported_activity' =>
+      'Not estimated for this activity type (ACSM running/walking only)',
+    'no_route' => 'Not estimated — no GPS route for this session',
+    'route_too_short' => 'Not estimated — GPS route too short',
+    'no_completed_km_split' => 'Not estimated — no completed 1 km split',
+    'no_steady_hr_for_split' => 'Not estimated — no steady HR over the split',
+    'no_qualifying_bout' =>
+      'Not estimated — no steady submaximal bout (bout too short, intensity '
+      'outside 40–90 %HRR, or implausible result)',
+    'no_hr_max_available' =>
+      'Not estimated — no HR max anchor available for this session',
+    'no_resting_hr_available' =>
+      'Not estimated — no resting HR available before this session',
+    'estimation_unavailable' =>
+      'Not estimated — the input data could not be read',
+    _ => 'Not estimated from this session',
+  };
+}
+
 /// The supporting numbers a finished session can honestly print, as
 /// `(name, formatted value)` — the shape [shareStats] hands the share card, so
 /// one session cannot describe itself two ways.
@@ -599,8 +649,26 @@ List<(String, String)> sessionStats(ActivityResult r, UnitsController? u) {
   add('HR recovery', r.hrr60 == null ? null : '${r.hrr60} bpm in 60 s');
   // ESTIMATE from one completed km split of THIS session's own route + HR —
   // absent on almost every session (indoor, no GPS, no full km) by design.
-  add('VO2max (est.)',
-      r.vo2max == null ? null : '${r.vo2max!.toStringAsFixed(1)} ml/kg/min');
+  // The label carries the method + unit every time it shows, and when there
+  // is no number the REASON shows in prose instead of a silent gap — a null
+  // here is a real, derived answer ("why not") and the row owes the user it.
+  add(
+      'VO2max (est.)',
+      r.vo2max != null
+          ? '${r.vo2max!.toStringAsFixed(1)} ml/kg/min '
+              '(est., ACSM pace + %HRR)'
+          : vo2maxAbsenceText(r.vo2maxAbsenceReason));
+  // RETROSPECTIVE — a SEPARATE row, never merged with the live estimate
+  // above: this one is explicitly a nachträgliche Berechnung from the
+  // session's own frozen km splits by the history pass ("Schätzung aus
+  // bisherigen Aktivitäten"), and the label says so. Absent renders as
+  // nothing — a session the history pass could not grade is not a 0.
+  if (r.vo2maxFromHistory != null) {
+    add(
+        'VO2max (from history)',
+        '${r.vo2maxFromHistory!.toStringAsFixed(1)} ml/kg/min '
+        '(retrospective est. from this session\'s splits)');
+  }
   add('Calories', r.calories == null ? null : '${grouped(r.calories!)} kcal');
   add('Strain', r.strain?.toStringAsFixed(1));
   // TS-09 — last, under the measurements, and named 'Your rating' rather than

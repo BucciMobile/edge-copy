@@ -1232,6 +1232,7 @@
   "healthMeasuresUnit": "指标",
   "healthRowRestingHr": "静息心率",
   "healthRowHrv": "心率变异性",
+  "healthRowVo2maxEst": "VO₂max（估计）",
   "healthRowSleep": "睡眠",
   "healthRowStress": "压力",
   "healthRowRespRate": "呼吸频率",

@@ -6330,6 +6330,7 @@
     "description": "Overview/Trends/Vitals row label: resting heart rate"
   },
   "healthRowHrv": "HRV",
+  "healthRowVo2maxEst": "VO₂max (est.)",
   "@healthRowHrv": {
     "description": "Overview/Trends row label: HRV"
   },

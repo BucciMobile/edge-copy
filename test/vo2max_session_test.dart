@@ -110,10 +110,19 @@ void main() {
     final w = await repo.getWorkout(id);
     final vo2max = w['vo2max_estimate'];
     expect(vo2max, isNotNull);
-    expect((vo2max as num).toDouble(), inInclusiveRange(30, 70));
+    // Reference case, pinned against the analytics formula by hand. The
+    // fixture's 0.009-degree route is slightly over a true km (haversine
+    // ~1000.9 m), so the split's own length feeds the pace:
+    //   speed ~1000.9/330 = 3.0331 m/s -> 181.98 m/min; running equation:
+    //   VO2submax = 0.2*181.98 + 3.5 = 39.897 ml/kg/min
+    //   %HRR = (150-55)/(187-55) = 0.719697
+    //   VO2max = 3.5 + (39.897-3.5)/0.719697 = 54.180 ml/kg/min
+    expect((vo2max as num).toDouble(), closeTo(54.18, 0.02));
 
     final row = await LocalDb.session(id);
     expect(row?['vo2max_estimate'], isNotNull);
+    expect(row?['vo2max_method'], 'acsm_speed_swain_hrr');
+    expect(row?['vo2max_absence_reason'], isNull);
   });
 
   test('it is written once and a second read does not recompute it',
@@ -147,6 +156,33 @@ void main() {
     expect(second, 12.34, reason: 'backfill-only: never recomputed once set');
   });
 
+  test('a cycling session with a route gets NO estimate (ACSM is foot-only)',
+      () async {
+    const id = 'w-vo2-bike';
+    const start = 515000;
+    const durationSec = 330;
+    const end = start + durationSec;
+    await LocalDb.putSession({
+      'id': id,
+      'start_ts': start,
+      'end_ts': end,
+      'type': 'cycle',
+      'status': 'done',
+      'duration_min': (durationSec / 60).round(),
+      'source': 'manual',
+      'device_family': 'gen4',
+      'created_at': start * 1000,
+    });
+    await _insertHr(start, end, 150, counterBase: 41500);
+    await _insertKmRoute(id, start, durationSec);
+
+    final w = await repo.getWorkout(id);
+    expect(w['vo2max_estimate'], isNull);
+    final row = await LocalDb.session(id);
+    expect(row?['vo2max_estimate'], isNull);
+    expect(row?['vo2max_absence_reason'], 'unsupported_activity');
+  });
+
   test('a session with no GPS route never gets an estimate', () async {
     const id = 'w-vo2-no-route';
     const start = 520000;
@@ -166,6 +202,8 @@ void main() {
 
     final w = await repo.getWorkout(id);
     expect(w['vo2max_estimate'], isNull);
+    final row = await LocalDb.session(id);
+    expect(row?['vo2max_absence_reason'], 'no_route');
   });
 
   test('an all-out split (near-maximal HR) abstains rather than fabricate',
@@ -192,5 +230,10 @@ void main() {
 
     final w = await repo.getWorkout(id);
     expect(w['vo2max_estimate'], isNull);
+    final row = await LocalDb.session(id);
+    // The analytics abstention (bout outside the submax %HRR band) is mapped
+    // to the edge-side "no qualifying bout" code — a machine-readable WHY,
+    // never a zero.
+    expect(row?['vo2max_absence_reason'], 'no_qualifying_bout');
   });
 }

@@ -1232,6 +1232,7 @@
   "healthMeasuresUnit": "Messwerte",
   "healthRowRestingHr": "Ruheherzfrequenz",
   "healthRowHrv": "HRV",
+  "healthRowVo2maxEst": "VO₂max (geschätzt)",
   "healthRowSleep": "Schlaf",
   "healthRowStress": "Stress",
   "healthRowRespRate": "Atemfrequenz",

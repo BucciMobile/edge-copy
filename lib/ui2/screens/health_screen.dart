@@ -1028,6 +1028,14 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       const SizedBox(height: S.x3),
       trend('hrv', l?.healthRowHrv ?? 'HRV', 'ms', C.green),
       const SizedBox(height: S.x3),
+      // RETROSPECTIVE VO₂max — an ESTIMATE trend, and the label must say so.
+      // The series only ever holds one method's day-medians (enforced in the
+      // DB layer), so the 28-day comparison is methodologically comparable;
+      // the LIVE per-session estimate never charts here and is never averaged
+      // with these points.
+      trend('vo2max', l?.healthRowVo2maxEst ?? 'VO₂max (est.)', 'ml/kg/min',
+          C.red, higherBetter: true),
+      const SizedBox(height: S.x3),
       if (d.need.value == null)
         trend('sleep', l?.healthTimeAsleep ?? 'Time asleep', '', C.blue)
       else

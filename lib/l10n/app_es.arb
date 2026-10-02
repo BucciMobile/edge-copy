@@ -1232,6 +1232,7 @@
   "healthMeasuresUnit": "medidas",
   "healthRowRestingHr": "Frecuencia cardíaca en reposo",
   "healthRowHrv": "VFC",
+  "healthRowVo2maxEst": "VO₂max (est.)",
   "healthRowSleep": "Sueño",
   "healthRowStress": "Estrés",
   "healthRowRespRate": "Frecuencia respiratoria",

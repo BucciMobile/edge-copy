@@ -1232,6 +1232,7 @@
   "healthMeasuresUnit": "माप",
   "healthRowRestingHr": "आराम के समय हृदय गति",
   "healthRowHrv": "एचआरवी",
+  "healthRowVo2maxEst": "वीओ₂ मैक्स (अनुमानित)",
   "healthRowSleep": "नींद",
   "healthRowStress": "तनाव",
   "healthRowRespRate": "श्वसन दर",

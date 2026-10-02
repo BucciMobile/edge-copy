@@ -185,6 +185,7 @@ class LocalDb {
     'sessions',
     'workout_route',
     'workout_split',
+    'vo2max_history',
     // User-initiated ECG readings and the band's raw ECG records recovered
     // through history — the band trims its flash on ACK, so these too are
     // the only copy. Parent before child.
@@ -1145,6 +1146,7 @@ class LocalDb {
     await _createWorkoutRoute(db);
     await _ensureWorkoutRouteSpeed(db);
     await _createWorkoutSplit(db);
+    await _createVo2maxHistory(db);
     await _ensureBreathingWindowColumns(db);
     // Self-skipping (one PRAGMA) unless the table really is still NOT NULL —
     // the same-version merged-build case this whole method exists for.
@@ -4366,6 +4368,14 @@ class LocalDb {
     // route split — see `_submaxVo2maxFromSplits` in local_repository_impl.
     // ESTIMATE tier always; absent (NULL) is the honest default, not 0.
     await _addColumnIfMissing(db, 'sessions', 'vo2max_estimate', 'REAL');
+    // Provenance for the VO2max estimate: which method produced the value
+    // (the one code the estimate tier ever uses today) and, on the same
+    // forward-only pass, WHY a session has none — a machine-readable
+    // snake_case code, not prose. Both additive + nullable: a row that
+    // predates them reads NULL, and a value is never recomputed once banked
+    // (see `_submaxVo2maxFromSplits` in local_repository_impl).
+    await _addColumnIfMissing(db, 'sessions', 'vo2max_method', 'TEXT');
+    await _addColumnIfMissing(db, 'sessions', 'vo2max_absence_reason', 'TEXT');
     // v43 (TS-09) — SESSION RPE. A SELF-REPORT, and labelled as one everywhere
     // it is ever shown. It exists to score the sessions heart rate cannot see
     // (lifting, climbing, anything intermittent) and its real value is the
@@ -10564,6 +10574,8 @@ class LocalDb {
     // and "best" on the strength screen (recentSetsFor reads strength_set with
     // no session-existence filter) and kept exporting under a dead session_id.
     await db.delete('strength_set', where: 'session_id = ?', whereArgs: [id]);
+    // …and the retrospective VO₂max rows, same owner reason.
+    await db.delete('vo2max_history', where: 'session_id = ?', whereArgs: [id]);
   }
 
   // ── workout GPS routes (run/ride/walk) I/O ─────────────────────────────────
@@ -10655,6 +10667,189 @@ class LocalDb {
       whereArgs: [sessionId],
       orderBy: 'km ASC',
     );
+  }
+
+  /// vo2max_history — RETROSPECTIVE per-split VO₂max estimates from stored
+  /// history ("Schätzung aus bisherigen Aktivitäten"), written by
+  /// `backfillVo2maxHistory` (compute/vo2max_history.dart) from the frozen
+  /// `workout_split` rows. A SEPARATE claim from the live `sessions.vo2max_estimate`:
+  /// that one is computed while the 1 Hz substrate exists; these are computed
+  /// AFTER the fact from the splits that survive. Never written onto the
+  /// session row — the original session values stay untouched.
+  ///
+  /// One row per (session_id, km): the estimate is per qualifying SPLIT, and
+  /// a session's several splits can each carry their own estimate/abstention.
+  /// `computed_at` marks every row as a NACHTRÄGLICHE Berechnung (computed
+  /// later than the activity), distinct from `activity_ts`.
+  static Future<void> _createVo2maxHistory(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vo2max_history (
+        session_id TEXT NOT NULL,
+        km INTEGER NOT NULL,
+        activity_ts INTEGER NOT NULL,
+        vo2max REAL,
+        absence_reason TEXT,
+        method TEXT NOT NULL,
+        formula_version TEXT NOT NULL,
+        hr_max_bpm REAL NOT NULL,
+        resting_hr_bpm REAL NOT NULL,
+        computed_at INTEGER NOT NULL,
+        PRIMARY KEY (session_id, km)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_vo2max_history_activity '
+      'ON vo2max_history(activity_ts)',
+    );
+  }
+
+  /// Upsert the retrospective VO₂max rows for one session. Idempotent on
+  /// (session_id, km) — repeated passes overwrite in place, never duplicate.
+  static Future<void> putVo2maxHistory(
+    String sessionId,
+    List<Map<String, Object?>> rows,
+  ) async {
+    final db = await instance;
+    await db.transaction((txn) async {
+      await txn.delete(
+        'vo2max_history',
+        where: 'session_id = ?',
+        whereArgs: [sessionId],
+      );
+      for (final r in rows) {
+        await txn.insert(
+          'vo2max_history',
+          {'session_id': sessionId, ...r},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  /// All retrospective VO₂max rows, oldest activity first. Empty when no
+  /// history pass has run or nothing qualified — never inferred.
+  static Future<List<Map<String, dynamic>>> vo2maxHistory() async {
+    final db = await instance;
+    return db.query('vo2max_history', orderBy: 'activity_ts ASC');
+  }
+
+  /// Median retrospective VO₂max per session over its qualifying splits
+  /// (rows with a value), one row per session_id that has at least one.
+  /// The median — not the mean — so one outlier split cannot drag a
+  /// session's aggregate; computed here so the whole list needs ONE query
+  /// instead of a per-session round trip.
+  static Future<Map<String, double>> vo2maxHistoryMedians() async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT session_id, vo2max FROM vo2max_history '
+      'WHERE vo2max IS NOT NULL ORDER BY session_id, vo2max',
+    );
+    final bySession = <String, List<double>>{};
+    for (final r in rows) {
+      final id = r['session_id'] as String?;
+      final v = (r['vo2max'] as num?)?.toDouble();
+      if (id == null || v == null || !v.isFinite) continue;
+      bySession.putIfAbsent(id, () => []).add(v);
+    }
+    final out = <String, double>{};
+    for (final e in bySession.entries) {
+      final xs = e.value; // already sorted by vo2max in the ORDER BY
+      final mid = xs.length ~/ 2;
+      out[e.key] = xs.length.isOdd
+          ? xs[mid]
+          : (xs[mid - 1] + xs[mid]) / 2;
+    }
+    return out;
+  }
+
+  /// RETROSPECTIVE VO₂max trend — one point per DAY that has at least one
+  /// qualifying history estimate: the median over that day's valued
+  /// `vo2max_history` rows. MEDIAN, not mean, for the same outlier reason as
+  /// [vo2maxHistoryMedians]: one downhill wind-aided km must not drag the
+  /// day's aggregate toward it.
+  ///
+  /// MIXING RULE, machine-enforced: only rows whose `method` matches
+  /// [method] AND whose `formula_version` matches count. A different method
+  /// is a different claim and never averaged into this series. A different
+  /// formula version is the same claim under different maths: a day's median
+  /// is built from ONE version only (the day's LAST version — the chain
+  /// that produced that day's most recent estimate), and version boundaries
+  /// surface as `algo_break` so the chart can mark them (the same convention
+  /// `getChart` already applies to `metric_series` version breaks). A median
+  /// over MIXED versions fabricates a number (40 under v1 + 60 under v2 =
+  /// 50) that neither chain ever produced. Newest row's timestamp carries
+  /// the point's `t` — the "as of" line on the trend card reads the day the
+  /// estimate is about, not the day the pass happened to run.
+  static Future<List<Map<String, Object?>>> vo2maxHistoryDailyTrend(
+      {String method = 'acsm_speed_swain_hrr'}) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT activity_ts, vo2max, formula_version FROM vo2max_history '
+      'WHERE vo2max IS NOT NULL AND method = ? '
+      'ORDER BY activity_ts ASC',
+      [method],
+    );
+    if (rows.isEmpty) return const [];
+    final out = <Map<String, Object?>>[];
+    // Per-day buckets keyed on the LOCAL calendar day of activity_ts
+    // (the same convention as data/day_label.dart). A day-of-month number
+    // alone would merge the 5th of two different months.
+    String? dayKey;
+    int bucketTs = 0;
+    var dayVals = <double>[];
+    String? bucketVersion;
+    String labelOf(int ts) {
+      final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000).toLocal();
+      String two(int x) => x.toString().padLeft(2, '0');
+      return '${d.year.toString().padLeft(4, '0')}-${two(d.month)}-${two(d.day)}';
+    }
+    for (final r in rows) {
+      final ts = (r['activity_ts'] as num?)?.toInt();
+      final v = (r['vo2max'] as num?)?.toDouble();
+      if (ts == null || v == null || !v.isFinite) continue;
+      final k = labelOf(ts);
+      final ver = r['formula_version'] as String?;
+      if (k != dayKey) {
+        if (dayVals.isNotEmpty) {
+          out.add(_medianPoint(bucketTs, dayVals, bucketVersion));
+        }
+        dayKey = k;
+        bucketTs = ts;
+        dayVals = <double>[];
+        bucketVersion = ver;
+      } else if (ver != bucketVersion) {
+        // Version changed WITHIN one day: the rows so far and the rows to
+        // come were produced by different chains and must not be medianed
+        // together. Flush the partial day under its own version, then start
+        // the day's bucket afresh on the new one.
+        if (dayVals.isNotEmpty) {
+          out.add(_medianPoint(bucketTs, dayVals, bucketVersion));
+        }
+        bucketTs = ts;
+        dayVals = <double>[];
+        bucketVersion = ver;
+      }
+      dayVals.add(v);
+    }
+    if (dayVals.isNotEmpty) {
+      out.add(_medianPoint(bucketTs, dayVals, bucketVersion));
+    }
+    return out;
+  }
+
+  /// The median of [xs] as a `{t, v, formula_version}` chart point at [ts].
+  /// The version rides along so `getChart` can mark a formula bump as an
+  /// algo break — the same convention `metric_series` version breaks follow.
+  static Map<String, Object?> _medianPoint(
+      int ts, List<double> xs, String? formulaVersion) {
+    final sorted = xs.where((x) => x.isFinite).toList()..sort();
+    final mid = sorted.length ~/ 2;
+    final v = sorted.isEmpty
+        ? null
+        : (sorted.length.isOdd
+            ? sorted[mid]
+            : (sorted[mid - 1] + sorted[mid]) / 2);
+    return {'t': ts, 'v': v, 'formula_version': formulaVersion};
   }
 
   /// Additive: add the `speed` column (smoothed instantaneous m/s) to an
@@ -10825,11 +11020,34 @@ class LocalDb {
   /// completed route km split (see `_submaxVo2maxFromSplits`). Never called
   /// with null — a session that didn't qualify simply never writes here and
   /// stays NULL, the honest "no estimate" state.
-  static Future<void> setSessionVo2max(String id, double vo2max) async {
+  static Future<void> setSessionVo2max(String id, double vo2max,
+      {String? method}) async {
     final db = await instance;
     await db.update(
       'sessions',
-      {'vo2max_estimate': vo2max},
+      {
+        'vo2max_estimate': vo2max,
+        'vo2max_method': ?method,
+        // A value arrived, so any earlier absence reason is stale — clear it
+        // on the same write rather than leave the row claiming both.
+        'vo2max_absence_reason': null,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Bank WHY a session has no VO2max estimate — written on the first
+  /// forward-only pass only, never recomputed, for the same retention reason
+  /// as the estimate itself: the substrate the answer was derived from is
+  /// pruned in days while the reason outlives it. `reason` is a
+  /// machine-readable snake_case code; prose lives in the screen, not here.
+  static Future<void> setSessionVo2maxAbsenceReason(
+      String id, String reason) async {
+    final db = await instance;
+    await db.update(
+      'sessions',
+      {'vo2max_absence_reason': reason},
       where: 'id = ?',
       whereArgs: [id],
     );
