@@ -9,6 +9,7 @@
 //     driven over the engine's fake-link seam.
 // No radio and no DB — everything here is deterministic.
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:fake_async/fake_async.dart';
@@ -504,4 +505,15 @@ void main() {
     });
   });
 
+  test('a stale retry never escalates over a newer arm', () {
+    // AppState needs the whole plugin stack, so this pins the guard by source:
+    // a grace retry that resumes after a newer arm must not cancel that arm's
+    // grace timer, so the shared escalation checks staleness before it cancels.
+    final src = File('lib/state/app_state.dart').readAsStringSync();
+    final guard = RegExp(
+      r'void _escalateAlarmLatchFailed\(int epoch\) \{[^}]*?'
+      r'if \(_savedAlarm != epoch\) return;\s*\n\s*_alarmGraceTimer\?\.cancel\(\);',
+    );
+    expect(guard.hasMatch(src), isTrue);
+  });
 }

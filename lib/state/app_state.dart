@@ -4804,6 +4804,8 @@ class AppState extends ChangeNotifier {
   /// strap can still confirm, so the critical alert waits; [_handleAlarmEvent]
   /// cancels this timer when 56 lands, and the alert re-checks confirmation.
   void _escalateAlarmLatchFailed(int epoch) {
+    // A retry that resumes after a newer arm must not cancel that arm's timer.
+    if (_savedAlarm != epoch) return;
     _alarmGraceTimer?.cancel();
     _alarmGraceTimer = Timer(alarmLatchAlertDelay(connected: isConnected), () {
       if (!_disposed) unawaited(_notifyAlarmLatchFailed(epoch));
