@@ -5295,6 +5295,14 @@ class AppState extends ChangeNotifier {
           await engine.reconcileLiveStreams();
           await engine.getBattery();
           await engine.getStrapName();
+          // the link can drop inside the awaits above. _onEngineState ignored
+          // that drop because _reconnecting is still set, so nobody else arms
+          // recovery or retries: do it here instead of breaking as connected.
+          if (!engine.isConnected) {
+            _log('Link dropped during reconnect setup — retrying.');
+            if (_background) await _armRecovery();
+            continue;
+          }
           // Alarm display comes from the locally-set/persisted value; the
           // GET_ALARM readback is parked (unconfirmed format) — see ble_engine.
           _log('Reconnected — live on; draining backlog in background.');
