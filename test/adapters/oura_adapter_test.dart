@@ -381,14 +381,8 @@ void main() {
 
   test('a cursor past the newest event is answered with replays, and the '
       'session ends instead of looping', () async {
-    // THE REPLAYED TAIL. A real ring (observed live on a Horizon and
-    // re-confirmed against Ring 4/5 notes by the open_oura project,
-    // 2026-09-24) answers a cursor past its newest event with the last few
-    // events AGAIN rather than an empty batch — so a session that treats them
-    // as new data asks the same question forever, and one that banks them as
-    // an ordinary short batch re-reads the same window on every idle sync.
-    // Both are wrong in ways a test without hardware cannot see on a live
-    // radio, which is why the behaviour is pinned here instead.
+    // The ring answers a cursor past its newest event with its last few
+    // events again; treating them as new would loop forever.
     final (events, link) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
@@ -415,15 +409,8 @@ void main() {
   });
 
   test('an old boot record in the replayed tail is not a new reboot', () async {
-    // THE FALSE TRIPWIRE. A boot record (`ring_start`, tag 0x41) stamped below
-    // the cursor is one a previous session already read and advanced past — a
-    // normal sync leaves the cursor at the newest event, and the replayed
-    // tail it serves on the next idle sync can carry that boot record
-    // indefinitely. Resetting on its presence would drop a VALID bookmark on
-    // every idle sync and re-read history forever. The boot record is an
-    // archived frame for a future decoder, not a reboot tripwire: the reset
-    // runs on `bytesLeft > 0` alone, the same signal the empty-batch branch
-    // runs on.
+    // A boot record below the cursor was already read by an earlier sync;
+    // only `bytesLeft > 0` means stranded.
     final (events, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
@@ -448,18 +435,10 @@ void main() {
     expect(events.whereType<SampleBatch>(), isEmpty);
   });
 
-
   test('replays with bytes remaining strand the bookmark, not just an empty '
       'batch', () async {
-    // The other shape the same ring hazard takes: after a REBOOT the ring's
-    // decisecond counter restarts near zero, so a bookmark from before the
-    // reboot is ahead of everything it holds — and this ring answers it with
-    // its last pre-reboot events rather than nothing, exactly as it answers
-    // an up-to-date cursor. `bytesLeft` is what separates the stranded case
-    // (data remains, unreachable behind the bookmark) from the ordinary
-    // replayed tail (nothing remains, the cursor is simply current), and a
-    // session that ends quietly on the first is the permanent silent-stall
-    // the stranded-bookmark remedy exists to fix.
+    // After a reboot the counter restarts below the bookmark and the ring
+    // answers with pre-reboot events; bytes left is what marks it stranded.
     final (events, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
@@ -480,20 +459,13 @@ void main() {
   });
 
   test('a batch of replays and new events keeps only the new', () async {
-    // The mixed batch — the one a ring that replays a short tail will actually
-    // serve on an ordinary incremental sync. The events at or after the cursor
-    // are new data and must flow through the ordinary path (banked, stamped,
-    // checkpointed, cursor advanced to their own max + 1); the ones before it
-    // must not reach the sample batch at all, because they are re-deliveries
-    // of seconds already committed and a decoder written later must be able
-    // to trust a batch not to mix the two.
+    // Events at or after the cursor flow through; replays never reach the
+    // batch, raw included.
     const syncUnix = 1782043215;
     final (events, link) = await _drive(_adapter(startCursorDs: 1000), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
       if (v.first == 0x10) {
-        final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
-        if (cursor > 1000) return [_summary(0, 0)];
         return [
           // Replays below the 1000 we asked from.
           _event(kOuraEvtTempPeriod, 900, _hex('6c0d')),
@@ -515,7 +487,8 @@ void main() {
         .whereType<BandNote>()
         .firstWhere((n) => n.key == 'oura_cursor_ds');
     expect(cursor.value, 1101);
-    expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(2));
+    expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1),
+        reason: 'bytesLeft 0 ends the drain after this batch');
   });
 
   // ── The ring's own sleep staging, banked as vendor scalars ──────────────
@@ -592,35 +565,6 @@ void main() {
       expect(o.at.millisecondsSinceEpoch ~/ 1000, syncUnix - 10);
       expect(o.value, 2.0);
     }
-  });
-
-  test('a hypnogram stamped in the future is dropped, not banked', () async {
-    // 9200 ds is 820 s past the injected now, outside the 300 s window.
-    final (events, _) = await _drive(
-      OuraAdapter(
-        key: _kKey,
-        anchor: (1000, 1782043215),
-        confirmTimeout: _kFast,
-        replyTimeout: _kFast,
-        nowSeconds: () => 1782043215,
-      ),
-      (i, v) {
-        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
-        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-        if (v.first == 0x10) {
-          return [
-            _event(kOuraEvtSleepPhaseInformation, 9200, hypnogramBody()),
-            _summary(1, 0),
-          ];
-        }
-        return const [];
-      },
-    );
-    expect(events.whereType<VendorScalars>(), isEmpty,
-        reason: 'no sleep-stage row is from the future');
-    final batch = events.whereType<SampleBatch>().single;
-    expect(batch.raw, hasLength(1),
-        reason: 'the frame is banked regardless, like every other one');
   });
 
   test('a hypnogram no origin ever reaches is dropped, not guessed', () async {

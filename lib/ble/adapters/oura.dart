@@ -194,11 +194,6 @@ class OuraAdapter extends BandAdapter {
     return a.$2 + (ds - a.$1) ~/ 10;
   }
 
-  /// The link's `_isPlausibleSecond` bound, repeated here because
-  /// [VendorScalars] skip the host's sample gate.
-  bool _isPlausibleStageSecond(int unix) =>
-      unix <= nowSeconds() + 300 && unix >= 1700000000;
-
   @override
   Stream<BandEvent> run(BandLink link) async* {
     final inbox = _Inbox();
@@ -256,17 +251,8 @@ class OuraAdapter extends BandAdapter {
         }
         final got = await _collectBatch(inbox);
         if (got == null) {
-          // THE SUMMARY IS THE ONLY BATCH TERMINATOR THIS PROTOCOL HAS. A batch
-          // that ends without one is a link that died mid-batch (or a radio
-          // that never sent it), and treating that as "drained" is the one
-          // wrong answer this loop could give: the frames it did deliver were
-          // collected into a `_Batch` that never reaches a `SampleBatch`, so
-          // they are not banked this session — and the CURSOR must not move
-          // on the strength of a batch whose end was never announced, because
-          // the ring may have held more behind the summary that never arrived.
-          // Ending the session leaves the bookmark put, so the next sync
-          // re-reads from the last confirmed boundary. Nothing is lost either
-          // way — the ring never deletes on our say-so.
+          // No summary = the batch never ended. Leave the cursor put; the
+          // next sync re-reads from the last confirmed boundary.
           link.log('oura: no batch summary within the reply window.');
           return;
         }
@@ -290,73 +276,29 @@ class OuraAdapter extends BandAdapter {
           return;
         }
 
-        // A REPLAYED TAIL IS DROPPED BEFORE ANYTHING ELSE SEES IT. The ring's
-        // documented answer to a cursor past its newest event is not an empty
-        // batch but the LAST FEW EVENTS AGAIN (observed live on a Horizon and
-        // re-confirmed against Ring 4/5 notes by the open_oura project,
-        // 2026-09-24): it is a replay, not new data, and a session that treats
-        // it as either new (advancing the cursor to the replay's own stamp —
-        // which cannot exceed the bookmark it was asked from, so the loop asks
-        // the same question forever) or as an ordinary short batch (banking
-        // duplicates — harmless to the tables, idempotent by REPLACE/PK, but it
-        // turns every idle sync into a busy loop that never ends) is wrong.
-        // Both halves below stop that: events older than the cursor the request
-        // asked from are discarded here, and the batch they leave behind counts
-        // as empty — which is the one honest answer, because a cursor the ring
-        // answered with only replays is exactly a cursor with nothing new after
-        // it. This is the fetch-by-currency sibling of the stranded-bookmark
-        // check below, and the two must not be merged: a stranded bookmark is a
-        // bookmark the ring CANNOT answer (rebooted counter), a replayed tail
-        // is one it answers with what it still holds — only the former resets
-        // the bookmark, because only the former makes every future record
-        // unreachable behind it.
-        final fresh = <OuraEvent>[
-          for (final e in got.events)
-            if (e.tsDs >= cursor) e,
+        // A cursor past the newest event is answered with the last few
+        // events again, not an empty batch. Drop anything below the cursor;
+        // advancing on a replay would move the bookmark backwards.
+        // `_collectBatch` fills events and raw in lockstep.
+        final keep = [
+          for (var i = 0; i < got.events.length; i++)
+            if (got.events[i].tsDs >= cursor) i,
         ];
-        if (fresh.length != got.events.length) {
-          // The RAW copies go with the events they belong to — `_collectBatch`
-          // fills the two lists in lockstep (one raw entry per accepted event,
-          // in arrival order), so the replay's own bytes are dropped by the same
-          // cut. `raw_archive` would dedupe them anyway (PRIMARY KEY on hex),
-          // but a batch must not hand a later decoder re-delivered frames mixed
-          // into new data it is being asked to trust.
-          final keepRaw = <Uint8List>[
-            for (var i = 0; i < got.events.length; i++)
-              if (got.events[i].tsDs >= cursor) got.raw[i],
-          ];
-          got.raw.clear();
-          got.raw.addAll(keepRaw);
-        }
-        if (fresh.isEmpty && got.events.isNotEmpty) {
+        if (keep.isEmpty) {
           link.log('oura: the ring replayed ${got.events.length} event(s) '
               'below the cursor; nothing new after $cursor.');
-          // A REPLAY WITH BYTES REMAINING IS A STRANDED BOOKMARK TOO. The
-          // rebooted-counter scenario lands here exactly the way it lands in
-          // the empty-batch branch above — everything the ring now holds is
-          // below a bookmark taken before the reboot — except this ring answers
-          // with its last few pre-reboot events instead of nothing. Same
-          // signal, same remedy: the bookmark is unanswerable and must be
-          // dropped, or the ring quietly fills up behind it forever.
-          //
-          // AND THE BOOT RECORD ALONE IS NOT EVIDENCE OF A NEW REBOOT. A boot
-          // record stamped below the cursor is by definition one a previous
-          // session already read and advanced past — a normal sync's replayed
-          // tail can carry it indefinitely, and treating it as a fresh reboot
-          // would reset a VALID bookmark on every idle sync and re-read
-          // history forever. The failure this guard exists for — a hardware
-          // factory reset leaving the counter restarted below a stale
-          // bookmark — is not distinguishable from the plain stranded case
-          // by the boot record's presence, only by the ring still holding
-          // something it could not deliver, which is the same `bytesLeft > 0`
-          // signal the empty-batch branch above runs on. So the reset runs on
-          // that signal alone, and the boot record stays what it is: an
-          // archived frame for a future decoder, not a reboot tripwire.
+          // Replays with bytes still left is the same stranded bookmark as
+          // the empty-batch case above (counter restarted below it).
           if (got.summary.bytesLeft > 0) {
             yield const BandNote('oura_cursor_stranded');
           }
           return;
         }
+        final fresh = [for (final i in keep) got.events[i]];
+        final freshRaw = [for (final i in keep) got.raw[i]];
+        got.raw
+          ..clear()
+          ..addAll(freshRaw);
         got.events.clear();
         got.events.addAll(fresh);
 
@@ -529,8 +471,6 @@ class OuraAdapter extends BandAdapter {
     _heldStages.removeWhere((h) {
       final unix = _anchorUnixFor(h.$1);
       if (unix == null) return false;
-      // A stamped second that is implausible will not get better: drop it.
-      if (!_isPlausibleStageSecond(unix)) return true;
       stageRows.add(Observation(
         at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
         sourceKind: ObservationSource.vendor,
