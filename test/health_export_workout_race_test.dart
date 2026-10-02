@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/health/health_export.dart';
@@ -79,5 +81,32 @@ void main() {
         );
       },
     );
+
+    test('a delete that never calls back does not freeze later exports',
+        () async {
+      // HealthKit's delete never answers when its sample query errors (store
+      // locked). Under the shared lock that used to block every later export.
+      final calls = <String>[];
+      var deletes = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('flutter_health'),
+              (call) async {
+        calls.add(call.method);
+        if (call.method == 'delete' && deletes++ == 0) {
+          return Completer<bool>().future; // never completes
+        }
+        return true;
+      });
+      store = _OrderingHealthStore();
+      final exporter =
+          HealthExporter(deleteTimeout: const Duration(milliseconds: 50));
+
+      final first = exporter.exportWorkout(_session(0));
+      final second = exporter.exportWorkout(_session(1));
+
+      expect(await first, isFalse, reason: 'uncleared window, no write');
+      expect(await second, isTrue);
+      expect(calls, ['delete', 'delete', 'writeWorkoutData']);
+    });
   });
 }

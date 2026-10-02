@@ -288,9 +288,22 @@ class HealthExporter {
   final HealthConnectHeartRateWriter _androidHeartRate;
   bool _configured = false;
 
-  HealthExporter({HealthConnectHeartRateWriter? androidHeartRate})
-    : _androidHeartRate =
-          androidHeartRate ?? MethodChannelHealthConnectHeartRateWriter();
+  /// Upper bound on one plugin `delete()`. HealthKit's delete runs a sample
+  /// query first, and when that query errors (the store is locked while the
+  /// phone is, which is exactly when a background drain exports) the plugin
+  /// returns without ever calling back. Every workout write and every
+  /// exportAll runs under [_workoutLock], so one hung delete used to freeze
+  /// all health export until the app was killed. A timed-out delete reads as
+  /// "not cleared", so nothing is written beside a possible survivor and the
+  /// next pass retries.
+  final Duration _deleteTimeout;
+
+  HealthExporter({
+    HealthConnectHeartRateWriter? androidHeartRate,
+    @visibleForTesting Duration deleteTimeout = const Duration(seconds: 30),
+  }) : _androidHeartRate =
+           androidHeartRate ?? MethodChannelHealthConnectHeartRateWriter(),
+       _deleteTimeout = deleteTimeout;
 
   /// The process-wide exporter. `AppState` holds this one, and so does every
   /// seam that lands a session without a widget tree to read AppState from —
@@ -426,11 +439,13 @@ class HealthExporter {
     final through = _stepsPurgedThrough!;
     if (through.isNotEmpty && date.compareTo(through) <= 0) return;
     try {
-      await _health.delete(
-        type: HealthDataType.STEPS,
-        startTime: dayStart,
-        endTime: dayEnd,
-      );
+      await _health
+          .delete(
+            type: HealthDataType.STEPS,
+            startTime: dayStart,
+            endTime: dayEnd,
+          )
+          .timeout(_deleteTimeout);
       _stepsPurgedThrough = date;
       await LocalDb.setCursor(_kStepsPurgeCursor, date);
     } catch (e) {
@@ -452,11 +467,9 @@ class HealthExporter {
   ) async {
     try {
       return healthDeleteClearedRange(
-        deleted: await _health.delete(
-          type: type,
-          startTime: start,
-          endTime: end,
-        ),
+        deleted: await _health
+            .delete(type: type, startTime: start, endTime: end)
+            .timeout(_deleteTimeout),
         ios: isApple,
       );
     } catch (e) {
