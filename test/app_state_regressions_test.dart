@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:openstrap_analytics/onehz.dart' as ana;
+import 'package:openstrap_edge/compute/hr_max.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
@@ -477,6 +478,27 @@ void main() {
       rest.debugTickWorkout();
       expect(w2.idleWatch.lastAskAt, isNotNull,
           reason: 'below zone 1 is still quiet');
+    });
+
+    test('a manual zone-1 edge below resting HR does not mute the watch', () {
+      // Manual bounds only need zone 1 >= 30 bpm. With zone 1 at 50 and RHR
+      // 58, capping the gate at zone 1 made a session left open overnight at
+      // 60 bpm read active every tick, so it was never asked about.
+      final app = connected(60);
+      addTearDown(app.dispose);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'manual-z1',
+        type: 'strength',
+        hrMax: 190,
+        restingHr: 58,
+        zoneSet: trainingZones(manualZoneLowerBpm: [50, 100, 130, 150, 170]),
+      );
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNotNull,
+          reason: 'resting HR is quiet whatever zone 1 says');
     });
   });
 
