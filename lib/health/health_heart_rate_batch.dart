@@ -102,8 +102,11 @@ Future<bool> exportContinuousHeartRateDay({
   final from = samples.first.time;
 
   if (useAndroidBatch) {
+    // Health Connect holds the day as ONE record, so the window stays the whole
+    // day; the native writer carries the earlier minutes over from the record
+    // it replaces.
     try {
-      return await androidWriter.replaceDay(from, end, samples);
+      return await androidWriter.replaceDay(start, end, samples);
     } catch (_) {
       return false;
     }

@@ -75,10 +75,10 @@ void main() {
       expect(calls, hasLength(1));
       expect(calls.single.method, 'replaceHeartRateDay');
       final args = (calls.single.arguments as Map).cast<String, Object?>();
-      expect(
-        args['startTime'],
-        DateTime(2026, 8, 5, 0, 1).millisecondsSinceEpoch,
-      );
+      // The day is one Health Connect record: the replace window must stay
+      // the whole day even when the first held minute is later, or an older
+      // whole-day record survives (duplicates) or loses its early minutes.
+      expect(args['startTime'], start.millisecondsSinceEpoch);
       expect(args['endTime'], end.millisecondsSinceEpoch);
       expect(args['samples'], [
         {
