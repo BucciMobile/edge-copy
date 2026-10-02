@@ -1311,14 +1311,6 @@ class LocalRepositoryImpl extends LocalRepository {
   @override
   Future<Map<String, dynamic>> getDaySteps(String date) async {
     final r = await LocalDb.resolvedStepsForDay(date);
-    // Only for naming: a span that sits inside a session gets that session's
-    // name. Cheap — one indexed read over one day.
-    final sessions = r.spans.isEmpty
-        ? const <Map<String, dynamic>>[]
-        : await LocalDb.sessionsInRange(
-            _localMidnightSec(date),
-            _localDayEndSec(date),
-          );
     // THE EXACT DAY, never `_bundleForDate`'s latest-complete fallback: the
     // spans come from this date's coverage rows, and pairing them with another
     // day's published total is the one mismatch this screen must not show.
@@ -1331,6 +1323,14 @@ class LocalRepositoryImpl extends LocalRepository {
             st?['spans'] is List
         ? st!['spans'] as List
         : null;
+    // Only for naming: a span that sits inside a session gets that session's
+    // name. Cheap — one indexed read over one day.
+    final sessions = r.spans.isEmpty && counter == null
+        ? const <Map<String, dynamic>>[]
+        : await LocalDb.sessionsInRange(
+            _localMidnightSec(date),
+            _localDayEndSec(date),
+          );
     if (counter != null) {
       return {
         'total': dayTotal ?? 0,
@@ -1341,7 +1341,16 @@ class LocalRepositoryImpl extends LocalRepository {
         'note': st?['note'] as String?,
         'spans': [
           for (final s in counter)
-            if (s is Map) {...s, 'source': LocalDb.kStepSourceBand},
+            if (s is Map && s['start_ts'] is num && s['end_ts'] is num)
+              {
+                ...s,
+                'source': LocalDb.kStepSourceBand,
+                'activity': _sessionOver(
+                  sessions,
+                  (s['start_ts'] as num).toInt(),
+                  (s['end_ts'] as num).toInt(),
+                ),
+              },
         ],
       };
     }
