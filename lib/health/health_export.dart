@@ -924,7 +924,7 @@ class HealthExporter {
     // on both stores (Health Connect SleepSessionRecord; HealthKit inBed+Core).
     if (Platform.isAndroid && !androidSleepAlreadyWritten) {
       try {
-        if (!await _androidSleep.replace(b)) {
+        if (!await _androidSleep.replace(b, dayStart: dayStart)) {
           debugPrint('[health] write Android sleep session returned false');
           success = false;
         }
@@ -1260,6 +1260,10 @@ class HealthExporter {
     // finalized without ever seeing the real finish — `end_ts` there is
     // reconcile-time, not a measurement, so this must never reach Health.
     if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) {
+      return null; // skip, not a failure
+    }
+    // "Private session" is hidden from exports, and Health is one.
+    if ((r['private'] as num?)?.toInt() == 1) {
       return null; // skip, not a failure
     }
     final st = (r['start_ts'] as num?)?.toInt();

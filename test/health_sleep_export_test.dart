@@ -594,6 +594,42 @@ void main() {
     );
 
     test(
+      'a day whose night is gone (rejected) clears the night exported earlier',
+      () async {
+        const channel = MethodChannel('openstrap/test_health_connect_clear');
+        final calls = <MethodCall>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              calls.add(call);
+              return true;
+            });
+        addTearDown(() {
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+        });
+        final exporter = HealthConnectSleepSessionExporter(
+          writer: MethodChannelHealthConnectSleepSessionWriter(
+            channel: channel,
+          ),
+        );
+
+        final noWindow = _overnightBundle()..remove('sleep');
+        expect(
+          await exporter.replace(noWindow, dayStart: DateTime(2026, 8, 5)),
+          isTrue,
+        );
+        expect(calls.single.method, 'clearSleepSessions');
+        final args = (calls.single.arguments as Map).cast<String, Object?>();
+        expect(args['startTime'], DateTime(2026, 8, 5).millisecondsSinceEpoch);
+        expect(
+          args['endTime'],
+          DateTime(2026, 8, 5, 12).millisecondsSinceEpoch,
+          reason: 'noon: tonight\'s night (starting this evening) is not ours',
+        );
+      },
+    );
+
+    test(
       're-export uses the replace operation and a false result propagates',
       () async {
         const channel = MethodChannel('openstrap/test_health_connect_replace');

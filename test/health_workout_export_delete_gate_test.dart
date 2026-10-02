@@ -148,6 +148,22 @@ void main() {
     });
   });
 
+  group('private sessions', () {
+    late _FakeHealthStore store;
+
+    tearDown(() => store.remove());
+
+    test('a private session clears its window and is never written', () async {
+      store = _FakeHealthStore(deleteResult: true)..install();
+
+      await HealthExporter().exportWorkout({..._session(), 'private': 1});
+
+      expect(store.calls, contains('delete'),
+          reason: 'the stop-time export wrote it before the flag landed');
+      expect(store.calls, isNot(contains('writeWorkoutData')));
+    });
+  });
+
   group('deleteWorkoutWindow (retime cleanup)', () {
     // setWorkoutWindow only has the OLD [start,end] before it overwrites the
     // row — this is what it calls to clear that range so a narrowed/moved
