@@ -1349,7 +1349,7 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     'absent_notes': <String, String>{
       if (hrMax == null && ceilingAbsentNote != null)
         'max_hr_used': ceilingAbsentNote,
-      if (hrZones.isEmpty && zonesAbsentNote != null) 'zones': zonesAbsentNote,
+      if (hrZones.isEmpty) 'zones': zonesAbsentNote ?? kUnknownAbsenceNote,
       if (caloriesKcal == null && caloriesAbsentNote != null) ...{
         'calories': caloriesAbsentNote,
         'calories_total': caloriesAbsentNote,
