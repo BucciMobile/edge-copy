@@ -109,6 +109,30 @@ void main() {
     });
   });
 
+  group('rescanDayIds', () {
+    // The midnight cut keeps the oldest day whole but drops the evening half
+    // of its night (its derive window starts the previous noon). A rescan of
+    // it replaced the full-night result with a truncated one.
+    test('skips a day whose derive window reaches below the prune', () {
+      final dataNow = _dayStart('2026-05-20') + 9 * 3600 + 47 * 60;
+      final days = DerivationEngine.rescanDayIds(
+        rawDayIds: const ['2026-05-19', '2026-05-17', '2026-05-18'],
+        dataNowSec: dataNow,
+        prunedBeforeSec: _dayStart('2026-05-17'),
+      );
+      expect(days, ['2026-05-18', '2026-05-19']);
+    });
+
+    test('never pruned — every recent day is rescanned', () {
+      final dataNow = _dayStart('2026-05-20') + 9 * 3600;
+      final days = DerivationEngine.rescanDayIds(
+        rawDayIds: const ['2026-05-18', '2026-05-17'],
+        dataNowSec: dataNow,
+      );
+      expect(days, ['2026-05-17', '2026-05-18']);
+    });
+  });
+
   group('the prune call site', () {
     late List<String> lines;
 
