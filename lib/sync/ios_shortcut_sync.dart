@@ -29,6 +29,26 @@ class IosShortcutSync {
 
   static Future<SyncReport> Function(ShortcutSyncTask)? foregroundSync;
   static BleEngine? Function()? foregroundEngine;
+  static bool _listening = false;
+
+  /// Native holds Shortcut runs until 'ready'. Sending it only once AppState has
+  /// registered its hooks keeps a cold launch off the headless path, which would
+  /// hold the band lease while the app's own session waits on it.
+  static void attachForeground(
+    Future<SyncReport> Function(ShortcutSyncTask) sync,
+    BleEngine? Function() engine,
+  ) {
+    foregroundSync = sync;
+    foregroundEngine = engine;
+    if (!_listening) return;
+    unawaited(
+      channel
+          .invokeMethod<void>('ready')
+          .catchError(
+            (Object error) => debugPrint('[shortcut-sync] ready: $error'),
+          ),
+    );
+  }
 
   static Future<void> init() async {
     if (!Platform.isIOS) return;
@@ -46,7 +66,7 @@ class IosShortcutSync {
           throw MissingPluginException();
       }
     });
-    await channel.invokeMethod<void>('ready');
+    _listening = true;
   }
 
   static Future<ShortcutSyncResult> run(String id, Duration budget) async {

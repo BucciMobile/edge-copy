@@ -1452,8 +1452,7 @@ class AppState extends ChangeNotifier {
     // skip the headless BLE path (it would fight FBP for the peripheral) — route
     // them to a catch-up pull over the existing live connection instead.
     IosBgTask.foregroundPull = foregroundCatchUp;
-    IosShortcutSync.foregroundSync = syncForShortcut;
-    IosShortcutSync.foregroundEngine = () => engine;
+    IosShortcutSync.attachForeground(syncForShortcut, () => engine);
     taskerBridge; // force init: register the method channel handler
     // A paired sensor's live beats, into the same trace as the band's. Touches
     // no radio — `HrsLink.reading` is a plain notifier whose identity survives

@@ -88,6 +88,23 @@ void main() {
         lessThan(headless.indexOf('engine.runSync(')));
   });
 
+  test('native is told ready only once AppState registered its hooks', () {
+    final src = File('lib/sync/ios_shortcut_sync.dart').readAsStringSync();
+    final init = src.substring(
+      src.indexOf('static Future<void> init()'),
+      src.indexOf('static Future<ShortcutSyncResult> run('),
+    );
+    expect(init, isNot(contains("'ready'")));
+    final attach = src.substring(
+      src.indexOf('static void attachForeground('),
+      src.indexOf('static Future<void> init()'),
+    );
+    expect(attach.indexOf("'ready'"),
+        greaterThan(attach.indexOf('foregroundEngine = engine')));
+    final app = File('lib/state/app_state.dart').readAsStringSync();
+    expect(app, contains('IosShortcutSync.attachForeground('));
+  });
+
   test('shared headless event callback retains alarm confirmation', () async {
     final engine = createHeadlessSyncEngine(
       paired: PairedDevice('test', 'serial'),
