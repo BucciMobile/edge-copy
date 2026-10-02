@@ -134,15 +134,10 @@ class OuraAdapter extends BandAdapter {
   ///
   /// The ring emits beat-to-beat intervals and SpO2, and this adapter
   /// decodes neither: their layouts are bit-packed and there is not one
-  /// captured byte of either to check a decoder against. The HYPNOGRAM is
-  /// decoded now (`_emit`, via protocol PR #71's `decodeSleepPhases`), and
-  /// what it produces is not a declared signal either — it banks per-stage
-  /// minute aggregates as undeclared vendor scalar observations while the
-  /// epoch series itself stays in `raw_archive`. A declared-but-absent
-  /// signal is WORSE than a missing one (see [BandAdapter.signals]) — it
-  /// turns a card that should delete itself into one that is permanently
-  /// empty — so nothing is claimed until a real capture from a ring this
-  /// project held has met the decoder.
+  /// captured byte of either to check a decoder against. A declared-but-absent
+  /// signal is WORSE than a missing one (see [BandAdapter.signals]) — it turns
+  /// a card that should delete itself into one that is permanently empty — so
+  /// nothing is claimed until a decoder exists and a real capture has met it.
   ///
   /// Temperature is emitted below and still not declared here, deliberately:
   /// [InputSignal.skinTempRaw] means RELATIVE ADC COUNTS (I8), and this ring
@@ -151,11 +146,8 @@ class OuraAdapter extends BandAdapter {
   /// member for absolute temperature and one should not be invented for a band
   /// nobody owns.
   ///
-  /// Same ruling for the sleep-stage scalars `_emit` now emits: the decoder
-  /// exists (protocol PR #71) but no capture from a ring THIS project held has
-  /// met it, so [InputSignal.vendorScalars] stays undeclared too — the rows
-  /// land in `observation` either way, and a declared-but-unverified signal is
-  /// the permanently-empty card the header note above refuses.
+  /// The hypnogram's stage minutes are emitted too, and [InputSignal.vendorScalars]
+  /// stays undeclared until a real ring has been checked against the decoder.
   @override
   Map<InputSignal, Duration> get signals => const {};
 
@@ -163,7 +155,6 @@ class OuraAdapter extends BandAdapter {
   /// so this is its ceiling, and it is also what tells a full batch from a
   /// short one when the cursor is advanced.
   static const int _kMaxEventsPerBatch = 255;
-
 
   /// The (ring decisecond, Unix second) pair this session is stamping against.
   ///
@@ -190,20 +181,9 @@ class OuraAdapter extends BandAdapter {
   /// every [SampleBatch], so nothing is lost that was not already banked.
   final List<(int ds, double tempC)> _held = [];
 
-  /// Hypnogram aggregates decoded before an origin could stamp them, as
-  /// `(ds, stage, minutes)`.
-  ///
-  /// Same lifecycle as [_held], and it exists for the same reason: the ring
-  /// stamps events on its own decisecond counter, and an observation row is
-  /// keyed `(device_id, ts_ms, source_kind, COALESCE(vendor_key, key))` — an
-  /// aggregate stamped on a WRONG second does not just miss a night, it
-  /// REPLACEs whatever row the right second would have produced and puts a
-  /// made-up number in its place. So the per-stage minute totals are held
-  /// until an origin can convert `ds` to a Unix second, and dropped at the
-  /// end of the drain when none ever could — the frames are still handed
-  /// over verbatim in every [SampleBatch], so nothing is lost that was not
-  /// already banked, and a later session with a stored anchor re-reads them.
-  final List<(int ds, OuraSleepPhase stage, double minutes)> _heldSleepStages = [];
+  /// Per-stage hypnogram minutes waiting for an origin, as
+  /// `(ds, stage, minutes)`. Same lifecycle as [_held].
+  final List<(int ds, OuraSleepPhase stage, double minutes)> _heldStages = [];
 
   /// The Unix second [ds] falls on, or null when no origin is known.
   int? _anchorUnixFor(int ds) {
@@ -214,14 +194,8 @@ class OuraAdapter extends BandAdapter {
     return a.$2 + (ds - a.$1) ~/ 10;
   }
 
-  /// NO SLEEP-STAGE ROW IS FROM THE FUTURE EITHER — the same bound the
-  /// host-side `_isPlausibleSecond` puts on a sample (`oura_link.dart`),
-  /// applied here because `VendorScalars` is banked OUTSIDE the commit path
-  /// (`host.dart`), so `_admitSample` never sees it. A stale anchor left
-  /// behind by a ring reboot extrapolates a record FORWARD past now — the
-  /// one reboot direction that can be bounded for free, same window (300 s
-  /// ahead) and same lower bound (an absolute Unix second in this decade) as
-  /// the link's, so the two checks cannot disagree about the same second.
+  /// The link's `_isPlausibleSecond` bound, repeated here because
+  /// [VendorScalars] skip the host's sample gate.
   bool _isPlausibleStageSecond(int unix) =>
       unix <= nowSeconds() + 300 && unix >= 1700000000;
 
@@ -522,69 +496,18 @@ class OuraAdapter extends BandAdapter {
         case kOuraEvtSleepPhaseInformation:
         case kOuraEvtSleepPhaseDetails:
         case kOuraEvtSleepPhaseData:
-          // THE RING'S OWN SLEEP STAGING, banked as vendor scalars. This is
-          // the one event family whose payload is a CONCLUSION the hardware
-          // computed itself, not a signal to derive from — the native
-          // `SleepPhase_OSSAv1` classification, 30 s epochs, decoded by
-          // `decodeSleepPhases` in `openstrap_protocol` (PR #71, ported code
-          // for code from the open_oura project's Rust decoder, whose
-          // hardware provenance is a Gen 3 Horizon capture — R6: nothing here
-          // has met OUR ring).
-          //
-          // WHAT IS KEPT IS THE EVENT'S OWN DELIMITATION, not a night's. The
-          // wire hands over one hypnogram per event, and where a night's
-          // boundary sits is a judgement this file has no evidence for —
-          // `sleep_summary_1` (0x49) carries start/end as MINUTE OFFSETS that
-          // open_oura itself marks unvalidated, so rolling events up to a
-          // night would be inventing the one boundary that decides which
-          // minutes count. One event's stage totals are exactly what the ring
-          // claims, no more.
-          //
-          // THE PER-STAGE MINUTE COUNTS ARE THE SCALARS. The full epoch
-          // series is deliberately NOT written anywhere: `observation` is
-          // scalars only ("a vendor hypnogram ... has no consumer — give it
-          // a table of its own when something is actually going to read it",
-          // db.dart), the frames stay in `raw_archive` for the day a consumer
-          // exists, and durations are honest scalars — they are measurements
-          // of the ring's own classification, not scores out of 100.
-          //
-          // `vendorKey`, not `key`: deep/light/REM/awake minutes are THEIR
-          // stages under THEIR staging algorithm, a proprietary composite in
-          // exactly the sense `Observation`'s split exists to fence — the
-          // same `key` under two algorithms is the ambiguity the split
-          // stops, and our own `stages4` staging is a different algorithm
-          // answering the same question.
+          // The ring's own staging, kept per event (no night boundary is
+          // known) as stage-minute totals under `vendorKey`: their algorithm,
+          // not our `stages4`. The epoch series stays in `raw_archive`.
           final hyp = decodeSleepPhases(e);
           if (hyp == null) break;
-          final minutesPerStage = <OuraSleepPhase, int>{};
+          final epochs = <OuraSleepPhase, int>{};
           for (final phase in hyp.phases) {
-            if (phase == null) continue;
-            minutesPerStage.update(phase, (m) => m + 1, () => 1);
+            epochs.update(phase, (n) => n + 1, ifAbsent: () => 1);
           }
-          final at = _anchorUnixFor(e.tsDs);
-          if (at == null) {
-            for (final entry in minutesPerStage.entries) {
-              _heldSleepStages.add((e.tsDs, entry.key, entry.value * 0.5));
-            }
-            break;
+          for (final MapEntry(:key, :value) in epochs.entries) {
+            _heldStages.add((e.tsDs, key, value * 0.5));
           }
-          // The plausibility bound is checked at STAMP time, not at hold
-          // time: the hold keeps `(ds, stage, minutes)` precisely because a
-          // later, better origin may make an implausible-looking ds honest
-          // after all — the one an origin from the SAME session cannot.
-          if (!_isPlausibleStageSecond(at)) break;
-          final rows = [
-            for (final entry in minutesPerStage.entries)
-              Observation(
-                at: DateTime.fromMillisecondsSinceEpoch(at * 1000),
-                sourceKind: ObservationSource.vendor,
-                vendorKey: 'sleep_${entry.key.name}_min',
-                value: entry.value * 0.5,
-                unit: 'min',
-                attribution: 'Oura',
-              ),
-          ];
-          yield VendorScalars(rows);
       }
     }
     // Stamp everything an origin can now reach — this batch's readings and any
@@ -603,19 +526,10 @@ class OuraAdapter extends BandAdapter {
       return true;
     });
     final stageRows = <Observation>[];
-    _heldSleepStages.removeWhere((h) {
+    _heldStages.removeWhere((h) {
       final unix = _anchorUnixFor(h.$1);
-      // STILL HELD, exactly like the temperatures above: null means no
-      // origin CAN reach this ds yet, and the hold exists so a LATER batch
-      // carrying a `time_sync` can stamp it. Removing it here would empty
-      // the hold in the same `_emit` call that filled it — the first
-      // pairing would lose its earliest stage minutes to a no-origin batch
-      // that a sync ten seconds later could have stamped.
       if (unix == null) return false;
-      // DROPPED, NOT GUESSED, for the same reason it was held at all: a
-      // plausibility failure means no honest second exists for this
-      // aggregate, and holding it forever would only ever re-derive the
-      // same wrong stamp from the same wrong origin.
+      // A stamped second that is implausible will not get better: drop it.
       if (!_isPlausibleStageSecond(unix)) return true;
       stageRows.add(Observation(
         at: DateTime.fromMillisecondsSinceEpoch(unix * 1000),
@@ -632,10 +546,7 @@ class OuraAdapter extends BandAdapter {
     // one that was not. Beat intervals, SpO2 and steps all live in here
     // undecoded, and that is the point: the bytes are banked now so a decoder
     // written when someone owns a ring can be run over them, instead of a
-    // guess being run over them today (owner rulings R1-R3). The hypnogram is
-    // decoded now, and its bytes are banked TOO - the scalars above are the
-    // aggregates, and the epoch series itself stays here for the day a
-    // consumer for it exists (`observation` is scalars only, db.dart).
+    // guess being run over them today (owner rulings R1-R3).
     yield SampleBatch(samples, raw: got.raw);
   }
 }
