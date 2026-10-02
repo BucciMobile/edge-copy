@@ -28,14 +28,9 @@ Future<String?> scanBarcode(BuildContext c) => showModalBottomSheet<String>(
       builder: (_) => const _ScanSheet(),
     );
 
-class _ScanSheet extends StatefulWidget {
+class _ScanSheet extends StatelessWidget {
   const _ScanSheet();
 
-  @override
-  State<_ScanSheet> createState() => _ScanSheetState();
-}
-
-class _ScanSheetState extends State<_ScanSheet> {
   /// The formats printed on packaged food. `all` would also read QR codes,
   /// which are not products.
   static const _formats = [
@@ -46,16 +41,6 @@ class _ScanSheetState extends State<_ScanSheet> {
     BarcodeFormat.dataBar,
     BarcodeFormat.dataBarExpanded,
   ];
-
-  /// One code per sheet. The detector fires repeatedly on the same packet, and
-  /// without this each repeat would be another pop and another lookup.
-  bool _done = false;
-
-  void _onDetect(String code) {
-    if (_done) return;
-    _done = true;
-    Navigator.of(context).pop(code);
-  }
 
   @override
   Widget build(BuildContext c) {
@@ -88,7 +73,7 @@ class _ScanSheetState extends State<_ScanSheet> {
                 aspectRatio: 1,
                 child: BarcodeReaderWidget(
                   formats: _formats,
-                  onDetect: _onDetect,
+                  onDetect: (code) => Navigator.of(c).pop(code),
                   errorBuilder: (_, e) => _CameraProblem(e),
                 ),
               ),

@@ -1,12 +1,5 @@
-// firebase_bridge.dart (F-Droid / FLOSS variant) — no-op stand-in with the
-// exact API of lib/telemetry/firebase_bridge.dart, zero firebase_* imports.
-//
-// Not compiled by default. The F-Droid build recipe (see
-// docs/fdroid/wtf.openstrap.openstrap_edge.yml) copies this over
-// lib/telemetry/firebase_bridge.dart and drops the four firebase_* lines
-// from pubspec.yaml before building, so the FLOSS build contains zero
-// Google Play Services / Firebase code. Every caller (telemetry_service.dart,
-// main.dart) is unaffected — they only ever see this API.
+// F-Droid stand-in for lib/telemetry/firebase_bridge.dart: same API, no firebase.
+// Copied over the real one by wtf.openstrap.openstrap_edge.yml.
 
 import 'package:flutter/foundation.dart';
 

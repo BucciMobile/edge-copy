@@ -1,15 +1,6 @@
-// barcode_reader.dart — the ONLY file that imports mobile_scanner.
-//
-// Same pattern as lib/telemetry/firebase_bridge.dart: mobile_scanner bundles
-// Google ML Kit on Android (checked its build.gradle directly — both the
-// bundled and "unbundled" modes pull play-services-basement/base/tasks), so
-// F-Droid's build recipe swaps this ONE file for
-// docs/fdroid/barcode_reader.floss.dart (a flutter_zxing-backed stand-in
-// with the identical API, zero Google deps) instead of touching the caller.
-// iOS and the Play Store / GitHub-release Android build keep mobile_scanner
-// unchanged — this only matters for the F-Droid recipe.
-//
-// Keep every mobile_scanner import confined to this file.
+// The only file that imports mobile_scanner (ML Kit pulls play services on
+// Android). The F-Droid build swaps it for docs/fdroid/barcode_reader.floss.dart
+// (same API, flutter_zxing), so keep it that way.
 
 import 'package:flutter/widgets.dart';
 import 'package:mobile_scanner/mobile_scanner.dart' as ms;
