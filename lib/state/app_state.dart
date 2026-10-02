@@ -4938,6 +4938,9 @@ class AppState extends ChangeNotifier {
             _log('[alarm] persisting confirmation failed: $e');
           }
         }());
+        // the 7pm "no alarm set for tonight" one-shot was decided before this
+        // alarm latched; re-decide it now or it fires over a real alarm.
+        unawaited(_ensureRemindersScheduled());
         break;
       case AlarmEffect.fired:
         _log('[alarm] strap FIRED — EXECUTED (event $id) received.');
