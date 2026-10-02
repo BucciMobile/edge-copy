@@ -250,7 +250,7 @@ void main() {
         ),
       );
       expect(layoutFaults, isEmpty);
-      expect(find.text('connected'), findsOneWidget);
+      expect(find.text('Connected'), findsOneWidget);
       await t.tap(find.text('Oura Ring Gen3'));
       await t.pumpAndSettle();
       expect(picked, ['AA:BB:CC:DD:EE:03']);

@@ -422,7 +422,9 @@ class PairSensorView extends StatelessWidget {
     // which one they meant. A named one does not — the id is machine plumbing
     // and putting it on every row is noise.
     final tail = id.length <= 5 ? id : id.substring(id.length - 5);
-    final signal = cand.rssi == null ? 'connected' : '${cand.rssi} dBm';
+    final signal = cand.rssi == null
+        ? (l?.devicesConnected ?? 'Connected')
+        : '${cand.rssi} dBm';
     return SetRow(
       LucideIcons.heartPulse,
       C.blue,

@@ -419,11 +419,18 @@ class HrsLink {
     // never hears it. Ask the OS for those directly. iOS only: Android ignores
     // the service filter here and would list every GATT link the phone has.
     if (Platform.isIOS) {
-      for (final e in entries) {
+      // The OS list includes links THIS app holds, an armed workout sensor
+      // among them. Listing it invites a tap whose pair-then-disconnect
+      // drops the live link, so ours are skipped.
+      final ours = {
+        for (final d in FlutterBluePlus.connectedDevices) d.remoteId.str,
+      };
+      for (final e in systemDeviceQueryOrder(entries)) {
         try {
           for (final d
               in await FlutterBluePlus.systemDevices([Guid(e.service)])) {
             final id = d.remoteId.str;
+            if (ours.contains(id)) continue;
             confirmed.putIfAbsent(id, () => e.id);
             seen.putIfAbsent(
                 id,
@@ -469,6 +476,20 @@ class HrsLink {
       await sub.cancel();
     }
     onResults(_ranked(seen));
+  }
+
+  /// The order [scanForAny]'s connected-device lookup asks the OS in. The
+  /// generic Heart Rate entry goes LAST: the lookup matches on a peripheral's
+  /// GATT, a Polar or Coros exposes 0x180D too, and the first entry to claim
+  /// a remote id keeps it.
+  @visibleForTesting
+  static List<BandEntry> systemDeviceQueryOrder(List<BandEntry> entries) {
+    bool generic(BandEntry e) =>
+        Guid(e.service) == Guid(kHeartRateServiceUuid);
+    return [
+      ...entries.where((e) => !generic(e)),
+      ...entries.where(generic),
+    ];
   }
 
   static List<BandCandidate> _ranked(Map<String, BandCandidate> seen) =>

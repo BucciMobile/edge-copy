@@ -418,4 +418,14 @@ void main() {
       expect(HrsLink.deriveTier('explicit', kBleHrs.id), 'explicit');
     });
   });
+
+  // A connected Polar or Coros also exposes 0x180D; asked first, the generic
+  // entry would claim it and route it past its own adapter.
+  test('connected-device lookup asks the generic heart-rate entry last', () {
+    final order = HrsLink.systemDeviceQueryOrder(
+        kBandRegistry.where((e) => !e.isFramed).toList());
+    expect(order.last.id, kBleHrs.id);
+    expect(order.indexOf(kPolarPmd), lessThan(order.indexOf(kBleHrs)));
+    expect(order.indexOf(kCoros), lessThan(order.indexOf(kBleHrs)));
+  });
 }
