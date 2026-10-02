@@ -1,5 +1,6 @@
 // Imported WHOOP blood oxygen: the importer writes the `spo2` series with
 // WHOOP provenance, and the metric screen loads and charts it.
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/compute/substrate.dart' show localDateLabel;
 import 'package:openstrap_edge/data/db.dart';
@@ -7,6 +8,9 @@ import 'package:openstrap_edge/import/whoop_import.dart';
 import 'package:openstrap_edge/data/local_repository_impl.dart';
 import 'package:openstrap_edge/ui2/screens/metric_detail.dart'
     show MetricData, specOf;
+import 'package:openstrap_edge/ui2/screens/screens.dart'
+    show ExploreData, HealthData, HealthScreen;
+import 'package:openstrap_edge/ui2/ui2.dart' show buildTheme;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'dart:io';
 import 'dart:convert';
@@ -91,5 +95,58 @@ void main() {
     final d = await MetricData.load(repo, 'spo2');
     expect(d.series, isNotEmpty);
     expect(d.series.last.v, 95.1);
+  });
+
+  test('stored spo2 rows that are not a percentage are not read back',
+      () async {
+    final db = await LocalDb.instance;
+    // banked before the import-time 70-100 bound
+    for (final (date, v) in [('2026-02-01', 0.0), ('2026-02-02', 101.0)]) {
+      await db.insert('metric_series', {'date': date, 'key': 'spo2', 'value': v},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    // the old cloud_v2 importer's relative index under the same key
+    await LocalDb.putDayResult(
+      dayId: '2026-02-03',
+      algoVersion: 1,
+      payloadJson: jsonEncode({'imported': true, 'source': 'cloud_v2'}),
+      windowJson: '{}',
+      finalized: true,
+      source: 'cloud_v2',
+      series: {'spo2': 88},
+    );
+    final dates = [
+      for (final r in await LocalDb.metricSeries('spo2')) r['date'],
+    ];
+    expect(dates, isNot(contains('2026-02-01')));
+    expect(dates, isNot(contains('2026-02-02')));
+    expect(dates, isNot(contains('2026-02-03')));
+    expect((await LocalDb.metricSeriesCounts(['spo2']))['spo2'], dates.length);
+  });
+
+  testWidgets('a device with no imported spo2 lists no blood oxygen row',
+      (tester) async {
+    // tall enough that the lazy list builds the Breathing family
+    tester.view.physicalSize = const Size(390 * 3, 4000 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    Future<void> pump(Map<String, int> counts) async {
+      await tester.pumpWidget(MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: Scaffold(
+          body: HealthScreen(
+              key: UniqueKey(),
+              data: const HealthData(daysWithData: 2),
+              explore: ExploreData(counts: counts),
+              tab: 1),
+        ),
+      ));
+      await tester.pumpAndSettle();
+    }
+
+    await pump({'resp_rate': 3});
+    expect(find.textContaining('Blood oxygen'), findsNothing);
+    await pump({'resp_rate': 3, 'spo2': 2});
+    expect(find.textContaining('Blood oxygen'), findsOneWidget);
   });
 }
