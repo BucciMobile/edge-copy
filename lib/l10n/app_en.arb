@@ -10496,7 +10496,7 @@
   "@activityExercisePickerNoMatch": {
     "description": "Empty result shown for an exercise search or category filter."
   },
-  "activityExercisePickerWgerCredit": "Exercise catalogue from wger · available offline",
+  "activityExercisePickerWgerCredit": "Exercise catalogue from wger",
   "@activityExercisePickerWgerCredit": {
     "description": "Attribution under the strength exercise picker."
   },
@@ -10524,6 +10524,15 @@
   "activityLiveChangeExercise": "Change exercise",
   "@activityLiveChangeExercise": {
     "description": "Accessibility label for changing the current strength exercise."
+  },
+  "activityExerciseCategory": "{category, select, Abs{Abs} Arms{Arms} Back{Back} Calves{Calves} Chest{Chest} Legs{Legs} Shoulders{Shoulders} other{{category}}}",
+  "@activityExerciseCategory": {
+    "description": "Strength exercise category name, used as a picker filter and row detail.",
+    "placeholders": {
+      "category": {
+        "type": "String"
+      }
+    }
   },
   "activityLiveAllowLocation": "Allow location",
   "@activityLiveAllowLocation": {

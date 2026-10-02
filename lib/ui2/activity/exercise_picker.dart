@@ -1,6 +1,4 @@
-// The one exercise picker used for a first choice, adding another lift and
-// changing the current one. It reads a generated on-device catalogue; opening
-// it never performs a network request.
+// Exercise picker for choosing, adding and changing a lift.
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -87,9 +85,7 @@ class _ExercisePickerState extends State<_ExercisePicker> {
       ];
     }
 
-    // The familiar short list remains useful even after the full catalogue
-    // arrives. A user's own recent lifts lead it; then the original eighteen
-    // fill the rest, with keys de-duplicated in insertion order.
+    // recent lifts first, then the built-in short list
     final out = <ExerciseDef>[];
     final seen = <String>{};
     for (final key in widget.recentKeys) {
@@ -187,7 +183,11 @@ class _ExercisePickerState extends State<_ExercisePicker> {
                   ),
                   _filter(p, _all, l?.activityExercisePickerAllFilter ?? 'All'),
                   for (final category in categories)
-                    _filter(p, category, category),
+                    _filter(
+                      p,
+                      category,
+                      l?.activityExerciseCategory(category) ?? category,
+                    ),
                 ],
               ),
             ),
@@ -231,7 +231,7 @@ class _ExercisePickerState extends State<_ExercisePicker> {
                 padding: const EdgeInsets.symmetric(vertical: S.x2),
                 child: Text(
                   l?.activityExercisePickerWgerCredit ??
-                      'Exercise catalogue from wger · available offline',
+                      'Exercise catalogue from wger',
                   textAlign: TextAlign.center,
                   style: F.over.copyWith(color: p.ink3),
                 ),
@@ -277,7 +277,8 @@ class _ExercisePickerState extends State<_ExercisePicker> {
     final selected = widget.selectedKeys.contains(exercise.key);
     final sourceUrl = exercise.sourceUrl;
     final details = <String>[
-      if (exercise.category.isNotEmpty) exercise.category,
+      if (exercise.category.isNotEmpty)
+        l?.activityExerciseCategory(exercise.category) ?? exercise.category,
       if (exercise.equipment.isNotEmpty) exercise.equipment.take(2).join(', '),
     ].join(' · ');
     final sourceLabel =
