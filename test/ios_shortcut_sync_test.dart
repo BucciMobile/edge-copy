@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/data/db.dart';
@@ -73,6 +74,19 @@ void main() {
       expect(engine.onReadyEcgRecovery, isNotNull);
     },
   );
+
+  test('a Shortcut connect re-arms the alarm like every headless connect', () {
+    final src = File('lib/sync/ios_shortcut_sync.dart').readAsStringSync();
+    final headless =
+        src.substring(src.indexOf('Future<ShortcutSyncResult> _headless('));
+    final connected = headless.indexOf('if (!connected)');
+    expect(headless.indexOf('await prepareHeadlessLink('),
+        greaterThan(connected));
+    expect(headless.indexOf('await rearmHeadlessAlarm('),
+        greaterThan(connected));
+    expect(headless.indexOf('await rearmHeadlessAlarm('),
+        lessThan(headless.indexOf('engine.runSync(')));
+  });
 
   test('shared headless event callback retains alarm confirmation', () async {
     final engine = createHeadlessSyncEngine(

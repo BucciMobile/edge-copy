@@ -5475,10 +5475,17 @@ class AppState extends ChangeNotifier {
       if (background && !engine.isConnected) await _armRecovery();
     }
     if (task.stopped || !engine.isConnected) return SyncReport(0, 0, false);
-    final report = await _kickSyncBurst(kickFirst: _syncBurst == null);
-    if (report.records > 0) _deriveScheduler.markStoredData();
-    if (!_disposed) notifyListeners();
-    return report;
+    final burst = _kickSyncBurst(kickFirst: _syncBurst == null).then((report) {
+      if (report.records > 0) _deriveScheduler.markStoredData();
+      if (!_disposed) notifyListeners();
+      return report;
+    });
+    // The burst is the app's and can run for many minutes; a stopped Shortcut
+    // stops waiting so it releases the headless gate, not the transfer.
+    return Future.any([
+      burst,
+      task.whenStopped.then((_) => SyncReport(0, 0, false)),
+    ]);
   }
 
   /// The ONE place the band's HIGH_FREQ_SYNC prompt is programmed. Two

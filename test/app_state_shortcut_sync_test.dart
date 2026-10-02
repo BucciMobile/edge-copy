@@ -172,4 +172,22 @@ void main() {
     expect(engine.disconnects, 0);
     expect(task.stopped, isTrue);
   });
+
+  test('a stopped Shortcut stops waiting on the app-owned burst', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)..initialized = true;
+    addTearDown(app.dispose);
+    final task = ShortcutSyncTask('deadline', const Duration(seconds: 5));
+    final work = app.syncForShortcut(task);
+    while (engine.runs == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    task.stop();
+    // Returns while the burst is still running, so the gate is not held for it.
+    final report = await work.timeout(const Duration(seconds: 1));
+    expect(report.complete, isFalse);
+    expect(engine.reply.isCompleted, isFalse);
+    expect(engine.disconnects, 0);
+    engine.reply.complete(SyncReport(0, 0, true));
+  });
 }

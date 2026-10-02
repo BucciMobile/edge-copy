@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -159,6 +159,12 @@ class IosShortcutSync {
         if (!report.complete || await _backlogRemains(liveEngine)) {
           return ShortcutSyncResult('partial', records: report.records);
         }
+        // A resumed app's DeriveScheduler derives and refreshes the UI; a second
+        // pass here would take DerivationEngine's lock and turn its job into a no-op.
+        if (WidgetsBinding.instance.lifecycleState ==
+            AppLifecycleState.resumed) {
+          return ShortcutSyncResult('complete', records: report.records);
+        }
         return await _derive(task);
       } finally {
         _onForegroundCommitFailure = null;
@@ -216,14 +222,16 @@ class IosShortcutSync {
       final blocker = _blockerResult(engine.bluetoothBlocker);
       if (blocker != null) return blocker;
       if (!connected) {
-        if (BandOwnership.foregroundIntent) {
-          return const ShortcutSyncResult('alreadyRunning');
-        }
         return ShortcutSyncResult(
           radioConnected ? 'failed' : 'bandUnreachable',
         );
       }
+      // connect already started the offload.
       task.update('syncing');
+      await prepareHeadlessLink(engine, paired);
+      // The band holds one armed epoch; this may be the only connect it gets.
+      await rearmHeadlessAlarm(engine);
+      if (task.stopped) return task.expired;
       for (var session = 0; session < 20 && !task.stopped; session++) {
         final report = await engine.runSync(timeout: task.remaining);
         if (task.stopped) return task.expired;
