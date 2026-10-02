@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openstrap_edge/ui2/activity/catalogue.dart';
 
 import '../tool/update_wger_exercises.dart';
 import '../tool/wger_weightlifting_selection.dart';
@@ -58,4 +59,25 @@ void main() {
       );
     }
   });
+
+  test('a muscle with an empty English name keeps its Latin name', () {
+    expect(wgerMuscleName({'name': 'Trapezius', 'name_en': ''}), 'Trapezius');
+    expect(wgerMuscleName({'name': 'Biceps brachii', 'name_en': 'Biceps'}),
+        'Biceps');
+    expect(
+        exerciseByKey('wger:d7a418d4-d0cb-4f85-8a7c-1e9d97152cbd')!
+            .matches('trapezius', 'en'),
+        isTrue);
+  });
+
+  test('dumbbell lifts step in 2 kg, bar lifts in 2.5', () {
+    expect(wgerLoadStep(['Dumbbell']), 2);
+    expect(wgerLoadStep(['Bench', 'Dumbbell']), 2);
+    expect(wgerLoadStep(['Barbell', 'Dumbbell']), 2.5);
+    expect(wgerLoadStep(['Cable machine']), 2.5);
+    // the shipped snapshot was generated with the same rule
+    expect(
+        exerciseByKey('wger:eb9476ac-2c00-4f49-a40f-f81682161a75')!.step, 2);
+  });
 }
+

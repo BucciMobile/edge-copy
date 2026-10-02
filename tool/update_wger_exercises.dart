@@ -4,7 +4,7 @@
 //
 //   dart run tool/update_wger_exercises.dart
 //
-// Only names, aliases, muscles, equipment and categories are kept.
+// Only names, aliases, muscles, equipment, categories and a load step are kept.
 
 import 'dart:convert';
 import 'dart:io';
@@ -87,6 +87,20 @@ List<Map<String, Object?>> selectWeightliftingExercises(List<Object?> raw) {
   }
   return selected;
 }
+
+/// Load increment for a generated row, matching the hand-written catalogue:
+/// a dumbbell moves in 2 kg, anything with a bar in 2.5.
+num wgerLoadStep(List<String> equipment) =>
+    equipment.contains('Dumbbell') &&
+        !equipment.contains('Barbell') &&
+        !equipment.contains('SZ-Bar')
+    ? 2
+    : 2.5;
+
+/// wger sends name_en as '' (not null) for some muscles, e.g. Trapezius, so
+/// fall back to the Latin name instead of dropping the muscle.
+Object? wgerMuscleName(Map muscle) =>
+    _clean(muscle['name_en']).isNotEmpty ? muscle['name_en'] : muscle['name'];
 
 Future<void> main() async {
   final client = HttpClient()
@@ -172,6 +186,7 @@ Future<void> main() async {
         ..writeln('    equipment: ${_dart(row.equipment)},')
         ..writeln('    aliases: ${_dart(row.aliases)},')
         ..writeln('    localizedLabels: ${_dart(row.localizedLabels)},')
+        ..write(row.step == 2.5 ? '' : '    step: ${row.step},\n')
         ..writeln('    sourceId: ${_dart(row.uuid)},')
         ..writeln('    sourceUpdatedAt: ${_dart(row.updatedAt)},')
         ..writeln('    sourceCredits: [');
@@ -325,6 +340,7 @@ class _Exercise {
   final List<_Credit> credits;
 
   String get key => 'wger:$uuid';
+  num get step => wgerLoadStep(equipment);
 
   factory _Exercise.fromJson(
     Map<String, Object?> map,
@@ -403,9 +419,7 @@ class _Exercise {
     }
 
     List<String> names(String field) => _strings(
-      ((map[field] as List?) ?? const []).whereType<Map>().map(
-        (m) => m['name_en'] ?? m['name'],
-      ),
+      ((map[field] as List?) ?? const []).whereType<Map>().map(wgerMuscleName),
     );
 
     final sortedLabels = Map<String, String>.fromEntries(

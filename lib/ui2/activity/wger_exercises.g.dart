@@ -61,6 +61,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl alterno de martillo con mancuernas",
       "fr": "Curl marteau alterné avec haltères",
     },
+    step: 2,
     sourceId: "eb9476ac-2c00-4f49-a40f-f81682161a75",
     sourceUpdatedAt: "2026-06-19T18:47:09.433435+02:00",
     sourceCredits: [
@@ -85,7 +86,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:f24cb758-9c0d-42d4-ad9e-6025c527dd13",
     "Arnold Shoulder Press",
     ["Shoulders"],
-    secondaryMuscles: ["Triceps"],
+    secondaryMuscles: ["Trapezius", "Triceps"],
     category: "Shoulders",
     equipment: ["Dumbbell"],
     aliases: [
@@ -99,6 +100,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "en": "Arnold Shoulder Press",
       "es": "Press Arnold",
     },
+    step: 2,
     sourceId: "f24cb758-9c0d-42d4-ad9e-6025c527dd13",
     sourceUpdatedAt: "2026-07-23T12:24:53.892041+02:00",
     sourceCredits: [
@@ -380,7 +382,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:57018827-f344-4627-88e5-03e4f2f49859",
     "Behind the Back Cable Lateral Raise",
     ["Shoulders"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Trapezius"],
     category: "Shoulders",
     equipment: ["Cable machine"],
     aliases: [],
@@ -482,6 +484,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press de banca con mancuernas",
       "fr": "Développé couché avec haltères",
     },
+    step: 2,
     sourceId: "28321cf3-70e6-48a4-ade1-d11382180cb3",
     sourceUpdatedAt: "2026-07-02T16:44:41.508287+02:00",
     sourceCredits: [
@@ -516,6 +519,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Remo con mancuernas",
       "fr": "Rowing avec haltères buste penché",
     },
+    step: 2,
     sourceId: "94a5c406-7bcd-47f3-9687-bdf92a763932",
     sourceUpdatedAt: "2026-09-21T20:10:23.321565+02:00",
     sourceCredits: [
@@ -534,12 +538,13 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:3642933c-d078-4fb6-a544-d1772fa0cc9d",
     "Bent Over Dumbbell Rows (Two Arms)",
-    ["Lats"],
-    secondaryMuscles: ["Biceps"],
+    ["Lats", "Trapezius"],
+    secondaryMuscles: ["Biceps", "Brachialis"],
     category: "Back",
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Bent Over Dumbbell Rows (Two Arms)"},
+    step: 2,
     sourceId: "3642933c-d078-4fb6-a544-d1772fa0cc9d",
     sourceUpdatedAt: "2026-09-21T20:27:48.081337+02:00",
     sourceCredits: [
@@ -559,6 +564,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Bent-Over Dumbbell Triceps Extension"},
+    step: 2,
     sourceId: "563203ce-1867-4376-aa7f-a0356808c0ae",
     sourceUpdatedAt: "2026-09-16T21:57:10.516376+02:00",
     sourceCredits: [
@@ -583,6 +589,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Elevaciones Posteriores",
       "fr": "Élévations latérales buste penché",
     },
+    step: 2,
     sourceId: "6f79b381-98a4-40d5-8a45-3bb0558be6fe",
     sourceUpdatedAt: "2026-06-19T18:46:19.206526+02:00",
     sourceCredits: [
@@ -607,7 +614,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:e68f6d51-fe02-4175-b277-dec0c1521f36",
     "Biceps Curl Machine",
     ["Biceps"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Brachialis"],
     category: "Arms",
     equipment: [],
     aliases: [],
@@ -636,7 +643,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:42227131-9b1e-4220-b082-c523f0651057",
     "Biceps Curls With SZ-bar",
     ["Biceps"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Brachialis"],
     category: "Arms",
     equipment: ["SZ-Bar"],
     aliases: [],
@@ -675,6 +682,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Sentadilla búlgara con mancuernas",
       "fr": "Squats bulgares haltères",
     },
+    step: 2,
     sourceId: "60d2c34b-43a1-48a3-b43b-160e4c0157f2",
     sourceUpdatedAt: "2026-06-19T18:54:06.798695+02:00",
     sourceCredits: [
@@ -813,7 +821,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:b1bf02cf-17b2-4bfc-a5b0-4ff7a2768dbb",
     "Cable Concentration Curl",
-    ["Biceps"],
+    ["Biceps", "Brachialis"],
     secondaryMuscles: [],
     category: "Arms",
     equipment: ["Cable machine"],
@@ -1041,7 +1049,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:821e289e-bd39-4410-b436-6f2a43bc3649",
     "Cable pull through",
     ["Glutes"],
-    secondaryMuscles: ["Calves", "Hamstrings", "Quads"],
+    secondaryMuscles: ["Calves", "Hamstrings", "Quads", "Soleus"],
     category: "Legs",
     equipment: ["Cable machine"],
     aliases: [],
@@ -1069,7 +1077,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:5d244235-cd56-472a-876e-6e530a899ef2",
     "Cable Rear Delt Fly",
-    ["Shoulders"],
+    ["Shoulders", "Trapezius"],
     secondaryMuscles: ["Triceps"],
     category: "Shoulders",
     equipment: ["Cable machine"],
@@ -1132,7 +1140,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:c867836d-2929-4977-b23c-014bc21ec08d",
     "Cable Woodchoppers",
-    [],
+    ["Obliquus externus abdominis"],
     secondaryMuscles: [],
     category: "Abs",
     equipment: ["Cable machine"],
@@ -1166,7 +1174,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:0d79f259-3b28-4258-8a08-cffec062a710",
     "Calf Press Using Leg Press Machine",
-    ["Calves"],
+    ["Calves", "Soleus"],
     secondaryMuscles: [],
     category: "Calves",
     equipment: [],
@@ -1201,7 +1209,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:95a9cc46-270e-45f2-8a17-5665a23ff70b",
     "Calf Raises on Hackenschmitt Machine",
     ["Calves"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Soleus"],
     category: "Calves",
     equipment: [],
     aliases: [],
@@ -1235,7 +1243,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:25cbc266-aa84-44f5-989b-53c9cc8fdc77",
     "Chest-Supported Rear Delt Raise",
     ["Shoulders"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Trapezius"],
     category: "Shoulders",
     equipment: ["Bench", "Dumbbell"],
     aliases: [],
@@ -1245,6 +1253,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Elevación posterior de hombro con apoyo en el pecho",
       "fr": "Élévation des deltoïdes postérieurs avec appui sur la poitrine",
     },
+    step: 2,
     sourceId: "25cbc266-aa84-44f5-989b-53c9cc8fdc77",
     sourceUpdatedAt: "2026-06-19T18:55:36.365751+02:00",
     sourceCredits: [
@@ -1283,7 +1292,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:8c509754-c86f-4c1b-bfa9-29c906ffc409",
     "Clean and Jerk OL",
     ["Glutes", "Hamstrings", "Quads", "Shoulders"],
-    secondaryMuscles: ["Abs", "Lats", "Triceps"],
+    secondaryMuscles: ["Abs", "Lats", "Trapezius", "Triceps"],
     category: "Shoulders",
     equipment: ["Barbell"],
     aliases: [],
@@ -1506,6 +1515,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press de Banca Declinado con Mancuernas",
       "fr": "Développé couché décliné aux haltères",
     },
+    step: 2,
     sourceId: "dda69c96-62d4-4690-aa07-a4a0f6ceb63a",
     sourceUpdatedAt: "2026-07-23T12:08:35.631556+02:00",
     sourceCredits: [
@@ -1530,7 +1540,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:e7a964cd-e68e-4926-bc7c-577065137e18",
     "Deficit Deadlift",
     [],
-    secondaryMuscles: ["Abs", "Glutes", "Hamstrings", "Lats"],
+    secondaryMuscles: ["Abs", "Glutes", "Hamstrings", "Lats", "Soleus"],
     category: "Back",
     equipment: ["Barbell"],
     aliases: ["Deficit deadlift"],
@@ -1563,7 +1573,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:fe249e2f-5856-420f-8a34-1b02c7fde141",
     "Double Kettlebell Clean and Press",
-    ["Biceps", "Quads", "Shoulders", "Triceps"],
+    ["Biceps", "Brachialis", "Quads", "Shoulders", "Trapezius", "Triceps"],
     secondaryMuscles: ["Abs", "Glutes", "Hamstrings", "Lats"],
     category: "Arms",
     equipment: ["Kettlebell"],
@@ -1611,12 +1621,13 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:0f648dbf-9ddc-44d9-a10c-1aa97537ea91",
     "Dumbbell Bent-Over Reverse Fly",
-    [],
+    ["Trapezius"],
     secondaryMuscles: [],
     category: "Shoulders",
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Dumbbell Bent-Over Reverse Fly"},
+    step: 2,
     sourceId: "0f648dbf-9ddc-44d9-a10c-1aa97537ea91",
     sourceUpdatedAt: "2026-09-16T18:20:43.749123+02:00",
     sourceCredits: [
@@ -1636,6 +1647,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Dumbbell Calf Raise"},
+    step: 2,
     sourceId: "456f0781-30c6-4f58-a5b4-3da8f4878065",
     sourceUpdatedAt: "2026-09-16T21:57:13.525405+02:00",
     sourceCredits: [
@@ -1660,6 +1672,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press de banca con agarre cerrado con mancuernas",
       "fr": "Développé couché serré aux haltères",
     },
+    step: 2,
     sourceId: "428112f3-3918-45ba-870a-dc58cf3959cf",
     sourceUpdatedAt: "2026-06-19T18:50:40.701113+02:00",
     sourceCredits: [
@@ -1678,7 +1691,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:46e0f60c-fdc0-489a-82e4-a5b7476a5c21",
     "Dumbbell Concentration Curl",
-    [],
+    ["Brachialis"],
     secondaryMuscles: ["Biceps"],
     category: "Arms",
     equipment: ["Dumbbell"],
@@ -1689,6 +1702,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl de concentración con mancuerna",
       "fr": "Curl biceps avec haltère",
     },
+    step: 2,
     sourceId: "46e0f60c-fdc0-489a-82e4-a5b7476a5c21",
     sourceUpdatedAt: "2026-06-19T18:57:39.114487+02:00",
     sourceCredits: [
@@ -1712,7 +1726,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:99846da5-5dc8-4de1-ba55-ae2b4c03c30d",
     "Dumbbell Curl",
-    ["Biceps"],
+    ["Biceps", "Brachialis"],
     secondaryMuscles: ["Abs", "Shoulders"],
     category: "Arms",
     equipment: ["Dumbbell"],
@@ -1723,6 +1737,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl con mancuerna",
       "fr": "Curl avec haltères",
     },
+    step: 2,
     sourceId: "99846da5-5dc8-4de1-ba55-ae2b4c03c30d",
     sourceUpdatedAt: "2026-06-19T18:56:41.784168+02:00",
     sourceCredits: [
@@ -1742,11 +1757,12 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:b199baca-7353-4dee-bbcf-620f96dba5b4",
     "Dumbbell Deadlift",
     ["Glutes", "Hamstrings"],
-    secondaryMuscles: ["Quads"],
+    secondaryMuscles: ["Quads", "Trapezius"],
     category: "Legs",
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Dumbbell Deadlift"},
+    step: 2,
     sourceId: "b199baca-7353-4dee-bbcf-620f96dba5b4",
     sourceUpdatedAt: "2026-07-23T12:25:13.206261+02:00",
     sourceCredits: [
@@ -1771,6 +1787,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press de suelo con mancuernas",
       "fr": "Développé au sol avec haltères",
     },
+    step: 2,
     sourceId: "e4966cb8-9089-4595-9c78-99a27821e6ff",
     sourceUpdatedAt: "2026-06-19T18:57:47.486181+02:00",
     sourceCredits: [
@@ -1805,6 +1822,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Sentadilla frontal con mancuernas",
       "fr": "Squat avant avec haltères",
     },
+    step: 2,
     sourceId: "4621b41f-0d32-4033-acff-dc079c792606",
     sourceUpdatedAt: "2026-06-19T18:49:28.824471+02:00",
     sourceCredits: [
@@ -1834,6 +1852,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Sentadilla con disco",
       "fr": "Squat goblet avec haltère",
     },
+    step: 2,
     sourceId: "b7c6a444-90ea-4f5b-9fea-748311606eaa",
     sourceUpdatedAt: "2026-06-19T18:56:54.257029+02:00",
     sourceCredits: [
@@ -1858,7 +1877,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:f0f53b8e-0136-4195-baf3-781903651359",
     "Dumbbell Hang Power Cleans",
     ["Glutes", "Hamstrings"],
-    secondaryMuscles: ["Calves", "Quads"],
+    secondaryMuscles: ["Calves", "Quads", "Trapezius"],
     category: "Back",
     equipment: ["Dumbbell"],
     aliases: [],
@@ -1868,6 +1887,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Cargada de potencia desde colgado con mancuernas",
       "fr": "Épaulés-jetés en puissance avec haltères depuis la suspension",
     },
+    step: 2,
     sourceId: "f0f53b8e-0136-4195-baf3-781903651359",
     sourceUpdatedAt: "2026-07-23T12:25:08.253641+02:00",
     sourceCredits: [
@@ -1897,6 +1917,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press hex con mancuernas",
       "fr": "Développé serré aux haltères (hex press)",
     },
+    step: 2,
     sourceId: "587af8f1-516b-44c3-8660-70f262e1bef8",
     sourceUpdatedAt: "2026-07-23T12:25:12.368050+02:00",
     sourceCredits: [
@@ -1926,6 +1947,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Empuje de cadera con mancuerna",
       "fr": "Hip Thrust avec haltère",
     },
+    step: 2,
     sourceId: "af77220c-098c-47c2-9f8c-92a651998903",
     sourceUpdatedAt: "2026-06-19T18:49:31.505813+02:00",
     sourceCredits: [
@@ -1945,7 +1967,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:43e85cb8-51d0-4892-b1bf-80a3cb111ff6",
     "Dumbbell Incline Curl",
     ["Biceps"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Brachialis"],
     category: "Arms",
     equipment: ["Dumbbell"],
     aliases: [],
@@ -1955,6 +1977,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl Inclinado con Mancuernas",
       "fr": "Curl incliné aux haltères",
     },
+    step: 2,
     sourceId: "43e85cb8-51d0-4892-b1bf-80a3cb111ff6",
     sourceUpdatedAt: "2026-06-19T18:46:35.686758+02:00",
     sourceCredits: [
@@ -1984,6 +2007,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Dumbbell Lateral Raise"},
+    step: 2,
     sourceId: "c8b182c3-9dfd-40ca-87b2-ef25f19aa181",
     sourceUpdatedAt: "2026-09-16T20:51:30.167973+02:00",
     sourceCredits: [
@@ -2007,6 +2031,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "en": "Dumbbell Lunges Standing",
       "es": "Zancadas con Mancuernas",
     },
+    step: 2,
     sourceId: "2f1a2707-e7ff-46ac-9112-3e31e6e961ee",
     sourceUpdatedAt: "2026-04-15T22:23:56.372270+02:00",
     sourceCredits: [
@@ -2036,6 +2061,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Zancadas Caminando con Mancuernas",
       "fr": "Fentes marchées avec haltères",
     },
+    step: 2,
     sourceId: "dcc6e237-a8bb-4eca-bbc5-7fb852636f6a",
     sourceUpdatedAt: "2026-07-02T16:14:28.985601+02:00",
     sourceCredits: [
@@ -2059,7 +2085,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:adb6067f-fd48-4a25-a9b4-0793c5f158fa",
     "Dumbbell rear delt row",
-    ["Shoulders"],
+    ["Brachialis", "Shoulders", "Trapezius"],
     secondaryMuscles: [],
     category: "Shoulders",
     equipment: ["Dumbbell"],
@@ -2070,6 +2096,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Remo para deltoides posterior con mancuernas",
       "fr": "Rowing pour deltoïdes postérieurs aux haltères",
     },
+    step: 2,
     sourceId: "adb6067f-fd48-4a25-a9b4-0793c5f158fa",
     sourceUpdatedAt: "2026-06-19T18:50:38.992200+02:00",
     sourceCredits: [
@@ -2089,7 +2116,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:75e34967-b0ec-40d5-811e-b474b234a7a9",
     "Dumbbell Rear Lunge",
     ["Glutes", "Quads"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Soleus"],
     category: "Legs",
     equipment: ["Dumbbell"],
     aliases: [],
@@ -2099,6 +2126,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Zancada hacia atrás con mancuernas",
       "fr": "Fente arrière avec haltères",
     },
+    step: 2,
     sourceId: "75e34967-b0ec-40d5-811e-b474b234a7a9",
     sourceUpdatedAt: "2026-06-19T18:49:37.661523+02:00",
     sourceCredits: [
@@ -2128,6 +2156,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Peso muerto rumano con mancuernas",
       "fr": "Soulevé de terre roumain avec haltères",
     },
+    step: 2,
     sourceId: "65d12ecf-54b8-466d-a412-e55c396cad69",
     sourceUpdatedAt: "2026-06-19T18:49:43.204115+02:00",
     sourceCredits: [
@@ -2146,7 +2175,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:3e9b3bb0-7958-4836-89a5-ed0c5f7eeb03",
     "Dumbbell Side Bend",
-    [],
+    ["Obliquus externus abdominis"],
     secondaryMuscles: [],
     category: "Abs",
     equipment: ["Dumbbell"],
@@ -2157,6 +2186,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Flexión lateral con mancuerna",
       "fr": "Flexion Latérale avec haltère",
     },
+    step: 2,
     sourceId: "3e9b3bb0-7958-4836-89a5-ed0c5f7eeb03",
     sourceUpdatedAt: "2026-06-19T18:49:36.273254+02:00",
     sourceCredits: [
@@ -2186,6 +2216,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Empuje de cadera a una pierna con mancuerna",
       "fr": "Hip thrust à une jambe avec haltère",
     },
+    step: 2,
     sourceId: "7cc24acf-3fc9-4d14-a461-cd00d1d18f0e",
     sourceUpdatedAt: "2026-07-23T12:08:34.828878+02:00",
     sourceCredits: [
@@ -2215,6 +2246,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Arrancada con mancuerna (dumbbell snatch)",
       "fr": "dumbbell snatch",
     },
+    step: 2,
     sourceId: "51fe0871-1390-4755-bd04-01a93e32f533",
     sourceUpdatedAt: "2026-06-19T18:56:10.682974+02:00",
     sourceCredits: [
@@ -2242,6 +2274,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "de": "Dumbbell Split Squat",
       "en": "Dumbbell Split Squat",
     },
+    step: 2,
     sourceId: "8a3e08ab-4e97-4aee-897a-60d8693b9b43",
     sourceUpdatedAt: "2026-07-23T12:25:12.789068+02:00",
     sourceCredits: [
@@ -2261,7 +2294,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:0c30c543-e2cc-499b-bc31-8c28db445ed2",
     "Dumbbell sumo deadlift",
     ["Glutes", "Hamstrings"],
-    secondaryMuscles: ["Quads"],
+    secondaryMuscles: ["Quads", "Trapezius"],
     category: "Legs",
     equipment: ["Dumbbell"],
     aliases: [],
@@ -2271,6 +2304,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Peso muerto sumo con mancuerna",
       "fr": "Soulevé de terre sumo avec haltère",
     },
+    step: 2,
     sourceId: "0c30c543-e2cc-499b-bc31-8c28db445ed2",
     sourceUpdatedAt: "2026-07-23T12:25:08.665206+02:00",
     sourceCredits: [
@@ -2300,6 +2334,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press Francés con Mancuerna",
       "fr": "Extension des triceps à l'haltère",
     },
+    step: 2,
     sourceId: "d8bddb58-91b0-4d7b-8ec1-cd742584b607",
     sourceUpdatedAt: "2026-06-19T18:56:54.943487+02:00",
     sourceCredits: [
@@ -2334,6 +2369,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Tate press con mancuernas",
       "fr": "Tate press avec haltères",
     },
+    step: 2,
     sourceId: "2affa71f-7308-4448-af57-dc44b424090e",
     sourceUpdatedAt: "2026-06-19T18:55:35.012633+02:00",
     sourceCredits: [
@@ -2352,7 +2388,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:d7a418d4-d0cb-4f85-8a7c-1e9d97152cbd",
     "Facepull",
-    [],
+    ["Trapezius"],
     secondaryMuscles: [],
     category: "Shoulders",
     equipment: ["Cable machine"],
@@ -2450,6 +2486,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Aperturas con Mancuernas",
       "fr": "Écarté aux haltères",
     },
+    step: 2,
     sourceId: "95d226ad-3bf7-4cd6-aa64-2f26b526d8b6",
     sourceUpdatedAt: "2026-06-19T18:46:35.176852+02:00",
     sourceCredits: [
@@ -2484,6 +2521,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Aperturas con Mancuernas Declinadas",
       "fr": "Écarté aux haltères sur banc décliné",
     },
+    step: 2,
     sourceId: "55d0a5ec-b147-40c3-aa77-314e61c93689",
     sourceUpdatedAt: "2026-07-23T12:08:36.039336+02:00",
     sourceCredits: [
@@ -2595,6 +2633,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl Martillo",
       "fr": "Curls marteau",
     },
+    step: 2,
     sourceId: "c0d9fe98-f4fe-49f3-8037-05e1984e7d2d",
     sourceUpdatedAt: "2026-06-19T18:46:39.253111+02:00",
     sourceCredits: [
@@ -2619,7 +2658,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:04365177-e078-489b-983a-8ac61b7346f1",
     "Hammercurls on Cable",
     ["Biceps"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Brachialis"],
     category: "Arms",
     equipment: ["Cable machine"],
     aliases: [],
@@ -2742,7 +2781,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:70c99a4e-3340-4993-a7f1-2d2709dada1a",
     "Incline Bench Reverse Fly",
-    ["Shoulders"],
+    ["Shoulders", "Trapezius"],
     secondaryMuscles: [],
     category: "Back",
     equipment: ["Dumbbell", "Incline bench"],
@@ -2753,6 +2792,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Aperturas Inversas",
       "fr": "Oiseau sur banc incliné",
     },
+    step: 2,
     sourceId: "70c99a4e-3340-4993-a7f1-2d2709dada1a",
     sourceUpdatedAt: "2026-07-23T12:08:36.445040+02:00",
     sourceCredits: [
@@ -2776,7 +2816,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:51a2d520-b510-4b6e-bd65-9fc40365e8de",
     "Incline Chest-Supported Dumbbell Row",
-    ["Biceps", "Lats"],
+    ["Biceps", "Lats", "Trapezius"],
     secondaryMuscles: [],
     category: "Back",
     equipment: ["Bench", "Dumbbell"],
@@ -2787,6 +2827,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Remo con mancuernas en banco inclinado con apoyo en el pecho",
       "fr": "Rowing avec haltères incliné, poitrine soutenue",
     },
+    step: 2,
     sourceId: "51a2d520-b510-4b6e-bd65-9fc40365e8de",
     sourceUpdatedAt: "2026-06-19T18:51:14.694651+02:00",
     sourceCredits: [
@@ -2835,6 +2876,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Aperturas con mancuernas en banco inclinado",
       "fr": "Écarté incliné aux haltères",
     },
+    step: 2,
     sourceId: "55ff32e6-24ab-4303-9b50-176d60d48796",
     sourceUpdatedAt: "2026-06-19T18:57:01.265947+02:00",
     sourceCredits: [
@@ -2864,6 +2906,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Remo con mancuernas en banco inclinado",
       "fr": "Rowing aux haltères sur banc incliné",
     },
+    step: 2,
     sourceId: "27eb3d4a-8677-4c1f-bf34-251e2b4741cb",
     sourceUpdatedAt: "2026-06-19T18:48:52.840741+02:00",
     sourceCredits: [
@@ -2941,7 +2984,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:9b5f8c6e-2436-4ded-aea9-8c698b0c8768",
     "Kettlebell deadlifts",
     ["Glutes", "Hamstrings"],
-    secondaryMuscles: ["Quads"],
+    secondaryMuscles: ["Quads", "Trapezius"],
     category: "Back",
     equipment: ["Kettlebell"],
     aliases: [],
@@ -2981,6 +3024,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Peso muerto a una pierna con pesa rusa",
       "fr": "Soulevé de terre unilatéral",
     },
+    step: 2,
     sourceId: "20b17b71-6d91-4b56-978a-04b7f94c04cc",
     sourceUpdatedAt: "2026-06-19T18:49:30.169104+02:00",
     sourceCredits: [
@@ -3066,7 +3110,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:73c1e130-fba9-473b-a093-a5712e2ae34d",
     "Landmine Rotation",
-    [],
+    ["Obliquus externus abdominis"],
     secondaryMuscles: ["Abs", "Shoulders"],
     category: "Abs",
     equipment: ["Barbell"],
@@ -3115,7 +3159,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:28d18142-8777-4dba-a3a1-6151cec94500",
     "Lean-Away Cable Lateral Raise",
     ["Shoulders"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Trapezius"],
     category: "Shoulders",
     equipment: ["Cable machine"],
     aliases: ["Lean-To Cable Lateral Raise", "Leaning Cable Lateral Raise"],
@@ -3533,7 +3577,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:8aae635b-cb15-4129-bc09-6951fa376274",
     "Machine Seated Calf Raise",
-    ["Calves"],
+    ["Calves", "Soleus"],
     secondaryMuscles: [],
     category: "Calves",
     equipment: [],
@@ -3552,7 +3596,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:28b65190-cae2-4d15-8f4e-dde0d9cc4d4b",
     "Meadows Row",
-    ["Lats"],
+    ["Lats", "Trapezius"],
     secondaryMuscles: ["Abs", "Biceps"],
     category: "Back",
     equipment: ["Barbell"],
@@ -3677,7 +3721,14 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:e56f2970-e4c9-45eb-8e8c-52abb590e7a6",
     "Pallof Press",
-    ["Abs", "Glutes", "Shoulders"],
+    [
+      "Abs",
+      "Glutes",
+      "Obliquus externus abdominis",
+      "Serratus anterior",
+      "Shoulders",
+      "Trapezius",
+    ],
     secondaryMuscles: ["Chest", "Triceps"],
     category: "Abs",
     equipment: ["Cable machine"],
@@ -3754,7 +3805,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:748e9635-7958-4a41-b1ed-93de74c7ef72",
     "Pendelay Rows",
-    ["Lats"],
+    ["Lats", "Trapezius"],
     secondaryMuscles: ["Biceps", "Triceps"],
     category: "Back",
     equipment: ["Barbell"],
@@ -3842,7 +3893,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:5d5122e0-65f3-4afc-ac36-21955e2c7dde",
     "Plate-Loaded Lat Pulldown",
     ["Lats"],
-    secondaryMuscles: ["Biceps"],
+    secondaryMuscles: ["Biceps", "Brachialis", "Trapezius"],
     category: "Back",
     equipment: [],
     aliases: ["Lever Lat Pulldown", "Plate Loaded Lat Pulldown"],
@@ -3898,7 +3949,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:dd52fb99-9426-4a78-b446-20a8e3e4ec47",
     "Preacher Curls",
-    [],
+    ["Brachialis"],
     secondaryMuscles: [],
     category: "Arms",
     equipment: ["SZ-Bar"],
@@ -3928,7 +3979,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:7f834f07-fa7b-46b6-8ffa-45930b0602db",
     "Pull Ups on Machine",
     ["Lats"],
-    secondaryMuscles: ["Biceps", "Shoulders"],
+    secondaryMuscles: ["Biceps", "Shoulders", "Trapezius"],
     category: "Back",
     equipment: [],
     aliases: [],
@@ -3955,6 +4006,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"en": "Pullover"},
+    step: 2,
     sourceId: "9ccd53e0-8392-4e61-91aa-e4e5f4ea339c",
     sourceUpdatedAt: "2026-04-15T22:23:55.195453+02:00",
     sourceCredits: [
@@ -3987,7 +4039,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:2b6c09f7-dbf1-45ea-baf6-9a12e0b12396",
     "Renegade Row",
-    ["Lats"],
+    ["Lats", "Trapezius"],
     secondaryMuscles: [],
     category: "Back",
     equipment: ["Dumbbell"],
@@ -3998,6 +4050,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Remo renegado",
       "fr": "Renegade row",
     },
+    step: 2,
     sourceId: "2b6c09f7-dbf1-45ea-baf6-9a12e0b12396",
     sourceUpdatedAt: "2026-06-19T18:57:17.325523+02:00",
     sourceCredits: [
@@ -4016,7 +4069,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:2cd5e3c6-a8c0-456a-ab47-5e7b3a435407",
     "Reverse Curl",
-    ["Biceps"],
+    ["Biceps", "Brachialis"],
     secondaryMuscles: [],
     category: "Arms",
     equipment: ["Barbell", "Dumbbell"],
@@ -4135,7 +4188,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:0ecfec6f-5d0f-4e8a-8d37-f6203a8923b8",
     "Seated Cable Row",
     ["Lats"],
-    secondaryMuscles: ["Biceps"],
+    secondaryMuscles: ["Biceps", "Trapezius"],
     category: "Back",
     equipment: ["Cable machine"],
     aliases: [],
@@ -4179,6 +4232,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Elevación de gemelos sentado con mancuerna",
       "fr": "Élévation des mollets haltères assis",
     },
+    step: 2,
     sourceId: "6995c30a-037f-4de3-ac4a-45384a1f38f9",
     sourceUpdatedAt: "2026-06-19T18:54:53.981469+02:00",
     sourceCredits: [
@@ -4198,7 +4252,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:19fba43a-8363-4da3-82c6-d8a14628b5e7",
     "Seated Dumbbell Curls",
     ["Biceps"],
-    secondaryMuscles: [],
+    secondaryMuscles: ["Brachialis"],
     category: "Arms",
     equipment: ["Dumbbell"],
     aliases: [],
@@ -4208,6 +4262,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl con mancuernas sentado",
       "fr": "Curls avec haltères assis",
     },
+    step: 2,
     sourceId: "19fba43a-8363-4da3-82c6-d8a14628b5e7",
     sourceUpdatedAt: "2026-06-19T18:51:20.831236+02:00",
     sourceCredits: [
@@ -4232,7 +4287,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:9bcc7b4f-4172-4db7-be95-d7b659c486f5",
     "Seated Row (Machine)",
     ["Lats"],
-    secondaryMuscles: ["Shoulders"],
+    secondaryMuscles: ["Shoulders", "Trapezius"],
     category: "Back",
     equipment: [],
     aliases: [],
@@ -4271,6 +4326,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press de tríceps sentado",
       "fr": "Extension des triceps assis",
     },
+    step: 2,
     sourceId: "cc5bf1a3-29b5-4c5a-8600-5e35c79ab4bf",
     sourceUpdatedAt: "2026-06-19T18:57:18.052455+02:00",
     sourceCredits: [
@@ -4305,6 +4361,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press Militar mancuerna",
       "fr": "Développé épaules, haltères",
     },
+    step: 2,
     sourceId: "87affa4b-395b-437c-9581-2bd20ea5aa7c",
     sourceUpdatedAt: "2026-06-19T18:46:58.504753+02:00",
     sourceCredits: [
@@ -4444,6 +4501,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Encogimientos de hombros con mancuernas",
       "fr": "Shrugs aux haltères",
     },
+    step: 2,
     sourceId: "72a945ec-3a7f-424b-9a05-1616ef7dce91",
     sourceUpdatedAt: "2026-06-19T18:57:28.480428+02:00",
     sourceCredits: [
@@ -4491,7 +4549,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:9dfce8f0-39fc-4204-9f84-500ec42074e9",
     "Single-arm dumbbell shoulder press",
     ["Shoulders"],
-    secondaryMuscles: ["Abs", "Triceps"],
+    secondaryMuscles: ["Abs", "Serratus anterior", "Trapezius", "Triceps"],
     category: "Shoulders",
     equipment: ["Dumbbell"],
     aliases: [],
@@ -4501,6 +4559,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press de hombro con mancuerna a un brazo",
       "fr": "Développé épaules unilatéral à l'haltère",
     },
+    step: 2,
     sourceId: "9dfce8f0-39fc-4204-9f84-500ec42074e9",
     sourceUpdatedAt: "2026-06-19T18:48:21.547721+02:00",
     sourceCredits: [
@@ -4519,8 +4578,8 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:b86fd8df-e726-4998-a7ee-000de0f70bf0",
     "Single-Arm Lat Pulldown",
-    ["Lats"],
-    secondaryMuscles: ["Biceps"],
+    ["Lats", "Trapezius"],
+    secondaryMuscles: ["Biceps", "Brachialis"],
     category: "Back",
     equipment: ["Cable machine"],
     aliases: ["Tirage vertical unilatéral"],
@@ -4559,6 +4618,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl en banco Scott a un brazo",
       "fr": "Curl au pupitre à un bras",
     },
+    step: 2,
     sourceId: "c85e6137-2577-4e28-82c2-427407d534eb",
     sourceUpdatedAt: "2026-06-19T18:57:24.335413+02:00",
     sourceCredits: [
@@ -4588,6 +4648,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Peso muerto a una pierna con mancuerna",
       "fr": "Soulevé de terre sur une jambe avec haltère",
     },
+    step: 2,
     sourceId: "a630de17-9170-434c-b486-96a6b8705506",
     sourceUpdatedAt: "2026-06-19T18:55:12.191611+02:00",
     sourceCredits: [
@@ -4617,6 +4678,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Press Francés con Mancuernas",
       "fr": "Barre au front aux haltères",
     },
+    step: 2,
     sourceId: "893c07ea-2e24-49b6-92e4-d0033eedec62",
     sourceUpdatedAt: "2026-06-19T18:46:39.770835+02:00",
     sourceCredits: [
@@ -4930,7 +4992,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:1eeccede-29c5-4f38-9ba7-d77c7c47993d",
     "T-Bar row",
-    ["Lats"],
+    ["Lats", "Trapezius"],
     secondaryMuscles: [],
     category: "Back",
     equipment: ["Barbell"],
@@ -4960,6 +5022,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Contragolpe de tríceps con mancuernas",
       "fr": "Extension des avant-bras avec haltère",
     },
+    step: 2,
     sourceId: "5915fabe-c941-4dac-b196-bc4e8c7ce57b",
     sourceUpdatedAt: "2026-04-15T22:23:56.145134+02:00",
     sourceCredits: [
@@ -5047,6 +5110,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Extensión de tríceps sobre la cabeza (mancuerna)",
       "fr": "Extension des triceps au-dessus de la tête (haltère)",
     },
+    step: 2,
     sourceId: "19133a0d-e6b2-4d57-8a84-8aac3d962a99",
     sourceUpdatedAt: "2026-06-19T19:55:24.212769+02:00",
     sourceCredits: [
@@ -5065,7 +5129,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:90e9f590-7d68-4afb-9f95-8429246ea4aa",
     "Trunk Rotation With Cable",
-    [],
+    ["Obliquus externus abdominis"],
     secondaryMuscles: ["Lats"],
     category: "Abs",
     equipment: ["Cable machine"],
@@ -5084,12 +5148,13 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:309bfd2b-1af4-49db-b64b-d7d7c7dd39bb",
     "Turkish Get-Up",
-    ["Glutes", "Shoulders"],
+    ["Glutes", "Obliquus externus abdominis", "Serratus anterior", "Shoulders"],
     secondaryMuscles: [],
     category: "Abs",
     equipment: ["Dumbbell"],
     aliases: [],
     localizedLabels: {"de": "Turkish Get-Up", "en": "Turkish Get-Up"},
+    step: 2,
     sourceId: "309bfd2b-1af4-49db-b64b-d7d7c7dd39bb",
     sourceUpdatedAt: "2026-07-23T12:08:31.974627+02:00",
     sourceCredits: [
@@ -5103,7 +5168,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:01976085-6701-45ea-b152-5c46ba60550d",
     "Upright Row w/ Dumbbells",
-    ["Shoulders"],
+    ["Shoulders", "Trapezius"],
     secondaryMuscles: ["Biceps"],
     category: "Shoulders",
     equipment: ["Dumbbell"],
@@ -5114,6 +5179,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Remo al mentón con mancuernas",
       "fr": "Tirage menton avec haltères",
     },
+    step: 2,
     sourceId: "01976085-6701-45ea-b152-5c46ba60550d",
     sourceUpdatedAt: "2026-06-19T18:57:37.753780+02:00",
     sourceCredits: [
@@ -5137,7 +5203,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:738137c0-5387-4215-b457-ea7af113b3ba",
     "Upright Row, on Multi Press",
-    ["Shoulders"],
+    ["Shoulders", "Trapezius"],
     secondaryMuscles: ["Biceps"],
     category: "Shoulders",
     equipment: [],
@@ -5166,7 +5232,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:5d40c67d-be59-4092-9c9c-301ca5310e2b",
     "Upright Row, SZ-bar",
-    ["Shoulders"],
+    ["Shoulders", "Trapezius"],
     secondaryMuscles: ["Biceps"],
     category: "Shoulders",
     equipment: ["SZ-Bar"],
@@ -5200,7 +5266,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:8d333b94-148c-48f8-9154-8b13279500d1",
     "Weighted Crunch",
-    [],
+    ["Obliquus externus abdominis"],
     secondaryMuscles: [],
     category: "Abs",
     equipment: ["Dumbbell"],
@@ -5211,6 +5277,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Crunch con peso",
       "fr": "Crunch lesté",
     },
+    step: 2,
     sourceId: "8d333b94-148c-48f8-9154-8b13279500d1",
     sourceUpdatedAt: "2026-06-19T18:49:34.206768+02:00",
     sourceCredits: [
@@ -5278,7 +5345,12 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     "wger:55b9d286-c4cc-4a29-97ad-58cb13c2bb7e",
     "Wide-grip Pulldown",
     ["Lats"],
-    secondaryMuscles: ["Shoulders"],
+    secondaryMuscles: [
+      "Brachialis",
+      "Serratus anterior",
+      "Shoulders",
+      "Trapezius",
+    ],
     category: "Back",
     equipment: ["Cable machine"],
     aliases: [
@@ -5351,6 +5423,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl de muñeca con mancuernas",
       "fr": "Curl des poignets, haltères",
     },
+    step: 2,
     sourceId: "2cc92db8-b245-44b8-b1d6-bf91c78c2ab9",
     sourceUpdatedAt: "2026-06-19T18:50:20.629462+02:00",
     sourceCredits: [
@@ -5369,7 +5442,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
   ExerciseDef(
     "wger:9564ab2d-2534-4b47-bdf7-f2f653aae3de",
     "Zottman curl",
-    ["Biceps"],
+    ["Biceps", "Brachialis"],
     secondaryMuscles: [],
     category: "Arms",
     equipment: ["Dumbbell"],
@@ -5380,6 +5453,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Curl Zottman",
       "fr": "Curl Zottman",
     },
+    step: 2,
     sourceId: "9564ab2d-2534-4b47-bdf7-f2f653aae3de",
     sourceUpdatedAt: "2026-06-19T18:52:03.524017+02:00",
     sourceCredits: [
