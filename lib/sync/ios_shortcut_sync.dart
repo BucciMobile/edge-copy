@@ -101,13 +101,20 @@ class IosShortcutSync {
     }
     if (task.stopped) return task.expired;
 
-    final adapter = await FlutterBluePlus.adapterState
-        .firstWhere(
-          (s) =>
-              s != BluetoothAdapterState.unknown &&
-              s != BluetoothAdapterState.turningOn,
-        )
-        .timeout(const Duration(seconds: 3));
+    // Caught here: a TimeoutException escaping the body reads as the gate's
+    // own run ceiling, which reports 'alreadyRunning' for a sync that never ran.
+    final BluetoothAdapterState adapter;
+    try {
+      adapter = await FlutterBluePlus.adapterState
+          .firstWhere(
+            (s) =>
+                s != BluetoothAdapterState.unknown &&
+                s != BluetoothAdapterState.turningOn,
+          )
+          .timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      return const ShortcutSyncResult('bluetoothUnavailable');
+    }
     final blocked = _blockerResult(
       classifyBleBlocker(adapterState: adapter.name),
     );

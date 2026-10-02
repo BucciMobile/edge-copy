@@ -23,6 +23,21 @@ base class _AdapterOn extends FlutterBluePlusPlatform {
   ) async => BmBluetoothAdapterState(adapterState: BmAdapterStateEnum.on);
 }
 
+// Stuck turning on until told otherwise. FBP caches the adapter state it reads
+// and keeps it fed from the first platform it saw, so the test using this runs
+// before the one installing _AdapterOn and settles the cache to on when done.
+base class _AdapterTurningOn extends FlutterBluePlusPlatform {
+  final changes = StreamController<BmBluetoothAdapterState>.broadcast();
+
+  @override
+  Future<BmBluetoothAdapterState> getAdapterState(
+    BmBluetoothAdapterStateRequest request,
+  ) async => BmBluetoothAdapterState(adapterState: BmAdapterStateEnum.turningOn);
+
+  @override
+  Stream<BmBluetoothAdapterState> get onAdapterStateChanged => changes.stream;
+}
+
 class _LiveEngine extends BleEngine {
   _LiveEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
 
@@ -157,6 +172,32 @@ void main() {
         (await IosShortcutSync.run('next', const Duration(seconds: 2))).status,
         'notPaired',
       );
+    },
+  );
+
+  test(
+    'an adapter that never settles is bluetoothUnavailable, not alreadyRunning',
+    () async {
+      final platform = _AdapterTurningOn();
+      FlutterBluePlusPlatform.instance = platform;
+      addTearDown(() async {
+        platform.changes.add(
+          BmBluetoothAdapterState(adapterState: BmAdapterStateEnum.on),
+        );
+        await pumpEventQueue();
+      });
+      await PairedDevice.save(
+        '00000000-0000-0000-0000-000000000001',
+        'test',
+        generation: 'gen4',
+      );
+      final result = await IosShortcutSync.run(
+        'adapter',
+        const Duration(seconds: 10),
+      );
+      expect(result.status, 'bluetoothUnavailable');
+      expect(HeadlessSyncGate.timedOutRuns, 0);
+      expect(HeadlessSyncGate.busy, isFalse);
     },
   );
 
