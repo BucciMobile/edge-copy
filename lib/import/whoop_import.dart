@@ -206,14 +206,14 @@ class WhoopImporter {
 
   // ── per-row writers ──────────────────────────────────────────────────────────
 
+  // a blank/0/garbage cell is no reading, not a 0% night.
+  static num? _pct(num? v, num lo) => v != null && v >= lo && v <= 100 ? v : null;
+
   /// Pure extraction: (date, raw field map) from one CSV row, or null when
   /// the row has no parseable anchor timestamp. No DB access — callers
   /// accumulate these across every file in the import before writing, so a
   /// later file's row (missing the earlier file's columns) can't null out
   /// what the earlier file already contributed for the same date.
-  // a blank/0/garbage cell is no reading, not a 0% night.
-  static num? _pct(num? v, num lo) => v != null && v >= lo && v <= 100 ? v : null;
-
   static (String, Map<String, dynamic>)? _extractDayFields(_Row row) {
     String get(List<String> names) => row.get(names);
     final wakeTs = _parseTs(get(['wake onset', 'sleep onset', 'cycle start time']));
