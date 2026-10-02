@@ -114,8 +114,7 @@ const kCsvExportSets = <CsvExportSet>[
     name: 'sleep',
     title: 'Sleep stages',
     columns: ['date', 'start_ts', 'end_ts', 'stage'],
-    sql:
-        'SELECT date, start_ts, end_ts, stage FROM v_hypnogram '
+    sql: 'SELECT date, start_ts, end_ts, stage FROM v_hypnogram '
         'ORDER BY date ASC, start_ts ASC',
   ),
   CsvExportSet(
@@ -147,8 +146,7 @@ const kCsvExportSets = <CsvExportSet>[
     name: 'labs',
     title: 'Lab results',
     columns: ['taken_on', 'marker', 'value', 'unit', 'note'],
-    sql:
-        'SELECT taken_on, marker, value, unit, note FROM lab_result '
+    sql: 'SELECT taken_on, marker, value, unit, note FROM lab_result '
         'ORDER BY taken_on ASC, marker ASC',
   ),
   // ── everything below is data the user TYPED IN ──────────────────────────────
