@@ -161,9 +161,10 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
   }
 }
 
-/// Applies the 12/24-hour choice: overrides MediaQuery for time pickers, and
-/// rebuilds everything below once when it flips, since the context-free
-/// `formatClock*` helpers can't register a dependency.
+/// Applies the 12/24-hour choice: overrides MediaQuery for time pickers, hands
+/// the locale's AM/PM text to `formatClock*`, and rebuilds everything below
+/// once when either flips, since those context-free helpers can't register a
+/// dependency.
 class _ClockScope extends StatefulWidget {
   const _ClockScope({required this.child});
   final Widget child;
@@ -173,14 +174,16 @@ class _ClockScope extends StatefulWidget {
 }
 
 class _ClockScopeState extends State<_ClockScope> {
-  bool? _last;
+  (bool, Locale)? _last;
 
   @override
   Widget build(BuildContext context) {
     final use24 = context
         .watch<ClockFormatController>()
         .resolve24h(MediaQuery.alwaysUse24HourFormatOf(context));
-    if (_last != null && _last != use24) {
+    bindClockLocalizations(MaterialLocalizations.of(context));
+    final now = (use24, Localizations.localeOf(context));
+    if (_last != null && _last != now) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         void mark(Element e) {
@@ -191,7 +194,7 @@ class _ClockScopeState extends State<_ClockScope> {
         (context as Element).visitChildren(mark);
       });
     }
-    _last = use24;
+    _last = now;
     return MediaQuery(
       data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: use24),
       child: widget.child,

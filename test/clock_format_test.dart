@@ -2,6 +2,8 @@
 // screen, so a bedtime cannot read `22:40` on Home and `10:40 PM` two screens
 // away — and so the choice the user makes in Settings reaches all of them.
 
+import 'package:flutter/widgets.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,6 +31,20 @@ void main() {
       expect(formatClock(7, 5), '7:05 AM');
       expect(formatClock(12, 0), '12:00 PM');
       expect(formatClock(23, 59), '11:59 PM');
+    });
+
+    test("12-hour uses the app locale's AM/PM and order", () async {
+      ClockFormatController.seed(ClockFormat.h12);
+      Future<void> bind(String lang) async => bindClockLocalizations(
+          await GlobalMaterialLocalizations.delegate.load(Locale(lang)));
+
+      await bind('zh');
+      expect(formatClock(7, 30), '上午 7:30');
+      expect(formatClock(19, 30), '下午 7:30');
+      await bind('es');
+      expect(formatClock(19, 30), '7:30 p. m.');
+      await bind('en');
+      expect(formatClock(19, 30), '7:30 PM');
     });
 
     test('minute of day wraps rather than printing an impossible hour', () {

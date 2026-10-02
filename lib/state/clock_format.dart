@@ -5,7 +5,7 @@
 
 import 'dart:ui' show PlatformDispatcher;
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 enum ClockFormat { system, h24, h12 }
@@ -66,8 +66,17 @@ class ClockFormatController extends ChangeNotifier {
   /// Tests only: forget the active controller so the next test starts from
   /// the OS setting again.
   @visibleForTesting
-  static void debugReset() => _active = null;
+  static void debugReset() {
+    _active = null;
+    _localizations = null;
+  }
 }
+
+/// The app locale's AM/PM text and 12-hour order, bound by the app's clock
+/// scope. Null (no app yet, a background isolate) falls back to English.
+MaterialLocalizations? _localizations;
+
+void bindClockLocalizations(MaterialLocalizations? l) => _localizations = l;
 
 /// Whether clock times render 24-hour right now: the user's choice, or the
 /// OS's "use 24-hour format" when the choice is "system" (or no controller
@@ -87,12 +96,21 @@ bool _systemUse24h() {
   }
 }
 
-/// Hour + minute → "07:05" or "7:05 AM", per [use24HourClock].
+/// Hour + minute → "07:05" or "7:05 AM" (the locale's AM/PM), per
+/// [use24HourClock].
 String formatClock(int hour, int minute) {
   final mm = minute.toString().padLeft(2, '0');
   if (use24HourClock) return '${hour.toString().padLeft(2, '0')}:$mm';
   final h = hour % 12 == 0 ? 12 : hour % 12;
-  return '$h:$mm ${hour < 12 ? 'AM' : 'PM'}';
+  final l = _localizations;
+  final period = hour < 12
+      ? (l?.anteMeridiemAbbreviation ?? 'AM')
+      : (l?.postMeridiemAbbreviation ?? 'PM');
+  // A 24-hour-native locale (de, fr, es) has no 12-hour order of its own, so
+  // the period goes after, as in English.
+  return l?.timeOfDayFormat() == TimeOfDayFormat.a_space_h_colon_mm
+      ? '$period $h:$mm'
+      : '$h:$mm $period';
 }
 
 /// The time of day of [d], as [formatClock].
