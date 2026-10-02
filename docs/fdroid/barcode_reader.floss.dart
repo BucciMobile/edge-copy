@@ -43,6 +43,17 @@ class _BarcodeReaderWidgetState extends State<BarcodeReaderWidget> {
     BarcodeFormat.dataBarExpanded: zx.Format.dataBarExpanded,
   };
 
+  @override
+  void initState() {
+    super.initState();
+    // ReaderWidget stays on its loading state forever with zero cameras.
+    availableCameras().then((cams) {
+      if (cams.isEmpty && mounted) {
+        setState(() => _error = const BarcodeReaderError(permissionDenied: false));
+      }
+    }, onError: (_) {});
+  }
+
   int get _codeFormat =>
       widget.formats.fold(0, (acc, f) => acc | (_formatBits[f] ?? 0));
 

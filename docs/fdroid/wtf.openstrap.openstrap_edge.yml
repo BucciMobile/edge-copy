@@ -33,9 +33,11 @@ Builds:
       - |-
         sed -i -e '/^  firebase_[a-z]*:/d' -e 's/^  mobile_scanner:.*/  flutter_zxing: ^2.4.0\n  camera: ^0.11.0/' pubspec.yaml
       - sed -i -e 's/signingConfigs.getByName("debug")/null/' android/app/build.gradle.kts
+      - sed -i -e '/id("com.google.firebase/d' -e '/configure<com.google.firebase/,+2d' android/settings.gradle.kts android/app/build.gradle.kts
       - export PUB_CACHE=$(pwd)/.pub-cache
       - $$flutter$$/bin/flutter config --no-analytics
       - $$flutter$$/bin/flutter pub get
+      - sed -i -e 's/com.google.android.gms:play-services-location:[0-9.]*/org.microg.gms:play-services-location:0.3.14.250932/' .pub-cache/hosted/pub.dev/geolocator_android-*/android/build.gradle
       # heredoc has to stay the last prebuild item
       - |
         cat >> android/app/build.gradle.kts <<'EOF'
@@ -57,5 +59,6 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
+UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
 CurrentVersion: 0.10.0
 CurrentVersionCode: 66
