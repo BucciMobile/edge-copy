@@ -89,9 +89,9 @@ List<Map<String, Object?>> selectWeightliftingExercises(List<Object?> raw) {
 }
 
 /// Load increment for a generated row, matching the hand-written catalogue:
-/// a dumbbell moves in 2 kg, anything with a bar in 2.5.
+/// a dumbbell or kettlebell moves in 2 kg, anything with a bar in 2.5.
 num wgerLoadStep(List<String> equipment) =>
-    equipment.contains('Dumbbell') &&
+    (equipment.contains('Dumbbell') || equipment.contains('Kettlebell')) &&
         !equipment.contains('Barbell') &&
         !equipment.contains('SZ-Bar')
     ? 2

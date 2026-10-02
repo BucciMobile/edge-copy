@@ -75,9 +75,14 @@ void main() {
     expect(wgerLoadStep(['Bench', 'Dumbbell']), 2);
     expect(wgerLoadStep(['Barbell', 'Dumbbell']), 2.5);
     expect(wgerLoadStep(['Cable machine']), 2.5);
+    // kettlebells come in 4 kg sizes, so 2.5 could never reach 8/12/16/24
+    expect(wgerLoadStep(['Kettlebell']), 2);
     // the shipped snapshot was generated with the same rule
     expect(
         exerciseByKey('wger:eb9476ac-2c00-4f49-a40f-f81682161a75')!.step, 2);
+    for (final e in exerciseLibrary.where((e) => e.key.startsWith('wger:'))) {
+      expect(e.step, wgerLoadStep(e.equipment), reason: e.label);
+    }
   });
 }
 

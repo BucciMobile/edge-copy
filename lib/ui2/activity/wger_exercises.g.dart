@@ -37,6 +37,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     equipment: ["Kettlebell"],
     aliases: [],
     localizedLabels: {"en": "2 Handed Kettlebell Swing"},
+    step: 2,
     sourceId: "1b020b3a-3732-4c7e-92fd-a0cec90ed69b",
     sourceUpdatedAt: "2026-07-23T12:24:53.482746+02:00",
     sourceCredits: [
@@ -1584,6 +1585,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Clean and press con doble kettlebell",
       "fr": "Épaulé-développé avec deux kettlebells",
     },
+    step: 2,
     sourceId: "fe249e2f-5856-420f-8a34-1b02c7fde141",
     sourceUpdatedAt: "2026-06-19T18:51:57.962481+02:00",
     sourceCredits: [
@@ -1608,6 +1610,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
     equipment: ["Kettlebell"],
     aliases: [],
     localizedLabels: {"en": "Double Kettlebell Front Squat"},
+    step: 2,
     sourceId: "a030a4e9-970c-4442-b0b3-e49b42143de0",
     sourceUpdatedAt: "2026-04-15T22:23:53.461982+02:00",
     sourceCredits: [
@@ -2995,6 +2998,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "fr": "Haltères de kettlebell",
       "zh": "提壶铃",
     },
+    step: 2,
     sourceId: "9b5f8c6e-2436-4ded-aea9-8c698b0c8768",
     sourceUpdatedAt: "2026-07-23T12:25:06.546463+02:00",
     sourceCredits: [
@@ -3054,6 +3058,7 @@ const _wgerExerciseLibrary = <ExerciseDef>[
       "es": "Sentadilla con pesa rusa",
       "fr": "Soulevé de terre sumo à la kettlebell",
     },
+    step: 2,
     sourceId: "5cbaa028-114d-4a15-9a95-70d9b3146f30",
     sourceUpdatedAt: "2026-06-19T18:54:47.131884+02:00",
     sourceCredits: [
