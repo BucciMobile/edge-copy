@@ -961,7 +961,9 @@ List<HealthSource> liveSources(AppState app,
           charging: app.device.charging ?? false,
           lastData: app.lastRecordAt,
           isBand: true,
-          family: app.device.generation,
+          // The stored generation when no link has come up this launch, so a
+          // disconnected band keeps its family-gated rows (Worn on, signals).
+          family: app.device.generation ?? app.paired?.generation,
         ),
       // Sensors paired alongside the band. One row each, ranked by their own
       // tier like everything else — a beat-to-beat strap sorts ABOVE the wrist
