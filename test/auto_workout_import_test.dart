@@ -3,6 +3,7 @@
 // to one full-window read per interval, cursor advanced only on real rows).
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:openstrap_edge/health/auto_workout_import.dart';
@@ -160,5 +161,40 @@ void main() {
       expect(await lastImportAt(HealthImport.workouts), isNull,
           reason: 'zero rows must not put the UI to sleep on a denial');
     });
+  });
+
+  group('read probe', _probeTests);
+}
+
+class _ProbeHealth extends Health {
+  _ProbeHealth(this.answer);
+  final bool? answer;
+
+  @override
+  Future<void> configure() async {}
+
+  @override
+  Future<bool?> hasPermissions(List<HealthDataType> types,
+          {List<HealthDataAccess>? permissions}) async =>
+      answer;
+}
+
+void _probeTests() {
+  // HealthKit answers null for READ whether or not access was granted, so a
+  // `== true` probe kept auto-import off on every iPhone.
+  test('apple: an unknowable READ grant (null) still lets the auto read run',
+      () async {
+    final i = HealthWorkoutImporter(health: _ProbeHealth(null), isApple: true);
+    expect(await i.hasReadPermission(), isTrue);
+  });
+
+  test('apple: an explicit false still skips', () async {
+    final i = HealthWorkoutImporter(health: _ProbeHealth(false), isApple: true);
+    expect(await i.hasReadPermission(), isFalse);
+  });
+
+  test('health connect: null is not a grant', () async {
+    final i = HealthWorkoutImporter(health: _ProbeHealth(null), isApple: false);
+    expect(await i.hasReadPermission(), isFalse);
   });
 }

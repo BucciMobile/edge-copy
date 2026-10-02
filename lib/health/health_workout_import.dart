@@ -244,15 +244,22 @@ class HealthWorkoutImporter {
 
   bool get routesSupported => _isApple;
 
-  /// NON-PROMPTING read-permission probe for the auto path: true only when
-  /// the store already granted WORKOUT read. Never shows a dialog — the
-  /// manual Import button's tap is the only place that question gets asked.
+  /// NON-PROMPTING read-permission probe for the auto path: true when the
+  /// store granted WORKOUT read, or (Apple) when it cannot say. Never shows a
+  /// dialog — the manual Import button's tap is the only place that question
+  /// gets asked.
+  ///
+  /// HealthKit never reveals a READ grant: `hasPermissions` answers null for
+  /// READ whether or not the user allowed it, so `== true` kept the auto path
+  /// off on every iPhone. A read without a grant returns an empty list (no
+  /// prompt, no error), and sync() writes nothing on an empty read, so the
+  /// throttled read is safe to just try.
   Future<bool> hasReadPermission() async {
     try {
       await _health.configure();
-      return await _health.hasPermissions(types,
-              permissions: [for (final _ in types) HealthDataAccess.READ]) ==
-          true;
+      final ok = await _health.hasPermissions(types,
+          permissions: [for (final _ in types) HealthDataAccess.READ]);
+      return ok == true || (_isApple && ok == null);
     } catch (_) {
       return false;
     }
