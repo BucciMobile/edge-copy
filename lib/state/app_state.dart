@@ -5433,10 +5433,24 @@ class AppState extends ChangeNotifier {
   /// "Sync the band". On a link that is already up in the foreground,
   /// [openSession] just reuses it and joins an offload nobody asked the band
   /// for, so the tap pulled nothing: ask for one over the current link, then
-  /// finalize whatever landed.
+  /// finalize whatever landed. Floored like [foregroundCatchUp]: on a band
+  /// that just drained, a few quick taps would each come back empty, and the
+  /// empty-sync detector reads three of those as a lost clock and backs the
+  /// periodic pull off.
   Future<void> syncNow() async {
     if (_background || !engine.isConnected) return openSession();
-    await forceResync();
+    try {
+      final running = _syncBurst;
+      if (running != null) {
+        await running;
+      } else if (await engine.requestForegroundSync()) {
+        await _kickSyncBurst(kickFirst: false);
+        notifyListeners();
+        _deriveScheduler.markStoredData();
+      }
+    } catch (e) {
+      _log('Sync failed: $e');
+    }
     _deriveScheduler.requestHeavy();
   }
 
