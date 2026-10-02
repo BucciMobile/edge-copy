@@ -49,7 +49,7 @@ void main() {
     test('follows the OS setting, with or without a controller', () {
       final binding = TestWidgetsFlutterBinding.instance;
       addTearDown(binding.platformDispatcher
-          .clearAlwaysUse24HourFormatTestValue);
+          .clearAlwaysUse24HourTestValue);
 
       binding.platformDispatcher.alwaysUse24HourFormatTestValue = true;
       expect(formatClock(19, 30), '19:30', reason: 'no controller yet');
@@ -63,7 +63,7 @@ void main() {
     test('an explicit choice overrides the OS', () {
       final binding = TestWidgetsFlutterBinding.instance;
       addTearDown(binding.platformDispatcher
-          .clearAlwaysUse24HourFormatTestValue);
+          .clearAlwaysUse24HourTestValue);
       binding.platformDispatcher.alwaysUse24HourFormatTestValue = true;
 
       ClockFormatController.seed(ClockFormat.h12);
