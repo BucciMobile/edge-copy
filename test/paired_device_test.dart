@@ -333,4 +333,27 @@ void main() {
     expect(await LocalDb.deviceWearingRaw(), Wearing.wrist);
     expect((await LocalDb.deviceRow())!['wearing_set_ts'], isNull);
   });
+
+  test('a restore before any pairing hands the wearing choice to the next band',
+      () async {
+    final dir = await databaseFactory.getDatabasesPath();
+    final srcPath = p.join(dir, 'paired_device_restore_src.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute('CREATE TABLE device (id TEXT PRIMARY KEY, '
+        'remote_id TEXT, wearing INTEGER, wearing_set_ts INTEGER)');
+    await src.insert('device', {
+      'id': LocalDb.kPrimaryDeviceId,
+      'remote_id': 'OLD-PHONE-UUID',
+      'wearing': Wearing.bicep,
+      'wearing_set_ts': 1786000000,
+    });
+    await src.close();
+
+    await LocalDb.importFromDbFile(srcPath);
+    await PairedDevice.save('NEW-PHONE-UUID', null, generation: 'gen5');
+    expect(await LocalDb.deviceWearingRaw(), Wearing.bicep);
+    expect((await LocalDb.deviceRow())!['wearing_set_ts'], 1786000000);
+    await databaseFactory.deleteDatabase(srcPath);
+  });
 }

@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../compute/substrate.dart' show beatTimesMs;
@@ -373,6 +374,12 @@ class LocalDb {
   /// A SECONDARY device gets a real id, issued by its adapter from something
   /// the band emits across the handshake — never from the link.
   static const String kPrimaryDeviceId = '';
+
+  /// Prefs key holding `[remoteId, wearing, wearing_set_ts]`: an explicit
+  /// wearing choice waiting for the next primary pairing to adopt it. A
+  /// forgotten band leaves its own remoteId; a restore onto an install with
+  /// no band yet leaves `''`, which whichever band pairs next takes.
+  static const String kPendingWornOnPref = 'paired_worn_on';
 
   /// The `sync_cursor` name for a per-offloading-device bookmark.
   ///
@@ -8872,6 +8879,7 @@ class LocalDb {
     // null when day_result could not be read at all, so the caller can tell
     // "nothing imported" from "we don't know".
     Set<String>? importedDays;
+    List<String>? restoredWornOn;
     try {
       for (final t in (only ?? tables)) {
         try {
@@ -9004,9 +9012,20 @@ class LocalDb {
                   final w = row['wearing'];
                   final ts = row['wearing_set_ts'];
                   if (w is num && ts is num) {
-                    batch.rawUpdate(_adoptWearingSql,
-                        [w.toInt(), ts.toInt(), kPrimaryDeviceId]);
-                    if (++ops >= chunkOps) await flush();
+                    // No band paired yet (the usual new-phone restore runs at
+                    // Welcome, before pairing): nothing to update, so it waits
+                    // for the pairing to adopt it.
+                    final local = await txn.query('device',
+                        columns: ['id'],
+                        where: 'id = ?',
+                        whereArgs: [kPrimaryDeviceId]);
+                    if (local.isEmpty) {
+                      restoredWornOn = ['', '${w.toInt()}', '${ts.toInt()}'];
+                    } else {
+                      batch.rawUpdate(_adoptWearingSql,
+                          [w.toInt(), ts.toInt(), kPrimaryDeviceId]);
+                      if (++ops >= chunkOps) await flush();
+                    }
                   }
                   continue;
                 }
@@ -9131,6 +9150,14 @@ class LocalDb {
       }
     } finally {
       await src.close();
+    }
+    final wornOn = restoredWornOn;
+    if (wornOn != null) {
+      final prefs = await SharedPreferences.getInstance();
+      // A forgotten band's stash is a choice made on THIS install; it wins.
+      if (!prefs.containsKey(kPendingWornOnPref)) {
+        await prefs.setStringList(kPendingWornOnPref, wornOn);
+      }
     }
     // An import writes day_result rows with a raw batch.insert, deliberately
     // bypassing putDayResult (and therefore the curve-encode seam), so the rows

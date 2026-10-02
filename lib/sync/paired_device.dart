@@ -40,9 +40,10 @@ class PairedDevice {
   static const String _kGeneration = 'paired_generation';
 
   /// `[remoteId, wearing, wearing_set_ts]` of a forgotten band's explicit
-  /// wearing choice. NOT cleared by [clear]: forget-and-re-pair the same band
-  /// (the usual BLE fix) must not silently reset it to the wrist DEFAULT.
-  static const String _kWornOn = 'paired_worn_on';
+  /// wearing choice, or a restored one (remoteId `''`, any band). NOT cleared
+  /// by [clear]: forget-and-re-pair the same band (the usual BLE fix) must not
+  /// silently reset it to the wrist DEFAULT.
+  static const String _kWornOn = LocalDb.kPendingWornOnPref;
 
   final String remoteId; // BLE remote id (iOS: per-install UUID; Android: MAC)
   final String? serial;
@@ -198,7 +199,9 @@ class PairedDevice {
     // has — and `load()` heals FROM the mirror.
     if (epoch != _forgetEpoch) return;
     final worn = prefs.getStringList(_kWornOn);
-    if (worn != null && worn.length == 3 && worn[0] == remoteId) {
+    if (worn != null &&
+        worn.length == 3 &&
+        (worn[0] == remoteId || worn[0].isEmpty)) {
       final w = int.tryParse(worn[1]);
       final ts = int.tryParse(worn[2]);
       if (w != null && ts != null) await LocalDb.adoptDeviceWearing(w, ts);
