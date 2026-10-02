@@ -4816,6 +4816,9 @@ class AppState extends ChangeNotifier {
       return;
     }
     _alarmAutoRetried = true;
+    // Keep showing "waiting" while the re-send is in flight instead of
+    // flashing the warning between the two windows.
+    _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
     var rearmed = false;
     try {
       // gen5 made setAlarm return the armed instant (null = the write never
@@ -4827,7 +4830,11 @@ class AppState extends ChangeNotifier {
     }
     // The write itself never landed, so the one retry was not actually spent —
     // give it back rather than latching this alarm out of any future retry.
-    if (!rearmed) _alarmAutoRetried = false;
+    if (!rearmed) {
+      _alarmAutoRetried = false;
+      // End the window opened above so the warning shows now.
+      if (_savedAlarm == epoch && !_alarm.confirmed) _alarm.setAtMs = null;
+    }
     // dispose() ran while the write was in flight — do NOT create a timer it
     // no longer has any chance to cancel (it would keep poking a torn-down
     // engine on every fire).

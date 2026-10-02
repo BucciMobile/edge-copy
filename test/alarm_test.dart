@@ -283,6 +283,17 @@ void main() {
       expect(a.isUnconfirmed(6000), isTrue);
     });
 
+    test('default grace covers a slow strap, and a late 56 still confirms',
+        () {
+      final a = AlarmConfirmation()..set(1750000000, 0);
+      expect(a.isPending(12500), isTrue,
+          reason: 'event 56 can arrive well after the first few seconds');
+      expect(a.isUnconfirmed(30000), isTrue);
+      expect(a.onEvent(AlarmConfirmation.kEvtSet, 90000),
+          AlarmEffect.confirmed);
+      expect(a.isUnconfirmed(90000), isFalse);
+    });
+
     test('event 56 confirms (and clears pending/unconfirmed)', () {
       final a = AlarmConfirmation(graceMs: 6000);
       a.set(1750000000, 0);
