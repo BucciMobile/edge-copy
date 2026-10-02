@@ -655,10 +655,8 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
         bool overnight = true,
         Rising rising = Rising.neither}) {
       if (m.isEmpty) {
-        // German capitalises nouns, so the name goes in as written there.
         final s = StatusCard.forMetric(
-            l?.healthNoMetric(
-                    l.localeName.startsWith('de') ? name : name.toLowerCase()) ??
+            l?.healthNoMetric(nounInSentence(l, name)) ??
                 'No ${name.toLowerCase()}',
             m,
             why: whyAbsent ?? '', gap: overnight ? d.nightGap : null);
