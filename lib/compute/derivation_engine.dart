@@ -3159,11 +3159,19 @@ class DerivationEngine {
     // [_kFoldedDaysKey] for why this exists and why a legacy profile that
     // lacks it is discarded rather than trusted.
     final foldedDays = SleepProfilePolicy.foldedDays(profileJson);
-    final mayFold = SleepProfilePolicy.shouldFold(
-      alreadyFolded: foldedDays,
-      dayId: dayId,
-      hasOverride: override != null,
-    );
+    // A fold is once per day_id, ever, so it must not take a pass that staged
+    // the night while it was still going (the first light pass after 00:15
+    // sees an hour of it). The day re-stages until it finalizes, so a pass
+    // after the day's window has closed is always still to come.
+    final mayFold = SleepProfilePolicy.nightOver(
+          dataEdgeSec: await LocalDb.lastDecodedRecTs(),
+          dayEndSec: range.$2,
+        ) &&
+        SleepProfilePolicy.shouldFold(
+          alreadyFolded: foldedDays,
+          dayId: dayId,
+          hasOverride: override != null,
+        );
     // The habitual-midsleep prior needs 14 distinct days and this call carries
     // ~36 h of substrate, so without the STORED windows the prior can never
     // fire in production and every night is anchored to the 03:30 cold start.
