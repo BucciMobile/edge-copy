@@ -554,7 +554,7 @@
   "circadianDetailStillnessFootnote": "Jede Stunde ist der Median aus {lo}–{hi} Fünf-Minuten-Abschnitten, in denen du wirklich ruhig warst, über {days, plural, one{den letzten Tag} other{die letzten {days} Tage}} – nie nur heute. {drawn} von 24 Stunden hatten mindestens drei Abschnitte, der Rest bleibt leer. Kein Stresswert – Aufsetzen, ein warmer Raum oder ein Kaffee verändern ihn genauso stark.",
   "circadianDetailForecastTitle": "Wie der Tag voraussichtlich verläuft",
   "circadianDetailForecastFootnote": "Ohne Skala – nur der Verlauf zählt.",
-  "circadianDetailTroughText": "Das stärkste Tief liegt {troughLabel}, etwa von {start} bis {end}.",
+  "circadianDetailTroughText": "Der flachste Abschnitt liegt bei {troughLabel}, etwa von {start} bis {end}.",
   "circadianDetailPredictionDisclaimer": "Das ist eine Vorhersage, keine Messung. Das Band misst nicht, wie wach du bist, und kennt nur die letzte Nacht – ein Nickerchen, Kaffee oder alles andere, was heute passiert, fließt nie ein.",
   "circadianDetailAssumedPhaseNote": "Dein persönlicher Tageshöhepunkt ist noch nicht ermittelt, daher wird ein Durchschnittswert verwendet.",
   "circadianDetailNotADrivingCheck": "Das ist weder ein Test der Fahrtüchtigkeit noch ein Werkzeug für Schichtsicherheit, und es sagt nichts darüber aus, ob du beeinträchtigt bist.",
