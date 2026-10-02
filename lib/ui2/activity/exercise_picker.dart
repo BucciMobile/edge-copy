@@ -69,15 +69,24 @@ class _ExercisePickerState extends State<_ExercisePicker> {
     return out;
   }
 
-  List<ExerciseDef> _visible(String languageCode) {
+  List<ExerciseDef> _visible(String languageCode, AppLocalizations? l) {
     final needle = query.trim();
+    final q = needle.toLowerCase();
+    // the category and equipment on screen are translated; search those too
+    bool hit(ExerciseDef e) =>
+        e.matches(needle, languageCode) ||
+        (l != null &&
+            [
+              l.activityExerciseCategory(e.category),
+              for (final name in e.equipment) _equipment(l, name),
+            ].any((v) => v.toLowerCase().contains(q)));
     final category = filter == _common || filter == _all ? null : filter;
     // a highlighted category chip keeps narrowing the search
     if (needle.isNotEmpty || category != null) {
       return [
         for (final exercise in exerciseLibrary)
           if ((category == null || exercise.category == category) &&
-              exercise.matches(needle, languageCode))
+              hit(exercise))
             exercise,
       ];
     }
@@ -109,7 +118,7 @@ class _ExercisePickerState extends State<_ExercisePicker> {
     final p = P.of(context);
     final l = AppLocalizations.of(context);
     final languageCode = Localizations.localeOf(context).languageCode;
-    final visible = _visible(languageCode);
+    final visible = _visible(languageCode, l);
     return SafeArea(
       top: false,
       child: Padding(
@@ -277,7 +286,8 @@ class _ExercisePickerState extends State<_ExercisePicker> {
     final details = <String>[
       if (exercise.category.isNotEmpty)
         l?.activityExerciseCategory(exercise.category) ?? exercise.category,
-      if (exercise.equipment.isNotEmpty) exercise.equipment.take(2).join(', '),
+      if (exercise.equipment.isNotEmpty)
+        exercise.equipment.take(2).map((e) => _equipment(l, e)).join(', '),
     ].join(' · ');
     final sourceLabel =
         l?.activityExercisePickerSourceLabel(label) ??
@@ -339,3 +349,10 @@ class _ExercisePickerState extends State<_ExercisePicker> {
     );
   }
 }
+
+String _equipment(AppLocalizations? l, String name) =>
+    l?.activityExerciseEquipment(
+      name.replaceAll(RegExp('[^A-Za-z]'), ''),
+      name,
+    ) ??
+    name;

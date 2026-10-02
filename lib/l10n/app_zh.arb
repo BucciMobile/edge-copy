@@ -2014,6 +2014,7 @@
   "activityLiveChooseExerciseBody": "记录一组前，请先选择第一个动作。",
   "activityLiveChangeExercise": "更换动作",
   "activityExerciseCategory": "{category, select, Abs{腹部} Arms{手臂} Back{背部} Calves{小腿} Chest{胸部} Legs{腿部} Shoulders{肩部} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{杠铃} Bench{训练凳} Cablemachine{绳索器械} Dumbbell{哑铃} Gymmat{训练垫} Inclinebench{上斜凳} Kettlebell{壶铃} nonebodyweightexercise{自重} Pullupbar{单杠} SZBar{曲杠} other{{name}}}",
   "activityLiveAllowLocation": "允许定位",
   "activityLiveBestLabel": "最佳",
   "activityLiveBodyweightExcludedNote": "自重 — 不计入训练量",

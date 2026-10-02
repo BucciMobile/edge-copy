@@ -10534,6 +10534,18 @@
       }
     }
   },
+  "activityExerciseEquipment": "{key, select, Barbell{Barbell} Bench{Bench} Cablemachine{Cable machine} Dumbbell{Dumbbell} Gymmat{Gym mat} Inclinebench{Incline bench} Kettlebell{Kettlebell} nonebodyweightexercise{Bodyweight} Pullupbar{Pull-up bar} SZBar{SZ-Bar} other{{name}}}",
+  "@activityExerciseEquipment": {
+    "description": "Strength exercise equipment name in the picker row detail. key is the English name with non-letters removed; name is the English name, shown when there is no translation.",
+    "placeholders": {
+      "key": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "activityLiveAllowLocation": "Allow location",
   "@activityLiveAllowLocation": {
     "description": "Live measured session: fix action when location permission was denied."

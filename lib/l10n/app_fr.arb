@@ -2014,6 +2014,7 @@
   "activityLiveChooseExerciseBody": "Choisissez le premier exercice avant d’enregistrer une série.",
   "activityLiveChangeExercise": "Changer d’exercice",
   "activityExerciseCategory": "{category, select, Abs{Abdos} Arms{Bras} Back{Dos} Calves{Mollets} Chest{Pectoraux} Legs{Jambes} Shoulders{Épaules} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{Barre} Bench{Banc} Cablemachine{Poulie} Dumbbell{Haltère} Gymmat{Tapis} Inclinebench{Banc incliné} Kettlebell{Kettlebell} nonebodyweightexercise{Poids du corps} Pullupbar{Barre de traction} SZBar{Barre EZ} other{{name}}}",
   "activityLiveAllowLocation": "Autoriser la localisation",
   "activityLiveBestLabel": "Meilleur",
   "activityLiveBodyweightExcludedNote": "Poids du corps — exclu du volume",

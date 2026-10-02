@@ -2014,6 +2014,7 @@
   "activityLiveChooseExerciseBody": "Wähle die erste Übung aus, bevor du einen Satz erfasst.",
   "activityLiveChangeExercise": "Übung wechseln",
   "activityExerciseCategory": "{category, select, Abs{Bauch} Arms{Arme} Back{Rücken} Calves{Waden} Chest{Brust} Legs{Beine} Shoulders{Schultern} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{Langhantel} Bench{Bank} Cablemachine{Kabelzug} Dumbbell{Kurzhantel} Gymmat{Matte} Inclinebench{Schrägbank} Kettlebell{Kettlebell} nonebodyweightexercise{Körpergewicht} Pullupbar{Klimmzugstange} SZBar{SZ-Stange} other{{name}}}",
   "activityLiveAllowLocation": "Standort erlauben",
   "activityLiveBestLabel": "Bestwert",
   "activityLiveBodyweightExcludedNote": "Körpergewicht — nicht im Volumen enthalten",

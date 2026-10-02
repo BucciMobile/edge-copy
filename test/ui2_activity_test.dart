@@ -20,6 +20,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:openstrap_edge/data/local_repository.dart';
 import 'package:openstrap_edge/gps/gps_source.dart';
+import 'package:openstrap_edge/l10n/app_localizations.dart';
 import 'package:openstrap_edge/state/prefs.dart';
 import 'package:openstrap_edge/state/units_controller.dart';
 import 'package:openstrap_edge/ui2/activity/catalogue.dart';
@@ -1516,6 +1517,38 @@ void main() {
       expect(find.text('Hanging leg raise'), findsOneWidget);
       expect(find.text('Front Raises'), findsNothing,
           reason: 'a shoulders lift is not in the Abs filter');
+    });
+
+    testWidgets('search matches the translated category and equipment it shows',
+        (tester) async {
+      tester.view.physicalSize = const Size(390 * 3, 2400 * 3);
+      tester.view.devicePixelRatio = 3;
+      addTearDown(tester.view.reset);
+      addTearDown(LiveDraft.clear);
+
+      final a = activityByName('weight_training')!;
+      LiveDraft.begin(a, weightKg: 72.4);
+      await tester.pumpWidget(MaterialApp(
+        locale: const Locale('de'),
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: buildTheme(Brightness.light),
+        home: liveFor(a, weightKg: 72.4),
+      ));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(BigButton, 'Übung auswählen'));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'Rücken');
+      await tester.pumpAndSettle();
+      expect(find.text('Barbell row'), findsOneWidget,
+          reason: 'the chip says Rücken, so typing it finds Back lifts');
+      expect(find.text('Rücken · Langhantel'), findsWidgets);
+
+      await tester.enterText(find.byType(TextField), 'Kurzhantel');
+      await tester.pumpAndSettle();
+      expect(find.text('Incline DB press'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets(
