@@ -45,7 +45,7 @@ import '../../state/app_state.dart';
 import '../../state/units_controller.dart';
 import '../../theme/theme_switcher.dart' show themedRoute;
 import '../activity/day_strain.dart' show DayStrainDetail;
-import '../profile/alarm.dart' show AlarmArmState, AlarmDoor, alarmArmOf;
+import '../profile/alarm.dart' show AlarmArmState, alarmArmOf, alarmDoor;
 import '../profile/devices.dart' show formatDayTime;
 import '../profile/profile.dart';
 import '../ui2.dart';
@@ -1824,7 +1824,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
       if (isToday)
         if (alarmArmOfContext(c) case final (DateTime?, AlarmArmState) a) ...[
           const SizedBox(height: S.x3),
-          AlarmDoor(armedAt: a.$1, state: a.$2),
+          alarmDoor(c, a.$1, a.$2),
         ],
     ]));
   }

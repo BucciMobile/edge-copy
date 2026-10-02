@@ -69,28 +69,17 @@ enum AlarmArmState {
 
 /// Home's door onto the alarm: the next armed day and time plus its state,
 /// or "Set an alarm". A plain [detailLinkRow], not a card.
-class AlarmDoor extends StatelessWidget {
-  final DateTime? armedAt;
-  final AlarmArmState state;
-  final VoidCallback? onTap;
-
-  const AlarmDoor(
-      {super.key, this.armedAt, this.state = AlarmArmState.none, this.onTap});
-
-  @override
-  Widget build(BuildContext c) {
-    final l = AppLocalizations.of(c);
-    final at = armedAt;
-    return detailLinkRow(
-        c,
-        LucideIcons.alarmClock,
-        l?.alarmNavTitle ?? 'Alarm',
-        at == null
-            ? (l?.alarmSetAnAlarm ?? 'Set an alarm')
-            : '${AlarmScreenView._dayAndTime(c, at)} · '
-                '${AlarmScreenView._localizedStateLabel(c, state)}',
-        onTap ?? () => go(c, const AlarmScreen()));
-  }
+Widget alarmDoor(BuildContext c, DateTime? at, AlarmArmState state) {
+  final l = AppLocalizations.of(c);
+  return detailLinkRow(
+      c,
+      LucideIcons.alarmClock,
+      l?.alarmNavTitle ?? 'Alarm',
+      at == null
+          ? (l?.alarmSetAnAlarm ?? 'Set an alarm')
+          : '${AlarmScreenView._dayAndTime(c, at)} · '
+              '${AlarmScreenView._localizedStateLabel(c, state)}',
+      () => go(c, const AlarmScreen()));
 }
 
 class AlarmScreen extends StatelessWidget {

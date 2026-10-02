@@ -29,23 +29,19 @@ void main() {
   });
 
   group('the home door', () {
-    Future<void> pump(WidgetTester t, AlarmDoor door) => t.pumpWidget(
-        MaterialApp(home: Scaffold(body: door)));
+    Future<void> pump(WidgetTester t, DateTime? at, AlarmArmState s) =>
+        t.pumpWidget(MaterialApp(
+            home: Scaffold(body: Builder(builder: (c) => alarmDoor(c, at, s)))));
 
     testWidgets('no alarm offers to set one', (t) async {
-      await pump(t, AlarmDoor(onTap: () {}));
+      await pump(t, null, AlarmArmState.none);
       expect(find.text('Set an alarm'), findsOneWidget);
     });
 
     testWidgets('an armed alarm shows its day, time and real state',
         (t) async {
       // 2026-08-22 is a Saturday.
-      await pump(
-          t,
-          AlarmDoor(
-              armedAt: DateTime(2026, 8, 22, 7, 30),
-              state: AlarmArmState.unknown,
-              onTap: () {}));
+      await pump(t, DateTime(2026, 8, 22, 7, 30), AlarmArmState.unknown);
       expect(find.text('Sat 07:30 · Not confirmed'), findsOneWidget);
     });
   });
