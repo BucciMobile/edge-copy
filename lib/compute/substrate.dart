@@ -1198,6 +1198,10 @@ List<PhysioDay> calendarDays(
             rrMs: rrMsSeg,
             rrTsMs: rrTsSeg,
             habitualMidsleepSec: habitualMidsleepSec,
+            // Gen5/MG band envelope, positional 1:1 with accelSlice: may END
+            // the auto night at the band's own last SLEEP (AUTO path only —
+            // never the override or the HR-led fallback below).
+            bandSleepState: sub.bandSleepStateSlice(loS, hiS),
           );
         } else {
           // Not an error and not "no sleep" — just no accel evidence. Fall
@@ -1233,10 +1237,15 @@ List<PhysioDay> calendarDays(
 
       if (s.present && s.window != null) {
         final offSec = s.window!.offsetMs! ~/ 1000;
+        // Which day owns the night is decided on the UNTRIMMED end, so the band
+        // rule moves the wake time but never the night's day (each day searches a
+        // slice clipped at its own midnight and would otherwise see two different
+        // tails — a night could be claimed by both days or by neither).
+        final ownerSec = offSec + (s.bandOffsetTrimSec ?? 0);
         // Auto/fallback: attribute only if the wake lands in this calendar day.
         // Manual/confirmed: trust the user — attribute to the day they set it on.
         final userSet = ov != null;
-        if (userSet || (offSec >= dayStart && offSec < dayEnd)) {
+        if (userSet || (ownerSec >= dayStart && ownerSec < dayEnd)) {
           seg = s;
           sleepLo = loS + s.window!.onsetIdx;
           sleepHi = loS + s.window!.offsetIdx;
