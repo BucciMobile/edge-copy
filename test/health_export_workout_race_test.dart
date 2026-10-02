@@ -2,7 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openstrap_edge/compute/derivation_engine.dart' show kAlgoVersion;
+import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// Records the ORDER platform-channel calls land in. The bug this guards is
 /// exportAll's day-wide WORKOUT delete-then-write racing exportWorkout's
@@ -107,6 +111,52 @@ void main() {
       expect(await first, isFalse, reason: 'uncleared window, no write');
       expect(await second, isTrue);
       expect(calls, ['delete', 'delete', 'writeWorkoutData']);
+    });
+
+    test('one hung delete ends the exportAll pass instead of every type of '
+        'every day timing out in turn', () async {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+      LocalDb.dbName = 'openstrap_health_hung_store_test.db';
+      final dir = await databaseFactory.getDatabasesPath();
+      await LocalDb.close();
+      await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
+      addTearDown(() async {
+        await LocalDb.close();
+        await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
+      });
+      for (final day in ['2026-08-25', '2026-08-26']) {
+        await LocalDb.putDayResult(
+          dayId: day,
+          algoVersion: kAlgoVersion,
+          payloadJson: '{"scalars":{}}',
+          windowJson: '{}',
+        );
+      }
+
+      var deletes = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('flutter_health'),
+              (call) async {
+        if (call.method == 'delete') {
+          deletes++;
+          return Completer<bool>().future; // locked store: never answers
+        }
+        return true;
+      });
+      store = _OrderingHealthStore();
+      final exporter =
+          HealthExporter(deleteTimeout: const Duration(milliseconds: 20));
+
+      await exporter.exportAll();
+      expect(deletes, 1,
+          reason: 'the first timeout marks the store hung for the rest of '
+              'the lock hold; each further delete would hold the lock '
+              'another full timeout');
+
+      // The next hold starts clean, so a workout export still tries.
+      expect(await exporter.exportWorkout(_session(0)), isFalse);
+      expect(deletes, 2);
     });
   });
 }

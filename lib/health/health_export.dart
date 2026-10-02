@@ -298,6 +298,13 @@ class HealthExporter {
   /// next pass retries.
   final Duration _deleteTimeout;
 
+  /// Set when a delete timed out during the current lock hold. A store that
+  /// hangs one delete hangs every one after it (the locked-phone case), so
+  /// the rest of the hold skips the native call instead of burning another
+  /// [_deleteTimeout] per type per day, and exportAll stops walking days.
+  /// Cleared at the start of every [_workoutLock] hold.
+  bool _storeHung = false;
+
   HealthExporter({
     HealthConnectHeartRateWriter? androidHeartRate,
     @visibleForTesting Duration deleteTimeout = const Duration(seconds: 30),
@@ -350,13 +357,14 @@ class HealthExporter {
       if (prefs.getBool(kHealthSyncPref) != true) return;
       await shared._ensureConfigured();
       if (await shared._androidUnavailable() != null) return;
-      await shared._workoutLock.run(
-        () => shared._deleteOwnSamples(
+      await shared._workoutLock.run(() {
+        shared._storeHung = false;
+        return shared._deleteOwnSamples(
           HealthDataType.WORKOUT,
           DateTime.fromMillisecondsSinceEpoch(startTs * 1000),
           DateTime.fromMillisecondsSinceEpoch(endTs * 1000),
-        ),
-      );
+        );
+      });
     } catch (e) {
       debugPrint('[health] deleteWorkoutWindow: $e');
     }
@@ -438,6 +446,7 @@ class HealthExporter {
     _stepsPurgedThrough ??= await LocalDb.getCursor(_kStepsPurgeCursor) ?? '';
     final through = _stepsPurgedThrough!;
     if (through.isNotEmpty && date.compareTo(through) <= 0) return;
+    if (_storeHung) return;
     try {
       await _health
           .delete(
@@ -449,6 +458,7 @@ class HealthExporter {
       _stepsPurgedThrough = date;
       await LocalDb.setCursor(_kStepsPurgeCursor, date);
     } catch (e) {
+      if (e is TimeoutException) _storeHung = true;
       // Leave the cursor where it is so the next pass retries this day.
       debugPrint('[health] purge legacy steps $date: $e');
     }
@@ -465,6 +475,7 @@ class HealthExporter {
     DateTime start,
     DateTime end,
   ) async {
+    if (_storeHung) return false;
     try {
       return healthDeleteClearedRange(
         deleted: await _health
@@ -473,6 +484,7 @@ class HealthExporter {
         ios: isApple,
       );
     } catch (e) {
+      if (e is TimeoutException) _storeHung = true;
       debugPrint('[health] delete ${type.name}: $e');
       return false;
     }
@@ -641,6 +653,7 @@ class HealthExporter {
     await _ensureConfigured();
     if (await _androidUnavailable() != null) return 0; // HC missing/outdated
     return _workoutLock.run(() async {
+    _storeHung = false;
     try {
       await ensureHealthSleepExportEpoch(
         getCursor: LocalDb.getCursor,
@@ -784,6 +797,9 @@ class HealthExporter {
         var newCursor = cursor;
         var prefixContiguous = true; // still extending the finalized prefix?
         for (final day in pendingDays.reversed) {
+          // A hung store fails every later day too; stop before they burn an
+          // attempt each. Unvisited days stay pending for the next pass.
+          if (_storeHung) break;
           final date = day.date;
           final finalized = day.finalized;
           if (day.skipped) {
@@ -1328,6 +1344,7 @@ class HealthExporter {
     final en = (session['end_ts'] as num?)?.toInt();
     if (st == null || en == null || en <= st) return false;
     return _workoutLock.run(() async {
+    _storeHung = false;
     try {
       await _ensureConfigured();
       if (await _androidUnavailable() != null) return false;
