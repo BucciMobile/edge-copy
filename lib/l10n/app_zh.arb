@@ -902,6 +902,7 @@
   "investigateWhichSensorCounted": "哪个传感器计数",
   "investigateStrapPedometer": "腕带 · 100 Hz 计步器",
   "investigateStrapOnChipCounter": "腕带 · 芯片内置计数器",
+  "investigateStrapCounterFactor": "芯片计数器 · 手机校准系数",
   "investigatePhonePedometer": "手机 · 计步器",
   "investigateDayTotal": "当日总计",
   "investigateStrapChipReported": "腕带芯片上报值",

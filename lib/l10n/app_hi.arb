@@ -902,6 +902,7 @@
   "investigateWhichSensorCounted": "किस सेंसर ने गिनती की",
   "investigateStrapPedometer": "बैंड · 100 Hz पेडोमीटर",
   "investigateStrapOnChipCounter": "बैंड · ऑन-चिप काउंटर",
+  "investigateStrapCounterFactor": "ऑन-चिप काउंटर · फ़ोन फ़ैक्टर",
   "investigatePhonePedometer": "फ़ोन · पेडोमीटर",
   "investigateDayTotal": "दिन का कुल",
   "investigateStrapChipReported": "बैंड चिप द्वारा दर्ज",

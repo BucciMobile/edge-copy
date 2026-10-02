@@ -4,7 +4,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:openstrap_edge/compute/derivation_engine.dart';
+import 'package:openstrap_edge/compute/substrate.dart';
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/data/live_coverage_policy.dart';
 import 'package:openstrap_edge/data/step_calibration.dart';
 
 void main() {
@@ -128,6 +131,53 @@ void main() {
     expect(rows.first['day'], '2026-01-02'); // DESC
     expect(rows.first['reference_steps'], isNull);
     expect(rows.last['reference_steps'], 9000); // replaced, not doubled
+    await LocalDb.close();
+  });
+
+  test('days without a phone reference never evict the learned factor',
+      () async {
+    LocalDb.dbName = 'step_cal_evict.db';
+    final dir = await databaseFactory.getDatabasesPath();
+    await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
+    await LocalDb.instance;
+    const t0 = 1_700_000_000;
+    // gen5 counter rising 1 tick/s for 2000 s.
+    final sub = Substrate(
+      deviceFamily: 'gen5',
+      tsSec: [for (var i = 0; i < 2000; i++) t0 + i],
+      hr: List<int>.filled(2000, 60),
+      rrTsMs: const [],
+      rrMs: const [],
+      ax: List<double>.filled(2000, 0),
+      ay: List<double>.filled(2000, 0),
+      az: List<double>.filled(2000, 1),
+      spo2Red: List<int>.filled(2000, 0),
+      spo2Ir: List<int>.filled(2000, 0),
+      skinTemp: List<int>.filled(2000, 0),
+      skinContact: List<int>.filled(2000, 0),
+      stepCount: [for (var i = 0; i < 2000; i++) i],
+    );
+    final engine = DerivationEngine();
+    const phone = [
+      CoverageSpan(startTs: t0, endTs: t0 + 1999, steps: 2800, fromBand: false),
+    ];
+    for (var d = 1; d <= 3; d++) {
+      await engine.updateStepCalibration('2026-01-0$d', sub, Wearing.wrist,
+          phoneSpans: phone);
+    }
+    final learned = await LocalDb.stepCalibrationProfile('gen5', Wearing.wrist);
+    expect(learned!.isCalibrated, isTrue);
+    // A month without the phone: nothing to pair, so nothing banked.
+    for (var d = 1; d <= 30; d++) {
+      await engine.updateStepCalibration(
+          '2026-02-${d.toString().padLeft(2, '0')}', sub, Wearing.wrist,
+          phoneSpans: const []);
+    }
+    final after = await LocalDb.stepCalibrationProfile('gen5', Wearing.wrist);
+    expect(after!.factor, learned.factor);
+    expect(after.nDays, 3);
+    expect(
+        (await LocalDb.stepCalibrationDays('gen5', Wearing.wrist)).length, 3);
     await LocalDb.close();
   });
 }

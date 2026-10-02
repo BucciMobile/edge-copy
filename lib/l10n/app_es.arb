@@ -902,6 +902,7 @@
   "investigateWhichSensorCounted": "Qué sensor contó",
   "investigateStrapPedometer": "banda · podómetro de 100 Hz",
   "investigateStrapOnChipCounter": "banda · contador integrado",
+  "investigateStrapCounterFactor": "contador integrado · factor del teléfono",
   "investigatePhonePedometer": "teléfono · podómetro",
   "investigateDayTotal": "total del día",
   "investigateStrapChipReported": "chip de la banda reportó",

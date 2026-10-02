@@ -305,6 +305,9 @@ void main() {
       expect(alone['value'], 933);
       expect(alone['band_measured'], 622);
       expect(alone['counter_calibration'], {'factor': 1.5, 'n_days': 4});
+      // The chip's row says what the chip counted; the factor is separate.
+      expect(alone['by_source'], {'strap_counter': 622});
+      expect(alone['note'], contains('scaled by 1.50 from 4 days'));
       final (withPhone, _) = _derive(gen5,
           liveStepsReal: 18856, liveStepsFromStrap: 0, counterProfile: bicep);
       expect(withPhone['value'], 18856);

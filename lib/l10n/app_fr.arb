@@ -902,6 +902,7 @@
   "investigateWhichSensorCounted": "Quel capteur a compté",
   "investigateStrapPedometer": "bracelet · podomètre 100 Hz",
   "investigateStrapOnChipCounter": "bracelet · compteur intégré",
+  "investigateStrapCounterFactor": "compteur intégré · facteur du téléphone",
   "investigatePhonePedometer": "téléphone · podomètre",
   "investigateDayTotal": "total du jour",
   "investigateStrapChipReported": "puce du bracelet a indiqué",

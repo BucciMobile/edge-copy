@@ -4590,6 +4590,10 @@
   "@investigateStrapOnChipCounter": {
     "description": "Step source row: strap's on-chip step counter"
   },
+  "investigateStrapCounterFactor": "on-chip counter · phone factor",
+  "@investigateStrapCounterFactor": {
+    "description": "Step source row: factor learned against the phone that scaled the on-chip counter"
+  },
   "investigatePhonePedometer": "phone · pedometer",
   "@investigatePhonePedometer": {
     "description": "Step source row: phone pedometer"

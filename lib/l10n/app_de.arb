@@ -902,6 +902,7 @@
   "investigateWhichSensorCounted": "Welcher Sensor gezählt hat",
   "investigateStrapPedometer": "Band · 100-Hz-Schrittzähler",
   "investigateStrapOnChipCounter": "Band · integrierter Zähler",
+  "investigateStrapCounterFactor": "integrierter Zähler · Telefon-Faktor",
   "investigatePhonePedometer": "Telefon · Schrittzähler",
   "investigateDayTotal": "Tagesgesamt",
   "investigateStrapChipReported": "Band-Chip gemeldet",

@@ -4877,7 +4877,7 @@ class DerivationEngine {
     // phone-only days: on a mixed day the phone spans are what is left after
     // band spans claimed their windows, not an independent reference.
     if (finalized && counterWearing != 0 && !liveSteps.mixed) {
-      await _updateStepCalibration(
+      await updateStepCalibration(
         day.date,
         daySub,
         counterWearing,
@@ -4892,7 +4892,8 @@ class DerivationEngine {
   /// Bank one day's (phone steps, counter ticks) pair for the (family,
   /// wearing) profile and refit it over the banked days. Never throws into
   /// the derive.
-  Future<void> _updateStepCalibration(
+  @visibleForTesting
+  Future<void> updateStepCalibration(
     String date,
     Substrate daySub,
     int wearing, {
@@ -4920,11 +4921,20 @@ class DerivationEngine {
         reference += phoneSpans[i].steps;
         counted += t;
       }
+      // Only bank a day the fit would admit. The refit reads the last 30
+      // rows, so banking no-phone days would push the learned days out of
+      // that window and reset the factor on exactly the days it is used.
+      if (!stepCalibrationDayAdmissible(StepCalibrationDay(
+        referenceSteps: reference,
+        counterTicks: counted,
+      ))) {
+        return;
+      }
       await LocalDb.putStepCalibrationDay(
         day: date,
         deviceFamily: family,
         wearing: wearing,
-        referenceSteps: reference > 0 ? reference : null,
+        referenceSteps: reference,
         counterTicks: counted,
       );
       final rows = await LocalDb.stepCalibrationDays(family, wearing);
@@ -6417,6 +6427,7 @@ class DerivationEngine {
     final useBand =
         liveStepsReal <= 0 && calibratedBand != null && calibratedBand > 0;
     final steps = useBand ? calibratedBand : liveStepsReal;
+    final calibrated = useBand && profile != null && profile.isCalibrated;
     final haveRealSteps = steps > 0;
     if (haveRealSteps) {
       scMap?['steps'] = steps.toDouble();
@@ -6432,7 +6443,7 @@ class DerivationEngine {
       'band_measured': rawBand,
       if (counter != null && wearing != 0)
         'counter_wearing': wearingName(wearing),
-      if (useBand && profile != null && profile.isCalibrated)
+      if (calibrated)
         'counter_calibration': <String, dynamic>{
           'factor': profile.factor,
           'n_days': profile.nDays,
@@ -6449,8 +6460,10 @@ class DerivationEngine {
       // sensor was there and counted nothing", which is a different claim.
       'by_source': haveRealSteps
           ? <String, int>{
+              // What the chip counted, not the scaled value: the factor is
+              // in `counter_calibration`.
               if (useBand)
-                'strap_counter': steps
+                'strap_counter': rawBand!
               else ...{
                 if (strap > 0) 'strap': strap,
                 if (phone > 0) 'phone': phone,
@@ -6494,6 +6507,9 @@ class DerivationEngine {
               ? 'the strap\'s own on-chip pedometer, summed from its cumulative '
                   'counter; wrapped and reset boundaries contribute nothing '
                   'rather than a guess'
+                  '${calibrated ? '; scaled by ${profile.factor.toStringAsFixed(2)} '
+                      'from ${profile.nDays} days your phone counted alongside '
+                      'it' : ''}'
               : (strap > 0 && phone > 0)
                   ? 'counted over measured windows only, each window by the '
                       'better sensor that was actually recording it — the '
