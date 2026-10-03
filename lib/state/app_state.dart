@@ -6061,6 +6061,10 @@ class AppState extends ChangeNotifier {
     String type = 'other',
   }) {
     if (activeWorkout != null) return;
+    // A new session owns no draft yet. One left in Prefs belongs to a session
+    // that ended without clearing it (finalized as stale on relaunch), and its
+    // pause would hold this session's clock. Setup opens the fresh one after.
+    LiveDraft.clear();
     final start = DateTime.now();
     final id = workoutId ?? 'w${start.millisecondsSinceEpoch}';
     _workoutRawBase = _liveRaw;
@@ -6497,6 +6501,9 @@ class AppState extends ChangeNotifier {
     ScreenWake.releaseOwner('workout');
     _deriveScheduler.setWorkoutActive(false);
     final w = activeWorkout!;
+    // Off the clock, not the last tick: a session finished while still paused
+    // after a relaunch has never ticked, and its elapsed is still zero.
+    w.elapsed = _sessionClock(w, DateTime.now());
     // Nullable for the same reason `steps` below is: an unanchored profile
     // means this session was never costed, and a 0 in the column reads as
     // "burned nothing" rather than "not measured".
@@ -6802,6 +6809,16 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Wall time since start minus every pause, the in-progress one included —
+  /// the same clock the live screen's draft shows.
+  Duration _sessionClock(LiveWorkoutState w, DateTime now) {
+    final d = LiveDraft.current;
+    final inPause = d?.pausedAt == null ? 0 : now.difference(d!.pausedAt!).inSeconds;
+    final v = now.difference(w.startTime) -
+        Duration(seconds: (d?.pausedSec ?? 0) + inPause);
+    return v.isNegative ? Duration.zero : v;
+  }
+
   void _tickWorkout() {
     final w = activeWorkout;
     if (w == null) return;
@@ -6809,10 +6826,16 @@ class AppState extends ChangeNotifier {
     // Pause is held by the live screen's draft. While paused the clock and
     // every tally (zones, strain, calories, the idle watch) hold too, so the
     // saved duration_min and the history row match the summary's clock.
-    final draft = LiveDraft.current;
-    if (draft?.pausedAt != null) return;
-    w.elapsed = DateTime.now().difference(w.startTime) -
-        Duration(seconds: draft?.pausedSec ?? 0);
+    // The clock is set BEFORE the pause return: a session that comes back
+    // paused after a relaunch starts at elapsed 0 and would otherwise keep it.
+    final now = DateTime.now();
+    w.elapsed = _sessionClock(w, now);
+    if (LiveDraft.current?.pausedAt != null) {
+      // Being paused is the user acting on the session, not forgetting it:
+      // the quiet stretch restarts at resume rather than counting the pause.
+      w.idleWatch.hold(now);
+      return;
+    }
     // [liveHr], not `device.liveHr`: a reading that is stale or arriving from a
     // band that has dropped is NOT a measurement of this second, and billing it
     // into the peak, the per-zone seconds and (through accrueHr) strain and
