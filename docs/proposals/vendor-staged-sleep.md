@@ -8,7 +8,10 @@ Status: open question for the owner. Nothing here is implemented.
    enforced by `test/observation_isolation_test.dart`). A vendor hypnogram
    banked as observations would be read back into the pipeline.
 2. `InputSignal` names inputs, never outputs (`lib/ble/adapters/signals.dart`).
-   A vendor hypnogram is a vendor output.
+   Vendor-computed numbers already have a class there, `vendorScalars`, but
+   it is scalars only and defined as never an input to our derivations. A
+   vendor hypnogram is an epoch series, and this proposal would feed it into
+   the sleep window, so it fits neither rule.
 
 ## The idea
 
@@ -31,8 +34,9 @@ cross-checked against our staging night by night. Agreement is not
 validation (both can be wrong the same way); only PSG validates either.
 
 Our own staging is not a high bar: on DREAMT the pre-#34 rules scored
-kappa 0.036 and the current rules 0.132 held-out (analytics
-`cardio_stager.dart`).
+kappa 0.036 across all 99 PSG-labelled nights, and the current rules 0.132
+on 49 held-out subjects (analytics `cardio_stager.dart`). Different splits,
+so not a like-for-like comparison, but both are low.
 
 The user override keeps priority. A vendor window the user corrects is
 corrected through the existing `sleep_override` flow in `sleep_detail.dart`.
