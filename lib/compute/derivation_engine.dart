@@ -31,8 +31,6 @@ import 'package:flutter/foundation.dart';
 import 'findings.dart';
 import 'nap_edits.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_performance/firebase_performance.dart';
 
 import '../ble/adapters/signals.dart';
 import '../data/coverage_resolver.dart';
@@ -43,6 +41,7 @@ import '../notify/fired_keys.dart';
 import '../notify/notification_center.dart';
 import '../notify/notification_event.dart';
 import '../notify/tap_router.dart' show workoutSuggestionRoute;
+import '../telemetry/firebase_bridge.dart';
 import '../telemetry/telemetry_service.dart';
 import 'crossday_pipeline.dart';
 import 'derive_pacing.dart';
@@ -1929,10 +1928,10 @@ const String kAnalyticsPin = '0441ef9e6fc6d5681c309ce6341911285e829f20';
 // calls. NO kAlgoVersion bump: ECG is not a derived `day_result`/
 // `metric_series` output, it is its own store (`ecg_reading` etc., schema
 // v54) with nothing feeding the existing metrics.
-// REPIN: protocol oura sleep-phase decoder (#71) @ a41b174, on top of bc7d8d0.
+// REPIN: protocol oura sleep-phase decoder (#71 merge) @ f04931b, on top of bc7d8d0.
 // NO kAlgoVersion bump: the stage minutes land in `observation`, which no
 // derivation reads.
-const String kProtocolPin = 'a41b174d2210a89e38efb4b74bd39c6487259923';
+const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 
 // Fold idempotency, the minimum-nights warm-up, and legacy-payload handling
 // all live in SleepProfilePolicy (pure, unit-tested) — see
@@ -2596,15 +2595,14 @@ class DerivationEngine {
       ..['concurrency'] = _deriveConcurrency
       ..['last_error'] = null;
       
-    Trace? runTrace;
+    FirebaseTraceHandle? runTrace;
     try {
       // Heavy/force passes only. Light passes run many times a day (including
       // all night in the background), and each trace is buffered + eventually
       // uploaded — periodic radio wakeups from a local-first app, for timings
       // the _diag map already captures locally.
-      if (Firebase.apps.isNotEmpty && (heavy || force)) {
-        runTrace = FirebasePerformance.instance.newTrace('derivation_engine_run');
-        await runTrace.start();
+      if (FirebaseBridge.isInitialized && (heavy || force)) {
+        runTrace = await FirebaseBridge.startTrace('derivation_engine_run');
         runTrace.putAttribute('mode', force ? 'force' : (heavy ? 'heavy' : 'light'));
       }
     } catch (_) {}

@@ -256,9 +256,9 @@ dependencies:
       # fixes, unrelated but already an ancestor). Verified present:
       # `git show bc7d8d0:lib/src/labrador.dart | grep 'class LabradorR17'`.
       #
-      # REPIN: protocol #71 (oura `decodeSleepPhases`) @ a41b174, on top of
+      # REPIN: protocol #71 merge (oura `decodeSleepPhases`) @ f04931b, on top of
       # bc7d8d0.
-      ref: a41b174d2210a89e38efb4b74bd39c6487259923
+      ref: f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510
   openstrap_analytics:
     git:
       url: https://github.com/OpenStrap/analytics.git
