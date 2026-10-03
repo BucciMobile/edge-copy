@@ -4436,13 +4436,34 @@ class LocalDb {
   }
 
   /// Upsert an auto-detected workout suggestion (id = "$date:$startSec").
+  /// A bout caught mid-workout comes back with the same start and a later end
+  /// on the next pass, so the detected span refreshes; `dismissed` and
+  /// `created_at` stay as the first insert left them. INSERT OR IGNORE +
+  /// UPDATE, not UPSERT (minSdk 26 ships SQLite 3.18, see [upsertDevice]).
   static Future<void> putWorkoutSuggestion(Map<String, dynamic> row) async {
     final db = await instance;
-    await db.insert(
-      'workout_suggestions',
-      row,
-      conflictAlgorithm: ConflictAlgorithm.ignore,
-    );
+    await db.transaction((txn) async {
+      await txn.insert(
+        'workout_suggestions',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      await txn.update(
+        'workout_suggestions',
+        {
+          for (final k in const [
+            'end_ts',
+            'avg_bpm',
+            'peak_bpm',
+            'duration_min',
+            'sport',
+          ])
+            if (row.containsKey(k)) k: row[k],
+        },
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    });
   }
 
   /// Active (not-yet-dismissed, not-yet-confirmed) suggestions, newest first.
