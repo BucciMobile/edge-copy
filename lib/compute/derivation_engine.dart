@@ -3988,12 +3988,18 @@ class DerivationEngine {
     return [
       for (final dayId in rawDayIds)
         if (_localNextDayLabelToSec(dayId) >= cutoffSec &&
-            (prunedBeforeSec == null ||
-                _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec >=
-                    prunedBeforeSec))
+            !windowTruncatedByPrune(dayId, prunedBeforeSec))
           dayId,
     ]..sort();
   }
+
+  /// Whether [dayId]'s derive window ([_targetDayWindow], from the previous
+  /// noon) starts below [prunedBeforeSec], i.e. part of its night is gone.
+  @visibleForTesting
+  static bool windowTruncatedByPrune(String dayId, int? prunedBeforeSec) =>
+      prunedBeforeSec != null &&
+      _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec <
+          prunedBeforeSec;
 
   /// A stable, cheap signature of the CURRENT rolling baseline — the same inputs
   /// the readiness/illness baselines fold over. We take the trailing
@@ -4360,14 +4366,23 @@ class DerivationEngine {
     // `partial` row was considered instead, but `partial` still gets written
     // to `day_result` and would still shadow the better older row for
     // day-detail reads; declining is what actually protects it.
+    //
+    // Same decline when the prune has cut into this day's window: the midnight
+    // cut keeps the oldest kept day's own rows but drops the evening half of
+    // its night, so sleepSub is non-empty and the scalars come back from a
+    // partial night. Every path (algo bump, force, override, rescan) lands here.
     if (!producedNothing &&
-        nightSubstrateRegressed(
-          sleepSubEmpty: sleepSub.isEmpty,
-          nightScalarsNull: scMap == null ||
-              (scMap['rhr'] == null &&
-                  scMap['rmssd'] == null &&
-                  scMap['readiness'] == null),
-        )) {
+        (nightSubstrateRegressed(
+              sleepSubEmpty: sleepSub.isEmpty,
+              nightScalarsNull: scMap == null ||
+                  (scMap['rhr'] == null &&
+                      scMap['rmssd'] == null &&
+                      scMap['readiness'] == null),
+            ) ||
+            windowTruncatedByPrune(
+              day.date,
+              await LocalDb.getCursorInt(_prunedBeforeCursor),
+            ))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
           (existingNight['rhr'] != null ||
@@ -4376,7 +4391,7 @@ class DerivationEngine {
       if (existingHadNight) {
         _log('derive ${day.date}: sleep-window substrate pruned out from '
             "under a day that already had real night scalars — kept the "
-            'existing result rather than nulling the readiness baseline '
+            'existing result rather than overwriting the readiness baseline '
             '(edge#305)');
         return;
       }
