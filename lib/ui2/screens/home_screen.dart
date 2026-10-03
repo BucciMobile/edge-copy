@@ -1620,6 +1620,12 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
               onFix: sync == null ? null : () => _tapSync(sync),
             );
           }),
+        // The alarm lives on AppState too, so a load failure must not hide it.
+        if (_day == null || _day == todayLabel())
+          if (alarmArmOfContext(c) case final (DateTime?, AlarmArmState) a) ...[
+            const SizedBox(height: S.x3),
+            alarmDoor(c, a.$1, a.$2),
+          ],
       ]));
     }
 
