@@ -87,15 +87,22 @@ enum AccessorySetup {
 
       case "showPicker":
         if #available(iOS 18.0, *) {
-          // No argument (today's only caller) = today's behaviour exactly.
-          let addAnother = (call.arguments as? Bool) ?? false
-          Impl.shared.showPicker(addAnother: addAnother) { res in
+          let reply: (Result<String, Impl.PickerError>) -> Void = { res in
             switch res {
             case .success(let id): result(id)
             case .failure(let err):
               result(FlutterError(code: "ask_picker", message: err.message, details: nil))
             }
           }
+          // A `{"services": [...]}` map is a SENSOR picker (see `showSensorPicker`). A Bool
+          // or no argument is the band picker, byte-identical to before.
+          if let args = call.arguments as? [String: Any],
+             let services = args["services"] as? [String] {
+            Impl.shared.showSensorPicker(services: services, reply)
+            return
+          }
+          let addAnother = (call.arguments as? Bool) ?? false
+          Impl.shared.showPicker(addAnother: addAnother, reply)
         } else {
           result(FlutterError(code: "unavailable",
                               message: "AccessorySetupKit requires iOS 18", details: nil))
@@ -162,10 +169,36 @@ private final class Impl {
     }
   }
 
-  /// Every provisioned accessory's uppercased CoreBluetooth UUID, in session order.
-  /// `session.accessories` is an ARRAY — one entry per accessory the user has granted.
-  private var provisionedIdList: [String] {
+  /// The declared services that belong to a SENSOR, not a band — Info.plist's
+  /// `OSAskSensorServices`, generated from `kAskPickerSensors`. Uppercased.
+  private var sensorServices: Set<String> {
+    let list = Bundle.main.infoDictionary?["OSAskSensorServices"] as? [String] ?? []
+    return Set(list.map { $0.uppercased() })
+  }
+
+  /// The service the accessory was provisioned under, uppercased, or nil.
+  private func service(of accessory: ASAccessory) -> String? {
+    accessory.descriptor.bluetoothServiceUUID?.uuidString.uppercased()
+  }
+
+  /// Every provisioned accessory's uppercased CoreBluetooth UUID, sensors included, in
+  /// session order. `session.accessories` is an ARRAY — one entry per accessory granted.
+  private var allIdList: [String] {
     session.accessories.compactMap { $0.bluetoothIdentifier?.uuidString.uppercased() }
+  }
+
+  /// Every provisioned BAND's uppercased CoreBluetooth UUID, in session order.
+  ///
+  /// SENSORS ARE LEFT OUT, and every reader depends on that: `provisionedId()` is how
+  /// Dart decides a WHOOP is provisioned, and the band picker's early return below hands
+  /// `known.first` back as the band to connect to. A ring paired first would otherwise
+  /// come back as the user's WHOOP.
+  private var provisionedIdList: [String] {
+    let sensors = sensorServices
+    return session.accessories.compactMap { a in
+      if let svc = service(of: a), sensors.contains(svc) { return nil }
+      return a.bluetoothIdentifier?.uuidString.uppercased()
+    }
   }
 
   /// Returns the uppercased UUIDs of the already-provisioned accessories (possibly empty).
@@ -185,6 +218,7 @@ private final class Impl {
                   _ completion: @escaping (Result<String, PickerError>) -> Void) {
     ensureActivated()
     let known = provisionedIdList
+    let knownAll = allIdList
     // Already provisioned and not explicitly adding another? Don't re-show the picker —
     // just return the known id.
     //
@@ -232,7 +266,11 @@ private final class Impl {
                                  descriptor: descriptor)
     }
     let info = Bundle.main.infoDictionary ?? [:]
-    let services = info["NSAccessorySetupBluetoothServices"] as? [String] ?? []
+    // Sensor services are declared in the same array (Apple requires every criterion to
+    // be) but each has a picker of its own — see `showSensorPicker`.
+    let sensors = sensorServices
+    let services = (info["NSAccessorySetupBluetoothServices"] as? [String] ?? [])
+      .filter { !sensors.contains($0.uppercased()) }
     let labels = info["OSBandLabels"] as? [String: String] ?? [:]
     var items = services.map { svc in
       makeItem(labels[svc.uppercased()] ?? "Band") {
@@ -258,7 +296,46 @@ private final class Impl {
     // with a service UUID.
 
     pickerResult = completion
-    present(items, known: known, allowGen4Retry: true)
+    present(items, known: knownAll, fallback: { self.provisionedIdList.first },
+            allowGen4Retry: true)
+  }
+
+  /// The picker for ONE notify-class sensor (`kAskPickerSensors`), filtered to [services].
+  ///
+  /// WHY: with `NSAccessorySetupKitSupports` declared, Core Bluetooth only reaches
+  /// accessories the user approved in an ASK picker, so a sensor's ordinary scan finds
+  /// nothing (#371/#372). The returned id is the sensor's CoreBluetooth UUID and goes
+  /// straight to the existing Dart pairing step.
+  ///
+  /// Already approved → its id comes back with no sheet, like the band picker's early
+  /// return. Every service must be declared under `OSAskSensorServices`; anything else
+  /// is refused here rather than handed to ASK, whose descriptor validation traps.
+  func showSensorPicker(services: [String],
+                        _ completion: @escaping (Result<String, PickerError>) -> Void) {
+    ensureActivated()
+    let wanted = Set(services.map { $0.uppercased() })
+    guard !wanted.isEmpty, wanted.isSubset(of: sensorServices) else {
+      completion(.failure(PickerError(
+        message: "That sensor is not declared for the iOS pairing sheet.")))
+      return
+    }
+    if let existing = session.accessories.first(where: { a in
+      guard let svc = service(of: a) else { return false }
+      return wanted.contains(svc)
+    }), let id = existing.bluetoothIdentifier?.uuidString.uppercased() {
+      completion(.success(id))
+      return
+    }
+    let labels = Bundle.main.infoDictionary?["OSBandLabels"] as? [String: String] ?? [:]
+    let image = UIImage(systemName: "sensor.tag.radiowave.forward") ?? UIImage()
+    let sensorItems = wanted.sorted().map { svc -> ASPickerDisplayItem in
+      let descriptor = ASDiscoveryDescriptor()
+      descriptor.bluetoothServiceUUID = CBUUID(string: svc)
+      return ASPickerDisplayItem(name: labels[svc] ?? "Sensor", productImage: image,
+                                 descriptor: descriptor)
+    }
+    pickerResult = completion
+    present(sensorItems, known: allIdList, fallback: { nil }, allowGen4Retry: false)
   }
 
   /// Presents the picker and resolves `pickerResult`.
@@ -267,9 +344,12 @@ private final class Impl {
   /// experimental one), retry once with the WHOOP 4.0 item that already ships,
   /// so the experiment can never take down 4.0 pairing.
   ///
-  /// - Parameter known: accessory ids provisioned before this picker run started,
-  ///   so the success handler can tell which id it just added (see below).
-  private func present(_ items: [ASPickerDisplayItem], known: [String], allowGen4Retry: Bool) {
+  /// - Parameter known: accessory ids provisioned before this picker run started, sensors
+  ///   included, so the success handler can tell which id it just added (see below).
+  /// - Parameter fallback: the id to report when the run added nothing new — the band
+  ///   picker keeps its old `first` answer; a sensor picker has none.
+  private func present(_ items: [ASPickerDisplayItem], known: [String],
+                       fallback: @escaping () -> String?, allowGen4Retry: Bool) {
     session.showPicker(for: items) { [weak self] error in
       guard let self = self else { return }
       // The retry (if any) that led to THIS completion running is no longer
@@ -291,7 +371,7 @@ private final class Impl {
           NSLog("[ASK] picker rejected the %d-item descriptor list (%@) — "
                 + "retrying with the WHOOP 4.0 item only.", items.count, message)
           self.retryInFlight = true
-          self.present([items[0]], known: known, allowGen4Retry: false)
+          self.present([items[0]], known: known, fallback: fallback, allowGen4Retry: false)
           return
         }
         self.pickerResult = nil
@@ -302,9 +382,8 @@ private final class Impl {
       // once a second band is provisioned the first entry is the OLD one, so `.first`
       // would hand Dart the wrong device to connect to. (With none previously known —
       // every pairing today — the added one IS the first, so this is unchanged.)
-      let current = self.provisionedIdList
       let knownSet = Set(known)
-      let id = current.first { !knownSet.contains($0) } ?? current.first
+      let id = self.allIdList.first { !knownSet.contains($0) } ?? fallback()
       if let cb = self.pickerResult {
         self.pickerResult = nil
         if let id = id {

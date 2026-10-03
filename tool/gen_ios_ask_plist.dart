@@ -1,9 +1,13 @@
 // Info.plist's AccessorySetupKit block is DERIVED from the band registry —
-// from [kFramedBands], not the whole of it. ASK provisions the PRIMARY band,
-// the one that holds a link and gets its flash trimmed. A notify-only sensor
-// is connected straight from its stored remote id during a workout and needs
-// no ASK descriptor, so declaring its service here would only put chest straps
-// in the WHOOP pairing picker.
+// from [kFramedBands] plus [kAskPickerSensors], not the whole of it. ASK
+// provisions the PRIMARY band, the one that holds a link and gets its flash
+// trimmed. A notify-only sensor was assumed to need no ASK descriptor because
+// it is connected straight from its stored remote id — but with
+// `NSAccessorySetupKitSupports` declared the app has no standard Bluetooth
+// authorization, so a sensor the user never approved in a picker cannot even
+// be scanned (#371/#372). The sensors in [kAskPickerSensors] are declared too,
+// and ALSO listed under [kSensorServicesKey] so the WHOOP picker leaves them
+// out; each gets a picker of its own, filtered to its service.
 //
 // Apple requires every criterion an ASK discovery descriptor matches on to be
 // declared in Info.plist under NSAccessorySetupBluetoothServices. On iOS 18+
@@ -40,6 +44,11 @@ const String kServicesKey = 'NSAccessorySetupBluetoothServices';
 /// rather than hiding a band.
 const String kLabelsKey = 'OSBandLabels';
 
+/// Our own key: the declared services that belong to a SENSOR rather than a
+/// band. `AccessorySetup.swift` subtracts these from the band picker, so
+/// declaring a ring's service cannot put a ring in the WHOOP picker.
+const String kSensorServicesKey = 'OSAskSensorServices';
+
 /// Extra ASK match criterion NOT tied to any one [BandEntry]: the 16-bit SIG
 /// member UUID `0xFD4B`, a fallback for gen5's 128-bit vendor UUID being
 /// hidden in the scan-response overflow area (see AccessorySetup.swift's
@@ -71,6 +80,10 @@ String _servicesBody(List<BandEntry> registry) {
   return buf.toString();
 }
 
+String _sensorServicesBody(List<BandEntry> sensors) => sensors
+    .map((e) => '\t\t<string>${e.service.toUpperCase()}</string>\n')
+    .join();
+
 String _labelsBody(List<BandEntry> registry) => registry
     .map((e) => '\t\t<key>${e.service.toUpperCase()}</key>\n'
         '\t\t<string>${_esc(e.label)}</string>\n')
@@ -90,10 +103,17 @@ String _replaceBody(String plist, String key, String tag, String body) {
   return plist.replaceRange(m.start, m.end, '${m[1]}$body${m[2]}');
 }
 
-/// [plist] with both generated blocks rebuilt from [registry].
-String applyBlocks(String plist, List<BandEntry> registry) {
-  var out = _replaceBody(plist, kServicesKey, 'array', _servicesBody(registry));
-  out = _replaceBody(out, kLabelsKey, 'dict', _labelsBody(registry));
+/// [plist] with every generated block rebuilt from [bands] and [sensors].
+String applyBlocks(
+  String plist,
+  List<BandEntry> bands, [
+  List<BandEntry> sensors = const [],
+]) {
+  final all = [...bands, ...sensors];
+  var out = _replaceBody(plist, kServicesKey, 'array', _servicesBody(all));
+  out = _replaceBody(out, kLabelsKey, 'dict', _labelsBody(all));
+  out = _replaceBody(
+      out, kSensorServicesKey, 'array', _sensorServicesBody(sensors));
   return out;
 }
 
@@ -104,21 +124,26 @@ void main(List<String> args) {
     exit(2);
   }
   final current = file.readAsStringSync();
-  final wanted = applyBlocks(current, kFramedBands);
+  final wanted = applyBlocks(current, kFramedBands, kAskPickerSensors);
   if (current == wanted) {
-    stdout.writeln('$kPlistPath is in sync with kFramedBands.');
+    stdout.writeln('$kPlistPath is in sync with kFramedBands + '
+        'kAskPickerSensors.');
     return;
   }
   if (args.contains('--check')) {
+    final all = [...kFramedBands, ...kAskPickerSensors];
     stderr.writeln('$kPlistPath is STALE. Expected:\n'
-        '\t<key>$kServicesKey</key>\n\t<array>\n${_servicesBody(kFramedBands)}'
+        '\t<key>$kServicesKey</key>\n\t<array>\n${_servicesBody(all)}'
         '\t</array>\n'
-        '\t<key>$kLabelsKey</key>\n\t<dict>\n${_labelsBody(kFramedBands)}'
+        '\t<key>$kLabelsKey</key>\n\t<dict>\n${_labelsBody(all)}'
         '\t</dict>\n'
+        '\t<key>$kSensorServicesKey</key>\n\t<array>\n'
+        '${_sensorServicesBody(kAskPickerSensors)}\t</array>\n'
         'Run: dart run tool/gen_ios_ask_plist.dart');
     exit(1);
   }
   file.writeAsStringSync(wanted);
-  stdout.writeln('$kPlistPath updated from kFramedBands '
-      '(${kFramedBands.length} band(s)).');
+  stdout.writeln('$kPlistPath updated from kFramedBands + kAskPickerSensors '
+      '(${kFramedBands.length} band(s), ${kAskPickerSensors.length} '
+      'sensor(s)).');
 }
