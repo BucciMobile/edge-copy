@@ -188,6 +188,41 @@ void main() {
     expect(today['hrv']['rmssd'], 77);
   });
 
+  test('a settled no-sleep night is not covered by an older night', () async {
+    final y = DateTime.now().subtract(const Duration(days: 1));
+    final yesterday = '${y.year.toString().padLeft(4, '0')}-'
+        '${y.month.toString().padLeft(2, '0')}-'
+        '${y.day.toString().padLeft(2, '0')}';
+    await seed(
+      day: yesterday,
+      wakeSec: nowSec - 24 * 3600,
+      edgeSec: nowSec - 20 * 3600,
+      rmssd: 77,
+    );
+    await db.insert('day_result', {
+      'day_id': todayLabel(),
+      'algo_version': kAlgoVersion,
+      'payload_json': jsonEncode({
+        'flags': ['NO_SLEEP_DETECTED'],
+      }),
+      'window_json': '{}',
+      'computed_at': 1,
+      'finalized': 0,
+    });
+    final edge = nowSec - 10 * 60;
+    await db.insert('decoded_onehz', {
+      'ts_ms': edge * 1000,
+      'rec_ts': edge,
+      'counter': edge,
+      'hr': 60,
+    });
+    await LocalDb.refreshComputeFreshness();
+    final today =
+        await LocalRepositoryImpl(getProfileMap: () => const {}).getToday();
+    expect(today['status']['overnight_day'], todayLabel());
+    expect(today['hrv']?['rmssd'], isNot(77));
+  });
+
   test('readiness chart leaves out the night getToday holds back', () async {
     final wake = nowSec - 20 * 60;
     await seed(wakeSec: wake, edgeSec: wake + 60);
