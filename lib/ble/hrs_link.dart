@@ -233,6 +233,9 @@ class HrsLink {
   /// back sooner.
   static Future<void> stopScanIfRunning(Object owner) async {
     if (!identical(_scanOwner, owner)) return;
+    // Cleared here too, so a scan still in its iOS connected-device lookup
+    // sees the dismissal and never starts.
+    _scanOwner = null;
     try {
       await FlutterBluePlus.stopScan().timeout(_stopScanTimeout);
     } catch (e) {
@@ -263,6 +266,7 @@ class HrsLink {
   /// and a second copy of this function is how the two drift apart.
   ///
   /// [onResults] is called with the whole ranked list each time it changes —
+  /// peripherals already connected to the phone first, then the rest
   /// strongest signal first, which is very nearly "the one on your chest".
   /// Throws [BleUnavailableException] when the phone's own stack is the
   /// problem; see [scanHeldBackReason] for the iOS case that is not an error.
@@ -418,6 +422,9 @@ class HrsLink {
     // holding a ring, typically) has stopped advertising, so the scan below
     // never hears it. Ask the OS for those directly. iOS only: Android ignores
     // the service filter here and would list every GATT link the phone has.
+    // Claimed before the iOS lookup below: it awaits, and a screen dismissed
+    // during it must be able to cancel the scan that would follow.
+    _scanOwner = owner;
     if (Platform.isIOS) {
       // The OS list includes links THIS app holds, an armed workout sensor
       // among them. Listing it invites a tap whose pair-then-disconnect
@@ -447,6 +454,10 @@ class HrsLink {
       }
       if (seen.isNotEmpty) onResults(_ranked(seen));
     }
+    if (!identical(_scanOwner, owner)) {
+      await sub.cancel();
+      return;
+    }
     try {
       // CLAIMED BEFORE THE START, not after it. `startScan` flips the radio on
       // partway through its own body and only THEN returns, so an owner set on
@@ -456,7 +467,7 @@ class HrsLink {
       // first cannot fail the other way either: `flutter_blue_plus` serialises
       // `startScan`/`stopScan` through one mutex, so a stop issued in the
       // window queues behind this start and takes effect on the way out.
-      _scanOwner = owner;
+      // (The claim itself is made above, before the iOS lookup.)
       await FlutterBluePlus.startScan(
         withServices: serviceGuids,
         timeout: timeout,
