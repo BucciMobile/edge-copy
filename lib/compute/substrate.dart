@@ -1001,7 +1001,9 @@ List<int?>? counterTicksPerWindow(
     for (final (start, end) in windows)
       () {
         final i0 = lowerBound(ts, start + 1) - 1; // last record <= start
-        final i1 = lowerBound(ts, end); // first record >= end
+        var i1 = lowerBound(ts, end); // first record >= end
+        // Data ending at `end - 1` closes the last 1 Hz second of the window.
+        if (i1 == ts.length && ts.last == end - 1) i1--;
         if (i0 < 0 || i1 >= ts.length) return null;
         if (start - ts[i0] > maxGapSec || ts[i1] - end > maxGapSec) return null;
         if (breaks[i1] != breaks[i0]) return null;

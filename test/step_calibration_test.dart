@@ -272,6 +272,16 @@ void main() {
       expect(w[2], 400);
     });
 
+    test('a window whose last second is the last record is covered', () {
+      final w = counterTicksPerWindow(
+        s,
+        [(t0 + 1700, t0 + 1800), (t0 + 1700, t0 + 1801)],
+        cumulativeCounterModulus: 65536,
+      )!;
+      expect(w[0], 99);
+      expect(w[1], isNull);
+    });
+
     test('no counter on the family is null, not zero', () {
       expect(
         counterTicksPerWindow(_sub([-1, -1]), [(t0, t0 + 1)],

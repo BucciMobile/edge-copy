@@ -4930,26 +4930,30 @@ class DerivationEngine {
       ))) {
         return;
       }
-      await LocalDb.putStepCalibrationDay(
-        day: date,
-        deviceFamily: family,
-        wearing: wearing,
-        referenceSteps: reference,
-        counterTicks: counted,
-      );
-      final rows = await LocalDb.stepCalibrationDays(family, wearing);
-      final profile = estimateStepCalibration(
-        family,
-        wearing,
-        [
-          for (final r in rows)
-            StepCalibrationDay(
-              referenceSteps: (r['reference_steps'] as num?)?.toInt() ?? 0,
-              counterTicks: (r['counter_ticks'] as num?)?.toInt() ?? 0,
-            ),
-        ],
-      );
-      await LocalDb.putStepCalibrationProfile(profile);
+      // Concurrent day workers each bank then refit; unserialized, a slower
+      // refit over fewer rows can land last and replace a newer profile.
+      await _stepCalibrationLock.run(() async {
+        await LocalDb.putStepCalibrationDay(
+          day: date,
+          deviceFamily: family,
+          wearing: wearing,
+          referenceSteps: reference,
+          counterTicks: counted,
+        );
+        final rows = await LocalDb.stepCalibrationDays(family, wearing);
+        final profile = estimateStepCalibration(
+          family,
+          wearing,
+          [
+            for (final r in rows)
+              StepCalibrationDay(
+                referenceSteps: (r['reference_steps'] as num?)?.toInt() ?? 0,
+                counterTicks: (r['counter_ticks'] as num?)?.toInt() ?? 0,
+              ),
+          ],
+        );
+        await LocalDb.putStepCalibrationProfile(profile);
+      });
     } catch (e) {
       _log('step calibration update failed for $date: $e');
     }
@@ -6295,6 +6299,9 @@ class DerivationEngine {
   /// Serializes the shared-floor read-modify-write across concurrent day
   /// workers. See [_frozenMovementFloor].
   static final _AsyncLock _floorLock = _AsyncLock();
+
+  /// Serializes [updateStepCalibration]'s bank-then-refit across day workers.
+  static final _AsyncLock _stepCalibrationLock = _AsyncLock();
 
   static Future<double?> _resolveMovementFloor(
     _BaselineHistoryCache history,
