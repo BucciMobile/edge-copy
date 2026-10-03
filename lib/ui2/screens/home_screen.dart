@@ -35,7 +35,8 @@ import 'package:provider/provider.dart';
 import '../../ai/briefing.dart'
     show Briefing, BriefingPeriod, BriefingStore, currentBriefingPeriod, resolveBriefingToShow;
 import '../../data/day_label.dart' show todayLabel, calendarDaysBetween;
-import '../../data/db.dart' show DbRebuild;
+import '../../compute/onehz_pipeline.dart' show readinessInputShortfallNote;
+import '../../data/db.dart' show DbRebuild, LocalDb;
 import '../../data/journal_fields.dart' show formatMinuteOfDay;
 import '../../data/local_repository.dart';
 import '../../l10n/app_localizations.dart';
@@ -930,7 +931,19 @@ _RingState _ringOf(HomeRingKind k, HomeData d, AppLocalizations? l) {
       final band = readinessBand(v, l);
       return v == null
           ? _gap(k, l?.homeRingRecovery ?? 'Recovery', LucideIcons.batteryCharging,
-              C.green, d.readiness, l?.homeReadinessNotScored ?? 'Not scored', l)
+              C.green, d.readiness, l?.homeReadinessNotScored ?? 'Not scored', l,
+              // The same shortfall sentence the Readiness detail screen's
+              // banner shows, off the SAME stored diagnostic — _gap's own
+              // whyFromNote(m.note) doesn't recognise the need_inputs:
+              // convention this composite uses (only need_baseline:), so
+              // without this it fell through to the generic "nothing
+              // recorded says why" even with a real, known reason on hand.
+              // metricName: 'recovery' — this ring is labelled "Recovery",
+              // not "Readiness", and the sentence should say what the ring
+              // itself says.
+              fallbackWhy:
+                  readinessInputShortfallNote(d.absentDiag, metricName: 'recovery') ??
+                      '')
           : _RingState(k, l?.homeRingRecovery ?? 'Recovery',
               LucideIcons.batteryCharging, band.color,
               value: '${v.round()}', sub: band.label, frac: v / 100);
@@ -1191,6 +1204,12 @@ class HomeData {
   final String? illnessDay;
   final double? illnessZ;
 
+  /// `LocalDb.readinessAbsentDiag` off today's bundle — null unless
+  /// [readiness] is absent. See `readiness_detail.dart`'s own copy of this
+  /// field for why: this card's "not scored" explanation has to be built
+  /// from the SAME diagnostic that screen's does, or the two can disagree.
+  final Map<String, dynamic>? absentDiag;
+
   const HomeData({
     this.name,
     this.dayId,
@@ -1211,6 +1230,7 @@ class HomeData {
     this.illnessDay,
     this.illnessZ,
     this.insightsStale,
+    this.absentDiag,
   });
 
   /// The three illness fields, replaced together. Test-facing sugar, and they
@@ -1236,6 +1256,7 @@ class HomeData {
         illnessDay: day,
         illnessZ: z,
         insightsStale: insightsStale,
+        absentDiag: absentDiag,
       );
 
   /// A day OTHER than today, for the Home day switcher.
@@ -1295,6 +1316,16 @@ class HomeData {
     // here may imply a second signal.
     final illness = today['illness'];
 
+    // The three that come off the OVERNIGHT block. Gated, so a night that is
+    // not today's cannot arrive wearing today's clothes — see
+    // [overnightMetric]. Steps, active energy and strain are today's own and
+    // are read straight.
+    final readiness = overnightMetric(today, d('readiness'), l);
+    final absentDiag = readiness.value != null
+        ? null
+        : await LocalDb.readinessAbsentDiag(
+            (today['status'] as Map?)?['today_day']?.toString());
+
     return HomeData(
       name: profile['name']?.toString(),
       dayId: (today['status'] as Map?)?['today_day']?.toString(),
@@ -1302,11 +1333,8 @@ class HomeData {
       illnessState: illness is Map ? illness['state']?.toString() : null,
       illnessDay: illness is Map ? illness['date']?.toString() : null,
       illnessZ: illness is Map ? (illness['z'] as num?)?.toDouble() : null,
-      // The three that come off the OVERNIGHT block. Gated, so a night that
-      // is not today's cannot arrive wearing today's clothes — see
-      // [overnightMetric]. Steps, active energy and strain are today's own and
-      // are read straight.
-      readiness: overnightMetric(today, d('readiness'), l),
+      readiness: readiness,
+      absentDiag: absentDiag,
       drivers: [
         for (final e in (gbDrivers is List ? gbDrivers : const []))
           if (e is Map) e.cast<String, dynamic>(),
@@ -1762,6 +1790,13 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         else
           Builder(builder: (c) {
             final need = needMessageFromNote(d.readiness.note);
+            // readinessInputShortfallNote off d.absentDiag is the SAME
+            // function and the SAME stored diagnostic readiness_detail.dart's
+            // banner uses — not a second, independently-worded explanation —
+            // so this card and the detail screen can never say two different
+            // things about the same absence.
+            final shortfall =
+                need == null ? readinessInputShortfallNote(d.absentDiag) : null;
             return StatusCard(
               l?.homeReadinessNotScoredTitle ?? 'Readiness is not scored today',
               need != null
@@ -1771,7 +1806,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
                   // history to compare it to" — a cause, stated for every
                   // absence the note convention did not cover. The door below
                   // is what actually answers it.
-                  : whyFromNote(d.readiness.note) ??
+                  : shortfall ??
+                      whyFromNote(d.readiness.note) ??
                       (l?.homeReadinessNoReason ?? 'Nothing recorded says why.'),
               fix: l?.homeSeeWhatWasMissing ?? 'See what was missing',
               icon: LucideIcons.batteryCharging,
