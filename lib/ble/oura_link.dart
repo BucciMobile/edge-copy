@@ -584,7 +584,7 @@ class OuraLink {
     // Bounded by wall time, not a spin count: a real sqflite commit between
     // batches can outlast any fixed number of zero-length yields.
     final clock = Stopwatch()..start();
-    while (!finished && clock.elapsed < const Duration(seconds: 5)) {
+    while (!finished && clock.elapsed < timeouts) {
       await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {

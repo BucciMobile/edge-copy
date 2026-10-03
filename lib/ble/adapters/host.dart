@@ -191,6 +191,7 @@ class BandHost {
     await _runSub?.cancel();
     _runSub = null;
     await _commit(all: true);
+    await _vendorWrites;
     _reading.value = null;
   }
 
@@ -215,9 +216,13 @@ class BandHost {
         onNote?.call(key, value);
         onLog('[${adapter.id}] $key = $value');
       case VendorScalars():
-        unawaited(_bankVendorScalars(e));
+        // Chained, not awaited: best-effort and outside the ACK path, but
+        // [stop] waits for it so a read after stop sees the rows.
+        _vendorWrites = _vendorWrites.then((_) => _bankVendorScalars(e));
     }
   }
+
+  Future<void> _vendorWrites = Future<void>.value();
 
   /// Bank one device's vendor scalars. Returns rows written.
   ///

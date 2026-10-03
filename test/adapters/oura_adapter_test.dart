@@ -682,6 +682,43 @@ void main() {
     expect(deep, [((base * 1000) + 29500, 4.0)]);
   });
 
+  test('a full batch with nothing left decodes its last decisecond', () async {
+    // No bytes left means nothing was cut and no re-read comes, so leaving
+    // 1300 to one would never decode it.
+    const base = 1782043215;
+    final (events, link) = await _drive(
+      OuraAdapter(
+        key: _kKey,
+        anchor: (1000, base),
+        confirmTimeout: _kFast,
+        replyTimeout: _kFast,
+      ),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first != 0x10) return const [];
+        return [
+          for (var n = 0; n < 254; n++)
+            _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')),
+          _event(kOuraEvtSleepPhaseInformation, 1300, hypnogramBody()),
+          _summary(255, 0),
+        ];
+      },
+    );
+    expect(
+        events
+            .whereType<VendorScalars>()
+            .expand((b) => b.rows)
+            .any((o) => o.vendorKey == 'sleep_deep_min'),
+        isTrue);
+    final cursors = events
+        .whereType<BandNote>()
+        .where((n) => n.key == 'oura_cursor_ds')
+        .map((n) => n.value);
+    expect(cursors, <Object?>[1301]);
+    expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1));
+  });
+
   test('a hypnogram no origin ever reaches is dropped, not guessed', () async {
     final (events, _) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];

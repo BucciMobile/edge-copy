@@ -322,8 +322,10 @@ class OuraAdapter extends BandAdapter {
         // next batch re-reads (see the cursor advance below). Decoding it here
         // too would stamp a partial sum now and the full one after a re-anchor,
         // on two different `ts_ms` that REPLACE cannot collapse. It is left to
-        // the re-read, which sees all of it.
-        final full = got.summary.received >= _kMaxEventsPerBatch;
+        // the re-read, which sees all of it. With no bytes left nothing was
+        // cut and no re-read comes, so the last decisecond is decoded here.
+        final full = got.summary.received >= _kMaxEventsPerBatch &&
+            got.summary.bytesLeft > 0;
         final reread = (full && got.maxDs > cursor) ? got.maxDs : null;
         yield* _emit(link, got, skipDs: reread);
 
