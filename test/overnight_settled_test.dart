@@ -188,6 +188,29 @@ void main() {
     expect(today['hrv']['rmssd'], 77);
   });
 
+  test('readiness chart leaves out the night getToday holds back', () async {
+    final wake = nowSec - 20 * 60;
+    await seed(wakeSec: wake, edgeSec: wake + 60);
+    await db.insert('metric_series', {
+      'date': todayLabel(),
+      'key': 'readiness',
+      'value': 41,
+    });
+    await LocalDb.refreshComputeFreshness();
+    final repo = LocalRepositoryImpl(getProfileMap: () => const {});
+    expect((await repo.getChart('recovery'))['points'], isEmpty);
+
+    // Edge past the wake: the night settles and today's point is back.
+    await db.insert('decoded_onehz', {
+      'ts_ms': (wake + 2 * 3600) * 1000,
+      'rec_ts': wake + 2 * 3600,
+      'counter': 2,
+      'hr': 60,
+    });
+    await LocalDb.refreshComputeFreshness();
+    expect((await repo.getChart('recovery'))['points'], hasLength(1));
+  });
+
   test('recovery push waits for the same settled night Home does', () {
     final wake = nowSec - 2 * 60 * 60;
     final payload = {

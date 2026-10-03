@@ -1874,6 +1874,19 @@ class LocalRepositoryImpl extends LocalRepository {
     // 74 in the ring and 69 as today's point in the chart underneath it. One
     // day, one readiness number.
     final pin = key == 'readiness' ? await LocalDb.frozenHeadline() : null;
+    // #448: every derive writes today's readiness, partial night or not, and a
+    // held night has no pin yet. Leave today's point out while getToday holds
+    // it back, or the chart plots the number the ring above it refuses.
+    String? heldDay;
+    if (key == 'readiness') {
+      final fresh = await _freshness('today');
+      final recheckAt = (fresh?['overnight_recheck_at'] as num?)?.toInt();
+      if (recheckAt != null &&
+          _nowSec() < recheckAt &&
+          fresh?['today_day']?.toString() == _todayLocalLabel()) {
+        heldDay = _todayLocalLabel();
+      }
+    }
 
     // ONE read of metric_series_version, two consumers. `_algoBreaks` used to
     // fetch it privately; `coverage_devices` rides on the same rows because it
@@ -1897,10 +1910,11 @@ class LocalRepositoryImpl extends LocalRepository {
     return {
       'points': [
         for (final r in rows)
-          {
-            't': _dateToEpoch(r['date'] as String),
-            'v': r['date'] == pin?.day ? pin!.value : r['value'],
-          },
+          if (r['date'] != heldDay || r['date'] == pin?.day)
+            {
+              't': _dateToEpoch(r['date'] as String),
+              'v': r['date'] == pin?.day ? pin!.value : r['value'],
+            },
       ],
       // L4 — THE DENOMINATOR. Worn minutes for the same days, so a long trend
       // can be read against how much of it was actually measured instead of
