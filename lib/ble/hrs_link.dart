@@ -487,14 +487,25 @@ class HrsLink {
   /// not having PPI: an H10 carries PMD for ECG/accel only, the PMD adapter
   /// ends its session when PPI start is refused, and 0x180D works on every
   /// Polar. A connected, silent Verity Sense lands on generic HR as a result.
+  ///
+  /// Only a service that fingerprints one board outranks generic: a 128-bit
+  /// UUID no other entry uses. A 16-bit custom service (0xfff0 and the like)
+  /// or one several boards share (the Nordic UART UUID) says nothing about
+  /// what the peripheral is, so a strap carrying one beside 0x180D stays a
+  /// heart rate strap.
   @visibleForTesting
   static List<BandEntry> systemDeviceQueryOrder(List<BandEntry> entries) {
     bool generic(BandEntry e) =>
         Guid(e.service) == Guid(kHeartRateServiceUuid);
     bool pmd(BandEntry e) => e.id == kPolarPmd.id;
+    bool fingerprint(BandEntry e) =>
+        !e.service.toLowerCase().endsWith('-0000-1000-8000-00805f9b34fb') &&
+        entries.where((o) => Guid(o.service) == Guid(e.service)).length == 1;
+    final specific = entries.where((e) => !generic(e) && !pmd(e));
     return [
-      ...entries.where((e) => !generic(e) && !pmd(e)),
+      ...specific.where(fingerprint),
       ...entries.where(generic),
+      ...specific.where((e) => !fingerprint(e)),
       ...entries.where(pmd),
     ];
   }
