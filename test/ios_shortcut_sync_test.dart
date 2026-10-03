@@ -258,4 +258,29 @@ void main() {
     expect(result.status, 'partial');
     expect(result.records, 42);
   });
+
+  test('a joined app burst reports only what the Shortcut saw commit', () async {
+    FlutterBluePlusPlatform.instance = _AdapterOn();
+    await PairedDevice.save(
+      '00000000-0000-0000-0000-000000000001',
+      'test',
+      generation: 'gen4',
+    );
+    IosShortcutSync.foregroundEngine = _LiveEngine.new;
+    IosShortcutSync.foregroundSync = (task) async {
+      IosShortcutSync.foregroundCommitted(3);
+      // The burst's own total includes what landed before the Shortcut joined.
+      return SyncReport(10, 2, false);
+    };
+    addTearDown(() {
+      IosShortcutSync.foregroundEngine = null;
+      IosShortcutSync.foregroundSync = null;
+    });
+    final result = await IosShortcutSync.run(
+      'joined',
+      const Duration(seconds: 5),
+    );
+    expect(result.status, 'partial');
+    expect(result.records, 3);
+  });
 }

@@ -170,14 +170,13 @@ class IosShortcutSync {
         if (task.stopped) return task.expired;
         final blocker = _blockerResult(liveEngine.bluetoothBlocker);
         if (blocker != null) return blocker;
-        if (!liveEngine.isConnected && report.records == 0) {
+        if (!liveEngine.isConnected && task.records == 0) {
           return ShortcutSyncResult(
             radioConnected ? 'failed' : 'bandUnreachable',
           );
         }
-        task.records = report.records;
         if (!report.complete || await _backlogRemains(liveEngine)) {
-          return ShortcutSyncResult('partial', records: report.records);
+          return ShortcutSyncResult('partial', records: task.records);
         }
         return await _derive(task);
       } finally {
