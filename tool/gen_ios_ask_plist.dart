@@ -49,6 +49,15 @@ const String kLabelsKey = 'OSBandLabels';
 /// declaring a ring's service cannot put a ring in the WHOOP picker.
 const String kSensorServicesKey = 'OSAskSensorServices';
 
+/// Apple's list of Bluetooth company identifiers the ASK picker may match on —
+/// declared for [kAskSensorCompanyIds] only, never put on a descriptor (see
+/// that map's doc for both halves of why).
+const String kCompanyIdsKey = 'NSAccessorySetupBluetoothCompanyIdentifiers';
+
+/// One company identifier as declared: `0x` and four uppercase hex digits.
+String companyIdString(int id) =>
+    '0x${id.toRadixString(16).toUpperCase().padLeft(4, '0')}';
+
 /// Extra ASK match criterion NOT tied to any one [BandEntry]: the 16-bit SIG
 /// member UUID `0xFD4B`, a fallback for gen5's 128-bit vendor UUID being
 /// hidden in the scan-response overflow area (see AccessorySetup.swift's
@@ -84,6 +93,12 @@ String _sensorServicesBody(List<BandEntry> sensors) => sensors
     .map((e) => '\t\t<string>${e.service.toUpperCase()}</string>\n')
     .join();
 
+String _companyIdsBody(List<BandEntry> sensors) => [
+      for (final e in sensors)
+        if (kAskSensorCompanyIds[e.id] case final id?)
+          '\t\t<string>${companyIdString(id)}</string>\n',
+    ].join();
+
 String _labelsBody(List<BandEntry> registry) => registry
     .map((e) => '\t\t<key>${e.service.toUpperCase()}</key>\n'
         '\t\t<string>${_esc(e.label)}</string>\n')
@@ -114,6 +129,7 @@ String applyBlocks(
   out = _replaceBody(out, kLabelsKey, 'dict', _labelsBody(all));
   out = _replaceBody(
       out, kSensorServicesKey, 'array', _sensorServicesBody(sensors));
+  out = _replaceBody(out, kCompanyIdsKey, 'array', _companyIdsBody(sensors));
   return out;
 }
 
@@ -139,6 +155,8 @@ void main(List<String> args) {
         '\t</dict>\n'
         '\t<key>$kSensorServicesKey</key>\n\t<array>\n'
         '${_sensorServicesBody(kAskPickerSensors)}\t</array>\n'
+        '\t<key>$kCompanyIdsKey</key>\n\t<array>\n'
+        '${_companyIdsBody(kAskPickerSensors)}\t</array>\n'
         'Run: dart run tool/gen_ios_ask_plist.dart');
     exit(1);
   }

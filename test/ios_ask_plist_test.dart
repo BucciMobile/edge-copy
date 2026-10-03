@@ -59,6 +59,23 @@ void main() {
     }
   });
 
+  test("every ASK sensor's company id is declared, never on a descriptor", () {
+    final declared = RegExp(
+      '<key>$kCompanyIdsKey</key>\\s*<array>(.*?)</array>',
+      dotAll: true,
+    ).firstMatch(plist)?.group(1);
+    expect(declared, isNotNull, reason: '$kCompanyIdsKey block missing');
+    for (final e in kAskPickerSensors) {
+      final id = kAskSensorCompanyIds[e.id];
+      if (id == null) continue;
+      expect(declared, contains('<string>${companyIdString(id)}</string>'),
+          reason: '${e.id}: without it the picker finds nothing');
+    }
+    // Setting it on the descriptor traps on iOS 27 — see kAskSensorCompanyIds.
+    final swift = File('ios/Runner/AccessorySetup.swift').readAsStringSync();
+    expect(swift, isNot(contains('bluetoothCompanyIdentifier =')));
+  });
+
   test('ASK sensors are notify-class, never framed bands', () {
     for (final e in kAskPickerSensors) {
       expect(e.isFramed, isFalse, reason: e.id);

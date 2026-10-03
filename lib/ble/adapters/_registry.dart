@@ -1600,6 +1600,25 @@ final List<BandEntry> kFramedBands =
 /// every entry added here is one more row the picker can show.
 const List<BandEntry> kAskPickerSensors = <BandEntry>[kOura];
 
+/// The Bluetooth SIG company identifier each [kAskPickerSensors] entry puts in
+/// its advertisement's manufacturer data, by entry id. Declared in Info.plist's
+/// `NSAccessorySetupBluetoothCompanyIdentifiers` and NOWHERE ELSE.
+///
+/// WHY IT HAS TO BE DECLARED. A device whose advertisement carries
+/// manufacturer data was not found by the ASK picker while only its service
+/// was declared ("No accessory found"); with its company identifier declared
+/// as well, the same picker found it (iPhone, iOS 27, Oura ring advertising
+/// `ff b2 02 …`). This matches an Apple developer-forum report for the same
+/// symptom.
+///
+/// WHY IT IS NOT ON THE DESCRIPTOR. Setting `bluetoothCompanyIdentifier` on
+/// the ASDiscoveryDescriptor trapped on iOS 27 ("'NSAccessorySetupBluetooth
+/// CompanyIdentifiers' has no item '2b2' in Info.plist"), whatever spelling
+/// the plist used. The declaration alone is what made discovery work.
+const Map<String, int> kAskSensorCompanyIds = <String, int>{
+  'oura': 0x02B2, // Oura Health Oy
+};
+
 /// The entry speaking [wire]. Used by the engine's test seam, which is handed
 /// a [BandProfile] rather than an entry.
 BandEntry bandEntryFor(BandProfile wire) =>

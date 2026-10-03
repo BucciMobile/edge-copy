@@ -94,6 +94,13 @@
 	<!-- GENERATED (see above): the declared services that belong to a SENSOR
 	     paired through its own ASK picker, not to a band. AccessorySetup.swift
 	     subtracts these from the WHOOP picker. -->
+	<!-- GENERATED (see above): Bluetooth company identifiers of the ASK sensors,
+	     declared so the picker finds a sensor whose advertisement carries
+	     manufacturer data. Never set on a descriptor: that traps on iOS 27. -->
+	<key>NSAccessorySetupBluetoothCompanyIdentifiers</key>
+	<array>
+		<string>0x02B2</string>
+	</array>
 	<key>OSAskSensorServices</key>
 	<array>
 		<string>98ED0001-A541-11E4-B6A0-0002A5D5C51B</string>
