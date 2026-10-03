@@ -12511,6 +12511,15 @@
       }
     }
   },
+  "bpResearchLoadFailed": "The capture list failed to update. ({error})",
+  "@bpResearchLoadFailed": {
+    "description": "Snackbar when reloading the capture list (on open or after a delete) threw",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "bpResearchCaptureFailed": "Capture failed, nothing was saved. ({error})",
   "@bpResearchCaptureFailed": {
     "description": "Snackbar when storing the capture threw",

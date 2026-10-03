@@ -31,7 +31,7 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
   @override
   void initState() {
     super.initState();
-    _refresh();
+    _reload();
   }
 
   @override
@@ -52,6 +52,22 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
         _rows = rows;
         _edgeMs = edge;
       });
+    }
+  }
+
+  /// Runs [before] (if any) then [_refresh]; a throw becomes a snackbar
+  /// instead of an unhandled async error.
+  Future<void> _reload([Future<void> Function()? before]) async {
+    try {
+      await before?.call();
+      await _refresh();
+    } catch (e) {
+      if (!mounted) return;
+      final l = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(l?.bpResearchLoadFailed('$e') ??
+            'The capture list failed to update. ($e)'),
+      ));
     }
   }
 
@@ -192,8 +208,8 @@ class _BpResearchScreenState extends State<BpResearchScreen> {
                 trailing: IconButton(
                   icon: const Icon(LucideIcons.trash2, size: 18),
                   onPressed: () async {
-                    await LocalDb.deleteBpResearchCapture(r['id'] as int);
-                    await _refresh();
+                    await _reload(() =>
+                        LocalDb.deleteBpResearchCapture(r['id'] as int));
                   },
                 ),
               ),
