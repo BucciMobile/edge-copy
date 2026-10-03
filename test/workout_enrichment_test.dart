@@ -360,6 +360,20 @@ void main() {
     expect(live['trace_samples'], 600);
     expect(live['trace_coverage_pct'], 100);
 
+    // The prune cutoff lands mid-session: only the 150 bpm second half is
+    // left. That tail must not stand in for the banked full window.
+    await LocalDb.pruneDecodedBeforeRecTs(s + 300);
+    final tail = await repo.getWorkout('w-frozen');
+    expect(tail['hr'], live['hr']);
+    expect(tail['avg_hr'], live['avg_hr']);
+    expect(tail['time_to_peak_min'], live['time_to_peak_min']);
+    expect(tail['trace_samples'], 600);
+    final listed = ((await repo.getWorkouts(range: 'all'))['workouts'] as List)
+        .cast<Map>()
+        .firstWhere((w) => w['id'] == 'w-frozen');
+    expect(listed['avg_hr'], live['avg_hr']);
+    expect(listed['max_hr'], live['max_hr']);
+
     // The band's 1 Hz window ages out — which is what used to blank the whole
     // chart half of this screen on day four, permanently.
     await LocalDb.pruneDecodedBeforeRecTs(e + 100000);
