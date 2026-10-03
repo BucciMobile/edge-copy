@@ -17,7 +17,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/ble/ble_state.dart';
 import 'package:openstrap_edge/state/alarm_schedule.dart'
-    show alarmGraceTimerDelay, alarmLatchAlertDelay, alarmLatchFailed;
+    show
+        alarmGraceTimerDelay,
+        alarmLatchAlertAtMs,
+        alarmLatchAlertDelay,
+        alarmLatchAlertResumeDelay,
+        alarmLatchFailed;
 import 'package:openstrap_edge/sync/sync_policy.dart' show ClockRef;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 
@@ -318,6 +323,40 @@ void main() {
       a.onEvent(AlarmConfirmation.kEvtSet, 90000);
       expect(alarmLatchFailed(a, 1750000000, enabled: true), isFalse);
       expect(alarmLatchAlertDelay(connected: false), Duration.zero);
+    });
+
+    test('a relaunch resumes the alert a killed process was holding', () {
+      const epoch = 1750000000;
+      const armedAt = epoch * 1000 - 8 * 3600 * 1000; // armed at bedtime
+      final alertAt = alarmLatchAlertAtMs(armedAt, 30000);
+      final stored = ['$epoch', '$alertAt'];
+      // Killed 2 min after the arm: the rest of the hold still runs.
+      expect(
+          alarmLatchAlertResumeDelay(stored,
+              savedEpoch: epoch, confirmed: false, nowMs: armedAt + 120000),
+          Duration(milliseconds: alertAt - armedAt - 120000));
+      // Relaunched after the hold ran out: alert now.
+      expect(
+          alarmLatchAlertResumeDelay(stored,
+              savedEpoch: epoch, confirmed: false, nowMs: alertAt + 1),
+          Duration.zero);
+      // Confirmed, a different alarm, or the alarm time already passed.
+      expect(
+          alarmLatchAlertResumeDelay(stored,
+              savedEpoch: epoch, confirmed: true, nowMs: alertAt + 1),
+          isNull);
+      expect(
+          alarmLatchAlertResumeDelay(stored,
+              savedEpoch: epoch + 60, confirmed: false, nowMs: alertAt + 1),
+          isNull);
+      expect(
+          alarmLatchAlertResumeDelay(stored,
+              savedEpoch: epoch, confirmed: false, nowMs: epoch * 1000),
+          isNull);
+      expect(
+          alarmLatchAlertResumeDelay(null,
+              savedEpoch: epoch, confirmed: false, nowMs: alertAt + 1),
+          isNull);
     });
 
     test('event 56 confirms (and clears pending/unconfirmed)', () {

@@ -2440,6 +2440,18 @@ class AppState extends ChangeNotifier {
     if (_savedAlarm != null) {
       _alarm.set(_savedAlarm!, DateTime.now().millisecondsSinceEpoch);
       _alarm.confirmed = alarmPrefs.getBool('alarm_epoch_confirmed') ?? false;
+      // Resume the not-confirmed alert a killed process was still holding.
+      final saved = _savedAlarm!;
+      final resume = alarmLatchAlertResumeDelay(
+          alarmPrefs.getStringList('alarm_latch_alert'),
+          savedEpoch: saved,
+          confirmed: _alarm.confirmed,
+          nowMs: DateTime.now().millisecondsSinceEpoch);
+      if (resume != null) {
+        _alarmGraceTimer = Timer(resume, () {
+          if (!_disposed) unawaited(_notifyAlarmLatchFailed(saved));
+        });
+      }
     }
     await _loadAlarmSchedule();
     await _seedAlarmScheduleFromLegacyIfNeeded();
@@ -4784,6 +4796,12 @@ class AppState extends ChangeNotifier {
     await prefs.setInt('alarm_epoch', epoch);
     // Not confirmed yet — event 56 (below, in _handleAlarmEvent) flips this.
     await prefs.setBool('alarm_epoch_confirmed', false);
+    // The alert timers below live in memory only; this lets a relaunch
+    // still send the critical alert if the process dies before it goes out.
+    await prefs.setStringList('alarm_latch_alert', [
+      '$epoch',
+      '${alarmLatchAlertAtMs(DateTime.now().millisecondsSinceEpoch, _alarm.graceMs)}',
+    ]);
     // Nudge the UI once the grace window elapses so an unconfirmed alarm flips to
     // its soft warning even if no event ever arrives.
     _armAlarmGraceTimer(when);

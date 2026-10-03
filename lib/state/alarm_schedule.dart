@@ -285,3 +285,25 @@ Future<bool> awaitAlarmLatch(Future<bool> Function() latched,
 /// alert back; disconnected = nothing more can arrive, alert now.
 Duration alarmLatchAlertDelay({required bool connected}) =>
     connected ? const Duration(minutes: 5) : Duration.zero;
+
+/// When the critical "alarm not confirmed" alert is due for an arm made at
+/// [armedAtMs]: both grace windows (first try + the one retry) plus the
+/// connected hold. Persisted at arm time so a relaunch can still send it.
+int alarmLatchAlertAtMs(int armedAtMs, int graceMs) =>
+    armedAtMs +
+    2 * graceMs +
+    alarmLatchAlertDelay(connected: true).inMilliseconds;
+
+/// After a relaunch, how long until the alert the dead process was holding
+/// for [savedEpoch] goes out. [stored] is the persisted `[epoch, alertAtMs]`.
+/// Null when there is nothing to resume: no stored hold, a different alarm,
+/// already confirmed, or the alarm time itself has passed.
+Duration? alarmLatchAlertResumeDelay(List<String>? stored,
+    {required int? savedEpoch, required bool confirmed, required int nowMs}) {
+  if (stored == null || stored.length != 2 || savedEpoch == null) return null;
+  if (confirmed || int.tryParse(stored[0]) != savedEpoch) return null;
+  if (savedEpoch * 1000 <= nowMs) return null;
+  final alertAtMs = int.tryParse(stored[1]);
+  if (alertAtMs == null) return null;
+  return Duration(milliseconds: alertAtMs > nowMs ? alertAtMs - nowMs : 0);
+}
