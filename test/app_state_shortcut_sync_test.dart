@@ -54,6 +54,23 @@ class _ConnectedEngine extends BleEngine {
   void setBackground(bool value) => background = value;
 }
 
+/// Session 1 banks records and advances the frontier with backlog left on the
+/// strap; session 2 gets nothing because the link dropped.
+class _TwoSessionEngine extends _ConnectedEngine {
+  @override
+  int? get strapHistoryNewestTs => 1000000;
+
+  @override
+  Future<SyncReport> runSync({
+    Duration timeout = const Duration(seconds: 600),
+  }) async {
+    runs++;
+    if (runs > 1) return SyncReport(0, 0, false);
+    await LocalDb.setCursor('rec_ts_hw', '500');
+    return SyncReport(42, 3, false);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -213,6 +230,20 @@ void main() {
     task.stop();
     await work;
     engine.reply.complete(SyncReport(0, 0, true));
+  });
+
+  test('a burst reports records banked by every session, not the last', () async {
+    await LocalDb.deleteCursor('rec_ts_hw');
+    final engine = _TwoSessionEngine();
+    final app = AppState.forTesting(engine: engine)..initialized = true;
+    addTearDown(app.dispose);
+    final report = await app.syncForShortcut(
+      ShortcutSyncTask('two', const Duration(seconds: 5)),
+    );
+    expect(engine.runs, 2);
+    expect(report.records, 42);
+    expect(report.batches, 3);
+    expect(report.complete, isFalse);
   });
 
   test('opening the app during an in-flight session foregrounds it', () async {

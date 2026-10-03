@@ -4252,7 +4252,8 @@ class AppState extends ChangeNotifier {
     // real progress, so this only runs long when there's genuinely a lot to pull.
     int maxSessions = 20,
   }) async {
-    var last = SyncReport(0, 0, false);
+    // Totals for the whole burst; `complete` is the final session's.
+    var total = SyncReport(0, 0, false);
     for (var i = 0; i < maxSessions && engine.isConnected; i++) {
       // Terminal `Stuck`: a burst failed validation
       // 15 times and the abort went out, so this connection's history is over.
@@ -4301,7 +4302,11 @@ class AppState extends ChangeNotifier {
           strapNewest != null &&
           frontierAfter != null &&
           (strapNewest - frontierAfter) > 300;
-      last = report;
+      total = SyncReport(
+        total.records + report.records,
+        total.batches + report.batches,
+        report.complete,
+      );
       await LocalDb.upsertSyncLedgerEntry(
         status: report.complete ? 'complete' : 'session_end',
         metaPatch: {
@@ -4352,7 +4357,7 @@ class AppState extends ChangeNotifier {
         'frontier still behind strap newest ($strapNewest > $frontierAfter).',
       );
     }
-    return last;
+    return total;
   }
 
   // ── pairing (LOCAL only) ────────────────────────────────────────────────────
