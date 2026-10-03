@@ -2279,8 +2279,13 @@ class AppState extends ChangeNotifier {
       if (editedDay != null) {
         // A finalized day behind the export cursor is never re-written, so
         // the corrected (or rejected) night would never reach the health store.
-        await HealthExporter.reexportFrom(editedDay);
-        if (healthSyncEnabled) unawaited(_runHealthExport());
+        // Not awaited: the rewind waits out any export already running, and
+        // the edit shouldn't spin for that long.
+        unawaited(
+          HealthExporter.reexportFrom(editedDay).then((_) {
+            if (healthSyncEnabled) unawaited(_runHealthExport());
+          }),
+        );
       }
       await LocalDb.refreshComputeFreshness();
       // The day_result rows just changed — without this no RevisionReload screen

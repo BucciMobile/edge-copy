@@ -335,6 +335,9 @@ class HealthExporter {
     }
   }
 
+  @visibleForTesting
+  Future<T> debugRunLocked<T>(Future<T> Function() op) => _workoutLock.run(op);
+
   /// Rewind the export cursor so the next [exportAll] re-writes [date] and
   /// every day after it. Under the same lock as [exportAll], so a pass already
   /// running can't advance the cursor back over it. Never throws.

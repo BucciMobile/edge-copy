@@ -2,6 +2,8 @@
 // because another derive pass holds the latch, and the morning readiness pin
 // must not keep showing the uncorrected night.
 
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +12,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:openstrap_edge/compute/derivation_engine.dart';
 import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/state/app_state.dart';
 
 void main() {
@@ -71,6 +74,37 @@ void main() {
     DerivationEngine.debugRunning = false;
     await edit;
     expect(await LocalDb.frozenHeadline(), isNull);
+  });
+
+  test('an edit doesn\'t wait for a health export already running', () async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    final exporting = Completer<void>();
+    final running = HealthExporter.shared.debugRunLocked(
+      () => exporting.future,
+    );
+    addTearDown(() async {
+      if (!exporting.isCompleted) exporting.complete();
+      await running;
+    });
+
+    var done = false;
+    final edit = app
+        .setSleepOverride(
+          '2026-09-20',
+          DateTime(2026, 9, 19, 23),
+          DateTime(2026, 9, 20, 7),
+        )
+        .then((_) => done = true);
+    for (var i = 0; i < 40 && !done; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    expect(done, isTrue, reason: 'the sleep sheet spins until the export ends');
+    expect(app.reanalyzing, isFalse);
+
+    exporting.complete();
+    await running;
+    await edit;
   });
 
   test('correcting the pinned day releases the morning pin', () async {
