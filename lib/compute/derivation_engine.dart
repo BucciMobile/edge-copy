@@ -1910,10 +1910,10 @@ const int kAlgoVersion = 98;
 // skin-temp window (see pubspec.yaml's comment beside the `ref:` for the
 // verification command). kAlgoVersion bumped 96 -> 97, see the changelog
 // entry above.
-// TEMPORARY @ 9fc1d6a — OpenStrap/analytics PR #80 head (band-state night
-// end: bandTrimmedOffsetSec, segmentSleep(bandSleepState:),
-// SleepSegmentation.bandOffsetTrimSec) on the author's fork, for v98 above.
-// Repin to the OpenStrap/analytics merge SHA before this PR is merged.
+// REPIN @ 9fc1d6a — analytics PR #80 (band-state night end:
+// bandTrimmedOffsetSec, segmentSleep(bandSleepState:),
+// SleepSegmentation.bandOffsetTrimSec), on OpenStrap/analytics main, for v98
+// above.
 const String kAnalyticsPin = '9fc1d6a9b13240ee668e74940e03cb5646113a5c';
 // Repinned to analytics main's tip, which carries BOTH PR #72 (hrv_freq
 // Welch gap guard) and PR #73 (overreachingConjunction rhr quantum guard) —

@@ -258,11 +258,7 @@ dependencies:
       ref: bc7d8d0df706e40a2546ffde4545263f09d0fecb
   openstrap_analytics:
     git:
-      # TEMPORARY (until analytics#80 merges): pinned to OpenStrap/analytics PR #80's head on the
-      # author's fork so CI compiles the band-sleep-offset-trim change. Repin
-      # to the OpenStrap/analytics merge SHA (url back to OpenStrap) before
-      # this PR is merged.
-      url: https://github.com/DropTabl/analytics.git
+      url: https://github.com/OpenStrap/analytics.git
       # analytics main @ #34 merge. Two hops in one: #32 (the HR-onset bypass
       # for low-limb-swing cardio) had already merged and this pin was still
       # sitting on its PR-branch head, and #34 lands the sleep-stager rewrite.
