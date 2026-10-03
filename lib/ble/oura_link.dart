@@ -582,9 +582,12 @@ class OuraLink {
     final done = host.run(link).whenComplete(() => finished = true);
     var served = 0;
     // Bounded by wall time, not a spin count: a real sqflite commit between
-    // batches can outlast any fixed number of zero-length yields.
+    // batches can outlast any fixed number of zero-length yields. The bound
+    // outlasts `timeouts` so the link never closes while the adapter may
+    // still validly be waiting on a confirmation.
     final clock = Stopwatch()..start();
-    while (!finished && clock.elapsed < const Duration(seconds: 5)) {
+    final deadline = timeouts + const Duration(seconds: 5);
+    while (!finished && clock.elapsed < deadline) {
       await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {
