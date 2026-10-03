@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/data/local_repository.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
@@ -591,5 +592,31 @@ void main() {
 
       expect(await LocalDb.liveWorkoutTally(id), isNull);
     });
+
+    test('deleting the running session ends it, and stop cannot bring it back',
+        () async {
+      await Prefs.ensureLoaded();
+      const id = 'deleted-while-live';
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      app.repo = _DeleteRepo();
+      LiveDraft.begin(activityByName('running')!).setPaused(true);
+      app.startWorkout(workoutId: id, type: 'run');
+      expect(await LocalDb.session(id), isNotNull);
+
+      await app.deleteWorkout(id);
+
+      expect(app.activeWorkout, isNull);
+      expect(LiveDraft.current, isNull,
+          reason: 'a paused draft left behind would freeze the next session');
+      await app.stopWorkout();
+      expect(await LocalDb.session(id), isNull);
+    });
   });
+}
+
+class _DeleteRepo extends LocalRepository {
+  @override
+  Future<void> deleteWorkout(String id) => LocalDb.deleteSession(id);
 }

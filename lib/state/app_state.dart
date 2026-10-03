@@ -6578,6 +6578,10 @@ class AppState extends ChangeNotifier {
       unawaited(_healthExport.exportWorkout(sessionRow));
     }
     activeWorkout = null;
+    // The draft (and its pause) belongs to this session. Ended from the Live
+    // Activity or a double-tap, a paused draft used to outlive it and freeze
+    // the next session's tick.
+    LiveDraft.clear();
     _workoutRawBase = null;
     _workoutSawSamples = false;
     _workoutMinuteSteps.clear();
@@ -6630,6 +6634,7 @@ class AppState extends ChangeNotifier {
     ScreenWake.releaseOwner('workout');
     _deriveScheduler.setWorkoutActive(false);
     activeWorkout = null;
+    LiveDraft.clear();
     _nudgeLive(); // the workout's stream ownership ends with it
     _workoutRawBase = null;
     _workoutSawSamples = false;
@@ -6647,12 +6652,14 @@ class AppState extends ChangeNotifier {
   /// "Run live" until a manual refresh/restart; and deleting a workout that
   /// was GENUINELY still live would have left its timer/route tracker/Live
   /// Activity running against a deleted id.
+  ///
+  /// Teardown runs BEFORE the delete: stopping the route tracker flushes its
+  /// tail under this id, which would otherwise land after the delete.
   Future<void> deleteWorkout(String id) async {
+    final live = activeWorkout?.workoutId == id;
+    if (live) await _cancelActiveWorkoutTeardown();
     await repo?.deleteWorkout(id);
-    if (activeWorkout?.workoutId == id) {
-      await _cancelActiveWorkoutTeardown();
-      notifyListeners();
-    }
+    if (live) notifyListeners();
   }
 
   // ── band-gesture actions (in-app) ─────────────────────────────────────────────
