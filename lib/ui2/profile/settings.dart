@@ -192,8 +192,11 @@ class _MoreSettingsState extends State<MoreSettings> {
           (theme.choice.index + 1) % AppThemeChoice.values.length]),
       // the wind-down body bakes the time in when it's armed, re-arm it now
       onCycleClockFormat: () async {
-        await clock.cycle();
-        await app.refreshAiReminders();
+        try {
+          await clock.cycle();
+        } finally {
+          await app.refreshAiReminders();
+        }
       },
       onToggleCycleTracking: () =>
           app.setCycleTrackingEnabled(!app.cycleTrackingEnabled),
