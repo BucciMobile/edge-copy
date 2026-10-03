@@ -83,7 +83,8 @@ void main() {
     final fin = body.lastIndexOf('} finally {');
     expect(fin, isNot(-1));
     const rearm =
-        'if (_background && !engine.isConnected) await _armRecovery();';
+        'if (_keepAlive && _background && !engine.isConnected) {\n'
+        '        await _armRecovery();';
     expect(body.substring(fin).contains(rearm), isTrue);
   });
 

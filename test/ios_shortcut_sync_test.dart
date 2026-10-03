@@ -231,4 +231,31 @@ void main() {
       );
     },
   );
+
+  test('a Shortcut stopped mid-burst still reports committed records', () async {
+    FlutterBluePlusPlatform.instance = _AdapterOn();
+    await PairedDevice.save(
+      '00000000-0000-0000-0000-000000000001',
+      'test',
+      generation: 'gen4',
+    );
+    final burst = Completer<SyncReport>();
+    IosShortcutSync.foregroundEngine = _LiveEngine.new;
+    IosShortcutSync.foregroundSync = (task) {
+      task.update('syncing');
+      IosShortcutSync.foregroundCommitted(42);
+      return burst.future;
+    };
+    addTearDown(() {
+      IosShortcutSync.foregroundEngine = null;
+      IosShortcutSync.foregroundSync = null;
+      if (!burst.isCompleted) burst.complete(SyncReport(0, 0, true));
+    });
+    final result = await IosShortcutSync.run(
+      'committed',
+      const Duration(milliseconds: 300),
+    );
+    expect(result.status, 'partial');
+    expect(result.records, 42);
+  });
 }

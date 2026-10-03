@@ -1386,6 +1386,7 @@ class AppState extends ChangeNotifier {
           IosShortcutSync.foregroundCommitFailed();
           rethrow;
         }
+        IosShortcutSync.foregroundCommitted(samples.length);
       },
       // Pre-setup fallback only: the drain path archives inside commitSyncBatch.
       onArchiveRecord: (raw) async {
@@ -5223,7 +5224,11 @@ class AppState extends ChangeNotifier {
       // background transition will clear it: every restore wake and BG-task
       // sync would skip until the user next opens the app. Hand the band back
       // to the restore path, same as the background cold-launch does.
-      if (_background && !engine.isConnected) await _armRecovery();
+      // Not after unpair/endSession dropped keep-alive mid-connect: that would
+      // re-arm a pending connect for a session nobody wants.
+      if (_keepAlive && _background && !engine.isConnected) {
+        await _armRecovery();
+      }
       _setBusy(false);
     }
   }

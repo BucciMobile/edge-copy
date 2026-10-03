@@ -25,7 +25,11 @@ class IosShortcutSync {
   static ShortcutSyncTask? _active;
   static void Function()? _onForegroundCommitFailure;
 
+  static void Function(int records)? _onForegroundCommitted;
+
   static void foregroundCommitFailed() => _onForegroundCommitFailure?.call();
+  static void foregroundCommitted(int records) =>
+      _onForegroundCommitted?.call(records);
 
   static Future<SyncReport> Function(ShortcutSyncTask)? foregroundSync;
   static BleEngine? Function()? foregroundEngine;
@@ -126,6 +130,10 @@ class IosShortcutSync {
     final liveEngine = foregroundEngine?.call();
     if (liveSync != null && liveEngine != null) {
       _onForegroundCommitFailure = () => task.stop('failed');
+      // Counted as each batch commits, so a Shortcut stopped mid-burst still
+      // reports what was saved.
+      _onForegroundCommitted = (count) =>
+          task.update(task.phase, records: task.records + count);
       task.update(liveEngine.isConnected ? 'syncing' : 'connecting');
       var radioConnected = liveEngine.isConnected;
       final radio = BluetoothDevice.fromId(paired.remoteId).connectionState
@@ -174,6 +182,7 @@ class IosShortcutSync {
         return await _derive(task);
       } finally {
         _onForegroundCommitFailure = null;
+        _onForegroundCommitted = null;
         task.onStop = null;
         progress.cancel();
         await radio.cancel();
