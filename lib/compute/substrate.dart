@@ -898,6 +898,11 @@ int? hardwareStepsFromCounter(
 /// the counter DOES carry times — one per record. Grouped into one span per
 /// LOCAL clock hour (by the delta's closing record), each span running from the
 /// first credited delta's opening record to the last one's closing record.
+/// A delta read across an hour line (its opening record in an earlier local
+/// hour, e.g. the one record pair either side of an off-wrist hole) is a span
+/// of its own that nothing merges into: when in that stretch its steps fell is
+/// unknown, and merging the next hour's deltas into it would stretch that whole
+/// hour's steps back across the hole.
 /// Local, not `ts ~/ 3600`: in a half-hour-offset zone a UTC hour crosses a
 /// local hour line, and the day chart spreads a span evenly over its extent,
 /// so a UTC-hour span would push steps into the wrong local hour.
@@ -912,7 +917,10 @@ List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
   final seen = _walkCounterDeltas(sub, cumulativeCounterModulus,
       maxStepsPerSecond, (fromTs, ts, delta) {
     final last = out.isEmpty ? null : out.last;
-    if (last != null && _localHourStart(last.endTs) == _localHourStart(ts)) {
+    final hour = _localHourStart(ts);
+    if (last != null &&
+        _localHourStart(last.endTs) == hour &&
+        _localHourStart(last.startTs) == hour) {
       out[out.length - 1] =
           (startTs: last.startTs, endTs: ts, steps: last.steps + delta);
     } else {
