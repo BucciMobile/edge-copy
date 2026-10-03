@@ -327,7 +327,13 @@ private final class Impl {
       return
     }
     let labels = Bundle.main.infoDictionary?["OSBandLabels"] as? [String: String] ?? [:]
-    let image = UIImage(systemName: "sensor.tag.radiowave.forward") ?? UIImage()
+    // The bundled product bitmap, as the band picker uses — NOT an SF Symbol first. Seen
+    // on iOS 27: with the symbol image, iOS dropped the item ("Ignoring invalid display
+    // items … Cannot launch picker due to no valid display item") and no sheet opened;
+    // with the bitmap, the same descriptor opened the sheet.
+    let image = UIImage(named: "StrapProduct")
+      ?? UIImage(systemName: "sensor.tag.radiowave.forward")
+      ?? UIImage()
     let sensorItems = wanted.sorted().map { svc -> ASPickerDisplayItem in
       let descriptor = ASDiscoveryDescriptor()
       descriptor.bluetoothServiceUUID = CBUUID(string: svc)
