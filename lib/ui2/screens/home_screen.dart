@@ -1756,8 +1756,11 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
                 switch (k) {
                   HomeRingKind.recovery => const ReadinessDetail(),
                   HomeRingKind.strain => const DayStrainDetail(),
-                  // The night the ring was drawn from, not last night.
-                  HomeRingKind.sleep => SleepDetail(day: _day),
+                  // The night the ring was drawn from, not last night. Today
+                  // stays null even after the switcher steps back onto it:
+                  // today's ring is the held-over night, and only the default
+                  // pick resolves to that one.
+                  HomeRingKind.sleep => SleepDetail(day: isToday ? null : _day),
                 }),
           )
         else

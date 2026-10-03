@@ -137,6 +137,37 @@ void main() {
         _yesterday);
   });
 
+  testWidgets('back on today the sleep ring opens the held-over night',
+      (t) async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    app.repo = _Repo();
+
+    await t.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider<AppState>.value(value: app),
+        ChangeNotifierProvider<ThemeController>.value(
+            value: ThemeController.seed(
+                AppThemeChoice.light, Brightness.light)),
+      ],
+      child: MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: const Scaffold(body: HomeScreen(hour: 9)),
+      ),
+    ));
+    await _settle(t);
+    await t.tap(find.bySemanticsLabel('Previous day'));
+    await _settle(t);
+    await t.tap(find.bySemanticsLabel('Next day'));
+    await _settle(t);
+
+    // Today, reached through the switcher, is still today: no explicit day,
+    // so Sleep resolves the night the ring is drawn from.
+    t.widget<RingTrio>(find.byType(RingTrio)).onOpen!(HomeRingKind.sleep);
+    await _settle(t);
+    expect(t.widget<SleepDetail>(find.byType(SleepDetail)).day, isNull);
+  });
+
   testWidgets('a past day with nothing recorded says so, not "sync the band"',
       (t) async {
     final app = AppState.forTesting();
