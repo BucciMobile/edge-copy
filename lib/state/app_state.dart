@@ -1754,10 +1754,11 @@ class AppState extends ChangeNotifier {
       // Same signal, for the surfaces that can't listen: home/lock-screen
       // widget, Watch mirror, Siri intents (WidgetService.refresh).
       unawaited(WidgetService.refresh(repo));
-      // A heavy finalize is where a freshly-closed sleep window + recovery for a
-      // new physiological day lands — fire the "recovery ready" push off it.
+      // "Recovery ready" push, on light passes too: it waits for the settled
+      // night (#448), and once a heavy has run before the edge passed the
+      // wake, only light drains are left to see it settle.
+      unawaited(_maybeNotifyRecoveryReady());
       if (heavy) {
-        unawaited(_maybeNotifyRecoveryReady());
         // Baseline-dirty rescan: new data may have shifted the rolling baseline,
         // so refresh baseline-dependent scalars (readiness/illness/stress) on
         // recent FINALIZED days. Cheap when the baseline is unchanged (a single
@@ -1855,6 +1856,10 @@ class AppState extends ChangeNotifier {
       if (score == null) {
         return; // recovery not computed (no nocturnal HRV) → no fire
       }
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.getString(_kLastRecoveryNotifDay) == dayId) {
+        return; // already fired
+      }
       final payload = SeriesCodec.decodePayloadJson(
         (row['payload_json'] ?? '{}').toString(),
       );
@@ -1867,11 +1872,6 @@ class AppState extends ChangeNotifier {
         nowSec: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       )) {
         return;
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      if (prefs.getString(_kLastRecoveryNotifDay) == dayId) {
-        return; // already fired
       }
 
       // Sleep hours from the day's bundle accounting (tst), for the body copy.
