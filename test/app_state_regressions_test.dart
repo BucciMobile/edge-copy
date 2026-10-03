@@ -480,6 +480,26 @@ void main() {
           reason: 'below zone 1 is still quiet');
     });
 
+    test('a high resting HR still lets the zone-1 edge win (#466)', () {
+      // RHR 72 / max 173: calorie gate 112.4, zone 1 starts at 86.5. Halfway
+      // to the gate (92.2) sat above zone 1, so 89 bpm showed ZONE 1 and was
+      // still asked "nothing above resting effort".
+      final app = connected(89);
+      addTearDown(app.dispose);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'high-rhr',
+        type: 'strength',
+        hrMax: 173,
+        restingHr: 72,
+        zoneSet: ana.HeartRateZones.zonesFromMaxHr(173),
+      );
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNull);
+    });
+
     test('a manual zone-1 edge below resting HR does not mute the watch', () {
       // Manual bounds only need zone 1 >= 30 bpm. With zone 1 at 50 and RHR
       // 58, capping the gate at zone 1 made a session left open overnight at

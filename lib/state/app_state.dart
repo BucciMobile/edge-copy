@@ -6834,12 +6834,13 @@ class AppState extends ChangeNotifier {
     // ask is a notification, once per session; the session itself is never
     // touched — there is deliberately no auto-stop.
     //
-    // The cap never goes below halfway between resting HR and the calorie
-    // gate. Resting HR here is the night's LOWEST 30-min mean, so sleeping HR
-    // sits a few bpm above it: a zone-1 edge at or just above it (manual
-    // bounds only need >= 30 bpm, or zone 1 = 50 % HRmax at an older age)
-    // would make a session left open overnight read active forever, and the
-    // nudge would never go out.
+    // The cap never goes below a quarter of the way from resting HR to the
+    // calorie gate (~10 % HRR). Resting HR here is the night's LOWEST 30-min
+    // mean, so sleeping HR sits a few bpm above it: a zone-1 edge at or just
+    // above it (manual bounds only need >= 30 bpm) would make a session left
+    // open overnight read active forever, and the nudge would never go out.
+    // A wider floor (halfway) overshot a real 50 %-HRmax zone-1 edge once RHR
+    // passes ~0.375 HRmax, nudging sessions the bar shows as ZONE 1.
     final wRhr = w.restingHr;
     final wMax = w.hrMax;
     final calGate = (wRhr != null && wMax != null)
@@ -6848,7 +6849,7 @@ class AppState extends ChangeNotifier {
     final z1Floor = w.zoneSet?.zones.first.lower;
     final idleGate = (calGate == null || z1Floor == null)
         ? calGate
-        : math.max(math.min(calGate, z1Floor), (wRhr! + calGate) / 2);
+        : math.max(math.min(calGate, z1Floor), wRhr! + (calGate - wRhr) / 4);
     if (w.idleWatch.onTick(DateTime.now(), hr: hr, gate: idleGate)) {
       unawaited(_nudgeIdleWorkout(w));
     }
