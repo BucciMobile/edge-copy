@@ -316,13 +316,13 @@ class HealthConnectSleepSessionExporter {
     final session = normalizeHealthSleepSession(bundle);
     // No sleep window at all — nothing to write, and that is not a failure.
     // But a night exported earlier (since rejected, or gone on re-derive) is
-    // still in the store, and nothing else deletes Health Connect sleep. Every
-    // night that ends on this day overlaps its morning, and neither
-    // neighbouring night does, so clear exactly [midnight, noon).
+    // still in the store, and nothing else deletes Health Connect sleep. A
+    // range delete matches records by START time and most nights start the
+    // evening before, so clear the same noon-to-noon window a replace does.
     if (session == null) {
       if (dayStart == null) return true;
       return writer.clear(
-        dayStart,
+        DateTime(dayStart.year, dayStart.month, dayStart.day - 1, 12),
         DateTime(dayStart.year, dayStart.month, dayStart.day, 12),
       );
     }

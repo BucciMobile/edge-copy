@@ -620,7 +620,12 @@ void main() {
         );
         expect(calls.single.method, 'clearSleepSessions');
         final args = (calls.single.arguments as Map).cast<String, Object?>();
-        expect(args['startTime'], DateTime(2026, 8, 5).millisecondsSinceEpoch);
+        expect(
+          args['startTime'],
+          DateTime(2026, 8, 4, 12).millisecondsSinceEpoch,
+          reason: 'a night that started at 23:00 the evening before is '
+              'matched by its start, so the clear has to reach back to it',
+        );
         expect(
           args['endTime'],
           DateTime(2026, 8, 5, 12).millisecondsSinceEpoch,
