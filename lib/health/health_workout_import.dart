@@ -42,6 +42,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:health/health.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../data/db.dart';
 
@@ -101,12 +102,26 @@ class ImportedWorkoutRow {
 
 /// Turn raw health-store points into workout rows, dropping anything unusable.
 /// Pure, so the filtering is testable without a store.
+///
+/// [ownApp] is this app's bundle id / package name. Our own exported sessions
+/// are skipped: they are already in History as band sessions, and the export
+/// rewrites them under a fresh uuid on every pass, so importing them would add
+/// one more copy each time. HealthKit names the app in `sourceId`, Health
+/// Connect in `sourceName`, so either matching counts.
 @visibleForTesting
-List<ImportedWorkoutRow> workoutsFrom(List<HealthDataPoint> points) {
+List<ImportedWorkoutRow> workoutsFrom(List<HealthDataPoint> points,
+    {String? ownApp}) {
   final out = <ImportedWorkoutRow>[];
   final seen = <String>{};
   for (final p in points) {
     if (p.type != HealthDataType.WORKOUT) continue;
+    // An empty id would match every Health Connect point (its sourceId is
+    // always ""), so it never counts as ours.
+    if (ownApp != null &&
+        ownApp.isNotEmpty &&
+        (p.sourceId == ownApp || p.sourceName == ownApp)) {
+      continue;
+    }
     final v = p.value;
     if (v is! WorkoutHealthValue) continue;
     // A record with no uuid cannot be deduplicated or matched to its route, and
@@ -300,7 +315,11 @@ class HealthWorkoutImporter {
         startTime: start,
         endTime: end,
       );
-      rows = workoutsFrom(points);
+      String? ownApp;
+      try {
+        ownApp = (await PackageInfo.fromPlatform()).packageName;
+      } catch (_) {}
+      rows = workoutsFrom(points, ownApp: ownApp);
     } catch (e) {
       debugPrint('[imported_workout] read: $e');
       return WorkoutImportResult(routesSupported: routesSupported);
