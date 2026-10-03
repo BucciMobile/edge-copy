@@ -202,13 +202,37 @@ class RoughNight {
   return (signs: signs, moved: moved, tempMoved: tempMoved);
 }
 
+/// When the last session that ran late into the evening BEFORE [day]'s night
+/// ended, or null. [day]'s night is the one that ended that morning, so it
+/// started the previous evening: only a session that began that previous
+/// calendar day and finished from [kLateTrainingHour] on (past midnight
+/// included) came before it. One from [day] itself came after the night it
+/// would be blamed for.
+DateTime? lateTrainingEnd(String day, List<Map<String, Object?>> sessions) {
+  final d = DateTime.parse(day);
+  final dayBefore = DateTime(d.year, d.month, d.day - 1);
+  final lateFrom = DateTime(d.year, d.month, d.day - 1, kLateTrainingHour);
+  DateTime? latest;
+  for (final s in sessions) {
+    final start = s['start_ts'], end = s['end_ts'];
+    if (start is! num || end is! num) continue;
+    final began = DateTime.fromMillisecondsSinceEpoch(start.toInt() * 1000);
+    if (began.isBefore(dayBefore) || !began.isBefore(d)) continue;
+    final t = DateTime.fromMillisecondsSinceEpoch(end.toInt() * 1000);
+    if (!t.isBefore(lateFrom) && (latest == null || t.isAfter(latest))) {
+      latest = t;
+    }
+  }
+  return latest;
+}
+
 /// Read [day]'s state, plus everything the app can state about it instead of
 /// asking. Null whenever there is no card to show — a short record, a night
 /// that was ordinary, or a night this screen has no business commenting on.
 ///
-/// FOUR indexed series reads and three read-seam calls, no compute. `getToday`
-/// is not among them: [day] is passed in because the caller already knows which
-/// night it is looking at.
+/// FOUR indexed series reads, one session-range read and two read-seam calls,
+/// no compute. `getToday` is not among them: [day] is passed in because the
+/// caller already knows which night it is looking at.
 Future<RoughNight?> loadRoughNight(
   LocalRepository repo,
   String day, {
@@ -242,26 +266,20 @@ Future<RoughNight?> loadRoughNight(
 
   // LATE TRAINING — the app has the end time, so it says it.
   try {
-    final sessions = (await repo.getDayTimeline(day))['sessions'];
-    if (sessions is List) {
-      DateTime? latest;
-      for (final s in sessions) {
-        if (s is! Map) continue;
-        final end = s['end_ts'];
-        if (end is! num) continue;
-        final t = DateTime.fromMillisecondsSinceEpoch(end.toInt() * 1000);
-        if (t.hour >= kLateTrainingHour &&
-            (latest == null || t.isAfter(latest))) {
-          latest = t;
-        }
-      }
-      if (latest != null) {
-        final at = formatMinuteOfDay(latest.hour * 60 + latest.minute);
-        knows.add(
-          l?.roughNightLateTraining(at) ??
-              'You trained until $at, which often does this on its own.',
-        );
-      }
+    final d = DateTime.parse(day);
+    final latest = lateTrainingEnd(
+      day,
+      await LocalDb.sessionsInRange(
+        DateTime(d.year, d.month, d.day - 1).millisecondsSinceEpoch ~/ 1000,
+        d.millisecondsSinceEpoch ~/ 1000,
+      ),
+    );
+    if (latest != null) {
+      final at = formatMinuteOfDay(latest.hour * 60 + latest.minute);
+      knows.add(
+        l?.roughNightLateTraining(at) ??
+            'You trained until $at, which often does this on its own.',
+      );
     }
   } catch (_) {/* a knowable that could not be read is simply not stated */}
 
