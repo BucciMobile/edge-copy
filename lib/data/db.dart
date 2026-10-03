@@ -352,7 +352,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 55;
+  static const int schemaVersion = 60;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -1163,6 +1163,12 @@ class LocalDb {
     await _createNotifFired(db);
     await _createNotifSlots(db);
     await _createAlarmSchedule(db);
+    // BP research (rung 55 + v2 rung 56): both helpers are fully idempotent
+    // (CREATE TABLE IF NOT EXISTS plus per-column guarded ALTERs), so a
+    // same-version merged build whose schema lineage skipped a rung gets
+    // repaired here instead of bricking on the first BP read or write.
+    await _createBpResearch(db);
+    await _upgradeBpResearchV2(db);
     // CREATE TABLE IF NOT EXISTS on the every-open repair path, no schema
     // version bump needed — additive, no backfill (see _createImportedWorkout
     // just above for the same reasoning).
@@ -1592,6 +1598,122 @@ class LocalDb {
     );
   }
 
+<<<<<<< HEAD
+=======
+  /// BP research capture store (schema rung 55).
+  ///
+  /// EXPERIMENTAL, DEVELOPER-ONLY, and it stays that way. A cuff reading the
+  /// user types in next to the band data of the same instant is exactly the
+  /// pairing the `imported_measurement` guard exists to prevent becoming an
+  /// input: the moment a wrist series and a cuff series are regressed against
+  /// each other ON DEVICE, this app is making a cuffless-blood-pressure
+  /// claim from an uncleared device. So this is a SEPARATE store, read by
+  /// exactly one dev screen and one CSV export, and — like
+  /// `imported_measurement` and `observation` — the isolation is structural:
+  /// nothing in `compute/`, nothing that feeds `day_result` or
+  /// `metric_series`, and nothing that writes to HealthKit / Health Connect
+  /// may name either table. `bp_research_isolation_test.dart` fails the moment
+  /// anyone does.
+  ///
+  /// Captures are idempotent on `(measured_at_ms, device)`: retaking the same
+  /// cuff reading at the same instant re-states the window rather than
+  /// duplicating it. Legitimate repeat measurements minutes apart are
+  /// different instants and both stay.
+  /// Rung 56: the v2 research columns and the snapshot table. Additive only —
+  /// nullable columns and a new table, no rewrite, no backfill. Idempotent
+  /// (every ADD COLUMN guarded by _columnsOf) so it can serve both the
+  /// onUpgrade ladder and a fresh install that ran rung 55's CREATE first.
+  static Future<void> _upgradeBpResearchV2(Database db) async {
+    // SELF-SUFFICIENT rung: the ALTERs below assume the rung-55 tables exist.
+    // A v55 database whose bp_research tables are missing (an interrupted
+    // foreign build, an unusual merge lineage) would throw "no such table"
+    // inside the ONE exclusive onUpgrade transaction and brick every launch
+    // with no rollback target. CREATE TABLE IF NOT EXISTS is a no-op in every
+    // normal path (the ladder created the tables one rung earlier).
+    await _createBpResearch(db);
+    final refCols = await _columnsOf(db, 'bp_research_reference');
+    // Measurement vs entry time. NULL on v1 rows: their measured_at_ms
+    // doubles as both, and absent stays absent — no backfill.
+    if (!refCols.contains('measurement_started_at_ms')) {
+      await db.execute(
+        'ALTER TABLE bp_research_reference '
+        'ADD COLUMN measurement_started_at_ms INTEGER',
+      );
+    }
+    if (!refCols.contains('measurement_finished_at_ms')) {
+      await db.execute(
+        'ALTER TABLE bp_research_reference '
+        'ADD COLUMN measurement_finished_at_ms INTEGER',
+      );
+    }
+    // Band identity and session grouping, kept beside the capture so signal
+    // provenance survives a device swap or a second band.
+    if (!refCols.contains('band_device_id')) {
+      await db.execute(
+        'ALTER TABLE bp_research_reference ADD COLUMN band_device_id TEXT',
+      );
+    }
+    if (!refCols.contains('measurement_session_id')) {
+      await db.execute(
+        'ALTER TABLE bp_research_reference '
+        'ADD COLUMN measurement_session_id TEXT',
+      );
+    }
+    // Precision of the recorded measurement instant ('minute' for the
+    // current UI) — the analysis must know the pairing instant is not
+    // second-accurate.
+    if (!refCols.contains('time_precision')) {
+      await db.execute(
+        'ALTER TABLE bp_research_reference ADD COLUMN time_precision TEXT',
+      );
+    }
+
+    final winCols = await _columnsOf(db, 'bp_research_window');
+    // Requested vs OBSERVED window bounds: what the data actually covered.
+    if (!winCols.contains('observed_start_ms')) {
+      await db.execute(
+        'ALTER TABLE bp_research_window ADD COLUMN observed_start_ms INTEGER',
+      );
+    }
+    if (!winCols.contains('observed_end_ms')) {
+      await db.execute(
+        'ALTER TABLE bp_research_window ADD COLUMN observed_end_ms INTEGER',
+      );
+    }
+    // Quality counts (v2): honest coverage and continuity metrics, never a
+    // fabricated confidence number.
+    for (final c in [
+      'valid_hr_seconds INTEGER',
+      'valid_interval_count INTEGER',
+      'valid_interval_pair_count INTEGER',
+      'coverage_fraction REAL',
+      'rejected_interval_fraction REAL',
+      'quality_status TEXT',
+      'feature_version INTEGER',
+      'snapshot_revision INTEGER',
+    ]) {
+      final name = c.split(' ').first;
+      if (!winCols.contains(name)) {
+        await db.execute('ALTER TABLE bp_research_window ADD COLUMN $c');
+      }
+    }
+
+    // Immutable raw-row snapshots: the exact onehz/rr rows a window
+    // revision was computed from, frozen as JSON. Re-processing writes a
+    // NEW revision row; old revisions stay. Research-only, same isolation
+    // as the rung-55 tables.
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS bp_research_snapshot ('
+      'id INTEGER PRIMARY KEY AUTOINCREMENT, '
+      'reference_id INTEGER NOT NULL, '
+      'revision INTEGER NOT NULL, '
+      'onehz_json TEXT NOT NULL, '
+      'rr_json TEXT NOT NULL, '
+      'created_at_ms INTEGER NOT NULL, '
+      'UNIQUE (reference_id, revision))',
+    );
+  }
+>>>>>>> 0024c45f (fix(migration): self-sufficient rung-56 BP upgrade, BP repair on open, real-file 54->56/55->56 migration tests)
 
   /// BP research capture store (dev mode only). Read only by the dev screen
   /// and the CSV export; bp_research_isolation_test.dart keeps it that way.
