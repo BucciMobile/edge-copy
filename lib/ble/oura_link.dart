@@ -247,6 +247,25 @@ class OuraLink {
         _cursorWrites.then((_) => _persistCursor(ds)).catchError((_) {});
   }
 
+  /// Drop the bookmark and the stored time anchor, through the same queue.
+  ///
+  /// The reset means the ring's decisecond counter restarted, so the stored
+  /// `(ds, unix)` anchor belongs to the dead boot; left in place it would
+  /// stamp the new boot's readings wrong. Without it they wait for the new
+  /// boot's own `time_sync`. [deviceId] is captured because this can run
+  /// after `stop()` nulled `_deviceId`. A failed anchor delete aborts the
+  /// reset, so cursor 0 never lands next to the old anchor.
+  void _resetCursor(String deviceId) {
+    _cursorWrites = _cursorWrites.then((_) async {
+      _anchor = null;
+      await LocalDb.deleteCursor(_anchorItem(deviceId));
+      await _persistCursor(0, deviceId);
+    }).catchError((e) {
+      debugPrint('[oura] stranded reset incomplete; the bookmark stays and '
+          'the next sync re-runs it: $e');
+    });
+  }
+
   bool _busy = false;
 
   /// Connect to the paired ring, drain its history to the end, disconnect.
@@ -399,20 +418,10 @@ class OuraLink {
         // re-read is idempotent here (`decoded_onehz` REPLACEs by second,
         // `raw_archive` dedups on the frame bytes). Leaving it costs every
         // record the ring takes from here on, silently.
-        //
-        // The anchor goes too: it pairs a decisecond from the old boot with a
-        // Unix second, and stamping the new boot with it would be plausible
-        // and wrong. Readings wait for the new boot's own time_sync instead.
         debugPrint('[oura] the bookmark is past the end of the ring — '
             'dropping it so the next sync re-reads from the beginning.');
-        _anchor = null;
         final deviceId = _deviceId;
-        if (deviceId != null) {
-          _cursorWrites = _cursorWrites
-              .then((_) => LocalDb.deleteCursor(_anchorItem(deviceId)))
-              .catchError((_) {});
-        }
-        _writeCursor(0);
+        if (deviceId != null) _resetCursor(deviceId);
       case 'battery':
         if (value is int) _batteryPct = value;
       case 'battery_mv':
@@ -438,9 +447,9 @@ class OuraLink {
   }
 
   /// Bank one frame verbatim, decoded or not (owner rulings R1-R3): the beat
-  /// intervals, SpO2, the hypnogram and the steps are all in here undecoded
-  /// and the bytes are banked now so a decoder written when someone owns a
-  /// ring can be run over them.
+  /// intervals, SpO2 and the steps are all in here undecoded and the bytes
+  /// are banked now so a decoder written when someone owns a ring can be run
+  /// over them.
   ArchiveRecord? _buildArchiveRow(List<int> bytes, int capturedAtMs) {
     final f = parseOuraFrame(bytes);
     if (f == null) return null;
@@ -470,8 +479,8 @@ class OuraLink {
     );
   }
 
-  Future<void> _persistCursor(int ds) async {
-    final deviceId = _deviceId;
+  Future<void> _persistCursor(int ds, [String? forDevice]) async {
+    final deviceId = forDevice ?? _deviceId;
     if (deviceId == null) return;
     // NOT MONOTONIC, and it must not be. 0 arrives here when the ring reports
     // data remaining and answers this bookmark with nothing — a bookmark past
@@ -572,8 +581,11 @@ class OuraLink {
     var finished = false;
     final done = host.run(link).whenComplete(() => finished = true);
     var served = 0;
-    for (var spin = 0; spin < 800 && !finished; spin++) {
-      await Future<void>.delayed(Duration.zero);
+    // Bounded by wall time, not a spin count: a real sqflite commit between
+    // batches can outlast any fixed number of zero-length yields.
+    final clock = Stopwatch()..start();
+    while (!finished && clock.elapsed < timeouts) {
+      await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {
           link.feed(kOuraNotifyChar, f, atSec: _now());
@@ -586,8 +598,8 @@ class OuraLink {
     // final flush is the same sqflite write), so the same generous bound.
     await done.timeout(const Duration(seconds: 30), onTimeout: () {});
     await host.stop();
-    _host = null;
     await _cursorWrites;
+    _host = null;
     _anchor = null;
     _deviceId = null;
     return link;
