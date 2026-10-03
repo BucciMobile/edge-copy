@@ -3335,6 +3335,11 @@ class LocalDb {
   /// the day. Day-tagged so it survives restarts and is ignored on a new day.
   static const String kFrozenHeadlineCursor = 'frozen_headline';
 
+  /// Cursor holding the highest `rec_ts` cutoff [pruneDecodedBeforeRecTs] has
+  /// applied: decoded rows before it are gone, so anything rebuilt from them
+  /// (minute HR export) can't be rewritten for that span.
+  static const String kDecodedPrunedBeforeCursor = 'decoded_pruned_before';
+
   /// The pinned morning readiness headline (day + value), or null if unset /
   /// unparseable. The `day` must be compared to today's label by the caller — a
   /// pin left over from a previous day must NOT be surfaced.
@@ -10959,6 +10964,10 @@ class LocalDb {
       // storage problem; the 1 Hz substrate is.
       // ponytail: unbounded, so give it its own multi-year cutoff if a real
       // install's table ever shows up big.
+      final prior = await _cursorIntVia(txn, kDecodedPrunedBeforeCursor);
+      if (prior == null || cutoffSec > prior) {
+        await setCursor(kDecodedPrunedBeforeCursor, '$cutoffSec', txn: txn);
+      }
     });
     return deleted;
   }

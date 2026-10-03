@@ -76,9 +76,9 @@ void main() {
       final args = (calls.single.arguments as Map).cast<String, Object?>();
       expect(
         args['startTime'],
-        DateTime(2026, 8, 5, 0, 1).millisecondsSinceEpoch,
-        reason: 'decoded rows before the first sample were pruned; the '
-            'minute HR written from them must survive the replace',
+        start.millisecondsSinceEpoch,
+        reason: 'the day is one record starting at midnight and a range '
+            'delete matches by start time; a later start misses it',
       );
       expect(args['endTime'], end.millisecondsSinceEpoch);
       expect(args['samples'], [
@@ -91,6 +91,26 @@ void main() {
           'beatsPerMinute': anyOf(81, 82),
         },
       ]);
+    });
+
+    test('Android leaves a partly pruned day\'s record alone', () async {
+      final writer = _UnusedHeartRateWriter();
+      final rows = [_row(DateTime(2026, 8, 5, 14, 7), 70)];
+      Future<bool> export(DateTime? prunedBefore) =>
+          exportContinuousHeartRateDay(
+            rows: rows,
+            start: start,
+            end: end,
+            useAndroidBatch: true,
+            androidWriter: writer,
+            prunedBefore: prunedBefore,
+            writeGeneric: (_, _) async => throw StateError('not Apple'),
+          );
+
+      expect(await export(DateTime(2026, 8, 5, 14)), isTrue);
+      expect(writer.calls, 0, reason: 'the record holds HR the rows lost');
+      expect(await export(start), isTrue);
+      expect(writer.calls, 1);
     });
 
     test('a day with no samples left is not rewritten', () {

@@ -1196,12 +1196,23 @@ class HealthExporter {
     }
 
     if (hrRows != null) {
+      int? prunedBefore;
+      try {
+        prunedBefore = await LocalDb.getCursorInt(
+          LocalDb.kDecodedPrunedBeforeCursor,
+        );
+      } catch (e) {
+        debugPrint('[health] read prune cutoff: $e');
+      }
       final wroteHeartRate = await exportContinuousHeartRateDay(
         rows: hrRows,
         start: dayStart,
         end: dayEnd,
         useAndroidBatch: Platform.isAndroid,
         androidWriter: _androidHeartRate,
+        prunedBefore: prunedBefore == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(prunedBefore * 1000),
         writeGeneric: (sample, sampleEnd) => _health.writeHealthData(
           value: sample.beatsPerMinute.toDouble(),
           type: HealthDataType.HEART_RATE,

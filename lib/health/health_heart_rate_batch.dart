@@ -94,6 +94,7 @@ Future<bool> exportContinuousHeartRateDay({
   required DateTime end,
   required bool useAndroidBatch,
   required HealthConnectHeartRateWriter androidWriter,
+  DateTime? prunedBefore,
   required Future<bool> Function(HealthHeartRateSample sample, DateTime end)
   writeGeneric,
 }) async {
@@ -101,8 +102,15 @@ Future<bool> exportContinuousHeartRateDay({
   if (samples.isEmpty) return true;
 
   if (useAndroidBatch) {
+    // Health Connect holds the day as ONE record starting at [start], and a
+    // range delete matches records by start time. The replace has to start
+    // at [start] too, or it misses the old record and the day goes in twice.
+    // A record can't be cut, so a day whose decoded rows were partly pruned
+    // ([prunedBefore] past [start]) keeps the record written while they
+    // still existed rather than being replaced by the part that's left.
+    if (prunedBefore != null && prunedBefore.isAfter(start)) return true;
     try {
-      return await androidWriter.replaceDay(samples.first.time, end, samples);
+      return await androidWriter.replaceDay(start, end, samples);
     } catch (_) {
       return false;
     }
