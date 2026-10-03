@@ -5488,8 +5488,9 @@ class AppState extends ChangeNotifier {
     // timedOut even though the burst is banking records.
     task.update('syncing');
     final burst = _kickSyncBurst(kickFirst: _syncBurst == null).then((report) {
+      if (_disposed) return report;
       if (report.records > 0) _deriveScheduler.markStoredData();
-      if (!_disposed) notifyListeners();
+      notifyListeners();
       return report;
     });
     // The burst is the app's and can run for many minutes; a stopped Shortcut
