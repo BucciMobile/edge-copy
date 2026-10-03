@@ -9760,6 +9760,20 @@ class LocalDb {
     final today = localDayLabelNow();
     final latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
     final todayWake = await wakeDayFeatures(today);
+    // A no-sleep TODAY only settles the night once the data has run past local
+    // noon. Today is derived from the first post-midnight records, and a
+    // window with no sleep YET (still up at 00:30, or mid-night) carries the
+    // same NO_SLEEP_DETECTED flag as a night that really had none, so without
+    // this the overnight went 'ready' and blank every night until sleep was
+    // found. Earlier days' nights are over by definition.
+    // ponytail: fixed noon cutoff, a late sleeper waking after noon sees the
+    // night as no-sleep until the wake lands; use habitual wake if that bites.
+    final todayDate = DateTime.parse(today);
+    final todayNoonSec =
+        DateTime(todayDate.year, todayDate.month, todayDate.day, 12)
+                .millisecondsSinceEpoch ~/
+            1000;
+    final todayNightOver = latestRawTs != null && latestRawTs >= todayNoonSec;
     String? latestOvernightDay;
     int? latestOvernightComputedAt;
     String? latestRecoveryDay;
@@ -9780,7 +9794,9 @@ class LocalDb {
             ((decoded['sleep'] as Map?)?['accounting'] as Map?)?['value'];
         final flags = decoded['flags'];
         final hasSleep = sleep is Map && sleep['tst_sec'] != null;
-        final noSleep = flags is List && flags.contains('NO_SLEEP_DETECTED');
+        final noSleep = flags is List &&
+            flags.contains('NO_SLEEP_DETECTED') &&
+            (dayId != today || todayNightOver);
         if (hasSleep || noSleep) {
           latestOvernightDay = dayId;
           latestOvernightComputedAt = (row['computed_at'] as num?)?.toInt();
