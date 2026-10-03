@@ -3995,10 +3995,16 @@ class DerivationEngine {
 
   /// Whether [dayId]'s derive window ([_targetDayWindow], from the previous
   /// noon) starts below [prunedBeforeSec], i.e. part of its night is gone.
+  /// A user-set sleep window ([forcedOnsetSec]) only needs its own onset kept.
   @visibleForTesting
-  static bool windowTruncatedByPrune(String dayId, int? prunedBeforeSec) =>
+  static bool windowTruncatedByPrune(
+    String dayId,
+    int? prunedBeforeSec, {
+    int? forcedOnsetSec,
+  }) =>
       prunedBeforeSec != null &&
-      _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec <
+      (forcedOnsetSec ??
+              _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec) <
           prunedBeforeSec;
 
   /// A stable, cheap signature of the CURRENT rolling baseline — the same inputs
@@ -4175,6 +4181,7 @@ class DerivationEngine {
       dataNowSec,
       await _BaselineHistoryCache.load(),
       forceFinalize: forceFinalize,
+      suppliedSubstrate: true,
     );
   }
 
@@ -4184,6 +4191,7 @@ class DerivationEngine {
     int dataNowSec,
     _BaselineHistoryCache history, {
     bool forceFinalize = false,
+    bool suppliedSubstrate = false,
   }) async {
     final daySub = day.daySub;
     final sleepSub = day.sleepSub;
@@ -4379,10 +4387,16 @@ class DerivationEngine {
                       scMap['rmssd'] == null &&
                       scMap['readiness'] == null),
             ) ||
-            windowTruncatedByPrune(
-              day.date,
-              await LocalDb.getCursorInt(_prunedBeforeCursor),
-            ))) {
+            // An import brings its own substrate, the prune can't have cut it.
+            (!suppliedSubstrate &&
+                windowTruncatedByPrune(
+                  day.date,
+                  await LocalDb.getCursorInt(_prunedBeforeCursor),
+                  forcedOnsetSec: day.sleepSource == 'manual' ||
+                          day.sleepSource == 'confirmed'
+                      ? day.sleepOnsetSec
+                      : null,
+                )))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
           (existingNight['rhr'] != null ||
@@ -5748,13 +5762,15 @@ class DerivationEngine {
       derivedDayIds: derivedIds,
     );
     if (cutoffSec == null) return;
-    final deleted = await LocalDb.pruneDecodedBeforeRecTs(cutoffSec);
     // Highest cutoff ever applied: a held-back pass can cut lower, but rows
-    // below an earlier cut are still gone. See [rescanDayIds].
+    // below an earlier cut are still gone. See [rescanDayIds]. Written BEFORE
+    // the delete: a kill between the two then leaves the cursor ahead (a day
+    // protected one pass early), never behind a delete that already landed.
     final prunedBefore = await LocalDb.getCursorInt(_prunedBeforeCursor);
     if (prunedBefore == null || cutoffSec > prunedBefore) {
       await LocalDb.setCursor(_prunedBeforeCursor, '$cutoffSec');
     }
+    final deleted = await LocalDb.pruneDecodedBeforeRecTs(cutoffSec);
     if (deleted > 0) {
       _log('pruned $deleted decoded rows with rec_ts < $cutoffSec');
     }

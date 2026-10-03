@@ -131,6 +131,24 @@ void main() {
       );
       expect(days, ['2026-05-17', '2026-05-18']);
     });
+
+    // A user-set sleep window that starts after the cut has its whole night,
+    // so its re-derive must not be declined off the generic previous-noon
+    // search window.
+    test('a forced sleep window is judged by its own onset', () {
+      final cut = _dayStart('2026-05-17');
+      expect(DerivationEngine.windowTruncatedByPrune('2026-05-17', cut), isTrue);
+      expect(
+        DerivationEngine.windowTruncatedByPrune('2026-05-17', cut,
+            forcedOnsetSec: cut + 3600),
+        isFalse,
+      );
+      expect(
+        DerivationEngine.windowTruncatedByPrune('2026-05-17', cut,
+            forcedOnsetSec: cut - 3600),
+        isTrue,
+      );
+    });
   });
 
   group('the prune call site', () {
