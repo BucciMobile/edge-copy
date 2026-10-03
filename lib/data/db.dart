@@ -9892,11 +9892,14 @@ class LocalDb {
     final db = await instance;
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.transaction((txn) async {
+      // Only a QUEUED job covers a new request. A running pass may have
+      // loaded its substrate before the batch behind this request landed, so
+      // it queues behind it and drains when the pass finishes.
       final active = await txn.query(
         'compute_jobs',
         columns: ['id', 'type', 'state'],
-        where: 'scope = ? AND state IN (?, ?)',
-        whereArgs: ['derive', 'queued', 'running'],
+        where: 'scope = ? AND state = ?',
+        whereArgs: ['derive', 'queued'],
       );
       bool hasType(String t) =>
           active.any((row) => row['type']?.toString() == t);
@@ -9911,7 +9914,9 @@ class LocalDb {
         );
       }
       await txn.insert('compute_jobs', {
-        'id': 'derive_${type}_$now',
+        // Microseconds: the running job this one may queue behind can share
+        // its millisecond, and a PK collision would throw.
+        'id': 'derive_${type}_${DateTime.now().microsecondsSinceEpoch}',
         'type': type,
         'scope': 'derive',
         'priority': type == 'derive_heavy' ? 200 : 100,
