@@ -138,6 +138,19 @@ private final class Impl {
   // as cancelled before the retry gets a chance to report its own outcome,
   // so a successfully provisioned accessory gets reported to Dart as cancelled.
   private var retryInFlight = false
+  // True from a `showPicker` completion with no error and no new accessory listed, until
+  // `.accessoryAdded` (the pick) or `.pickerDidDismiss` (no pick) resolves the call.
+  //
+  // The completion is NOT the user's choice. Traced on iOS 27: event `.pickerDidPresent`,
+  // then the completion with error == nil and `session.accessories` still empty, then —
+  // only after the user tapped through the sheet, well over 5 s later — `.accessoryAdded`
+  // and finally `.pickerDidDismiss`. Resolving at the completion reported "nothing
+  // provisioned" for every pick the user had not finished yet.
+  private var awaitingAdded = false
+  // The ids known before the sheet opened and the band picker's old fallback, kept for the
+  // `.pickerDidDismiss` resolution of an `awaitingAdded` call.
+  private var awaitingKnown: Set<String> = []
+  private var awaitingFallback: () -> String? = { nil }
 
   struct PickerError: Error { let message: String }
 
@@ -154,10 +167,38 @@ private final class Impl {
     // session stays live and so a picker-dismiss without a selection can resolve a
     // pending showPicker as "cancelled".
     switch event.eventType {
+    case .accessoryAdded:
+      // The late half of a successful picker — see `awaitingAdded`.
+      guard awaitingAdded, let cb = pickerResult else { return }
+      awaitingAdded = false
+      pickerResult = nil
+      if let id = event.accessory?.bluetoothIdentifier?.uuidString.uppercased() {
+        NSLog("[ASK] accessory added after the picker returned: %@", id)
+        cb(.success(id))
+      } else {
+        cb(.failure(PickerError(message: "The accessory was added without a Bluetooth identifier.")))
+      }
     case .pickerDidDismiss:
       // Ignore the first sheet's dismissal while the Gen 4 retry is in flight —
       // see `retryInFlight`'s doc comment.
       guard !retryInFlight else { return }
+      // A sheet that closed with no `.accessoryAdded`: whatever is listed now that was not
+      // before is the pick (an add can land in the list without its event), else the band
+      // picker's fallback, else nothing was chosen.
+      if awaitingAdded {
+        awaitingAdded = false
+        let known = awaitingKnown
+        let id = allIdList.first { !known.contains($0) } ?? awaitingFallback()
+        if let cb = pickerResult {
+          pickerResult = nil
+          if let id = id {
+            cb(.success(id))
+          } else {
+            cb(.failure(PickerError(message: "Pairing cancelled.")))
+          }
+        }
+        return
+      }
       // If a picker was in flight and nothing got added, treat as cancelled. (If an
       // accessory WAS added, showPicker's completion handler already resolved it.)
       if let cb = pickerResult {
@@ -389,15 +430,20 @@ private final class Impl {
       // would hand Dart the wrong device to connect to. (With none previously known —
       // every pairing today — the added one IS the first, so this is unchanged.)
       let knownSet = Set(known)
-      let id = self.allIdList.first { !knownSet.contains($0) } ?? fallback()
-      if let cb = self.pickerResult {
+      if let added = self.allIdList.first(where: { !knownSet.contains($0) }),
+         let cb = self.pickerResult {
         self.pickerResult = nil
-        if let id = id {
-          cb(.success(id))
-        } else {
-          cb(.failure(PickerError(message: "No accessory was provisioned.")))
-        }
+        cb(.success(added))
+        return
       }
+      // Nothing is waiting on this picker any more (already resolved elsewhere).
+      guard self.pickerResult != nil else { return }
+      // The sheet is up and nothing is chosen yet: the pick arrives as `.accessoryAdded`,
+      // or the sheet closes without one (`.pickerDidDismiss`). See `awaitingAdded`.
+      NSLog("[ASK] picker presented; waiting for the user's pick")
+      self.awaitingKnown = knownSet
+      self.awaitingFallback = fallback
+      self.awaitingAdded = true
     }
   }
 
