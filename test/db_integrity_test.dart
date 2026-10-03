@@ -260,6 +260,12 @@ void main() {
     await LocalDb.putMetricSeriesValue('2026-07-01', 'readiness', 62);
     await LocalDb.putMetricSeriesValue('2026-07-03', 'readiness', 40);
     await LocalDb.putBaseline('movement_floor', '{"src":"local"}');
+    // A 3-night local profile vs a backup's 30: the accumulator with more
+    // folded nights survives, finalized history or not.
+    String profile(int n) => '{"folded_days":[${[
+          for (var i = 0; i < n; i++) '"2026-05-${'${i + 1}'.padLeft(2, '0')}"'
+        ].join(',')}]}';
+    await LocalDb.putBaseline('sleep_user_profile', profile(3));
     await LocalDb.addLiveCoverage(1782900000, 1782900600, 500, '2026-07-01');
 
     final dir = await databaseFactory.getDatabasesPath();
@@ -287,6 +293,11 @@ void main() {
       'payload_json': '{"src":"foreign"}',
       'updated_at': 1,
     });
+    await src.insert('baselines', {
+      'key': 'sleep_user_profile',
+      'payload_json': profile(30),
+      'updated_at': 1,
+    });
     // id 1 collides with the local row's id; the first window is a replay of
     // the local one, the second is new.
     for (final w in [(1782900000, 1782900600), (1782904000, 1782904600)]) {
@@ -312,6 +323,8 @@ void main() {
     expect(await readiness('2026-07-03'), 55); // not finalized: import wins
     expect((await LocalDb.baseline('movement_floor'))!['payload_json'],
         '{"src":"local"}');
+    expect((await LocalDb.baseline('sleep_user_profile'))!['payload_json'],
+        profile(30));
     final cov = await db.query('live_coverage',
         where: 'day = ?', whereArgs: ['2026-07-01'], orderBy: 'start_ts');
     expect([for (final r in cov) r['start_ts']], [1782900000, 1782904000]);

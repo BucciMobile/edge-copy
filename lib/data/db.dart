@@ -27,6 +27,7 @@ import '../compute/substrate.dart' show beatTimesMs;
 // `show` keeps the rest of the engine out of this namespace.
 import '../coach/coach_db.dart' show CoachDb;
 import '../compute/derivation_engine.dart' show kAlgoVersion;
+import '../compute/sleep_profile_policy.dart' show SleepProfilePolicy;
 import '../ble/adapters/adapter.dart' show NeutralSample;
 import '../ble/adapters/signals.dart' show InputSignal;
 import '../import/import_container.dart';
@@ -8823,6 +8824,16 @@ class LocalDb {
               ))
                 '${r['day']}',
           };
+          // sleep_user_profile is an accumulator (one fold per finalized
+          // night), so the local-wins rule below would let a few local nights
+          // throw away a backup's months. The side that folded more nights
+          // keeps it; restored nights arrive finalized and never re-fold.
+          final localProfileNights = t == 'baselines'
+              ? SleepProfilePolicy.foldedDays(
+                  (await LocalDb.baseline('sleep_user_profile'))?['payload_json']
+                      as String?,
+                ).length
+              : 0;
           var copied = 0;
           var page = firstPage;
           // ONE TRANSACTION PER PAGE, not per table. The whole-table transaction
@@ -8971,7 +8982,13 @@ class LocalDb {
                   row,
                   // A device with its own finalized history keeps its own
                   // baselines (the frozen movement floor among them).
-                  conflictAlgorithm: t == 'baselines' && finalizedDays.isNotEmpty
+                  conflictAlgorithm: t == 'baselines' &&
+                          (row['key'] == 'sleep_user_profile'
+                              ? SleepProfilePolicy.foldedDays(
+                                          row['payload_json'] as String?)
+                                      .length <=
+                                  localProfileNights
+                              : finalizedDays.isNotEmpty)
                       ? ConflictAlgorithm.ignore
                       : ConflictAlgorithm.replace,
                 );
