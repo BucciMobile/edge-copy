@@ -1,6 +1,8 @@
 // German capitalises nouns. The "Using X for Y" caption on the metric detail
 // lowercased the signal name for every locale, so a German user read
-// "WHOOP wird für durchgehende herzfrequenz verwendet."
+// "WHOOP wird für durchgehende herzfrequenz verwendet." Keeping it as written
+// gave "für Durchgehende Herzfrequenz", a capitalised adjective mid-sentence,
+// so the DE caption leads with the label.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,7 +15,7 @@ void main() {
     final l = lookupAppLocalizations(const Locale('de'));
     final name = nounInSentence(l, 'Durchgehende Herzfrequenz');
     expect(l.metricDetailUsingForX('WHOOP', name),
-        'WHOOP wird für Durchgehende Herzfrequenz verwendet.');
+        'Durchgehende Herzfrequenz kommt von WHOOP.');
   });
 
   test('english still lowercases it', () {

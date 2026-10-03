@@ -1142,7 +1142,7 @@
   "metricDetailWearFootnote": "Für {have} von {win} Tagen gibt es Tragedaten. Die übrigen sind Lücken in beiden Diagrammen – die Linie oben wird nicht darüber hinweg verbunden.",
   "metricDetailSlotNoRecord": "{day}, kein Eintrag",
   "metricDetailSlotWithValue": "{day}, {value} {unit}",
-  "metricDetailUsingForX": "{device} wird für {metric} verwendet.",
+  "metricDetailUsingForX": "{metric} kommt von {device}.",
   "metricDetailPreferX": "{device} bevorzugen",
   "metricDetailHistoryKeepsSource": "Bereits abgeschlossene Tage behalten die Quelle, mit der sie berechnet wurden.",
   "metricDetailDimmedCaption": "Das sind die Tage, an denen {device} beteiligt war. Die Linie zeigt deinen zusammengeführten Wert.",

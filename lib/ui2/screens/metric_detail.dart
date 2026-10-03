@@ -41,8 +41,9 @@ import 'sleep_detail.dart';
 
 // ═══════════════════ the vocabulary ═══════════════════
 
-/// [name] as it reads mid-sentence. German capitalises nouns, so it goes in
-/// as written there; everywhere else the title case comes off.
+/// [name] as it reads in a caption. German keeps it as written: its labels
+/// can open with an adjective, so the DE strings put [name] first in the
+/// sentence instead. Everywhere else the title case comes off.
 String nounInSentence(AppLocalizations? l, String name) =>
     l?.localeName.startsWith('de') == true ? name : name.toLowerCase();
 
