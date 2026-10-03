@@ -206,6 +206,34 @@ String? readinessInputShortfallNote(
       'before $metricName can score.';
 }
 
+final _unstableBaselinePattern = RegExp(r'^unstable_baseline:');
+
+/// A genuine reason for [zCapAbsentNote]'s absence: the composite actually
+/// computed but got withheld as a saturated, degenerate-baseline artefact
+/// (see [kReadinessZCap]) — a DIFFERENT cause than [readinessInputShortfallNote]
+/// covers (which needs a baseline-count shortfall or an unsettled temp; this
+/// one has neither, since reaching the z-cap check means every input already
+/// cleared its own floor).
+///
+/// Found live on PR #510: callers that only tried
+/// [readinessInputShortfallNote] and fell straight to the generic "nothing
+/// recorded says why" for this case lost the specific reason a prior version
+/// of the screen showed (as the raw, unreadable note) — worth a real
+/// translation rather than either extreme.
+///
+/// Null for every other note, including no note at all — the same "a key it
+/// does not recognise renders as we do not know" floor [whyFromNote] already
+/// uses, so an absence this function can't name still gets the honest
+/// generic fallback instead of a leaked machine string.
+String? readinessUnstableBaselineNote(
+  String? note, {
+  String metricName = 'readiness',
+}) {
+  if (note == null || !_unstableBaselinePattern.hasMatch(note)) return null;
+  return 'Today\'s $metricName looked too extreme to trust against your own '
+      'history, so it was held back rather than shown.';
+}
+
 /// Serializable input to the isolate: one physiological day's decoded 1 Hz
 /// substrate (the day slice), the PRECOMPUTED single-source sleep segmentation,
 /// the profile, and trailing baseline history for the readiness pass.

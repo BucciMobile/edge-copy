@@ -35,7 +35,8 @@ import 'package:provider/provider.dart';
 import '../../ai/briefing.dart'
     show Briefing, BriefingPeriod, BriefingStore, currentBriefingPeriod, resolveBriefingToShow;
 import '../../data/day_label.dart' show todayLabel, calendarDaysBetween;
-import '../../compute/onehz_pipeline.dart' show readinessInputShortfallNote;
+import '../../compute/onehz_pipeline.dart'
+    show readinessInputShortfallNote, readinessUnstableBaselineNote;
 import '../../data/db.dart' show DbRebuild, LocalDb;
 import '../../data/journal_fields.dart' show formatMinuteOfDay;
 import '../../data/local_repository.dart';
@@ -940,10 +941,14 @@ _RingState _ringOf(HomeRingKind k, HomeData d, AppLocalizations? l) {
               // recorded says why" even with a real, known reason on hand.
               // metricName: 'recovery' — this ring is labelled "Recovery",
               // not "Readiness", and the sentence should say what the ring
-              // itself says.
-              fallbackWhy:
-                  readinessInputShortfallNote(d.absentDiag, metricName: 'recovery') ??
-                      '')
+              // itself says. The second translator covers the z-cap absence
+              // shape readinessInputShortfallNote alone doesn't (PR #510).
+              fallbackWhy: readinessInputShortfallNote(d.absentDiag,
+                      metricName: 'recovery') ??
+                  readinessUnstableBaselineNote(
+                      d.absentDiag?['note']?.toString(),
+                      metricName: 'recovery') ??
+                  '')
           : _RingState(k, l?.homeRingRecovery ?? 'Recovery',
               LucideIcons.batteryCharging, band.color,
               value: '${v.round()}', sub: band.label, frac: v / 100);
@@ -1275,10 +1280,18 @@ class HomeData {
     final overview = await repo.getDayOverview(date);
     final strain = await repo.getDayStrain(date);
     final sleep = await repo.getDaySleepV2(date);
+    final readiness = metricOf(overview['readiness']);
+    // Same lookup [load] does for today, for the same reason: the ring's
+    // shortfall explanation needs the stored diagnostic, and a day the
+    // switcher stepped onto can be absent too, not just today (PR #510).
+    final absentDiag = readiness.value != null
+        ? null
+        : await LocalDb.readinessAbsentDiag(date);
     return HomeData(
       name: profile['name']?.toString(),
       dayId: date,
-      readiness: metricOf(overview['readiness']),
+      readiness: readiness,
+      absentDiag: absentDiag,
       rhr: metricOf(overview['resting_hr']),
       strain: metricOf(strain['strain']),
       steps: metricOf(strain['steps']),
@@ -1790,13 +1803,17 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         else
           Builder(builder: (c) {
             final need = needMessageFromNote(d.readiness.note);
-            // readinessInputShortfallNote off d.absentDiag is the SAME
-            // function and the SAME stored diagnostic readiness_detail.dart's
-            // banner uses — not a second, independently-worded explanation —
-            // so this card and the detail screen can never say two different
-            // things about the same absence.
-            final shortfall =
-                need == null ? readinessInputShortfallNote(d.absentDiag) : null;
+            // readinessInputShortfallNote/readinessUnstableBaselineNote off
+            // d.absentDiag are the SAME functions and the SAME stored
+            // diagnostic readiness_detail.dart's banner uses — not a second,
+            // independently-worded explanation — so this card and the detail
+            // screen can never say two different things about the same
+            // absence.
+            final shortfall = need == null
+                ? readinessInputShortfallNote(d.absentDiag) ??
+                    readinessUnstableBaselineNote(
+                        d.absentDiag?['note']?.toString())
+                : null;
             return StatusCard(
               l?.homeReadinessNotScoredTitle ?? 'Readiness is not scored today',
               need != null

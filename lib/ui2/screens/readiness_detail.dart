@@ -9,7 +9,8 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:openstrap_analytics/onehz.dart' show readinessCompositeMinBaseline;
 
-import '../../compute/onehz_pipeline.dart' show readinessInputShortfallNote;
+import '../../compute/onehz_pipeline.dart'
+    show readinessInputShortfallNote, readinessUnstableBaselineNote;
 import '../../data/db.dart';
 import '../../data/local_repository.dart';
 import '../../l10n/app_localizations.dart';
@@ -161,11 +162,18 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
           // EXACT SAME computed reason as that section (readinessInputShortfallNote
           // off d.absentDiag) rather than a second, independently-guessed one
           // — the two must never be able to disagree, only one be shorter.
+          // readinessUnstableBaselineNote covers the OTHER absence shape
+          // (PR #510): a z-cap withhold has no baseline shortfall to report
+          // (every input already cleared its floor), so the first function
+          // alone fell straight to the generic fallback for it.
           StatusCard.forMetric(
                   l?.readinessDetailNotScoredTitle ??
                       'Readiness is not scored',
                   d.readiness,
-                  why: readinessInputShortfallNote(d.absentDiag) ?? '',
+                  why: readinessInputShortfallNote(d.absentDiag) ??
+                      readinessUnstableBaselineNote(
+                          d.absentDiag?['note']?.toString()) ??
+                      '',
                   // Where the data stops, appended to whatever the pipeline
                   // said. Not a substitute for the reason and not a reading —
                   // "the last one was Saturday" is a fact about coverage.
