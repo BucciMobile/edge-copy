@@ -2742,8 +2742,8 @@ class DeviceDetailView extends StatelessWidget {
                                 ? (l?.devicesWornUnknown ?? 'Unknown')
                                 : wornName(c, wornOn ?? Wearing.wrist),
                             sub: l?.devicesWornOnSub ??
-                                'Where the band sits. Steps are corrected '
-                                'for it.',
+                                'Where the band sits. Used to calibrate '
+                                'steps.',
                             onTap: onWearing),
                         Divider(color: p.line, height: 1),
                       ],

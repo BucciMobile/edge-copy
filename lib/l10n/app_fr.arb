@@ -2387,7 +2387,7 @@
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"
   },
-  "devicesWornOnSub": "Où se trouve le bracelet. Les pas sont corrigés en conséquence.",
+  "devicesWornOnSub": "Où se trouve le bracelet. Sert à calibrer les pas.",
   "@devicesWornOnSub": {
     "description": "Step calibration wearing-location setting"
   },
