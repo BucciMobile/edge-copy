@@ -65,7 +65,9 @@ void main() {
   test('finalized days behind a retrying day are written once', () async {
     final exporter = HealthExporter();
     expect(await exporter.exportAll(), 2);
-    expect(await LocalDb.getCursor('health_export_through'), '');
+    // unset (null) on non-apple hosts, '' after the apple sleep-epoch reset;
+    // the exporter reads both as "nothing exported yet".
+    expect(await LocalDb.getCursor('health_export_through') ?? '', '');
     final afterFirst = Map.of(writes);
 
     // The failing day is in backoff; nothing is due.
