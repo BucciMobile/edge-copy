@@ -248,6 +248,23 @@ void main() {
     expect(r.daysRead, 2);
     expect(r.totalSteps, greaterThan(0));
   });
+
+  test('stop() mid-sync banks nothing for the days not yet written', () async {
+    late PhonePedometer ped;
+    var stopped = false;
+    ped = PhonePedometer(stepReader: (from, to) async {
+      // The user turns phone steps off while the first day is being walked.
+      if (!stopped) {
+        stopped = true;
+        await ped.stop();
+      }
+      return 5;
+    });
+    final r = await ped.syncRecent(days: 3);
+    expect(r.daysRead, 0);
+    final db = await LocalDb.instance;
+    expect(await db.query('live_coverage'), isEmpty);
+  });
 }
 
 String _label(DateTime d) =>
