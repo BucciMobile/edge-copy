@@ -166,27 +166,49 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
           // (PR #510): a z-cap withhold has no baseline shortfall to report
           // (every input already cleared its floor), so the first function
           // alone fell straight to the generic fallback for it.
-          StatusCard.forMetric(
-                  l?.readinessDetailNotScoredTitle ??
-                      'Readiness is not scored',
-                  d.readiness,
-                  why: readinessInputShortfallNote(d.absentDiag) ??
-                      readinessUnstableBaselineNote(
-                          d.absentDiag?['note']?.toString()) ??
-                      '',
-                  // Where the data stops, appended to whatever the pipeline
-                  // said. Not a substitute for the reason and not a reading —
-                  // "the last one was Saturday" is a fact about coverage.
-                  gap: d.heldOverNight == null
-                      ? null
-                      : (l?.readinessDetailLastNightScored(
-                              prettyDay(d.heldOverNight, l)) ??
-                          'The last night scored was '
-                              '${prettyDay(d.heldOverNight, l)}.')) ??
-              const SizedBox.shrink(),
-          if (d.absentDiag != null)
-            Section(l?.readinessDetailWhatWasMissing ?? 'What was missing',
-                _absence(c, p, d.absentDiag!)),
+          Builder(builder: (c) {
+            final diagReason = readinessInputShortfallNote(d.absentDiag) ??
+                readinessUnstableBaselineNote(
+                    d.absentDiag?['note']?.toString());
+            // StatusCard.forMetric prefers a prose note already ON the
+            // metric (`told`, via whyFromNote) over `why:` — deliberately,
+            // for screen-authored text like the held-over "nothing synced
+            // yet" sentence [overnightMetric] attaches. When that wins, the
+            // diagnostic reason above never reaches the banner at all
+            // (PR #510 follow-up) — _absence below shows it in that one
+            // case so it is not lost from the screen entirely, without
+            // reintroducing the general "says it twice" duplication fixed
+            // earlier in this same PR.
+            final bannerShowsDiag = whyFromNote(d.readiness.note) == null;
+            return Column(children: [
+              StatusCard.forMetric(
+                      l?.readinessDetailNotScoredTitle ??
+                          'Readiness is not scored',
+                      d.readiness,
+                      why: diagReason ?? '',
+                      // Where the data stops, appended to whatever the
+                      // pipeline said. Not a substitute for the reason and
+                      // not a reading — "the last one was Saturday" is a
+                      // fact about coverage.
+                      gap: d.heldOverNight == null
+                          ? null
+                          : (l?.readinessDetailLastNightScored(
+                                  prettyDay(d.heldOverNight, l)) ??
+                              'The last night scored was '
+                                  '${prettyDay(d.heldOverNight, l)}.')) ??
+                  const SizedBox.shrink(),
+              if (d.absentDiag != null)
+                Section(
+                    l?.readinessDetailWhatWasMissing ?? 'What was missing',
+                    _absence(
+                      c,
+                      p,
+                      d.absentDiag!,
+                      fallbackReason:
+                          bannerShowsDiag ? null : diagReason,
+                    )),
+            ]);
+          }),
         ] else
           Surface(
             child: Column(children: [
@@ -330,7 +352,18 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
   /// now (built from the same [readinessInputShortfallNote] off the same
   /// [diag]) — this used to repeat a second copy of it here, which read as
   /// the screen saying the same thing twice.
-  Widget _absence(BuildContext c, P p, Map<String, dynamic> diag) {
+  /// [fallbackReason] is non-null ONLY in the one case the banner above this
+  /// section does not already show the diagnostic reason itself: a held-over
+  /// night, where `StatusCard.forMetric` prefers the metric's own prose note
+  /// ("nothing synced yet") over it. Null in the ordinary case — the banner
+  /// already said it once, and repeating it here is the exact duplication a
+  /// prior pass of this same PR removed.
+  Widget _absence(
+    BuildContext c,
+    P p,
+    Map<String, dynamic> diag, {
+    String? fallbackReason,
+  }) {
     final l = AppLocalizations.of(c);
     final rows = <(String, String)>[];
     for (final k in const ['hrv', 'rhr', 'resp', 'temp']) {
@@ -344,37 +377,40 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
       ));
     }
 
-    return rows.isEmpty
-        ? const SizedBox.shrink()
-        : Surface(
-            pad: const EdgeInsets.symmetric(horizontal: S.x4),
-            child: Column(
-              // Explicit, not the default `center`: each row's inner Column
-              // shrink-wraps to its own (narrow) text width, same as every
-              // row in `_breakdown` below it — the difference is that
-              // `_breakdown`'s rows are a `Row` (fills the full width by
-              // default regardless of the parent's alignment), so only this
-              // Column needed the alignment said out loud for the two
-              // sections to actually match.
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < rows.length; i++) ...[
-                  if (i > 0) Divider(color: p.line, height: 1),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: S.x3),
-                    child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(rows[i].$1,
-                              style: F.body.copyWith(color: p.ink)),
-                          Text(rows[i].$2,
-                              style: F.over.copyWith(color: p.ink3)),
-                        ]),
-                  ),
-                ],
-              ],
-            ),
-          );
+    if (rows.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      Surface(
+        pad: const EdgeInsets.symmetric(horizontal: S.x4),
+        child: Column(
+          // Explicit, not the default `center`: each row's inner Column
+          // shrink-wraps to its own (narrow) text width, same as every row
+          // in `_breakdown` below it — the difference is that `_breakdown`'s
+          // rows are a `Row` (fills the full width by default regardless of
+          // the parent's alignment), so only this Column needed the
+          // alignment said out loud for the two sections to actually match.
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < rows.length; i++) ...[
+              if (i > 0) Divider(color: p.line, height: 1),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: S.x3),
+                child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(rows[i].$1, style: F.body.copyWith(color: p.ink)),
+                      Text(rows[i].$2,
+                          style: F.over.copyWith(color: p.ink3)),
+                    ]),
+              ),
+            ],
+          ],
+        ),
+      ),
+      if (fallbackReason != null) ...[
+        const SizedBox(height: S.x3),
+        Text(fallbackReason, style: F.cap.copyWith(color: p.ink3, height: 1.5)),
+      ],
+    ]);
   }
 
   Widget _breakdown(BuildContext c, P p, ReadinessData d) {
