@@ -226,7 +226,12 @@ class BatteryForecaster {
     }
 
     final currentPct = run.first.pct;
-    final hoursToWake = wakeAt.difference(now).inSeconds / 3600.0;
+    // Count down from when that level was READ, not from `now`: the newest
+    // sample can be up to [maxSampleAge] old (the band out of range, or no
+    // change since), and every hour since it was taken was drained too.
+    final sampledAt =
+        DateTime.fromMillisecondsSinceEpoch(run.first.tsSec * 1000);
+    final hoursToWake = wakeAt.difference(sampledAt).inSeconds / 3600.0;
     final predicted = currentPct - rate * hoursToWake;
     final hoursToEmpty = currentPct / rate;
 
@@ -237,7 +242,7 @@ class BatteryForecaster {
       currentPct: currentPct,
       predictedPctAtWake: predicted,
       predictedEmptyAt:
-          now.add(Duration(seconds: (hoursToEmpty * 3600).round())),
+          sampledAt.add(Duration(seconds: (hoursToEmpty * 3600).round())),
     );
   }
 
