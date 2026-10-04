@@ -33,6 +33,7 @@ import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 class _Link {
   final logs = <String>[];
   final written = <({int seq, int opcode})>[];
+  final inners = <Uint8List>[];
   late final BleEngine engine;
 
   _Link({proto.Decoded? Function(int seq, int opcode)? replyTo}) {
@@ -42,7 +43,10 @@ class _Link {
       onWrite: (frame) async {
         final inner = proto.parseFrame(frame, profile: proto.BandProfile.gen5)!.inner;
         written.add((seq: inner[1], opcode: inner[2]));
-        final reply = replyTo?.call(inner[1], inner[2]);
+        inners.add(inner);
+        // gen5 SET_CLOCKs before every arm; a strap answers that one
+        final reply = replyTo?.call(inner[1], inner[2]) ??
+            (inner[2] == proto.Cmd.setClock ? _ok(inner[2], inner[1]) : null);
         if (reply != null) engine.debugAbsorbDecoded(reply);
         return true;
       },
@@ -69,6 +73,12 @@ proto.Decoded _alarmReply(
       proto.parseCommandResponse(inner, profile: proto.BandProfile.gen5)!;
   return proto.Decoded('cmd_response', {'opcode': r.opcode, ...r.decoded});
 }
+
+proto.Decoded _ok(int opcode, int seq) => proto.Decoded('cmd_response', {
+      'opcode': opcode,
+      'req_seq': seq,
+      'cmd_status': CommandAwaiter.statusSuccess,
+    });
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -520,7 +530,7 @@ void main() {
       // echo the originating sequence must not lose its wake alarm. The arm
       // costs at most the awaiter's single 5 s timeout, with no resend.
       fakeAsync((async) {
-        final link = _Link(); // writes succeed, nothing ever answers
+        final link = _Link(); // only the pre-arm clock write is answered
         DateTime? armed;
         var done = false;
         link.engine.setAlarm(wake).then((v) {
@@ -537,6 +547,26 @@ void main() {
         expect(link.logged('arm UNCONFIRMED'), isTrue);
         expect(link.engine.pendingCommandCount, 0);
       });
+    });
+
+    test('gen5 arms against the clock its own SET_CLOCK just set', () async {
+      // a correlation left over from before the arm's SET_CLOCK: strap an hour
+      // behind. once that write lands the strap reads wall time, so the alarm
+      // must go out unshifted, not an hour early.
+      final link = _Link(
+        replyTo: (seq, opcode) => opcode == proto.Cmd.setAlarmTime
+            ? _alarmReply(opcode, seq, proto.AlarmStatus.validInputPattern)
+            : null,
+      );
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      link.engine.debugAbsorbDecoded(
+          proto.Decoded('clock', {'clock_epoch': nowSec - 3600}));
+      final at = DateTime.now().add(const Duration(hours: 8));
+
+      expect(await link.engine.setAlarm(at), at);
+      final arm = link.inners.lastWhere((i) => i[2] == proto.Cmd.setAlarmTime);
+      final epoch = ByteData.sublistView(arm, 5, 9).getUint32(0, Endian.little);
+      expect(epoch, at.millisecondsSinceEpoch ~/ 1000);
     });
 
     test('a failed write is still the only silent null', () async {

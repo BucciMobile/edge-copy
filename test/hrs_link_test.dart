@@ -9,6 +9,7 @@
 // simulator path, so this proves the write is correct, not that any real
 // strap sends these exact bytes.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -399,6 +400,42 @@ void main() {
 
       final rows = await LocalDb.deviceRows();
       expect(rows.where((r) => r['id'] == id), isEmpty);
+    });
+
+    // THE INVERSE OF WHAT THIS ONCE ASSERTED, on purpose. It used to pin that
+    // forgetting a ring revoked its ASK approval. That revocation removes the
+    // accessory from the SYSTEM and for every app, bond included, so it
+    // unpaired the ring from the phone — the Oura app losing it too, and the
+    // ring not advertising again until re-paired with the vendor app. See the
+    // comment in `HrsLink.forgetDevice`.
+    test('a forgotten ring leaves its picker approval alone', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('openstrap/accessory_setup');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (c) async {
+        calls.add(c);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      await LocalDb.upsertDevice(
+        id: 'oura-a1b2c3d4',
+        adapterId: kOura.id,
+        remoteId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      );
+
+      await HrsLink.forgetDevice('oura-a1b2c3d4');
+
+      expect(
+        calls.where((c) => c.method == 'removeSensor'),
+        isEmpty,
+        reason: 'revoking the approval would unpair the ring from the phone '
+            'for every app, which a forget in this app never asked for',
+      );
+      // The row still goes, which is what a forget DOES mean.
+      final rows = await LocalDb.deviceRows();
+      expect(rows.where((r) => r['id'] == 'oura-a1b2c3d4'), isEmpty);
     });
   });
 

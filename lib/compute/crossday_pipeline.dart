@@ -840,14 +840,15 @@ typedef _Circadian = ({
 /// Nonparametric circadian metrics + a 24 h cosinor over the HOURLY HR profile.
 ///
 /// INPUT HONESTY. The textbook input is continuous accelerometry (ENMO), and we
-/// cannot use it: the 1 Hz substrate is pruned after 3 days, so no multi-day
-/// accel series exists to analyse. What survives is `day_result`, which is never
-/// pruned, and the per-day hourly HR profile stored on it. `circadianNonparametric`
-/// names an HR series as an accepted input alongside activity, and HR carries the
-/// same circadian rhythm the battery measures — but M10/L5 are then the most- and
-/// least-ACTIVE-HR windows, not step counts, and RA is an HR amplitude ratio. The
-/// note on each envelope says so. Skin temperature is deliberately NOT used: the
-/// only stored temperature channel is `skin_temp_raw`, which is not a temperature.
+/// cannot use it: the 1 Hz substrate is pruned at `rawRetentionDays`, so no
+/// multi-day accel series exists to analyse. What survives is `day_result`,
+/// which is never pruned, and the per-day hourly HR profile stored on it.
+/// `circadianNonparametric` names an HR series as an accepted input alongside
+/// activity, and HR carries the same circadian rhythm the battery measures —
+/// but M10/L5 are then the most- and least-ACTIVE-HR windows, not step counts,
+/// and RA is an HR amplitude ratio. The note on each envelope says so. Skin
+/// temperature is deliberately NOT used: the only stored temperature channel is
+/// `skin_temp_raw`, which is not a temperature.
 ///
 /// DAY ADMISSION. A day enters only when all 24 local-hour bins are covered
 /// (≥5 real minutes each, enforced upstream in `_hourlyHrProfile`). Missing hours
