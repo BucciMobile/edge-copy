@@ -7552,7 +7552,10 @@ class BleEngine {
       // correlation below is the drift-0 one this write produces: a
       // fire-and-forget write left the pre-SET drift in place whenever the
       // read-back hadn't landed yet, and the alarm was armed shifted by it.
-      await _bootstrapSetClockGen5();
+      if (!await _bootstrapSetClockGen5()) {
+        _log('[ALARM] pre-arm SET_CLOCK unanswered — arming against the last '
+            'correlation (drift=${_clockRef?.driftSec ?? 0}s).');
+      }
     }
     // Arm in the STRAP's RTC frame. The strap fires the wake alarm autonomously
     // on its OWN clock, so if that clock is offset from wall time (SET_CLOCK not
