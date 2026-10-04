@@ -3929,11 +3929,11 @@ class DerivationEngine {
         _log('rescan: no data edge');
         return 0;
       }
-      final cutoffSec = dataNowSec - _rescanWindowDays * 86400;
-      final todoDays = [
-        for (final dayId in rawByDay.keys)
-          if (_localNextDayLabelToSec(dayId) >= cutoffSec) dayId,
-      ]..sort();
+      final todoDays = rescanDayIds(
+        rawDayIds: rawByDay.keys,
+        dataNowSec: dataNowSec,
+        prunedBeforeSec: await LocalDb.getCursorInt(_prunedBeforeCursor),
+      );
       if (todoDays.isEmpty) {
         _log('rescan: no recent decoded-backed days');
         await LocalDb.setCursor('baseline_sig', sig);
@@ -3986,6 +3986,42 @@ class DerivationEngine {
       _running = false;
     }
   }
+
+  /// The days [rescanRecent] re-derives: every day with substrate inside the
+  /// rescan window, minus any whose derive window ([_targetDayWindow], from the
+  /// previous noon) reaches below [prunedBeforeSec]. The prune cuts on local
+  /// midnight, so the oldest kept day has its own rows but lost the evening
+  /// half of its night; re-deriving it would REPLACE a full-night result with
+  /// a truncated one that no empty-substrate guard catches. Its stored result
+  /// was computed from the whole night, so it keeps that.
+  @visibleForTesting
+  static List<String> rescanDayIds({
+    required Iterable<String> rawDayIds,
+    required int dataNowSec,
+    int? prunedBeforeSec,
+  }) {
+    final cutoffSec = dataNowSec - _rescanWindowDays * 86400;
+    return [
+      for (final dayId in rawDayIds)
+        if (_localNextDayLabelToSec(dayId) >= cutoffSec &&
+            !windowTruncatedByPrune(dayId, prunedBeforeSec))
+          dayId,
+    ]..sort();
+  }
+
+  /// Whether [dayId]'s derive window ([_targetDayWindow], from the previous
+  /// noon) starts below [prunedBeforeSec], i.e. part of its night is gone.
+  /// A user-set sleep window ([forcedOnsetSec]) only needs its own onset kept.
+  @visibleForTesting
+  static bool windowTruncatedByPrune(
+    String dayId,
+    int? prunedBeforeSec, {
+    int? forcedOnsetSec,
+  }) =>
+      prunedBeforeSec != null &&
+      (forcedOnsetSec ??
+              _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec) <
+          prunedBeforeSec;
 
   /// A stable, cheap signature of the CURRENT rolling baseline — the same inputs
   /// the readiness/illness baselines fold over. We take the trailing
@@ -4161,6 +4197,7 @@ class DerivationEngine {
       dataNowSec,
       await _BaselineHistoryCache.load(),
       forceFinalize: forceFinalize,
+      suppliedSubstrate: true,
     );
   }
 
@@ -4170,6 +4207,7 @@ class DerivationEngine {
     int dataNowSec,
     _BaselineHistoryCache history, {
     bool forceFinalize = false,
+    bool suppliedSubstrate = false,
   }) async {
     final daySub = day.daySub;
     final sleepSub = day.sleepSub;
@@ -4352,14 +4390,29 @@ class DerivationEngine {
     // `partial` row was considered instead, but `partial` still gets written
     // to `day_result` and would still shadow the better older row for
     // day-detail reads; declining is what actually protects it.
+    //
+    // Same decline when the prune has cut into this day's window: the midnight
+    // cut keeps the oldest kept day's own rows but drops the evening half of
+    // its night, so sleepSub is non-empty and the scalars come back from a
+    // partial night. Every path (algo bump, force, override, rescan) lands here.
     if (!producedNothing &&
-        nightSubstrateRegressed(
-          sleepSubEmpty: sleepSub.isEmpty,
-          nightScalarsNull: scMap == null ||
-              (scMap['rhr'] == null &&
-                  scMap['rmssd'] == null &&
-                  scMap['readiness'] == null),
-        )) {
+        (nightSubstrateRegressed(
+              sleepSubEmpty: sleepSub.isEmpty,
+              nightScalarsNull: scMap == null ||
+                  (scMap['rhr'] == null &&
+                      scMap['rmssd'] == null &&
+                      scMap['readiness'] == null),
+            ) ||
+            // An import brings its own substrate, the prune can't have cut it.
+            (!suppliedSubstrate &&
+                windowTruncatedByPrune(
+                  day.date,
+                  await LocalDb.getCursorInt(_prunedBeforeCursor),
+                  forcedOnsetSec: day.sleepSource == 'manual' ||
+                          day.sleepSource == 'confirmed'
+                      ? day.sleepOnsetSec
+                      : null,
+                )))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
           (existingNight['rhr'] != null ||
@@ -4368,7 +4421,7 @@ class DerivationEngine {
       if (existingHadNight) {
         _log('derive ${day.date}: sleep-window substrate pruned out from '
             "under a day that already had real night scalars — kept the "
-            'existing result rather than nulling the readiness baseline '
+            'existing result rather than overwriting the readiness baseline '
             '(edge#305)');
         return;
       }
@@ -5664,6 +5717,9 @@ class DerivationEngine {
   /// the whole install, forever, at ~12 MB/day.
   static const int _maxRawHoldDays = 14;
 
+  /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
+  static const String _prunedBeforeCursor = 'decoded_pruned_before';
+
   /// The `rec_ts` below which decoded substrate may be deleted, or null when
   /// nothing may be. PURE — the decision the raw prune is, separated from the
   /// two DB calls that surround it. See [_pruneOldDecoded] for the contract.
@@ -5677,7 +5733,7 @@ class DerivationEngine {
     if (cutoffSec <= 0) return null;
     final pending = rawDayIds.where((d) => !derivedDayIds.contains(d)).toList()
       ..sort();
-    if (pending.isEmpty) return cutoffSec;
+    if (pending.isEmpty) return _localDayStartOf(cutoffSec);
     // Hold at the START of the oldest day still owed a result — its own rows
     // survive, everything before it goes — floored so a permanently stuck day
     // cannot hold the whole install (see [_maxRawHoldDays]).
@@ -5685,8 +5741,17 @@ class DerivationEngine {
       _localDayLabelToSec(pending.first),
       dataNowSec - _maxRawHoldDays * 86400,
     );
-    return barrier < cutoffSec ? barrier : cutoffSec;
+    return _localDayStartOf(barrier < cutoffSec ? barrier : cutoffSec);
   }
+
+  /// Local midnight of the day [sec] falls in. The prune deletes WHOLE days:
+  /// a cutoff mid-day left that day half-pruned, still in `decodedRecTsMaxByDay`,
+  /// so the next rescan re-derived it from the surviving afternoon and replaced
+  /// its full curve/wear with one starting wherever the cutoff happened to sit
+  /// (#450). A fully-pruned day drops out of the rescan and keeps its result.
+  static int _localDayStartOf(int sec) => _localDayLabelToSec(
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(sec * 1000)),
+      );
 
   /// Prune raw older than [rawRetentionDays] BEHIND THE DATA EDGE. Retention is
   /// measured against the last record timestamp we actually drained
@@ -5727,7 +5792,14 @@ class DerivationEngine {
       derivedDayIds: derivedIds,
     );
     if (cutoffSec == null) return;
-    final deleted = await LocalDb.pruneDecodedBeforeRecTs(cutoffSec);
+    // Highest cutoff ever applied: a held-back pass can cut lower, but rows
+    // below an earlier cut are still gone. See [rescanDayIds]. Advanced inside
+    // the delete's own transaction, so a kill can't split the two and a
+    // concurrent lower-cutoff run can't write it backwards.
+    final deleted = await LocalDb.pruneDecodedBeforeRecTs(
+      cutoffSec,
+      cursorName: _prunedBeforeCursor,
+    );
     if (deleted > 0) {
       _log('pruned $deleted decoded rows with rec_ts < $cutoffSec');
     }
@@ -8574,7 +8646,8 @@ class DerivationEngine {
     }
   }
 
-  // static: pure day-label arithmetic, and `rawPruneCutoffSec` needs it.
+  // static: pure day-label arithmetic, and `rawPruneCutoffSec` /
+  // `rescanDayIds` need them.
   static int _localDayLabelToSec(String day) {
     final d = DateTime.tryParse(day);
     if (d == null) return 0;
@@ -8587,7 +8660,7 @@ class DerivationEngine {
   // .millisecondsSinceEpoch already respects local DST rules, so just asking
   // for the START of the NEXT day gets this right without hardcoding a
   // day length.
-  int _localNextDayLabelToSec(String day) {
+  static int _localNextDayLabelToSec(String day) {
     final d = DateTime.tryParse(day);
     if (d == null) return 0;
     return DateTime(d.year, d.month, d.day + 1).millisecondsSinceEpoch ~/ 1000;
