@@ -59,6 +59,7 @@
   "profileSetupOptional": "FACULTATIF",
   "profileSetupPickOneToContinue": "Choisissez une option ci-dessus pour continuer.",
   "alarmNavTitle": "Alarme",
+  "alarmFiredAt": "Déclenchée à {time}",
   "alarmNavSub": "Vous réveille via le bracelet, pas le téléphone",
   "alarmArmedFor": "ARMÉE POUR",
   "alarmNotConnectedTitle": "Le bracelet n’est pas connecté",

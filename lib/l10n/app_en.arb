@@ -236,6 +236,15 @@
   "@alarmNavTitle": {
     "description": "Alarm screen title."
   },
+  "alarmFiredAt": "Fired at {time}",
+  "@alarmFiredAt": {
+    "description": "Alarm screen pill after the band fired the alarm today.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "alarmNavSub": "Wakes you on the band, not the phone",
   "@alarmNavSub": {
     "description": "Alarm screen subtitle."

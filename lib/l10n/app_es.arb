@@ -59,6 +59,7 @@
   "profileSetupOptional": "OPCIONAL",
   "profileSetupPickOneToContinue": "Elige una opción arriba para continuar.",
   "alarmNavTitle": "Alarma",
+  "alarmFiredAt": "Sonó a las {time}",
   "alarmNavSub": "Te despierta con la banda, no con el teléfono",
   "alarmArmedFor": "ARMADA PARA",
   "alarmNotConnectedTitle": "La banda no está conectada",

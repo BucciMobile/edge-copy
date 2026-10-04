@@ -280,6 +280,9 @@ void main() {
       expect(prefs.getInt('alarm_epoch'), isNull);
       // the alarm screen shows the fire instead of silently swapping times
       expect(app.alarmFiredAt, isNotNull);
+      // and a relaunch later that day still shows it
+      expect(prefs.getInt('alarm_fired_at'),
+          app.alarmFiredAt!.millisecondsSinceEpoch ~/ 1000);
     });
 
     test('the app-side EXECUTED id (58) is a RUN_ALARM buzz, the arm stays',

@@ -181,7 +181,9 @@ class AlarmScreenView extends StatelessWidget {
                     calendarDaysBetween(fired, now ?? DateTime.now()) == 0) ...[
                   Align(
                     alignment: Alignment.centerLeft,
-                    child: Pill('Fired at ${_hhmm(fired)}', C.green,
+                    child: Pill(
+                        l?.alarmFiredAt(_hhmm(fired)) ??
+                            'Fired at ${_hhmm(fired)}', C.green,
                         icon: LucideIcons.alarmClockCheck),
                   ),
                   const SizedBox(height: S.x3),

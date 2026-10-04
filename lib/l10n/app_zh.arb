@@ -59,6 +59,7 @@
   "profileSetupOptional": "可选",
   "profileSetupPickOneToContinue": "请选择上方的一个选项以继续。",
   "alarmNavTitle": "闹钟",
+  "alarmFiredAt": "已于 {time} 响铃",
   "alarmNavSub": "通过腕带而非手机唤醒您",
   "alarmArmedFor": "已设置为",
   "alarmNotConnectedTitle": "腕带未连接",
