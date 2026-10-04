@@ -448,10 +448,13 @@ class LocalRepositoryImpl extends LocalRepository {
         : {
             'rmssd': rmssd,
             'sdnn': _scalar(b, 'sdnn'),
-            // Same baseline getDayHeart emits. Without it TodayData.hrv.baseline
-            // was always null, WidgetService pushed -1, and the HRV ring on the
-            // widget and the Watch could never fill on any day.
-            'baseline': (await _seriesMean('rmssd'))?.round(),
+            // Same baseline getDayHeart emits: the 28 nights before this
+            // bundle's day. Without it TodayData.hrv.baseline was always null,
+            // WidgetService pushed -1, and the HRV ring on the widget and the
+            // Watch could never fill on any day.
+            'baseline': (await _seriesMean('rmssd',
+                    before: (sleepBundle?['date'] as String?) ?? todayDay))
+                ?.round(),
             'confidence': (hrvTime?['confidence'] as num?) ?? 0.5,
           };
 
@@ -463,7 +466,8 @@ class LocalRepositoryImpl extends LocalRepository {
       if (sleepBundle != null && rhrEnv != null)
         'nocturnal': _nocturnal(
           sleepBundle,
-          baselineRhr: await _seriesMean('rhr'),
+          baselineRhr: await _seriesMean('rhr',
+              before: (sleepBundle['date'] as String?) ?? todayDay),
         ),
       // No `resp['rsa'] is Map` gate. `getDayLungs` never had one, so Health →
       // Overview could say "no respiratory rate" on a day whose Vitals tab

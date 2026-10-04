@@ -141,6 +141,46 @@ void main() {
       // app has.
       expect(written['sleep_need_min'], 462);
     });
+
+    test('today hrv and sleeping-hr baselines leave tonight out, like the day '
+        'screens', () async {
+      final db = await LocalDb.instance;
+      await db.delete('metric_series');
+      final today = DateTime.parse(todayLabel());
+      for (var i = 1; i <= 27; i++) {
+        final d = today.subtract(Duration(days: i));
+        final day = '${d.year.toString().padLeft(4, '0')}-'
+            '${d.month.toString().padLeft(2, '0')}-'
+            '${d.day.toString().padLeft(2, '0')}';
+        await db.insert(
+            'metric_series', {'date': day, 'key': 'rmssd', 'value': 50.0});
+        await db.insert(
+            'metric_series', {'date': day, 'key': 'rhr', 'value': 55.0});
+      }
+      await LocalDb.putDayResult(
+        dayId: todayLabel(),
+        algoVersion: kAlgoVersion,
+        payloadJson: jsonEncode({
+          'date': todayLabel(),
+          'scalars': {'readiness': 74.0, 'rhr': 59.0, 'rmssd': 30.0},
+          'clinical': {'resting_hr': {'value': 59.0}},
+          'sleep': {
+            'accounting': {
+              'value': {'tst_sec': 437 * 60, 'efficiency_pct': 91.0},
+            },
+          },
+        }),
+        windowJson: '{}',
+        series: {'rmssd': 30.0, 'rhr': 59.0},
+      );
+
+      final t = await repo.getToday();
+      // Tonight's own 30 / 59 used to sit in the window: 49.3 and 55.1.
+      expect((t['hrv'] as Map)['baseline'], 50);
+      final noct = t['nocturnal'] as Map;
+      expect(noct['vs_baseline_bpm'], 4.0);
+      expect(noct['elevated'], isTrue);
+    });
   });
 
   // `readinessBand` is the ONLY copy of the readiness cut-offs. The widget, the
