@@ -3357,9 +3357,14 @@ class DerivationEngine {
     final priorSleep = await _storedSleepHistory(excludeDay: dayId);
     // The band's own hypnogram, from its own table — never `observation`.
     // Gated inside calendarDays; an override outranks it, so skip the read.
+    // Only a device that owns hr1Hz over the night may stage it.
     final vendorNights = override != null
         ? const <VendorNight>[]
-        : await LocalDb.vendorSleepNights(range.$1, range.$2);
+        : ownedVendorNights(
+            await LocalDb.vendorSleepNights(range.$1, range.$2),
+            searchOwnership[InputSignal.hr1Hz] ?? const [],
+            primaryDeviceId: LocalDb.kPrimaryDeviceId,
+          );
     // Cancellable + TIMED OUT. This site previously used a bare `Isolate.run`
     // with no timeout at all, so a hung staging pass never completed its future
     // — `_running` stayed true and `DeriveScheduler._drain` never returned, i.e.
@@ -3466,10 +3471,7 @@ class DerivationEngine {
         try {
           final prev = SleepSessionCandidate.fromJson(
               (jsonDecode(storedJson) as Map).cast<String, dynamic>());
-          // The band's own night outranks ours even when ours ran longer.
-          final vendorWins = candidate.sleepSource == 'vendor_staged' &&
-              prev.sleepSource != 'vendor_staged';
-          if (!vendorWins && isRicherSleep(prev, candidate)) {
+          if (keepsBankedNight(prev, candidate)) {
             _log('derive $dayId: kept the banked night '
                 '(${_tstSec(prev)} s) over this pass\'s '
                 '${_tstSec(candidate)} s — less substrate, not a shorter night');
@@ -5375,6 +5377,22 @@ class DerivationEngine {
       }
     }
     return carried;
+  }
+
+  /// Whether the banked [prev] stays over the fresh [next]: [isRicherSleep],
+  /// except that the ring's own night outranks ours even when ours ran longer
+  /// — but only the SAME night. A ring night whose edges do not agree with the
+  /// banked window (a partly-synced one) never replaces it.
+  @visibleForTesting
+  static bool keepsBankedNight(
+    SleepSessionCandidate prev,
+    SleepSessionCandidate next,
+  ) {
+    final vendorWins = next.sleepSource == 'vendor_staged' &&
+        prev.sleepSource != 'vendor_staged' &&
+        vendorEdgesAgree(next.sleepOnsetSec, next.sleepOffsetSec,
+            prev.sleepOnsetSec, prev.sleepOffsetSec);
+    return !vendorWins && isRicherSleep(prev, next);
   }
 
   /// The night's measured total sleep, seconds. Null when this candidate has no

@@ -490,7 +490,9 @@ class OuraAdapter extends BandAdapter {
         }
         // Only the numbered `data` pages become an epoch series. A page is
         // taken to END at its own stamp; that is unverified, which is why the
-        // night is gated for contiguity before anything reads it. One code we
+        // night is gated for contiguity and for edges that agree with our own
+        // window (`vendorNightRejection`) before anything reads it. A shift of
+        // one page passes both. One code we
         // have no stage for and the page is dropped — the hole then fails
         // that gate for the whole night instead of a guessed stage passing it.
         if (key.$2 != kOuraEvtSleepPhaseData) continue;

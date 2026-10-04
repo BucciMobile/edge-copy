@@ -11,6 +11,8 @@ import 'dart:math' as math;
 
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
+import '../data/coverage_resolver.dart' show OwnedSpan, spanAt;
+
 /// One 30 s (or longer) epoch the band staged, in epoch seconds, half-open.
 class VendorEpoch {
   final int startSec;
@@ -47,6 +49,42 @@ const int kVendorNightMaxSec = 14 * 3600;
 
 /// A night where one stage holds at least this share is not a hypnogram.
 const double kVendorDegenerateShare = 0.9;
+
+/// How far a vendor night's onset and its offset may EACH sit from the window
+/// it has to agree with. Edges, not overlap: a partly-synced night (head or
+/// tail pages still on the ring) lies wholly inside ours and would pass any
+/// overlap test, then replace a full night with half of one. It also rejects
+/// a night whose page timing is off by more than this. A shift smaller than
+/// this (one page, if pages are stamped at their start rather than their end)
+/// is inside our own detection's error and no gate here can see it.
+const int kVendorEdgeToleranceSec = 60 * 60;
+
+/// Whether window a and window b start and end within
+/// [kVendorEdgeToleranceSec] of each other.
+bool vendorEdgesAgree(int aOn, int aOff, int bOn, int bOff) =>
+    (aOn - bOn).abs() <= kVendorEdgeToleranceSec &&
+    (aOff - bOff).abs() <= kVendorEdgeToleranceSec;
+
+/// The [nights] whose device owns `hr1Hz` at the night's midpoint, so a
+/// secondary ring never restages the night of the device that owns the
+/// signal. [hrOwner] is that signal's resolved spans; when none has an owner
+/// the primary owns it, the same rule the substrate masking uses.
+List<VendorNight> ownedVendorNights(
+  List<VendorNight> nights,
+  List<OwnedSpan> hrOwner, {
+  required String primaryDeviceId,
+}) {
+  final resolved = hrOwner.any((s) => s.deviceId != null);
+  return [
+    for (final n in nights)
+      if (n.epochs.isNotEmpty &&
+          (resolved
+                  ? spanAt(hrOwner, (n.onsetSec + n.offsetSec) ~/ 2)?.deviceId
+                  : primaryDeviceId) ==
+              n.deviceId)
+        n,
+  ];
+}
 
 /// Why [n] must not stage a night, or null when it may.
 ///
@@ -85,9 +123,10 @@ String? vendorNightRejection(
     return 'degenerate';
   }
   if (ours == null) return 'no_own_sleep';
-  final overlap = math.min(n.offsetSec, ours.offsetSec) -
-      math.max(n.onsetSec, ours.onsetSec);
-  if (overlap < len ~/ 2) return 'no_overlap';
+  if (!vendorEdgesAgree(
+      n.onsetSec, n.offsetSec, ours.onsetSec, ours.offsetSec)) {
+    return 'edges';
+  }
   return null;
 }
 

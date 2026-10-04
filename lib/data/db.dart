@@ -193,6 +193,8 @@ class LocalDb {
     'cycle_symptom',
     'sleep_override',
     'sleep_nap',
+    // A ring's own hypnogram. Nothing here can re-derive it.
+    'vendor_sleep_epoch',
     'workout_suggestions',
     'breathing_session',
     // Vendor, typed-in and imported scalars: a `reports` band trims its own
@@ -9114,6 +9116,8 @@ class LocalDb {
       // and lose every one they logged.
       'sleep_override',
       'sleep_nap',
+      // A ring's own hypnogram. Nothing here can re-derive it.
+      'vendor_sleep_epoch',
       'workout_suggestions',
       // Keep the decision merge after both kinds of accepted activity.
       'sessions',

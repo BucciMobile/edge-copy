@@ -2,7 +2,9 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/adapters/oura.dart' show ouraStage4;
+import 'package:openstrap_edge/compute/derivation_engine.dart';
 import 'package:openstrap_edge/compute/derive_prepare.dart';
+import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/compute/substrate.dart';
 import 'package:openstrap_edge/compute/vendor_sleep.dart';
 
@@ -109,7 +111,46 @@ void main() {
       expect(
           gate(_night(on, off),
               o: (onsetSec: _at(27, 6), offsetSec: _at(27, 9))),
-          'no_overlap');
+          'edges');
+    });
+    test('a partly-synced night inside ours is not our night', () {
+      // The tail pages are still on the ring: 23:10-03:10 sits wholly inside
+      // our 23:00-07:00, so any overlap rule passes it.
+      expect(gate(_night(on, _at(27, 3, 10))), 'edges');
+      // Head missing, same thing from the other end.
+      expect(gate(_night(_at(27, 2), off)), 'edges');
+    });
+    test('a night shifted by more than the tolerance is refused', () {
+      expect(gate(_night(on - 2 * 3600, off - 2 * 3600)), 'edges');
+      expect(gate(_night(on - 50 * 60, off - 50 * 60)), isNull);
+    });
+  });
+
+  group('ownership', () {
+    VendorNight from(String id) => VendorNight(
+        deviceId: id,
+        source: 'oura',
+        decodedAtSec: _at(27, 8),
+        epochs: _night(_at(26, 23), _at(27, 7)).epochs);
+    final ring = from('ring-1'), primary = from('');
+
+    test('a secondary ring does not stage the primary band\'s night', () {
+      final spans = [(start: _at(26, 12), end: _at(27, 12), deviceId: '')];
+      expect(ownedVendorNights([ring, primary], spans, primaryDeviceId: ''),
+          [primary]);
+    });
+    test('no resolved owner means the primary owns it', () {
+      final spans = [(start: _at(26, 12), end: _at(27, 12), deviceId: null)];
+      expect(ownedVendorNights([ring, primary], spans, primaryDeviceId: ''),
+          [primary]);
+      expect(ownedVendorNights([ring], const [], primaryDeviceId: ''), isEmpty);
+    });
+    test('a ring the user ranked first for heart rate does', () {
+      final spans = [
+        (start: _at(26, 12), end: _at(27, 12), deviceId: 'ring-1'),
+      ];
+      expect(ownedVendorNights([ring, primary], spans, primaryDeviceId: ''),
+          [ring]);
     });
   });
 
@@ -157,5 +198,38 @@ void main() {
           )).days.single;
       expect(day.sleepSource, 'manual');
     });
+  });
+
+  group('banked night', () {
+    SleepSessionCandidate cand(String src, int on, int off, int tst) =>
+        SleepSessionCandidate(
+          dayId: '2026-06-27',
+          confidence: 0.8,
+          flags: const [],
+          sleepJson: {'tst_sec': tst},
+          hypnoStages: const [],
+          sleepOnsetSec: on,
+          sleepOffsetSec: off,
+          sleepSource: src,
+        );
+    final banked = cand('auto', _at(26, 23), _at(27, 7), 27000);
+
+    test('the ring\'s own night replaces a longer banked night of ours', () {
+      expect(
+          DerivationEngine.keepsBankedNight(
+              banked, cand('vendor_staged', _at(26, 23, 20), _at(27, 6, 30), 24000)),
+          isFalse);
+    });
+    test('a partly-synced ring night never replaces a full banked one', () {
+      expect(
+          DerivationEngine.keepsBankedNight(
+              banked, cand('vendor_staged', _at(26, 23, 20), _at(27, 3), 12000)),
+          isTrue);
+    });
+  });
+
+  test('backup restore and salvage carry the ring hypnogram', () {
+    expect(LocalDb.restoreTablesForTest, contains('vendor_sleep_epoch'));
+    expect(LocalDb.salvageTablesForTest, contains('vendor_sleep_epoch'));
   });
 }
