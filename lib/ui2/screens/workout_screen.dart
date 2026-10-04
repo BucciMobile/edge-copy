@@ -245,7 +245,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
         yAxis: axis,
         xLabels: [
           for (var i = 6; i >= 0; i--)
-            _weekdayLetter(c, end.subtract(Motion.tick * 86400 * i)),
+            _weekdayLetter(c, DateTime(end.year, end.month, end.day - i)),
         ],
         footnote: (loc?.workoutTonnageFootnoteIntro ??
                 'Reps × load over the sets you logged with a weight. ') +
@@ -342,7 +342,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
               // place and its letter, and draws as the gap it is.
               xLabels: [
                 for (var i = 6; i >= 0; i--)
-                  _weekdayLetter(c, end.subtract(Motion.tick * 86400 * i)),
+                  _weekdayLetter(c, DateTime(end.year, end.month, end.day - i)),
               ],
               footnote: (loc?.workoutDailyLoadFootnoteIntro ??
                       'Banister training impulse — minutes weighted by '
@@ -2074,8 +2074,8 @@ Future<_WorkoutData> _loadWorkoutData(AppState app) async {
       // Nobody lifting is the normal case; a partial sum is still honest.
     }
 
-    final weekStart = end.subtract(Motion.tick * 86400 * (end.weekday - 1));
-    final thisWeek = [for (final w in past) if (w.start.isAfter(weekStart)) w];
+    final weekStart = DateTime(end.year, end.month, end.day - (end.weekday - 1));
+    final thisWeek = [for (final w in past) if (!w.start.isBefore(weekStart)) w];
 
     int? tracked;
     try {
