@@ -246,11 +246,13 @@ const kCsvExportSets = <CsvExportSet>[
     // in `exercise_def` — nothing inserts into that table — so `exercise` is
     // the storage key and the name is filled in from the catalogue. wger lifts
     // are keyed `wger:<uuid>`, which nobody can read back without it.
+    // A private session is out of v_sessions, so its sets stay out too.
     addColumns: _exerciseName,
     sql: '''
       SELECT s.at_ts, s.session_id, s.exercise_key AS exercise,
              s.set_index, s.reps, s.load_kg, s.rpe, s.hold_sec, s.rest_sec, s.note
       FROM strength_set s
+      WHERE s.session_id NOT IN (SELECT id FROM sessions WHERE private = 1)
       ORDER BY s.at_ts ASC, s.session_id ASC, s.seq ASC
     ''',
   ),
