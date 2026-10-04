@@ -7732,9 +7732,17 @@ class LocalDb {
   /// `readiness_detail.dart` (the only place that read it); Home's "not
   /// scored" card needed the exact same lookup for the exact same reason, and
   /// a second copy is how the two screens' explanations drift apart.
+  ///
+  /// Best effort: a failed read is null, not a throw. It only explains an
+  /// absence, so it must never take down the screen load that asked for it.
   static Future<Map<String, dynamic>?> readinessAbsentDiag(String? day) async {
     if (day == null) return null;
-    final payload = (await dayResult(day))?['payload_json'];
+    final Object? payload;
+    try {
+      payload = (await dayResult(day))?['payload_json'];
+    } catch (_) {
+      return null;
+    }
     if (payload is! String || !payload.contains('"readiness_absent_diag"')) {
       return null;
     }

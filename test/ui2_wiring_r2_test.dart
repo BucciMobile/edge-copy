@@ -538,11 +538,11 @@ void main() {
       expect(find.text('What went into it'), findsNothing);
       expect(find.text('What was missing'), findsOneWidget);
       // Presence and history are separate facts, and both are the pipeline's.
-      expect(find.textContaining('Measured · 6 nights'), findsOneWidget);
-      expect(find.textContaining('Not measured · 6 nights'), findsOneWidget);
-      // The note is turned into English by the machinery that already parses
-      // it — and never into a date. 14 − 6 = 8.
-      expect(find.textContaining('Need 8 more nights'), findsOneWidget);
+      expect(find.textContaining('Measured · 6 of 14 nights'), findsOneWidget);
+      expect(find.textContaining('Not measured · 6 of 14 nights'),
+          findsOneWidget);
+      // The banner says it once, off the same diag. 14 − 6 = 8.
+      expect(find.textContaining('Needs 8 more nights'), findsOneWidget);
     });
 
     testWidgets('a scored day carries no diagnostic at all', (t) async {
@@ -553,6 +553,34 @@ void main() {
                   readiness: Metric(
                       value: 74, confidence: .8, tier: MetricTier.high))));
       expect(find.text('What was missing'), findsNothing);
+    });
+
+    const diag = {
+      'hrv': {'value': true, 'baseline_n': 6, 'baseline_sd': 0.11},
+      'rhr': {'value': true, 'baseline_n': 6, 'baseline_sd': 1.2},
+    };
+
+    testWidgets('a need_baseline note does not print the reason twice',
+        (t) async {
+      await pump(
+          t,
+          const ReadinessDetail(
+              data: ReadinessData(
+                  readiness: Metric(note: 'need_baseline:have=6,need=14'),
+                  absentDiag: diag)));
+      expect(find.textContaining('before readiness can score'),
+          findsOneWidget);
+    });
+
+    testWidgets('a held-over night still shows the reason once', (t) async {
+      await pump(
+          t,
+          const ReadinessDetail(
+              data: ReadinessData(
+                  heldOverNight: '2026-05-16', absentDiag: diag)));
+      expect(find.textContaining('The last night scored was'), findsOneWidget);
+      expect(find.textContaining('before readiness can score'),
+          findsOneWidget);
     });
   });
 
