@@ -29,25 +29,6 @@ void main() {
     );
   });
 
-  // Moves the data edge to [hour]:00 local today.
-  Future<void> seedEdge(int hour) async {
-    final now = DateTime.now();
-    final ts =
-        DateTime(now.year, now.month, now.day, hour).millisecondsSinceEpoch ~/
-            1000;
-    await (await LocalDb.instance).insert('decoded_onehz', {
-      'device_id': 'test',
-      'ts_ms': ts * 1000,
-      'rec_ts': ts,
-      'counter': 1,
-      'hr': 60,
-      'ax': 0.0,
-      'ay': 0.0,
-      'az': 1.0,
-      'device_family': 'gen4',
-    });
-  }
-
   tearDownAll(() async {
     await LocalDb.close();
     await databaseFactory.deleteDatabase(

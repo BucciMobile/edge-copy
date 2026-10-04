@@ -4578,6 +4578,7 @@ class DerivationEngine {
     // partial night. Every path (algo bump, force, override, rescan) lands here.
     if (!producedNothing &&
         (nightSubstrateRegressed(
+              sleepRejected: day.sleepSource == 'rejected',
               sleepSubEmpty: sleepSub.isEmpty,
               nightScalarsNull: scMap == null ||
                   (scMap['rhr'] == null &&
@@ -4585,7 +4586,9 @@ class DerivationEngine {
                       scMap['readiness'] == null),
             ) ||
             // An import brings its own substrate, the prune can't have cut it.
+            // A rejected night has nothing to protect either.
             (!suppliedSubstrate &&
+                day.sleepSource != 'rejected' &&
                 windowTruncatedByPrune(
                   day.date,
                   await LocalDb.getCursorInt(_prunedBeforeCursor),
@@ -5223,10 +5226,15 @@ class DerivationEngine {
   /// shape is unit-testable without the full pipeline; the caller still has to
   /// confirm an EXISTING result actually had real night scalars before
   /// declining to write over it.
+  ///
+  /// [sleepRejected] (the user said "not sleep") is never a regression: the
+  /// null night is what they asked for, and the existing row is the very
+  /// night they rejected.
   static bool nightSubstrateRegressed({
+    bool sleepRejected = false,
     required bool sleepSubEmpty,
     required bool nightScalarsNull,
-  }) => sleepSubEmpty && nightScalarsNull;
+  }) => !sleepRejected && sleepSubEmpty && nightScalarsNull;
 
   /// Whether [row] is a REAL derived day result worth protecting — i.e. not a
   /// skip marker and not an all-absent shell.

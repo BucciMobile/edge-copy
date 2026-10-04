@@ -219,6 +219,11 @@ class ActivityStore {
           created.add(ActivitySuggestion.fromRow(row));
         } else {
           final first = matches.first;
+          // A slower pass from another engine can land after a newer one; a
+          // same-start bout only grows, so it never moves the end back.
+          if (first['start_ts'] == start && (first['end_ts'] as int) > end) {
+            continue;
+          }
           final changed =
               first['start_ts'] != start ||
               first['end_ts'] != end ||
