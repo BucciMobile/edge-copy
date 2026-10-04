@@ -1630,6 +1630,7 @@
   "sleepDetailWatchedExplain": "在你{inBed}的卧床时间中，我们监测到了{watched}；其余时间不属于测量范围。入睡比例及下方各阶段占比均以监测到的时间为准计算。",
   "sleepDetailWindowMine": "这个时间段是你自己设定的",
   "sleepDetailWindowFallback": "这个时间段是根据心率推断的",
+  "sleepDetailStagedByRing": "由你的戒指划分阶段",
   "sleepDetailWindowAuto": "这个时间段是根据信号自动判定的",
   "sleepDetailWindowFallbackBody": "系统未能找到明确的起止点，因此这些时间是一个估计值。",
   "sleepDetailWindowSol": "从时间段开始到入睡：{band}。",

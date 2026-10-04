@@ -1636,6 +1636,7 @@
   "sleepDetailWatchedExplain": "Observamos {watched} de tus {inBed} en cama; el resto no es una medición. El sueño, y los porcentajes de fases de abajo, se calculan sobre el tiempo que observamos.",
   "sleepDetailWindowMine": "Tú estableciste esta ventana",
   "sleepDetailWindowFallback": "Esta ventana se infirió a partir de la frecuencia cardíaca",
+  "sleepDetailStagedByRing": "Fases de tu anillo",
   "sleepDetailWindowAuto": "Esta ventana se calculó a partir de las señales",
   "sleepDetailWindowFallbackBody": "El sistema no pudo encontrar los límites, así que las horas son una estimación.",
   "sleepDetailWindowSol": "Desde el inicio de tu ventana hasta dormirte: {band}.",

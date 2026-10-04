@@ -58,6 +58,7 @@ import 'onehz_pipeline.dart';
 import 'step_cadence.dart';
 import 'profile.dart';
 import 'substrate.dart';
+import 'vendor_sleep.dart';
 
 /// Analytics/bundle version — bump to force a recompute of non-finalized days.
 /// v3: Walch 2019 stager + 4-class stages (light/deep/rem), robust nocturnal HRV,
@@ -1777,7 +1778,8 @@ import 'substrate.dart';
 // (`PreparedDerivationDay.tonightSleepOnsetSec`); a saved session's HRR
 // abstains when recording resumed more than 30 s after its end. Edge-only.
 // 106 → 107: analytics main @ c0effea, #86 rmssd gate refuses noise windows, so the stored rmssd/hrv can go null or move.
-const int kAlgoVersion = 107;
+// 107 → 108: a ring's own hypnogram stages the main sleep (`vendor_staged`, above auto, below the user's override) when it passes the plausibility gate. Edge-only.
+const int kAlgoVersion = 108;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -3353,6 +3355,11 @@ class DerivationEngine {
     // fire in production and every night is anchored to the 03:30 cold start.
     // Read on main (the DB lives here) and capture into the worker.
     final priorSleep = await _storedSleepHistory(excludeDay: dayId);
+    // The band's own hypnogram, from its own table — never `observation`.
+    // Gated inside calendarDays; an override outranks it, so skip the read.
+    final vendorNights = override != null
+        ? const <VendorNight>[]
+        : await LocalDb.vendorSleepNights(range.$1, range.$2);
     // Cancellable + TIMED OUT. This site previously used a bare `Isolate.run`
     // with no timeout at all, so a hung staging pass never completed its future
     // — `_running` stayed true and `DeriveScheduler._drain` never returned, i.e.
@@ -3384,6 +3391,7 @@ class DerivationEngine {
         targetDay: dayId,
         override: override,
         priorSleep: priorSleep,
+        vendorNights: vendorNights,
       );
       // Fold the MAIN sleep (most epochs) of a freshly-staged night into the
       // rolling profile — done here in the worker because the observations live
@@ -3429,6 +3437,9 @@ class DerivationEngine {
     }, _perDayTimeout, label: 'sleep-staging $dayId');
     final candidate = SleepSessionCandidate.fromJson(
         (jsonDecode(candidateJson) as Map).cast<String, dynamic>());
+    for (final f in candidate.flags) {
+      if (f.startsWith('VENDOR_SLEEP_IGNORED:')) _log('derive $dayId: $f');
+    }
     if (override == null) {
       // NEVER RE-STAGE A NIGHT SHORTER THAN THE ONE ALREADY BANKED (#242).
       //
@@ -3455,7 +3466,10 @@ class DerivationEngine {
         try {
           final prev = SleepSessionCandidate.fromJson(
               (jsonDecode(storedJson) as Map).cast<String, dynamic>());
-          if (isRicherSleep(prev, candidate)) {
+          // The band's own night outranks ours even when ours ran longer.
+          final vendorWins = candidate.sleepSource == 'vendor_staged' &&
+              prev.sleepSource != 'vendor_staged';
+          if (!vendorWins && isRicherSleep(prev, candidate)) {
             _log('derive $dayId: kept the banked night '
                 '(${_tstSec(prev)} s) over this pass\'s '
                 '${_tstSec(candidate)} s — less substrate, not a shorter night');

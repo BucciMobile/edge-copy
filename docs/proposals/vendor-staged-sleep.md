@@ -1,68 +1,43 @@
 # Proposal: a `vendor_staged` sleep source
 
-Status: open question for the owner. Nothing here is implemented.
+Status: implemented (kAlgoVersion 108, schema 58).
 
-## What it would bend
+## What was built
 
-1. `observation` is never an input to a derivation (OBSERVATION_SPEC §3,
-   enforced by `test/observation_isolation_test.dart`). A vendor hypnogram
-   banked as observations would be read back into the pipeline.
-2. `InputSignal` names inputs, never outputs (`lib/ble/adapters/signals.dart`).
-   Vendor-computed numbers already have a class there, `vendorScalars`, but
-   it is scalars only and defined as never an input to our derivations. A
-   vendor hypnogram is an epoch series, and this proposal would feed it into
-   the sleep window, so it fits neither rule.
-
-## The idea
-
-Today the main-sleep window comes from (`lib/compute/substrate.dart`):
+The main-sleep window precedence in `lib/compute/substrate.dart` is now:
 
 ```
-user override (manual / confirmed / rejected) > auto (van Hees) > auto_fallback (HR-led) > none
+user override (manual / confirmed / rejected) > vendor_staged > auto (van Hees) > auto_fallback (HR-led) > none
 ```
 
-The proposal adds one rung:
+- Storage: `vendor_sleep_epoch` (device, night onset, epoch start/end, stage,
+  source, decoded_at). Stages are stored in our `stages4` words. `observation`
+  stays scalars only and is still never read by a derivation
+  (`test/observation_isolation_test.dart`).
+- Write path: the Oura adapter turns each `data` hypnogram page into epochs
+  through one mapping function, `ouraStage4`. A code with no stage drops that
+  page, and the hole then fails the gate for the whole night. The per-stage
+  minutes are still banked as vendor scalars.
+- Plausibility gate (`lib/compute/vendor_sleep.dart`): a night is used only
+  when its epochs are contiguous and non-overlapping, it is 3 to 14 h long, it
+  sits inside the substrate and before it was decoded, no one stage holds 90%
+  or more of it, and it overlaps at least half of our own detected or HR-led
+  window. A failing night stays stored and unused, and the reason is logged.
+- Staging: a vendor night uses our forced-window segmentation for the window
+  and confidence, with every stage figure taken from the vendor epochs.
+  Analytics is unchanged.
+- Provenance: the day bundle carries `sleep_source = vendor_staged`, and the
+  Sleep screen shows "Staged by your ring" on the window and the hypnogram.
 
-```
-user override > vendor_staged > auto > auto_fallback > none
-```
+## Why a hypnogram and not other vendor numbers
 
-Why a hypnogram and not other vendor numbers: a sleep score or readiness is
-a composite with no method we can describe. A hypnogram is a window plus a
-per-epoch stage label, the same shape as our own `stages4`, so it can be
-cross-checked against our staging night by night. Agreement is not
-validation (both can be wrong the same way); only PSG validates either.
-
-Our own staging is not a high bar: on DREAMT the pre-#34 rules scored
-kappa 0.036 across all 99 PSG-labelled nights, and the current rules 0.132
-on 49 held-out subjects (analytics `cardio_stager.dart`). Different splits,
-so not a like-for-like comparison, but both are low.
-
-The user override keeps priority. A vendor window the user corrects is
-corrected through the existing `sleep_override` flow in `sleep_detail.dart`.
-
-## Conditions before it ships
-
-1. A ring we own has produced hypnogram frames that decode correctly with
-   our decoder. The layout is unverified on Ring 4/5.
-2. A table for the epoch series. `observation` stays scalars only
-   (`db.dart`), so the hypnogram gets its own table when this has a reader.
-3. The pipeline reads that table, never `observation`, so the isolation
-   test still holds.
-4. A vendor-staged night is labelled as vendor-staged wherever our staging
-   renders. Showing a vendor window as our own detection is the failure to
-   avoid.
+A sleep score or readiness is a composite with no method we can describe. A
+hypnogram is a window plus a per-epoch stage label, the same shape as our own
+`stages4`, so it can be cross-checked against our staging night by night.
+Agreement is not validation; only PSG validates either.
 
 ## Out of scope
 
 - A general "trust vendor numbers" rule.
-- Any change in `analytics`; it stays device-blind (OBSERVATION_SPEC §4). The
-  hypnogram would enter at the substrate layer, like the user override.
 - Ownership changes. Which device owns a signal stays with
   `_resolveOwnership` (`signal_priority`, primary device by default).
-
-## Doing nothing
-
-This is the current state and costs nothing: #468 banks the per-stage
-minutes as attributed vendor scalars, the epoch frames stay in
-`raw_archive`, and this source can be built from those bytes later.

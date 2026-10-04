@@ -19,6 +19,7 @@ import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 
 import '../data/day_label.dart';
+import 'vendor_sleep.dart';
 
 /// Minimum fraction of a nocturnal search window that must carry a REAL
 /// gravity vector before accel-led (van Hees) sleep detection is trusted.
@@ -1148,6 +1149,7 @@ class PhysioDay {
   ///   'auto'          — accel-led van Hees detection (the normal path)
   ///   'auto_fallback' — HR-led fallback (van Hees found nothing); LOW confidence,
   ///                     surface a "is this right?" prompt
+  ///   'vendor_staged' — the band's own hypnogram (window + stages), gated
   ///   'manual'        — user typed the window (Approach 1)
   ///   'confirmed'     — user accepted the fallback's proposal
   ///   'none'          — no sleep at all
@@ -1238,6 +1240,7 @@ List<PhysioDay> calendarDays(
   SleepWindowOverride? override,
   int Function(int epochSec)? tzOffsetAt,
   List<({int startSec, int endSec, String dayKey})> priorSleep = const [],
+  List<VendorNight> vendorNights = const [],
 }) {
   final tzOffset = tzOffsetAt ?? tzOffsetSecondsAt;
   if (sub.isEmpty) return const [];
@@ -1275,6 +1278,7 @@ List<PhysioDay> calendarDays(
     var seg = ana.SleepSegmentation.absent;
     var sleepLo = 0, sleepHi = 0;
     var sleepSource = 'none';
+    final vendorIgnored = <String>[];
     final dayLabel = localDateLabel(dayStart);
     // Does the user have an override (manual / confirmed) for THIS day?
     final ov =
@@ -1390,6 +1394,39 @@ List<PhysioDay> calendarDays(
             }
           }
         }
+        // vendor_staged: the band's own night, above our detection — which it
+        // must overlap, so our window is the evidence the gate checks against.
+        final ourOn = s.window?.onsetMs, ourOff = s.window?.offsetMs;
+        final ours = s.present && ourOn != null && ourOff != null
+            ? (onsetSec: ourOn ~/ 1000, offsetSec: ourOff ~/ 1000)
+            : null;
+        for (final vn in vendorNights) {
+          if (vn.epochs.isEmpty ||
+              vn.offsetSec < dayStart ||
+              vn.offsetSec >= dayEnd) {
+            continue;
+          }
+          var why = vendorNightRejection(vn,
+              dataStartSec: dataStart, dataEndSec: dataEnd, ours: ours);
+          if (why == null) {
+            final forced = ana.segmentSleep(
+              accelSlice,
+              hrSlice,
+              hrBaseline: hrBaseline,
+              rrMs: rrMsSeg,
+              rrTsMs: rrTsSeg,
+              forcedWindow: (onsetSec: vn.onsetSec, offsetSec: vn.offsetSec),
+            );
+            final staged = vendorStagedSegmentation(forced, vn);
+            if (staged.present) {
+              s = staged;
+              src = 'vendor_staged';
+              break;
+            }
+            why = 'not_staged';
+          }
+          vendorIgnored.add('VENDOR_SLEEP_IGNORED:${vn.source}:$why');
+        }
       }
 
       if (s.present && s.window != null) {
@@ -1435,15 +1472,18 @@ List<PhysioDay> calendarDays(
       sleepHiIdx: sleepHi,
       confidence: seg.present ? seg.confidence : 0.0,
       sleepSource: sleepSource,
-      flags: seg.present
-          ? (sleepSource == 'auto_fallback'
-              ? const <String>['SLEEP_FALLBACK']
-              : (sleepSource == 'manual' || sleepSource == 'confirmed'
-                  ? const <String>['SLEEP_MANUAL']
-                  : const <String>[]))
-          : (sleepSource == 'rejected'
-              ? const <String>['SLEEP_REJECTED']
-              : const <String>['NO_SLEEP_DETECTED']),
+      flags: [
+        ...(seg.present
+            ? (sleepSource == 'auto_fallback'
+                ? const <String>['SLEEP_FALLBACK']
+                : (sleepSource == 'manual' || sleepSource == 'confirmed'
+                    ? const <String>['SLEEP_MANUAL']
+                    : const <String>[]))
+            : (sleepSource == 'rejected'
+                ? const <String>['SLEEP_REJECTED']
+                : const <String>['NO_SLEEP_DETECTED'])),
+        ...vendorIgnored,
+      ],
     ));
     dayStart = dayEnd;
   }

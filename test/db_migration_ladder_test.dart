@@ -22,6 +22,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:openstrap_edge/compute/vendor_sleep.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/journal_fields.dart';
 import 'package:openstrap_edge/data/models.dart';
@@ -1552,6 +1553,38 @@ void main() {
 
       expect(await LocalDb.redriveArchivedRecords(db), 2,
           reason: 'both devices\' identical frame must decode, not just one');
+    },
+  );
+
+  test(
+    'v58 adds vendor_sleep_epoch; epochs chain into one night per device, '
+    'idempotent reopen',
+    () async {
+      const name = 'migrate_v58_vendor_sleep_test.db';
+      created.add(name);
+      await _seedOldDb(name, 50, _v5DerivedDdl);
+      expect(await _openThroughLocalDb(name), LocalDb.schemaVersion);
+      expect(await LocalDb.tableNames(), contains('vendor_sleep_epoch'));
+
+      const t0 = 1782000000;
+      await LocalDb.putVendorSleepEpochs(
+          const [VendorEpoch(t0, t0 + 30, 'light')],
+          deviceId: 'ring', source: 'oura');
+      // A later page, 20 min on: same night. One 3 h later: a new night.
+      await LocalDb.putVendorSleepEpochs(const [
+        VendorEpoch(t0 + 1230, t0 + 1260, 'deep'),
+        VendorEpoch(t0 + 4 * 3600, t0 + 4 * 3600 + 30, 'rem'),
+      ], deviceId: 'ring', source: 'oura');
+      final nights = await LocalDb.vendorSleepNights(t0 - 1, t0 + 5 * 3600);
+      expect(nights, hasLength(2));
+      expect(nights.first.epochs.map((e) => e.stage), ['light', 'deep']);
+      expect(nights.first.onsetSec, t0);
+      expect(nights.last.source, 'oura');
+
+      await LocalDb.close();
+      expect(await _openThroughLocalDb(name), LocalDb.schemaVersion);
+      final health = await LocalDb.schemaHealth();
+      expect(health['ok'], isTrue, reason: '$health');
     },
   );
 }

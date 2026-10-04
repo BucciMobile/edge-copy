@@ -219,6 +219,22 @@ class BandHost {
         // Chained, not awaited: best-effort and outside the ACK path, but
         // [stop] waits for it so a read after stop sees the rows.
         _vendorWrites = _vendorWrites.then((_) => _bankVendorScalars(e));
+      case VendorHypnogram(:final source, :final epochs):
+        // Same chain and same best-effort contract as vendor scalars.
+        _vendorWrites = _vendorWrites.then((_) async {
+          final extra = _admitSample;
+          final kept = [
+            for (final ep in epochs)
+              if (extra == null || extra(ep.startSec)) ep,
+          ];
+          if (kept.isEmpty) return;
+          try {
+            await LocalDb.putVendorSleepEpochs(kept,
+                deviceId: deviceId, source: source);
+          } catch (err) {
+            onLog('[${adapter.id}] vendor hypnogram not banked: $err');
+          }
+        });
     }
   }
 

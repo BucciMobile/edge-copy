@@ -38,6 +38,7 @@ import 'activity_store.dart';
 import '../models/activity_suggestion.dart';
 import '../compute/accepted_naps.dart';
 import '../compute/nap_edits.dart' show NapEditKind;
+import '../compute/vendor_sleep.dart' show VendorEpoch, VendorNight;
 import 'journal_fields.dart';
 import 'live_coverage_policy.dart';
 import 'step_calibration.dart';
@@ -380,7 +381,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 57;
+  static const int schemaVersion = 58;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -494,6 +495,7 @@ class LocalDb {
         await _createWorkoutSuggestions(db);
         await _createSleepOverride(db);
         await _createSleepNap(db);
+        await _createVendorSleepEpoch(db);
         await ActivityStore.create(db);
         await _createWorkoutRoute(db);
         await _createNotifFired(db);
@@ -1130,6 +1132,10 @@ class LocalDb {
           await _createSleepNap(db);
           await ActivityStore.create(db);
         }
+        if (oldV < 58) {
+          // A band's own hypnogram (`vendor_staged`). New table only.
+          await _createVendorSleepEpoch(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1199,6 +1205,7 @@ class LocalDb {
     await _createWorkoutSuggestions(db);
     await _createSleepOverride(db);
     await _createSleepNap(db);
+    await _createVendorSleepEpoch(db);
     await ActivityStore.create(db);
     await _createWorkoutRoute(db);
     await _ensureWorkoutRouteSpeed(db);
@@ -2254,6 +2261,108 @@ class LocalDb {
         PRIMARY KEY (day_id, start_ts)
       )
     ''');
+  }
+
+  /// A band's own hypnogram, one row per epoch, stages already in our
+  /// `stages4` words. `night_onset_ts` chains an epoch onto the night of the
+  /// same device's epoch that ended at most [_kVendorNightChainSec] before it.
+  /// Read only by the `vendor_staged` sleep rung, after its plausibility gate.
+  static Future<void> _createVendorSleepEpoch(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS vendor_sleep_epoch (
+        device_id TEXT NOT NULL,
+        night_onset_ts INTEGER NOT NULL,
+        start_ts INTEGER NOT NULL,
+        end_ts INTEGER NOT NULL,
+        stage TEXT NOT NULL,
+        source TEXT NOT NULL,
+        decoded_at INTEGER NOT NULL,
+        PRIMARY KEY (device_id, start_ts)
+      )
+    ''');
+    await db.execute('CREATE INDEX IF NOT EXISTS idx_vendor_sleep_epoch_night '
+        'ON vendor_sleep_epoch(night_onset_ts)');
+  }
+
+  static const int _kVendorNightChainSec = 30 * 60;
+
+  /// Bank [epochs] for [deviceId]. REPLACE on (device, start): a re-read page
+  /// overwrites itself.
+  static Future<void> putVendorSleepEpochs(
+    List<VendorEpoch> epochs, {
+    required String deviceId,
+    required String source,
+  }) async {
+    if (epochs.isEmpty) return;
+    final sorted = [...epochs]..sort((a, b) => a.startSec.compareTo(b.startSec));
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final db = await instance;
+    await db.transaction((txn) async {
+      int? onset;
+      var prevEnd = 0;
+      for (final e in sorted) {
+        if (onset == null || e.startSec - prevEnd > _kVendorNightChainSec) {
+          final prior = await txn.rawQuery(
+            'SELECT night_onset_ts FROM vendor_sleep_epoch '
+            'WHERE device_id = ? AND end_ts >= ? AND start_ts < ? '
+            'ORDER BY end_ts DESC LIMIT 1',
+            [deviceId, e.startSec - _kVendorNightChainSec, e.startSec],
+          );
+          onset = prior.isEmpty
+              ? e.startSec
+              : (prior.first['night_onset_ts'] as num).toInt();
+        }
+        await txn.insert('vendor_sleep_epoch', {
+          'device_id': deviceId,
+          'night_onset_ts': onset,
+          'start_ts': e.startSec,
+          'end_ts': e.endSec,
+          'stage': e.stage,
+          'source': source,
+          'decoded_at': now,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        prevEnd = e.endSec;
+      }
+    });
+  }
+
+  /// Every banked vendor night whose onset is in [[fromSec], [toSec]).
+  static Future<List<VendorNight>> vendorSleepNights(
+      int fromSec, int toSec) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT * FROM vendor_sleep_epoch '
+      'WHERE night_onset_ts >= ? AND night_onset_ts < ? '
+      'ORDER BY device_id, night_onset_ts, start_ts',
+      [fromSec, toSec],
+    );
+    final out = <VendorNight>[];
+    String? key;
+    for (final r in rows) {
+      final k = '${r['device_id']}|${r['night_onset_ts']}';
+      final ep = VendorEpoch((r['start_ts'] as num).toInt(),
+          (r['end_ts'] as num).toInt(), r['stage'] as String);
+      final decodedAt = (r['decoded_at'] as num).toInt();
+      if (k != key) {
+        key = k;
+        out.add(VendorNight(
+          deviceId: r['device_id'] as String,
+          source: r['source'] as String,
+          decodedAtSec: decodedAt,
+          epochs: [ep],
+        ));
+      } else {
+        final n = out.removeLast();
+        out.add(VendorNight(
+          deviceId: n.deviceId,
+          source: n.source,
+          decodedAtSec:
+              decodedAt > n.decodedAtSec ? decodedAt : n.decodedAtSec,
+          epochs: n.epochs..add(ep),
+        ));
+      }
+    }
+    return out;
   }
 
   static Future<void> _createSleepOverride(Database db) async {
@@ -9751,6 +9860,7 @@ class LocalDb {
       'device',
       'device_coverage',
       'signal_priority',
+      'vendor_sleep_epoch',
     ];
 
     final missingTables = <String>[];

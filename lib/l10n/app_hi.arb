@@ -1630,6 +1630,7 @@
   "sleepDetailWatchedExplain": "हमने बिस्तर पर बिताए आपके {inBed} में से {watched} मॉनिटर किया; बाकी समय एक मापन नहीं है। नींद, और नीचे दिए गए चरणों के हिस्से, केवल मॉनिटर किए गए समय पर आधारित हैं।",
   "sleepDetailWindowMine": "यह समय-सीमा आपने खुद तय की है",
   "sleepDetailWindowFallback": "यह समय-सीमा हृदय गति से अनुमानित की गई है",
+  "sleepDetailStagedByRing": "चरण आपकी रिंग ने तय किए",
   "sleepDetailWindowAuto": "यह समय-सीमा संकेतों से तय की गई है",
   "sleepDetailWindowFallbackBody": "विश्लेषण सीमाओं को नहीं ढूंढ पाया, इसलिए ये समय एक अनुमान हैं।",
   "sleepDetailWindowSol": "आपकी समय-सीमा की शुरुआत से सोने तक: {band}।",

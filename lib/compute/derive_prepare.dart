@@ -6,6 +6,7 @@ import 'package:openstrap_analytics/onehz.dart' as ana;
 import '../ble/adapters/signals.dart';
 import '../data/coverage_resolver.dart';
 import 'substrate.dart';
+import 'vendor_sleep.dart';
 
 class PreparedDerivationDay {
   final String date;
@@ -383,6 +384,7 @@ PreparedDerivationPayload prepareDerivationPayload(
   String? targetDay,
   SleepWindowOverride? override,
   List<({int startSec, int endSec, String dayKey})> priorSleep = const [],
+  List<VendorNight> vendorNights = const [],
 }) {
   if (sub.isEmpty || sub.lastTs == null) {
     return const PreparedDerivationPayload(dataNowSec: 0, days: []);
@@ -392,6 +394,7 @@ PreparedDerivationPayload prepareDerivationPayload(
     sub,
     override: override,
     priorSleep: priorSleep,
+    vendorNights: vendorNights,
   )) {
     if (targetDay != null && day.date != targetDay) continue;
     final daySub = sub.slice(day.startSec, day.endSec);
@@ -443,9 +446,13 @@ SleepSessionCandidate prepareSleepSessionCandidate(
   required String targetDay,
   SleepWindowOverride? override,
   List<({int startSec, int endSec, String dayKey})> priorSleep = const [],
+  List<VendorNight> vendorNights = const [],
 }) {
   final payload = prepareDerivationPayload(sub,
-      targetDay: targetDay, override: override, priorSleep: priorSleep);
+      targetDay: targetDay,
+      override: override,
+      priorSleep: priorSleep,
+      vendorNights: vendorNights);
   if (payload.days.isEmpty) return SleepSessionCandidate.absent(targetDay);
   final day = payload.days.first;
   return SleepSessionCandidate(
