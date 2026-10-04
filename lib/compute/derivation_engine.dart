@@ -1746,7 +1746,21 @@ import 'substrate.dart';
 // exist), the steps bundle gains `counter_wearing` / `counter_calibration` /
 // `counter_coverage`, and strap_counter confidence is 0.9..0.98 by evidence.
 // `band_measured` stays the raw ticks. gen4 has no counter. Edge-only.
-const int kAlgoVersion = 102;
+// 102 → 103 (band-state night END, gen5/MG): an AUTO night now ENDS at the
+// band's own last SLEEP second when the band's continuously observed tail
+// after it is ≥ 10 min awake (UP/WAKE, no re-settling) — the lie-in is no
+// longer counted as sleep, so in-bed/TST/efficiency and the wake time move
+// earlier on those mornings (`sleep.band_offset_trim_sec` records the seconds
+// removed). Naps cannot reclaim that tail: the nap main-sleep exclusion runs
+// to the UNTRIMMED end (`_DayBlocksInput.napExcludeEndSec`). A band-corrected
+// night replaces a banked longer one with the same onset, bounded to the
+// corroborated tail (`isRicherSleep`). The morning readiness pin, which fires
+// at `sleepOffsetSec + 1 h`, now freezes earlier on those mornings. UNCHANGED:
+// onset, stages, which day owns the night (decided on the untrimmed end),
+// gen4 (no band envelope), manual/confirmed overrides and the HR-led
+// fallback. Analytics change: OpenStrap/analytics PR #80; kAnalyticsPin
+// repinned to analytics main @ 4fc2b12, which also carries #81-#85.
+const int kAlgoVersion = 103;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1922,7 +1936,11 @@ const int kAlgoVersion = 102;
 // skin-temp window (see pubspec.yaml's comment beside the `ref:` for the
 // verification command). kAlgoVersion bumped 96 -> 97, see the changelog
 // entry above.
-const String kAnalyticsPin = '0441ef9e6fc6d5681c309ce6341911285e829f20';
+// REPIN @ 9fc1d6a — analytics PR #80 (band-state night end:
+// bandTrimmedOffsetSec, segmentSleep(bandSleepState:),
+// SleepSegmentation.bandOffsetTrimSec), on OpenStrap/analytics main, for v100
+// above.
+const String kAnalyticsPin = '4fc2b1229ab916d2d94c4dd3b7565f96a4c6e093';
 // Repinned to analytics main's tip, which carries BOTH PR #72 (hrv_freq
 // Welch gap guard) and PR #73 (overreachingConjunction rhr quantum guard) —
 // the two independent kAlgoVersion bumps above (93 and 94). Verified both
@@ -4668,6 +4686,8 @@ class DerivationEngine {
         profile: profile,
         onsetSec: day.sleepOnsetSec,
         offsetSec: day.sleepOffsetSec,
+        napExcludeEndSec: day.sleepOffsetSec +
+            ((day.sleepJson['band_offset_trim_sec'] as num?)?.toInt() ?? 0),
         // NOCTURNAL-ONLY. `scalars.rhr` is allowed to fall back to daytime HR
         // for the resting-HR card; feeding that into TRIMP charged a day
         // against an awake reference and published a strain the pure pipeline
@@ -5246,6 +5266,12 @@ class DerivationEngine {
   /// A candidate with no night at all is never richer than one that has one, and
   /// EQUAL is not richer — a pass that reproduces the same night writes, so an
   /// otherwise-identical candidate still refreshes.
+  ///
+  /// One bounded exception: a candidate whose end the band corroborated
+  /// (`band_offset_trim_sec` set), with the same onset (±60 s), whose UNTRIMMED
+  /// end covers the banked end, and whose TST loss does not exceed what was
+  /// removed from the banked window (+60 s), replaces the banked night — that is
+  /// a corrected wake time, not less substrate.
   @visibleForTesting
   static bool isRicherSleep(
     SleepSessionCandidate prev,
@@ -5254,7 +5280,30 @@ class DerivationEngine {
     final p = _tstSec(prev);
     if (p == null) return false;
     final n = _tstSec(next);
-    return n == null || p > n;
+    if (n == null) return true;
+    int? trimOf(SleepSessionCandidate c) =>
+        (c.sleepJson['band_offset_trim_sec'] as num?)?.toInt();
+    final sameOnset = (next.sleepOnsetSec - prev.sleepOnsetSec).abs() <= 60;
+    final nextTrim = trimOf(next);
+    // A band END correction is not "less substrate" — but only for the part of
+    // the banked night that lies inside the tail the band corroborated as
+    // awake: the banked end must fall WITHIN (next end, next untrimmed end],
+    // and the TST lost may not exceed what was removed from the banked window.
+    // "Within", not "equal to", because the morning record GROWS: an early
+    // pass banks a night whose awake tail is still < 10 min; a later pass trims.
+    if (sameOnset &&
+        nextTrim != null &&
+        next.sleepOffsetSec < prev.sleepOffsetSec &&
+        prev.sleepOffsetSec <= next.sleepOffsetSec + nextTrim + 60 &&
+        p - n <= (prev.sleepOffsetSec - next.sleepOffsetSec) + 60) {
+      return false;
+    }
+    // NO mirror rule (deliberately — review round 3): the trim is a
+    // deterministic function of the stored rows, and rows are only added or
+    // replaced by the same record, so a later pass with no trim means the band
+    // now shows SLEEP later (e.g. a backfilled gap) — new evidence, which must
+    // be allowed to win through the ordinary comparison.
+    return p > n;
   }
 
   /// How a day should be filed after its second half failed and the previous
@@ -8042,6 +8091,11 @@ class DerivationEngine {
     // Read on the main isolate and carried in, like every other DB-sourced
     // input here — this runs inside the compute worker, which has no database.
     List<NapEdit> napEdits = const [],
+    // Where the main-sleep exclusion ENDS — the night's UNTRIMMED end when the
+    // band cut the auto window short (`sleep.band_offset_trim_sec`), so the
+    // lie-in the band rule removed from the night cannot be reclaimed as a
+    // nap. Null = [offsetSec].
+    int? napExcludeEndSec,
   }) {
     try {
       final n = s.length;
@@ -8061,11 +8115,12 @@ class DerivationEngine {
       final hr = [for (final h in s.hr) h.toDouble()];
       // Map the main-sleep epoch-second window to indices into the day arrays.
       ana.SleepWindowSpan? main;
-      if (offsetSec > onsetSec) {
+      final excludeEndSec = napExcludeEndSec ?? offsetSec;
+      if (excludeEndSec > onsetSec) {
         var lo = -1, hi = -1;
         for (var i = 0; i < n; i++) {
           if (lo < 0 && s.tsSec[i] >= onsetSec) lo = i;
-          if (s.tsSec[i] < offsetSec) hi = i + 1;
+          if (s.tsSec[i] < excludeEndSec) hi = i + 1;
         }
         if (lo >= 0 && hi > lo) main = ana.SleepWindowSpan(lo, hi);
       }
@@ -8409,6 +8464,7 @@ class DerivationEngine {
       wristOff: inp.wristOffSpans,
       charging: inp.chargingSpans,
       napEdits: inp.napEdits,
+      napExcludeEndSec: inp.napExcludeEndSec ?? offset,
     );
     bundlePatch['sleep_periods'] = _sleepPeriods(
       onset,
@@ -9025,6 +9081,7 @@ class DerivationEngine {
     List<List<int>> wristOff = const [],
     List<List<int>> charging = const [],
     List<NapEdit> napEdits = const [],
+    int? napExcludeEndSec,
   }) =>
       _attachNaps(
         bundle,
@@ -9037,6 +9094,7 @@ class DerivationEngine {
         wristOff: wristOff,
         charging: charging,
         napEdits: napEdits,
+        napExcludeEndSec: napExcludeEndSec,
       );
 
   void _log(String m) {
@@ -9075,6 +9133,12 @@ class _DayBlocksInput {
   final Profile profile;
   final int onsetSec;
   final int offsetSec;
+
+  /// Where nap detection's main-sleep exclusion ends: [offsetSec] plus the
+  /// band trim (`sleep.band_offset_trim_sec`), i.e. the UNTRIMMED auto end, so
+  /// a lie-in the band rule cut off the night is not reclaimed as a nap. Null
+  /// = [offsetSec].
+  final int? napExcludeEndSec;
 
   /// NOCTURNAL resting HR for this day (`scalars.rhr_nocturnal`) — null unless a
   /// sleep session was detected. NOT `scalars.rhr`, which is allowed to fall
@@ -9146,6 +9210,7 @@ class _DayBlocksInput {
     required this.profile,
     required this.onsetSec,
     required this.offsetSec,
+    this.napExcludeEndSec,
     required this.rhr,
     required this.maxHrUsed,
     required this.liveStepsReal,

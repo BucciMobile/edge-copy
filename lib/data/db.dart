@@ -7620,7 +7620,7 @@ class LocalDb {
         'SELECT counter, rec_ts, hr, ax, ay, az, '
         'spo2_red_raw, spo2_ir_raw, skin_temp_raw, '
         'step_count, step_cadence, activity_class, skin_temp_c, '
-        'on_wrist, hr_valid, hr_alt, device_family, device_id '
+        'on_wrist, hr_valid, hr_alt, device_family, device_id, band_sleep_state '
         'FROM decoded_onehz '
         'WHERE rec_ts >= ? AND rec_ts <= ? AND ${derivableSourceSql()} '
         'ORDER BY rec_ts ASC, counter ASC LIMIT ?',
@@ -7631,7 +7631,7 @@ class LocalDb {
       'SELECT counter, rec_ts, hr, ax, ay, az, '
       'spo2_red_raw, spo2_ir_raw, skin_temp_raw, '
       'step_count, step_cadence, activity_class, skin_temp_c, '
-      'on_wrist, hr_valid, hr_alt, device_family, device_id '
+      'on_wrist, hr_valid, hr_alt, device_family, device_id, band_sleep_state '
       'FROM decoded_onehz '
       'WHERE rec_ts >= ? AND rec_ts <= ? AND ${derivableSourceSql()} '
       'AND (rec_ts > ? OR (rec_ts = ? AND counter > ?)) '
