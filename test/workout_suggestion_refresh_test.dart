@@ -5,7 +5,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:openstrap_edge/data/activity_store.dart';
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/models/activity_suggestion.dart';
 
 void main() {
   setUpAll(() async {
@@ -58,5 +60,18 @@ void main() {
     await LocalDb.dismissWorkoutSuggestion('workout:1000');
     await LocalDb.putWorkoutSuggestion(row(5000, 66, 3));
     expect(await LocalDb.activeWorkoutSuggestions(), isEmpty);
+  });
+
+  test('a nap re-detected with an earlier end does move back', () async {
+    final store = ActivityStore(await LocalDb.instance);
+    await store.reconcile(ActivityKind.nap, [
+      {'start': 9000, 'end': 12000},
+    ]);
+    await store.reconcile(ActivityKind.nap, [
+      {'start': 9000, 'end': 10800},
+    ]);
+    final rows = await (await LocalDb.instance).query('activity_suggestions',
+        where: "kind = 'nap'");
+    expect(rows.single['end_ts'], 10800);
   });
 }
