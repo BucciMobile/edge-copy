@@ -29,6 +29,7 @@ Map<String, dynamic> _diag({
   int rhr = readinessCompositeMinBaseline,
   int resp = readinessCompositeMinBaseline,
   double? tempSettledFrac,
+  String note = 'need_inputs:have=1,need=2,weight=0.4,need_weight=0.5',
 }) =>
     {
       'hrv': {'value': true, 'baseline_n': hrv},
@@ -39,6 +40,7 @@ Map<String, dynamic> _diag({
         'baseline_n': readinessCompositeMinBaseline,
         'settled_frac': tempSettledFrac,
       },
+      'note': note,
     };
 
 void main() {
@@ -53,18 +55,44 @@ void main() {
     );
   });
 
-  test('reports the WORST baseline shortfall, not the first one found', () {
-    // RHR (11 of 14, short by 3) is further from ready than breathing rate
-    // (13 of 14, short by 1) — the actual bottleneck is RHR's count, 3, even
-    // though no input is named in the sentence itself.
+  test('counts the second-closest input, not the slowest one', () {
+    // Two inputs past 14 nights is enough to score, so the slowest one is
+    // never the bottleneck: HRV 10, RHR 12, resp 5 scores in 4 nights.
     final note = readinessInputShortfallNote(
-      _diag(rhr: 11, resp: 13, tempSettledFrac: 0.95),
+      _diag(hrv: 10, rhr: 12, resp: 5, tempSettledFrac: 0.95),
     );
-    expect(note, 'Needs 3 more nights before readiness can score.');
+    expect(note, 'Needs 4 more nights before readiness can score.');
+  });
+
+  test('an input not measured today is not counted', () {
+    final diag = _diag(hrv: 10, rhr: 12, resp: 0, tempSettledFrac: 0.95);
+    (diag['resp'] as Map)['value'] = false;
+    expect(readinessInputShortfallNote(diag),
+        'Needs 4 more nights before readiness can score.');
+  });
+
+  test('a need_baseline note is left to needMessageFromNote', () {
+    expect(
+      readinessInputShortfallNote(_diag(
+          hrv: 12, rhr: 12, resp: 0, note: 'need_baseline:have=12,need=14')),
+      isNull,
+    );
+  });
+
+  test('a z-cap withhold gets no night count', () {
+    expect(
+      readinessInputShortfallNote(_diag(
+          hrv: 30,
+          rhr: 30,
+          resp: 6,
+          tempSettledFrac: 0.9,
+          note: 'unstable_baseline:z=9.100,cap=6.0')),
+      isNull,
+    );
   });
 
   test('singular night is grammatically correct', () {
-    final note = readinessInputShortfallNote(_diag(resp: 13));
+    final note = readinessInputShortfallNote(_diag(rhr: 13, resp: 13));
     expect(note, 'Needs 1 more night before readiness can score.');
   });
 
@@ -73,7 +101,7 @@ void main() {
       'no compound sentence, the night count alone is the overall answer',
       () {
     final note = readinessInputShortfallNote(
-      _diag(rhr: 11, tempSettledFrac: 0.666717),
+      _diag(rhr: 11, resp: 11, tempSettledFrac: 0.666717),
     );
     expect(note, 'Needs 3 more nights before readiness can score.');
   });
@@ -94,17 +122,19 @@ void main() {
 
   test('a settled-enough temp is not mentioned at all', () {
     expect(
-      readinessInputShortfallNote(_diag(rhr: 11, tempSettledFrac: 0.95)),
+      readinessInputShortfallNote(
+          _diag(rhr: 11, resp: 11, tempSettledFrac: 0.95)),
       'Needs 3 more nights before readiness can score.',
     );
   });
 
   test('a missing baseline_n is treated as zero history, not a crash', () {
     final diag = {
-      'hrv': <String, dynamic>{'value': false},
-      'rhr': {'value': true, 'baseline_n': readinessCompositeMinBaseline},
+      'hrv': <String, dynamic>{'value': true},
+      'rhr': <String, dynamic>{'value': true},
       'resp': {'value': true, 'baseline_n': readinessCompositeMinBaseline},
       'temp': {'value': true, 'baseline_n': readinessCompositeMinBaseline},
+      'note': 'need_inputs:have=1,need=2,weight=0.2,need_weight=0.5',
     };
     expect(
       readinessInputShortfallNote(diag),
@@ -117,7 +147,7 @@ void main() {
       'metricName swaps the noun for Home\'s "Recovery" ring without '
       'touching the number — same diagnostic, same count, only the label '
       'differs between the ring and the Readiness detail screen', () {
-    final diag = _diag(rhr: 11);
+    final diag = _diag(rhr: 11, resp: 11);
     expect(
       readinessInputShortfallNote(diag),
       'Needs 3 more nights before readiness can score.',

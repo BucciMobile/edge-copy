@@ -145,12 +145,18 @@ String? zCapAbsentNote(Metric<Readiness> composite) {
 /// stored data into prose, the job [needMessageFromNote] already does for a
 /// different note convention.
 ///
-/// Counts the WORST (furthest from ready) of the three baseline-length
-/// inputs — HRV/RHR/breathing rate — because that is the actual bottleneck:
-/// the composite cannot score until it clears, regardless of how close the
-/// others are. Deliberately names no input: the per-input "X of Y nights"
-/// rows this sentence sits above already say which one, by name, with its
-/// own count — this is the overall answer, not a second copy of a row.
+/// Only for a `need_inputs:` note. A `need_baseline:` absence already gets
+/// its count from [needMessageFromNote], and an `unstable_baseline:` one
+/// cleared every floor it needed, so a night count there is a false cause.
+///
+/// The count is the [readinessCompositeMinInputs]-th closest of HRV/RHR/
+/// breathing rate among the inputs actually measured today: the composite
+/// scores once that many clear [readinessCompositeMinBaseline], and any two
+/// of the three carry at least [readinessCompositeMinWeight]. Not the slowest
+/// one, which is never the bottleneck. Deliberately names no input: the
+/// per-input "X of Y nights" rows this sentence sits above already say which
+/// one, by name, with its own count — this is the overall answer, not a
+/// second copy of a row.
 ///
 /// Skin temperature is reported separately, without a night count: its
 /// settled-fraction gate depends on how many FUTURE nights read as genuinely
@@ -172,24 +178,23 @@ String? readinessInputShortfallNote(
   String metricName = 'readiness',
 }) {
   if (diag == null) return null;
-  const keys = ['hrv', 'rhr', 'resp'];
-  String? worstKey;
-  var worstShortfall = 0;
-  for (final key in keys) {
-    final e = diag[key];
-    if (e is! Map) continue;
-    final have = (e['baseline_n'] as num?)?.toInt() ?? 0;
-    final shortfall = readinessCompositeMinBaseline - have;
-    if (shortfall > worstShortfall) {
-      worstShortfall = shortfall;
-      worstKey = key;
-    }
-  }
+  if (!'${diag['note']}'.startsWith('need_inputs:')) return null;
+  // ponytail: ignores temp as the second input (HRV 0.40 + temp 0.10 also
+  // clears the weight floor), so it can overstate by a few nights then.
+  final shortfalls = [
+    for (final key in const ['hrv', 'rhr', 'resp'])
+      if (diag[key] case {'value': true} && final e)
+        math.max(0, readinessCompositeMinBaseline -
+            ((e['baseline_n'] as num?)?.toInt() ?? 0)),
+  ]..sort();
+  final shortfall = shortfalls.length < readinessCompositeMinInputs
+      ? 0
+      : shortfalls[readinessCompositeMinInputs - 1];
 
   final tempFrac = (diag['temp'] as Map?)?['settled_frac'] as num?;
   final tempUnsettled = tempFrac != null && tempFrac < kMinSettledFraction;
 
-  if (worstKey == null) {
+  if (shortfall == 0) {
     // No input is short on raw nights — if the only thing refused is skin
     // temperature, say so honestly, without an ETA this data cannot back.
     // No input named here either: the per-input "X of Y nights" rows below
@@ -202,7 +207,7 @@ String? readinessInputShortfallNote(
     return null;
   }
 
-  return 'Needs $worstShortfall more night${worstShortfall == 1 ? '' : 's'} '
+  return 'Needs $shortfall more night${shortfall == 1 ? '' : 's'} '
       'before $metricName can score.';
 }
 
