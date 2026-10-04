@@ -3290,7 +3290,13 @@ class AppState extends ChangeNotifier {
   /// 1 Hz HR keep flowing. Reporting `0` in that state is a fabricated
   /// measurement, and it is what the issue screenshotted: a mile walked, HR and
   /// distance both right, "0 STEPS" beside them.
-  int? get workoutStepsMeasured {
+  int? get workoutStepsMeasured =>
+      _workoutStepsMeasuredAt(DateTime.now().millisecondsSinceEpoch);
+
+  /// [workoutStepsMeasured] with coverage judged as of [nowMs], so
+  /// [stopWorkout] can judge it at the moment of stop rather than after the
+  /// route/sensor teardown it awaits.
+  int? _workoutStepsMeasuredAt(int nowMs) {
     if (activeWorkout == null || _workoutRawBase == null) return null;
     // Nothing gait-capable has arrived for this workout — unmeasured, as
     // opposed to zero steps having been measured.
@@ -3301,7 +3307,7 @@ class AppState extends ChangeNotifier {
     final last = _workoutLastGaitMs;
     if (_workoutStepsGap ||
         (last != null &&
-            DateTime.now().millisecondsSinceEpoch - last > _kWorkoutImuGapMs)) {
+            nowMs - last > _kWorkoutImuGapMs)) {
       return null;
     }
     final raw = _liveRaw - _workoutRawBase!;
@@ -6508,6 +6514,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> stopWorkout() async {
     if (activeWorkout == null) return;
+    // Step coverage is judged at the moment of stop: the teardown awaited
+    // below can take long enough to look like an accel gap that never happened.
+    final stopMs = DateTime.now().millisecondsSinceEpoch;
     _workoutTimer?.cancel();
     _workoutTimer = null;
     // Stop GPS route recording and AWAIT the buffered-tail flush before the
@@ -6540,7 +6549,7 @@ class AppState extends ChangeNotifier {
     final finalKcal = w.caloriesOrNull;
     // Nullable: an unmeasured workout must leave the column unset rather than
     // bank a zero that reads as "you took no steps".
-    final wSteps = workoutStepsMeasured;
+    final wSteps = _workoutStepsMeasuredAt(stopMs);
     // Measured walking cadence, or null when this session had too few gait-like
     // minutes to have one — most indoor sessions. Never 0.
     final wCadence =
