@@ -76,6 +76,33 @@ Future<void> handleHeadlessAlarmEvent(int id) async {
   await prefs.setBool('alarm_epoch_confirmed', true);
 }
 
+/// Headless re-arm + latch wait. No live AppState here to catch a late
+/// ALARM_SET (event 56) the way the foreground grace timer does, so wait for
+/// it inline, the same grace window as AlarmConfirmation, before this
+/// headless connection closes. The window opens BEFORE the write: setAlarm
+/// can sit up to 5s on a reply the strap never echoes, and a 56 landing in
+/// that wait is still this arm's latch. Not confirmed within the window still
+/// persists the epoch (optimistic, matching the foreground write) but as
+/// unconfirmed, so the 7pm safety check (AppState._alarmArmedTonight) won't
+/// wrongly treat an un-latched headless arm as covering tonight. If the wake
+/// is cut short mid-wait nothing is persisted, so the next connect re-arms
+/// instead of deduping on a stale epoch.
+@visibleForTesting
+Future<void> headlessArmAndConfirm(Future<AlarmArmResult> Function() arm,
+    Future<bool> Function(int sinceMs) latchedSince) async {
+  final armedAtMs = DateTime.now().millisecondsSinceEpoch;
+  final result = await arm();
+  final prefs = await SharedPreferences.getInstance();
+  if (result.disabled) {
+    await prefs.remove('alarm_epoch');
+    await prefs.remove('alarm_epoch_confirmed');
+  } else if (result.epoch != null) {
+    final confirmed = await awaitAlarmLatch(() => latchedSince(armedAtMs));
+    await prefs.setInt('alarm_epoch', result.epoch!);
+    await prefs.setBool('alarm_epoch_confirmed', confirmed);
+  }
+}
+
 /// Load the local profile (no Provider in the headless isolate).
 Future<Profile> loadHeadlessProfile() async {
   try {
@@ -184,6 +211,81 @@ BleEngine createHeadlessSyncEngine({
   return engine;
 }
 
+/// Post-connect work every headless connect owes the band, whichever entry
+/// point made it: pin the discovered generation, then program the HighFreq
+/// wake window for the imminent alarm.
+Future<void> prepareHeadlessLink(BleEngine engine, PairedDevice paired) async {
+  // Pin the discovered generation onto the pairing record, exactly like the
+  // foreground engine-state heal does — a headless-only phone would
+  // otherwise re-probe the connect route on every wake forever.
+  final gen = engine.state.generation;
+  if ((gen == 'gen4' || gen == 'gen5') && gen != paired.generation) {
+    await PairedDevice.save(paired.remoteId, paired.serial, generation: gen);
+  }
+  // Read the schedule + currently-armed epoch for the HighFreq window
+  // check ONLY — HighFreqWakeWindow needs the window of the alarm that's
+  // imminent right now, before the (possibly long) sync runs. This
+  // read is NOT reused by [rearmHeadlessAlarm]: `runSync()` can
+  // take a while, and re-reading fresh there (as the old code did) avoids
+  // arming a stale schedule if the user edits it mid-sync (see PR #403).
+  final preSyncSchedule = fillDefaultAlarmSchedule([
+    for (final r in await LocalDb.alarmScheduleRows())
+      AlarmScheduleEntry.fromRow(r),
+  ]);
+  final preSyncPrefs = await SharedPreferences.getInstance();
+  final armedWindow = armedSmartWakeWindow(
+    epoch: preSyncPrefs.getInt('alarm_epoch'),
+    schedule: preSyncSchedule,
+  );
+  final plan = await HighFreqWakeWindow.planNow(
+    scheduledWindowEnd: armedWindow?.windowEnd,
+    scheduledWindowMinutes: armedWindow?.minutes ?? 0,
+  );
+  await engine.applyHighFreqWakeWindow(
+    enabled: plan.shouldEnable,
+    targetWake: plan.targetWake,
+    duration: HighFreqWakeWindow.lease,
+    intervalSeconds: 61, // gen5 rejects <= 60
+
+    reason: plan.source,
+  );
+  debugPrint(
+    '[bgsync] HighFreq wake window: source=${plan.source} '
+    'samples=${plan.sampleCount} enabled=${plan.shouldEnable} '
+    'target=${plan.targetWake?.toIso8601String()}',
+  );
+}
+
+/// Arms the next weekly-schedule occurrence on a headless connection. The band
+/// holds one armed epoch, so every connect path has to re-arm or the day after
+/// a fired alarm stays unarmed. Never throws.
+Future<void> rearmHeadlessAlarm(BleEngine engine) async {
+  // Feature 1's arming engine, headless half: "on every successful
+  // connect AND after each headless sync". No AppState here, so the
+  // schedule read and the `alarm_epoch` persistence go straight through
+  // LocalDb/SharedPreferences — the same store the foreground path uses,
+  // so whichever side runs next sees a consistent value. Re-read fresh
+  // here (not [prepareHeadlessLink]'s copies) in case the user changed the
+  // schedule while `runSync()` was draining.
+  try {
+    final schedule = fillDefaultAlarmSchedule([
+      for (final r in await LocalDb.alarmScheduleRows())
+        AlarmScheduleEntry.fromRow(r),
+    ]);
+    final prefs = await SharedPreferences.getInstance();
+    await headlessArmAndConfirm(
+      () => armNextScheduledOccurrence(
+        engine: engine,
+        schedule: schedule,
+        currentArmedEpoch: prefs.getInt('alarm_epoch'),
+      ),
+      LocalDb.alarmSetConfirmedSince,
+    );
+  } catch (e) {
+    debugPrint('[bgsync] alarm re-arm skipped: $e');
+  }
+}
+
 /// One headless LOCAL drain pass. Safe to call from a background isolate. Never
 /// throws. Connects-by-id if reachable, drains whatever the band buffered to
 /// flash into local storage (non-destructive cursor — catches up everything since
@@ -232,94 +334,15 @@ Future<bool> runHeadlessSync({BandLease? lease}) async {
       await checkSyncStaleness();
       return true;
     }
-    // Pin the discovered generation onto the pairing record, exactly like the
-    // foreground engine-state heal does — a headless-only phone would
-    // otherwise re-probe the connect route on every wake forever.
-    final gen = engine.state.generation;
-    if ((gen == 'gen4' || gen == 'gen5') && gen != paired.generation) {
-      await PairedDevice.save(paired.remoteId, paired.serial, generation: gen);
-    }
     try {
-      // Read the schedule + currently-armed epoch for the HighFreq window
-      // check ONLY — HighFreqWakeWindow needs the window of the alarm that's
-      // imminent right now, before the (possibly long) sync below runs. This
-      // read is NOT reused for the re-arm block further down: `runSync()` can
-      // take a while, and re-reading fresh there (as the old code did) avoids
-      // arming a stale schedule if the user edits it mid-sync (see PR #403).
-      final preSyncSchedule = fillDefaultAlarmSchedule([
-        for (final r in await LocalDb.alarmScheduleRows())
-          AlarmScheduleEntry.fromRow(r),
-      ]);
-      final preSyncPrefs = await SharedPreferences.getInstance();
-      final armedWindow = armedSmartWakeWindow(
-        epoch: preSyncPrefs.getInt('alarm_epoch'),
-        schedule: preSyncSchedule,
-      );
-      final plan = await HighFreqWakeWindow.planNow(
-        scheduledWindowEnd: armedWindow?.windowEnd,
-        scheduledWindowMinutes: armedWindow?.minutes ?? 0,
-      );
-      await engine.applyHighFreqWakeWindow(
-        enabled: plan.shouldEnable,
-        targetWake: plan.targetWake,
-        duration: HighFreqWakeWindow.lease,
-        intervalSeconds: 61, // gen5 rejects <= 60
-
-        reason: plan.source,
-      );
-      debugPrint(
-        '[bgsync] HighFreq wake window: source=${plan.source} '
-        'samples=${plan.sampleCount} enabled=${plan.shouldEnable} '
-        'target=${plan.targetWake?.toIso8601String()}',
-      );
+      await prepareHeadlessLink(engine, paired);
       // Await the full backlog (default timeout): a phone-free run/sleep can leave a
       // large offline backlog on the band's flash. We never abort — if iOS cuts the
       // background window short, the offload persists what it got (flush-before-ACK)
       // and the next wake resumes from the (now-advanced) cursor. No live streams
       // (battery): connect → listen → store → ACK → derive → disconnect.
       await engine.runSync();
-      // Feature 1's arming engine, headless half: "on every successful
-      // connect AND after each headless sync". No AppState here, so the
-      // schedule read and the `alarm_epoch` persistence go straight through
-      // LocalDb/SharedPreferences — the same store the foreground path uses,
-      // so whichever side runs next sees a consistent value. Re-read fresh
-      // here (not the pre-sync copies above) in case the user changed the
-      // schedule while `runSync()` was draining.
-      try {
-        final schedule = fillDefaultAlarmSchedule([
-          for (final r in await LocalDb.alarmScheduleRows())
-            AlarmScheduleEntry.fromRow(r),
-        ]);
-        final prefs = await SharedPreferences.getInstance();
-        final result = await armNextScheduledOccurrence(
-          engine: engine,
-          schedule: schedule,
-          currentArmedEpoch: prefs.getInt('alarm_epoch'),
-        );
-        if (result.disabled) {
-          await prefs.remove('alarm_epoch');
-          await prefs.remove('alarm_epoch_confirmed');
-        } else if (result.epoch != null) {
-          final epoch = result.epoch!;
-          // No live AppState here to catch a late ALARM_SET (event 56) the way
-          // the foreground grace timer does, so wait for it inline — same
-          // grace window as AlarmConfirmation's default (6s) — before this
-          // headless connection closes. Not confirmed within that window still
-          // persists the epoch (optimistic, matching the foreground write) but
-          // as unconfirmed, so the 7pm safety check (AppState._alarmArmedTonight)
-          // won't wrongly treat an un-latched headless arm as covering tonight.
-          final armedAtMs = DateTime.now().millisecondsSinceEpoch;
-          var confirmed = false;
-          for (var i = 0; i < 6 && !confirmed; i++) {
-            await Future.delayed(const Duration(milliseconds: 1000));
-            confirmed = await LocalDb.alarmSetConfirmedSince(armedAtMs);
-          }
-          await prefs.setInt('alarm_epoch', epoch);
-          await prefs.setBool('alarm_epoch_confirmed', confirmed);
-        }
-      } catch (e) {
-        debugPrint('[bgsync] alarm re-arm skipped: $e');
-      }
+      await rearmHeadlessAlarm(engine);
     } finally {
       await engine.disconnect();
     }
@@ -633,6 +656,8 @@ Future<void> checkSyncStaleness({bool allowPermissionPrompt = false}) async {
         body: 'No new data for about $hoursStale hours. Open OpenStrap to '
             'reconnect — background sync may have stalled.',
         date: now.toIso8601String().substring(0, 10),
+        // Home: its day card carries the synced-through line and the sync
+        // button this body points at. Profile shows neither.
         route: '/today',
       ),
       allowPermissionPrompt: allowPermissionPrompt,

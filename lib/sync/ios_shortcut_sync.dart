@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -33,6 +33,26 @@ class IosShortcutSync {
 
   static Future<SyncReport> Function(ShortcutSyncTask)? foregroundSync;
   static BleEngine? Function()? foregroundEngine;
+  static bool _listening = false;
+
+  /// Native holds Shortcut runs until 'ready'. Sending it only once AppState has
+  /// registered its hooks keeps a cold launch off the headless path, which would
+  /// hold the band lease while the app's own session waits on it.
+  static void attachForeground(
+    Future<SyncReport> Function(ShortcutSyncTask) sync,
+    BleEngine? Function() engine,
+  ) {
+    foregroundSync = sync;
+    foregroundEngine = engine;
+    if (!_listening) return;
+    unawaited(
+      channel
+          .invokeMethod<void>('ready')
+          .catchError(
+            (Object error) => debugPrint('[shortcut-sync] ready: $error'),
+          ),
+    );
+  }
 
   static Future<void> init() async {
     if (!Platform.isIOS) return;
@@ -50,7 +70,7 @@ class IosShortcutSync {
           throw MissingPluginException();
       }
     });
-    await channel.invokeMethod<void>('ready');
+    _listening = true;
   }
 
   static Future<ShortcutSyncResult> run(String id, Duration budget) async {
@@ -178,6 +198,12 @@ class IosShortcutSync {
         if (!report.complete || await _backlogRemains(liveEngine)) {
           return ShortcutSyncResult('partial', records: task.records);
         }
+        // A resumed app's DeriveScheduler derives and refreshes the UI; a second
+        // pass here would take DerivationEngine's lock and turn its job into a no-op.
+        if (WidgetsBinding.instance.lifecycleState ==
+            AppLifecycleState.resumed) {
+          return ShortcutSyncResult('complete', records: task.records);
+        }
         return await _derive(task);
       } finally {
         _onForegroundCommitFailure = null;
@@ -236,15 +262,16 @@ class IosShortcutSync {
       final blocker = _blockerResult(engine.bluetoothBlocker);
       if (blocker != null) return blocker;
       if (!connected) {
-        if (BandOwnership.foregroundIntent) {
-          return const ShortcutSyncResult('alreadyRunning');
-        }
         return ShortcutSyncResult(
           radioConnected ? 'failed' : 'bandUnreachable',
         );
       }
+      // connect already started the offload.
       task.update('syncing');
-      var previousBatches = 0;
+      await prepareHeadlessLink(engine, paired);
+      // The band holds one armed epoch; this may be the only connect it gets.
+      await rearmHeadlessAlarm(engine);
+      if (task.stopped) return task.expired;
       for (var session = 0; session < 20 && !task.stopped; session++) {
         final report = await engine.runSync(timeout: task.remaining);
         if (task.stopped) return task.expired;
@@ -255,12 +282,11 @@ class IosShortcutSync {
           return await _derive(task);
         }
         if (!report.complete ||
-            report.batches <= previousBatches ||
+            report.batches == 0 ||
             engine.historyStuckThisSession ||
             !engine.isConnected) {
           break;
         }
-        previousBatches = report.batches;
         // HISTORY_COMPLETE can end one session while the advertised backlog still remains.
         if (!task.stopped) await engine.requestHistorySync();
       }
@@ -286,6 +312,7 @@ class IosShortcutSync {
       background: true,
     ).run(profile, heavy: false);
     if (task.stopped) return task.expired;
+    if (ResetGate.active) throw StateError('data reset in progress');
     await WidgetService.refresh(
       LocalRepositoryImpl(getProfileMap: () => profile.toMap()),
     );

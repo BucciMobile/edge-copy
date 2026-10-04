@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 // ignore: depend_on_referenced_packages
 import 'package:flutter_blue_plus_platform_interface/flutter_blue_plus_platform_interface.dart';
@@ -108,6 +109,36 @@ void main() {
       expect(engine.onReadyEcgRecovery, isNotNull);
     },
   );
+
+  test('a Shortcut connect re-arms the alarm like every headless connect', () {
+    final src = File('lib/sync/ios_shortcut_sync.dart').readAsStringSync();
+    final headless =
+        src.substring(src.indexOf('Future<ShortcutSyncResult> _headless('));
+    final connected = headless.indexOf('if (!connected)');
+    expect(headless.indexOf('await prepareHeadlessLink('),
+        greaterThan(connected));
+    expect(headless.indexOf('await rearmHeadlessAlarm('),
+        greaterThan(connected));
+    expect(headless.indexOf('await rearmHeadlessAlarm('),
+        lessThan(headless.indexOf('engine.runSync(')));
+  });
+
+  test('native is told ready only once AppState registered its hooks', () {
+    final src = File('lib/sync/ios_shortcut_sync.dart').readAsStringSync();
+    final init = src.substring(
+      src.indexOf('static Future<void> init()'),
+      src.indexOf('static Future<ShortcutSyncResult> run('),
+    );
+    expect(init, isNot(contains("'ready'")));
+    final attach = src.substring(
+      src.indexOf('static void attachForeground('),
+      src.indexOf('static Future<void> init()'),
+    );
+    expect(attach.indexOf("'ready'"),
+        greaterThan(attach.indexOf('foregroundEngine = engine')));
+    final app = File('lib/state/app_state.dart').readAsStringSync();
+    expect(app, contains('IosShortcutSync.attachForeground('));
+  });
 
   test('shared headless event callback retains alarm confirmation', () async {
     final engine = createHeadlessSyncEngine(

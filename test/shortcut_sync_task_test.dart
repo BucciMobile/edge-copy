@@ -36,6 +36,7 @@ void main() {
         expect(result.status, switch (phase) {
           'starting' || 'initializing' => 'timedOut',
           'connecting' => 'bandUnreachable',
+          'processing' => 'complete',
           _ => 'partial',
         });
         expect(result.records, 9);
