@@ -26,7 +26,7 @@ import '../compute/substrate.dart' show beatTimesMs;
 // version, which every day_result read applies as a CEILING (see [dayResult]).
 // `show` keeps the rest of the engine out of this namespace.
 import '../coach/coach_db.dart' show CoachDb;
-import '../compute/derivation_engine.dart' show kAlgoVersion;
+import '../compute/derivation_engine.dart' show kAlgoVersion, kOvernightGiveUpSec, overnightSettled;
 import '../compute/sleep_profile_policy.dart' show SleepProfilePolicy;
 import '../ble/adapters/adapter.dart' show NeutralSample;
 import '../ble/adapters/signals.dart' show InputSignal;
@@ -166,6 +166,10 @@ class LocalDb {
   /// is the 1 Hz substrate: re-syncable in principle, but the band trims its
   /// flash as we ACK, so in practice this is the only copy of those days too.
   static const _salvageTables = [
+    // Secondary devices first: tiny, and every device-keyed row below needs
+    // its device to still have a name if the salvage stops partway. The
+    // primary row is skipped by the merge, as on a restore.
+    'device',
     // Hand-entered. The only copy that exists anywhere.
     'journal',
     'journal_metric',
@@ -183,9 +187,18 @@ class LocalDb {
     'sleep_override',
     'sleep_nap',
     'breathing_session',
+    // Vendor, typed-in and imported scalars: a `reports` band trims its own
+    // history and the source app may be gone.
+    'observation',
+    // Owners before their routes: `workout_route` is keyed by a session id
+    // or an imported workout's uuid.
     'sessions',
+    'imported_workout',
     'workout_route',
     'workout_split',
+    // The only copy of what a paired sensor measured during a session.
+    'external_hr',
+    'imported_measurement',
     // User-initiated ECG readings and the band's raw ECG records recovered
     // through history — the band trims its flash on ACK, so these too are
     // the only copy. Parent before child.
@@ -353,7 +366,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 54;
+  static const int schemaVersion = 55;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -1078,6 +1091,12 @@ class LocalDb {
           // next free rung rather than collide with any of them.
           await _createEcgTables(db);
         }
+        if (oldV < 55) {
+          // One-time heal of the °C skin_temp_z older WHOOP imports wrote.
+          // Here, not on the onOpen repair pass: it reads every day_result
+          // payload, and new imports no longer write the key, so once is enough.
+          await _scrubImportedSkinTempZ(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1172,6 +1191,29 @@ class LocalDb {
     // / notifications all existing. DROP+CREATE so a shape change takes effect.
     await _ensureCoachViews(db);
     await _dropRawStore(db);
+  }
+
+  /// Older WHOOP CSV imports filed the export's absolute skin temp (°C) under
+  /// `scalars.skin_temp_z`, which every reader treats as SDs off baseline, so
+  /// 33 °C read as +33 SD in the cross-day temp inputs and the skin temp card.
+  /// Imported days are finalized with no raw behind them and never re-derive,
+  /// so the import fix alone can't heal them: drop the key from those rows.
+  /// Best-effort: a failed heal must never fail the open (that quarantines
+  /// the database), it just leaves the stale key behind.
+  static Future<void> _scrubImportedSkinTempZ(Database db) async {
+    try {
+      await db.execute(
+        "UPDATE day_result SET payload_json = "
+        "json_remove(payload_json, '\$.scalars.skin_temp_z') "
+        "WHERE payload_json LIKE '%skin_temp_z%' "
+        "AND payload_json LIKE '%whoop_export%' "
+        'AND json_valid(payload_json) '
+        "AND json_extract(payload_json, '\$.source') = 'whoop_export' "
+        "AND json_type(payload_json, '\$.scalars.skin_temp_z') IS NOT NULL",
+      );
+    } catch (_) {
+      // best-effort, see above
+    }
   }
 
   /// Periodic snapshot of a LIVE workout's per-second tallies (per-minute HR
@@ -3333,13 +3375,18 @@ class LocalDb {
   /// The pinned morning readiness headline (day + value), or null if unset /
   /// unparseable. The `day` must be compared to today's label by the caller — a
   /// pin left over from a previous day must NOT be surfaced.
-  static Future<({String day, int value})?> frozenHeadline() async {
+  static Future<({String day, int value, int? wakeSec})?> frozenHeadline() async {
     final raw = await getCursor(kFrozenHeadlineCursor);
     if (raw == null || raw.isEmpty) return null;
     try {
       final d = jsonDecode(raw);
       if (d is Map && d['day'] is String && d['value'] is num) {
-        return (day: d['day'] as String, value: (d['value'] as num).round());
+        final wake = d['wake_sec'];
+        return (
+          day: d['day'] as String,
+          value: (d['value'] as num).round(),
+          wakeSec: wake is num ? wake.toInt() : null,
+        );
       }
     } catch (_) {
       /* malformed → treat as unset */
@@ -3349,10 +3396,16 @@ class LocalDb {
 
   /// Pin [value] as the frozen readiness headline for [day] (overwrites any
   /// prior pin — first-complete-settle-per-day is enforced by the caller).
-  static Future<void> setFrozenHeadline(String day, int value) => setCursor(
-    kFrozenHeadlineCursor,
-    jsonEncode({'day': day, 'value': value}),
-  );
+  /// [wakeSec] is the wake of the night it was pinned on.
+  static Future<void> setFrozenHeadline(String day, int value, {int? wakeSec}) =>
+      setCursor(
+        kFrozenHeadlineCursor,
+        jsonEncode({
+          'day': day,
+          'value': value,
+          'wake_sec': ?wakeSec,
+        }),
+      );
 
   /// Persist a sync batch atomically: the raw records, their samples, AND the
   /// continuation cursor in ONE transaction. This is the durable half of the
@@ -9900,11 +9953,16 @@ class LocalDb {
     final today = localDayLabelNow();
     final latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
     final todayWake = await wakeDayFeatures(today);
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // The band's edge, same as the readiness freeze: a peripheral streaming
+    // this morning says nothing about how far the band's night has drained.
+    final bandEdgeSec = await lastDecodedRecTs() ?? 0;
     String? latestOvernightDay;
     int? latestOvernightComputedAt;
     String? latestRecoveryDay;
     int? latestRecoveryComputedAt;
     Map<String, dynamic>? todayRow;
+    int? overnightRecheckAt;
     for (final row in recent) {
       final dayId = row['day_id']?.toString();
       if (dayId == null || dayId.isEmpty) continue;
@@ -9913,6 +9971,25 @@ class LocalDb {
           SeriesCodec.decodePayloadJson(row['payload_json']) ??
           const <String, dynamic>{};
       if (decoded['skipped'] == true) continue;
+      // #448: today's night is not today's overnight until the drain has
+      // passed its wake. Mid-drain the window closes at the newest record, so
+      // serving it showed a partial night and its readiness as this morning's.
+      // A row with no window is held too: mid-drain the edge can still sit
+      // before sleep onset, and that read as a settled 'no sleep' night.
+      final offsetMs = (((decoded['sleep'] as Map?)?['window'] as Map?)?['value']
+          as Map?)?['offset_ms'];
+      final wakeSec = offsetMs is num ? offsetMs ~/ 1000 : null;
+      if (dayId == today &&
+          !overnightSettled(
+            sleepOffsetSec: wakeSec,
+            dataEdgeSec: bandEdgeSec,
+            nowSec: nowSec,
+          )) {
+        // When the give-up lands; getToday re-checks then, since a quiet
+        // strap triggers no derive to do it.
+        overnightRecheckAt = (wakeSec ?? bandEdgeSec) + kOvernightGiveUpSec;
+        continue;
+      }
       final scalars = ((decoded['scalars'] as Map?) ?? const {})
           .cast<String, dynamic>();
       if (latestOvernightDay == null) {
@@ -9970,6 +10047,7 @@ class LocalDb {
         'overnight_day': latestOvernightDay,
         'overnight_state': overnightState,
         'overnight_computed_at': latestOvernightComputedAt,
+        'overnight_recheck_at': overnightRecheckAt,
         'recovery_day': latestRecoveryDay,
         'recovery_computed_at': latestRecoveryComputedAt,
         'showing_prior_overnight':
