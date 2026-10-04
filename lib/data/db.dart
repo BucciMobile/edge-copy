@@ -7837,16 +7837,19 @@ class LocalDb {
   /// `day_result.window_json` already holds the sleep-window Metric envelope
   /// (`{value: {onset_ms, offset_ms, …}, confidence, tier, …}`) in its own
   /// column, so onset/offset are one small projected read — no bundle decode,
-  /// no per-day round trip. Rows: `{day_id, window_json}`.
-  static Future<List<Map<String, dynamic>>> sleepWindowRows(int limit) async {
+  /// no per-day round trip. Rows: `{day_id, window_json}`. [before] keeps
+  /// only days strictly earlier than that day_id.
+  static Future<List<Map<String, dynamic>>> sleepWindowRows(int limit,
+      {String? before}) async {
     final db = await instance;
     return db.rawQuery(
       'SELECT r.day_id AS day_id, r.window_json AS window_json '
       'FROM day_result r '
       '$_servedDayJoin '
       'WHERE r.skipped = 0 '
+      '${before == null ? '' : 'AND r.day_id < ? '}'
       'ORDER BY r.day_id DESC LIMIT ?',
-      [limit],
+      [?before, limit],
     );
   }
 
@@ -11019,13 +11022,25 @@ class LocalDb {
 
   /// Delete decoded substrate / structured band signals / events whose RECORD
   /// TIME (epoch seconds) is strictly before [cutoffSec].
-  static Future<int> pruneDecodedBeforeRecTs(int cutoffSec) async {
+  ///
+  /// [cursorName], when given, is raised to [cutoffSec] in the same
+  /// transaction, never lowered.
+  static Future<int> pruneDecodedBeforeRecTs(
+    int cutoffSec, {
+    String? cursorName,
+  }) async {
     final db = await instance;
     // `deleted` used to just stay 0 forever - none of the txn.delete() calls'
     // return values (rows actually deleted) were ever added to it, so the
     // caller's `if (deleted > 0) log(...)` never fired even on a real prune.
     int deleted = 0;
     await db.transaction((txn) async {
+      if (cursorName != null) {
+        final previous = await _cursorIntVia(txn, cursorName);
+        if (previous == null || cutoffSec > previous) {
+          await setCursor(cursorName, '$cutoffSec', txn: txn);
+        }
+      }
       // decoded_rr shares the rec_ts key, so a plain rec_ts range delete covers
       // every beat in the window — no counter subquery, no orphan sweep (there
       // are no counter-orphans once parent and child are keyed the same way).

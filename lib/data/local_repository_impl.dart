@@ -1737,8 +1737,9 @@ class LocalRepositoryImpl extends LocalRepository {
   // ── lists / summaries ─────────────────────────────────────────────────────
 
   @override
-  Future<List<Map<String, dynamic>>> sleepWindows({int days = 60}) async {
-    final rows = await LocalDb.sleepWindowRows(days);
+  Future<List<Map<String, dynamic>>> sleepWindows(
+      {int days = 60, String? before}) async {
+    final rows = await LocalDb.sleepWindowRows(days, before: before);
     final out = <Map<String, dynamic>>[];
     for (final r in rows) {
       final date = r['day_id'] as String?;
@@ -2028,7 +2029,10 @@ class LocalRepositoryImpl extends LocalRepository {
       [deviceId],
     );
     final oldestTs = (oldestRow.firstOrNull?['m'] as num?)?.toInt();
-    final bounded = oldestTs != null && dayStart < oldestTs;
+    // Bounded = the whole day predates this device's oldest kept row. The
+    // prune removes whole days, so the oldest kept day is complete even though
+    // its first row lands after midnight.
+    final bounded = oldestTs != null && dayEnd <= oldestTs;
     return {
       'points': points,
       'bounded': bounded,
