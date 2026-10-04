@@ -51,9 +51,13 @@ const _window = 28;
 /// the same night instead of jumping a whole day. A wake still at or before
 /// the onset becomes the first `up` after it. `day + k` rather than adding a Duration:
 /// calendar arithmetic across a possible DST boundary, not elapsed time.
+/// A picker left on the measured clock time keeps the measured instant:
+/// rebuilding it drops the seconds, and in a DST fall-back hour the local
+/// wall time names two instants.
 (DateTime, DateTime) correctedSleepWindow(
     DateTime onset, DateTime wake, TimeOfDay bed, TimeOfDay up) {
   DateTime nearest(DateTime ref, TimeOfDay t) {
+    if (ref.hour == t.hour && ref.minute == t.minute) return ref;
     DateTime? best;
     for (var k = -1; k <= 1; k++) {
       final c = DateTime(ref.year, ref.month, ref.day + k, t.hour, t.minute);
