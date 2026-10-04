@@ -11,6 +11,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:openstrap_edge/state/clock_format.dart';
 import 'package:openstrap_edge/ui2/profile/alarm.dart';
 
 void main() {
@@ -29,6 +30,10 @@ void main() {
   });
 
   group('the home door', () {
+    // The time follows the user's clock format; pin the 24-hour one.
+    setUp(() => ClockFormatController.seed(ClockFormat.h24));
+    tearDown(ClockFormatController.debugReset);
+
     // A fixed clock: whether the alarm is still ahead is relative to now.
     Future<void> pump(WidgetTester t, DateTime? at, AlarmArmState s,
             {DateTime? now}) =>
