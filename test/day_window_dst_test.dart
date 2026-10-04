@@ -239,10 +239,24 @@ void main() {
     'a corrected sleep window over a spring-forward night is still one night',
     () {
       final (on, off) = correctedSleepWindow(DateTime(2026, 3, 8, 0, 30),
-          const TimeOfDay(hour: 23, minute: 30),
+          DateTime(2026, 3, 8, 6, 40), const TimeOfDay(hour: 23, minute: 30),
           const TimeOfDay(hour: 7, minute: 0));
       expect(on, DateTime(2026, 3, 7, 23, 30));
       expect(off, DateTime(2026, 3, 8, 7, 0));
+    },
+    skip: Platform.isWindows ? 'POSIX setenv/tzset only' : null,
+  );
+
+  test(
+    'an unchanged bedtime in the repeated fall-back hour keeps its instant',
+    () {
+      // 01:30 happens twice on 2026-11-01; this onset is the second one (EST).
+      // Rebuilding it from the picker's 01:30 can pick the first, an hour off.
+      final onset = DateTime.utc(2026, 11, 1, 6, 30).toLocal();
+      final (on, _) = correctedSleepWindow(onset, DateTime(2026, 11, 1, 7),
+          const TimeOfDay(hour: 1, minute: 30),
+          const TimeOfDay(hour: 7, minute: 15));
+      expect(on.millisecondsSinceEpoch, onset.millisecondsSinceEpoch);
     },
     skip: Platform.isWindows ? 'POSIX setenv/tzset only' : null,
   );

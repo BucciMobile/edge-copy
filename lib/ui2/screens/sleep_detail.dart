@@ -105,18 +105,24 @@ int? _noonOf(String? day) => day == null
 /// closest to the measured onset — 23:30 picked over a 00:30 onset is the
 /// evening before, not 23 hours later. The wake is the first one after that
 /// bedtime. Calendar arithmetic (`day ± 1`), never a Duration: a DST day is 23
-/// or 25 hours long.
+/// or 25 hours long. A picker left on the measured clock time keeps the
+/// measured instant: rebuilding it drops the seconds, and in a DST fall-back
+/// hour the local wall time names two instants.
 (DateTime, DateTime) correctedSleepWindow(
-    DateTime onset, TimeOfDay bed, TimeOfDay up) {
+    DateTime onset, DateTime wake, TimeOfDay bed, TimeOfDay up) {
+  bool same(DateTime d, TimeOfDay t) =>
+      d.hour == t.hour && d.minute == t.minute;
   DateTime at(int dayOffset, TimeOfDay t) => DateTime(
       onset.year, onset.month, onset.day + dayOffset, t.hour, t.minute);
   int off(DateTime d) => d.difference(onset).inSeconds.abs();
-  var newOnset = at(0, bed);
+  var newOnset = same(onset, bed) ? onset : at(0, bed);
   for (final o in const [-1, 1]) {
     if (off(at(o, bed)) < off(newOnset)) newOnset = at(o, bed);
   }
-  var newWake = DateTime(
-      newOnset.year, newOnset.month, newOnset.day, up.hour, up.minute);
+  var newWake = same(wake, up) && wake.isAfter(newOnset)
+      ? wake
+      : DateTime(
+          newOnset.year, newOnset.month, newOnset.day, up.hour, up.minute);
   if (!newWake.isAfter(newOnset)) {
     newWake = DateTime(
         newOnset.year, newOnset.month, newOnset.day + 1, up.hour, up.minute);
@@ -780,7 +786,7 @@ class _SleepDetailState extends State<SleepDetail> {
       helpText: l?.sleepDetailWakeTimeHelp ?? 'WHEN YOU GOT UP',
     );
     if (up == null || !mounted) return;
-    final (newOnset, newWake) = correctedSleepWindow(onset, bed, up);
+    final (newOnset, newWake) = correctedSleepWindow(onset, wake, bed, up);
     await _runOverride(
       () => context.read<AppState>().setSleepOverride(day, newOnset, newWake),
     );
