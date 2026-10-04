@@ -606,6 +606,24 @@ class OuraLink {
   }
 }
 
+/// The `device_id` a pairing should REUSE for [priorRow], or null to mint one.
+///
+/// One physical ring must keep one id across re-pairings: the id is the storage
+/// key for `decoded_onehz`, `raw_archive` and every `sync_cursor` item, so a
+/// fresh one forks the ring into N identities and orphans everything the last
+/// pairing banked. [OuraLink.pairedRingRow] is the same single-ring lookup
+/// `sync()` resolves against, which is what makes reuse reconcile rather than
+/// fork.
+///
+/// Null for a row claiming [LocalDb.kPrimaryDeviceId]: `sync()` refuses such a
+/// row and tells the user to re-pair with a minted id, so carrying it forward
+/// would re-create the exact state that message asks them to escape.
+@visibleForTesting
+String? ouraReusableDeviceId(Map<String, Object?>? priorRow) {
+  final id = priorRow?['id'] as String?;
+  return (id == null || id == LocalDb.kPrimaryDeviceId) ? null : id;
+}
+
 /// Pair [device] as this phone's Oura ring. Null on success, or a sentence the
 /// user can act on.
 ///
@@ -631,15 +649,36 @@ class OuraLink {
 Future<String?> pairOuraRing(BluetoothDevice device) async {
   final rnd = Random.secure();
   final key = List<int>.generate(16, (_) => rnd.nextInt(256));
-  final deviceId =
+  // REUSE THE RING ROW'S ID, and mint only when there is no row to reuse. A
+  // device_id is the storage key for `decoded_onehz`, `raw_archive` and every
+  // `sync_cursor` item (`oura_cursor_ds:`, `oura_anchor:`, `counter_hw:`,
+  // `rec_ts_hw:`), so minting a fresh one on every pairing forks one physical
+  // ring into N identities: the re-paired ring drains from a zero cursor and
+  // everything the previous pairing banked is orphaned under an id nothing
+  // reads. [OuraLink.pairedRingRow] is the SAME single-ring lookup `sync()`
+  // resolves against, so reusing its id is precisely what makes a re-pair
+  // reconcile with the earlier data instead of starting beside it.
+  //
+  // NOT the BLE remote id, deliberately — see `HrsLink.pairedSensorRow`'s
+  // header: a remote id is a per-app CBPeripheral UUID on iOS and a rotating
+  // RPA on Android, which is the fragmentation this minted id exists to avoid.
+  // `remote_id` is the column allowed to change under a stable row.
+  final reusedId = ouraReusableDeviceId(await OuraLink.pairedRingRow());
+  final deviceId = reusedId ??
       'oura-${_hex(List<int>.generate(4, (_) => rnd.nextInt(256)))}';
+  // What the keychain held for [deviceId] before this attempt touched it. Only
+  // meaningful when an id is being reused: the key is stored BEFORE the ring
+  // has proved it (see the write below), so a failed re-pair would otherwise
+  // leave this attempt's unproven key sitting where the working one was — a
+  // pairing broken past recovery by anything short of another factory reset.
+  final priorKey = reusedId == null ? null : await OuraLink._readKey(reusedId);
   GattBandLink? link;
   // Set true only on the one path that writes the `device` row. Every OTHER
   // exit — a refused command, a silent ring, a caught exception, even the
   // early `missingCharacteristics` return before the key is written at all —
-  // leaves this false, and the `finally` below drops whatever key the phone
-  // has stored for [deviceId] so a failed pairing never outlives itself as an
-  // orphaned secret with no row pointing at it.
+  // leaves this false, and the `finally` below restores the keychain to what
+  // it held before, so a failed pairing never outlives itself as an orphaned
+  // secret with no row pointing at it.
   var paired = false;
   try {
     // A cap on concurrent SECONDARY links (never the band's own connect —
@@ -796,6 +835,26 @@ Future<String?> pairOuraRing(BluetoothDevice device) async {
     return 'Could not connect to that ring.';
   } finally {
     // Touches no radio, so it stays outside the slot.
-    if (!paired) await OuraLink._dropKey(deviceId);
+    //
+    // A FRESHLY MINTED id's key is an orphan once pairing failed — nothing
+    // points at it and nothing ever will, so it goes. A REUSED id's key is the
+    // one the working pairing still depends on, and this attempt overwrote it
+    // before the ring proved anything, so it is put back rather than dropped.
+    // When the id was reused but the prior key could not be READ (a locked
+    // keystore reads as absent), the keychain is left untouched: deleting a
+    // secret this run could not see is how a recoverable lock becomes a
+    // factory reset.
+    if (!paired) {
+      if (reusedId == null) {
+        await OuraLink._dropKey(deviceId);
+      } else if (priorKey != null) {
+        await _secure.write(
+          key: _keyItem(deviceId),
+          value: _hex(priorKey),
+          iOptions: _kApple,
+          mOptions: _kMacos,
+        );
+      }
+    }
   }
 }
