@@ -10881,13 +10881,25 @@ class LocalDb {
 
   /// Delete decoded substrate / structured band signals / events whose RECORD
   /// TIME (epoch seconds) is strictly before [cutoffSec].
-  static Future<int> pruneDecodedBeforeRecTs(int cutoffSec) async {
+  ///
+  /// [cursorName], when given, is raised to [cutoffSec] in the same
+  /// transaction, never lowered.
+  static Future<int> pruneDecodedBeforeRecTs(
+    int cutoffSec, {
+    String? cursorName,
+  }) async {
     final db = await instance;
     // `deleted` used to just stay 0 forever - none of the txn.delete() calls'
     // return values (rows actually deleted) were ever added to it, so the
     // caller's `if (deleted > 0) log(...)` never fired even on a real prune.
     int deleted = 0;
     await db.transaction((txn) async {
+      if (cursorName != null) {
+        final previous = await _cursorIntVia(txn, cursorName);
+        if (previous == null || cutoffSec > previous) {
+          await setCursor(cursorName, '$cutoffSec', txn: txn);
+        }
+      }
       // decoded_rr shares the rec_ts key, so a plain rec_ts range delete covers
       // every beat in the window — no counter subquery, no orphan sweep (there
       // are no counter-orphans once parent and child are keyed the same way).

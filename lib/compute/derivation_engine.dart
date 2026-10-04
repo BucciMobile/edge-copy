@@ -5763,14 +5763,13 @@ class DerivationEngine {
     );
     if (cutoffSec == null) return;
     // Highest cutoff ever applied: a held-back pass can cut lower, but rows
-    // below an earlier cut are still gone. See [rescanDayIds]. Written BEFORE
-    // the delete: a kill between the two then leaves the cursor ahead (a day
-    // protected one pass early), never behind a delete that already landed.
-    final prunedBefore = await LocalDb.getCursorInt(_prunedBeforeCursor);
-    if (prunedBefore == null || cutoffSec > prunedBefore) {
-      await LocalDb.setCursor(_prunedBeforeCursor, '$cutoffSec');
-    }
-    final deleted = await LocalDb.pruneDecodedBeforeRecTs(cutoffSec);
+    // below an earlier cut are still gone. See [rescanDayIds]. Advanced inside
+    // the delete's own transaction, so a kill can't split the two and a
+    // concurrent lower-cutoff run can't write it backwards.
+    final deleted = await LocalDb.pruneDecodedBeforeRecTs(
+      cutoffSec,
+      cursorName: _prunedBeforeCursor,
+    );
     if (deleted > 0) {
       _log('pruned $deleted decoded rows with rec_ts < $cutoffSec');
     }
