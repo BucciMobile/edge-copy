@@ -386,6 +386,44 @@ void main() {
       });
     });
 
+    test('a claim landing during the final flush keeps the old task counts',
+        () {
+      fakeAsync((async) {
+        final gate = Completer<void>();
+        final d = DrainController(
+          onRecord: (sample, r) async {},
+          onRecordsBatch: null,
+          onCommit: (raws, samples, token, {archives, ecgRawPackets, deviceFamily}) =>
+              gate.future,
+          onArchive: null,
+          log: (_) {},
+        );
+        RawRecord raw(int counter) => RawRecord(
+              counter: counter,
+              packetType: 0x2f,
+              hex: '2f18${counter.toRadixString(16).padLeft(8, '0')}',
+              capturedAt: 1786000000000 + counter,
+              recTs: 1786000000 + counter,
+            );
+        SyncReport? old;
+        d.awaitComplete(isLinkUp: () => true).then((r) => old = r);
+        d.onHistoricalRecord(raw(1), null, 24);
+        d.onHistoricalRecord(raw(2), null, 24);
+        d.onComplete();
+        // The tick sees COMPLETE and parks in flush() on the slow commit.
+        async.elapse(const Duration(seconds: 1));
+        expect(old, isNull);
+        // Auto-continue claims the next task while the commit is in flight.
+        d.startFreshTask();
+        gate.complete();
+        async.flushMicrotasks();
+        expect(old?.complete, isTrue);
+        expect((old?.records, old?.batches), (2, 0),
+            reason: 'the replacement task\'s reset counters leaked into '
+                'the finished task\'s report');
+      });
+    });
+
     test(
         'a superseded waiter performs NO commit — the replacement\'s buffered '
         'rows are persisted only by its own token commit', () {

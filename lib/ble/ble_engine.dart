@@ -8823,6 +8823,11 @@ class DrainController {
     final start = DateTime.now();
     final waiterGen = _taskGeneration;
     final done = Completer<SyncReport>();
+    // A claim can land while flush() is awaiting the commit; the counters
+    // then belong to the replacement task, so report the recorded outcome.
+    SyncReport reportAfterFlush(bool complete) => _taskGeneration != waiterGen
+        ? _supersededTaskReport[waiterGen] ?? SyncReport(0, 0, false)
+        : SyncReport(_recordsThisTask, _batchesThisTask, complete);
     Timer.periodic(const Duration(seconds: 1), (t) async {
       if (done.isCompleted) {
         t.cancel();
@@ -8870,14 +8875,13 @@ class DrainController {
         t.cancel();
         await flush();
         log('[SYNC] idle timeout — no offload progress for 60s.');
-        done.complete(SyncReport(_recordsThisTask, _batchesThisTask, false));
+        done.complete(reportAfterFlush(false));
         return;
       }
       t.cancel();
       await flush();
       log('[SYNC] await stop=$stop.');
-      done.complete(SyncReport(
-          _recordsThisTask, _batchesThisTask, stop == DrainStop.complete));
+      done.complete(reportAfterFlush(stop == DrainStop.complete));
     });
     return done.future;
   }
