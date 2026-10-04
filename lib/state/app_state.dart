@@ -1684,8 +1684,8 @@ class AppState extends ChangeNotifier {
   /// Feed a strap alarm-lifecycle event (56 set / 57–58 fired / 59 cleared)
   /// without going through the BLE event path. Tests only.
   @visibleForTesting
-  void debugHandleAlarmEvent(int id) =>
-      _handleAlarmEvent(id, DateTime.now().millisecondsSinceEpoch ~/ 1000);
+  void debugHandleAlarmEvent(int id, {int? tsSec}) => _handleAlarmEvent(
+      id, tsSec ?? DateTime.now().millisecondsSinceEpoch ~/ 1000);
 
   /// Feed one `DeviceState` through [_onEngineState] for [deviceId], exactly
   /// as `BleEngine`'s `onState` callback does. Tests only — lets a test drive
@@ -2535,14 +2535,8 @@ class AppState extends ChangeNotifier {
     // headless — background_sync.dart writes the same two keys) actually
     // learned, so a relaunch doesn't forget a confirmed headless arm and
     // wrongly read it as unconfirmed, nor trust an arm that never confirmed.
-    // `setAtMs` is stamped as "now" rather than the true original arm time —
-    // ponytail: harmless imprecision (worst case a few extra seconds of
-    // "pending" after launch before an unconfirmed arm shows its warning),
-    // add real persistence of setAtMs if that grace window ever needs to be
-    // exact across relaunches.
     if (_savedAlarm != null) {
-      _alarm.set(_savedAlarm!, DateTime.now().millisecondsSinceEpoch);
-      _alarm.confirmed = alarmPrefs.getBool('alarm_epoch_confirmed') ?? false;
+      _seedAlarmFromPrefs(_savedAlarm!, alarmPrefs);
       // Resume the not-confirmed alert a killed process was still holding.
       final saved = _savedAlarm!;
       final resume = alarmLatchAlertResumeDelay(
@@ -4727,6 +4721,16 @@ class AppState extends ChangeNotifier {
   /// edited schedule or a just-fired alarm re-arms with no manual step, and a
   /// fired one-shot (which clears `_savedAlarm`) picks up its next occurrence
   /// on the very next connect.
+  /// Restore the confirmation machine for a persisted arm. `setAtMs` is the
+  /// REAL arm time (`alarm_set_at_ms`), not now: it is the floor the replay
+  /// gate holds a strap event 56 against, and a late genuine 56 delivered
+  /// after a relaunch is stamped at the original arm. An arm persisted before
+  /// that key existed gets 0, i.e. no floor (the old accept-any behaviour).
+  void _seedAlarmFromPrefs(int epoch, SharedPreferences prefs) {
+    _alarm.set(epoch, prefs.getInt('alarm_set_at_ms') ?? 0);
+    _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
+  }
+
   Future<void> _armNextAlarmOccurrence({int? firedEpoch}) async {
     if (!isConnected) return;
     try {
@@ -4744,8 +4748,7 @@ class AppState extends ChangeNotifier {
         // show the arm that's actually on the strap.
         device.alarmEpoch = null;
         if (onDisk != null) {
-          _alarm.set(onDisk, DateTime.now().millisecondsSinceEpoch);
-          _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
+          _seedAlarmFromPrefs(onDisk, prefs);
         } else {
           _alarm.disable();
         }
@@ -4910,10 +4913,12 @@ class AppState extends ChangeNotifier {
   Future<void> _onArmed(DateTime when, int epoch) async {
     _savedAlarm = epoch;
     device.alarmEpoch = epoch; // optimistic display
-    _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch); // await event 56
+    final setAtMs = DateTime.now().millisecondsSinceEpoch;
+    _alarm.set(epoch, setAtMs); // await event 56
     _alarmAutoRetried = false; // a fresh arm gets its one retry
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('alarm_epoch', epoch);
+    await prefs.setInt('alarm_set_at_ms', setAtMs);
     // Not confirmed yet — event 56 (below, in _handleAlarmEvent) flips this.
     await prefs.setBool('alarm_epoch_confirmed', false);
     // The alert timers below live in memory only; this lets a relaunch
@@ -5082,7 +5087,10 @@ class AppState extends ChangeNotifier {
   /// the protocol EventId names (strapDrivenAlarmSet == 56, …); the pure state
   /// machine matches the raw ids so it stays dependency-free.
   void _handleAlarmEvent(int id, int ts) {
-    final effect = _alarm.onEvent(id, DateTime.now().millisecondsSinceEpoch);
+    // The strap stamps events on its own RTC; the alarm was armed at
+    // `when - driftSec` in that frame, so map back the same way.
+    final effect = _alarm.onEvent(id, DateTime.now().millisecondsSinceEpoch,
+        tsSec: ts + (engine.clockRef?.driftSec ?? 0));
     if (effect == null) return;
     switch (effect) {
       case AlarmEffect.confirmed:

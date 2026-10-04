@@ -99,6 +99,7 @@ Future<void> headlessArmAndConfirm(Future<AlarmArmResult> Function() arm,
   } else if (result.epoch != null) {
     final confirmed = await awaitAlarmLatch(() => latchedSince(armedAtMs));
     await prefs.setInt('alarm_epoch', result.epoch!);
+    await prefs.setInt('alarm_set_at_ms', armedAtMs);
     await prefs.setBool('alarm_epoch_confirmed', confirmed);
   }
 }

@@ -151,4 +151,59 @@ void main() {
     final stored = await LocalDb.importedWorkouts();
     expect(stored.map((r) => r['uuid']), ['strava']);
   });
+
+  test('apple: only a prompt:true sync lets the route fetch ask', () async {
+    final sent = <Object?>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(kHealthRoutesChannel, (call) async {
+      sent.add((call.arguments as Map)['prompt']);
+      return const <Object?>[];
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(kHealthRoutesChannel, null));
+    final importer = HealthWorkoutImporter(
+      health: _FakeHealth([_w('a')]),
+      isApple: true,
+    );
+
+    await importer.sync();
+    await importer.sync(prompt: true);
+
+    expect(sent, [false, true],
+        reason: 'the auto path calls sync() bare and must never prompt');
+  });
+
+  test('copies of our own exports stored before the filter get cleaned up',
+      () async {
+    PackageInfo.setMockInitialValues(
+      appName: 'Edge',
+      packageName: 'site.openstrap.edge',
+      version: '1',
+      buildNumber: '1',
+      buildSignature: '',
+    );
+    await LocalDb.putImportedWorkouts([
+      for (final u in ['old1', 'old2'])
+        ImportedWorkoutRow(
+          uuid: u,
+          startTs: 1,
+          endTs: 2,
+          kind: 'running',
+          source: 'Edge',
+        ).toRow(),
+    ]);
+    final importer = HealthWorkoutImporter(
+      health: _FakeHealth([
+        _w('ours', sourceId: 'site.openstrap.edge', sourceName: 'Edge'),
+        _w('theirs'),
+      ]),
+      isApple: false,
+    );
+
+    await importer.sync();
+
+    final stored = await LocalDb.importedWorkouts();
+    expect(stored.map((r) => r['uuid']), ['theirs']);
+  });
 }
