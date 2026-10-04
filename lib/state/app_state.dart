@@ -2285,12 +2285,17 @@ class AppState extends ChangeNotifier {
   }
 
   Timer? _activityReviewRetry;
-  Future<void> refreshActivityReviews() async {
+  int _activityReviewAttempts = 0;
+  Future<void> refreshActivityReviews({bool retry = false}) async {
     if (_disposed) return;
     _activityReviewRetry?.cancel();
-    bumpInsights();
+    if (!retry) {
+      _activityReviewAttempts = 0;
+      bumpInsights();
+    }
     try {
       if (await _derive.refreshActivityReviews(_profile)) {
+        _activityReviewAttempts = 0;
         bumpInsights();
         return;
       }
@@ -2298,7 +2303,10 @@ class AppState extends ChangeNotifier {
       _log('[activity-review] refresh deferred: $e');
     }
     if (!_disposed) {
-      _activityReviewRetry = Timer(const Duration(seconds: 2), () => unawaited(refreshActivityReviews()));
+      // A long derive holds the engine; back off 2s → 30s instead of polling.
+      final delay = Duration(seconds: math.min(30, 2 << _activityReviewAttempts));
+      if (_activityReviewAttempts < 4) _activityReviewAttempts++;
+      _activityReviewRetry = Timer(delay, () => unawaited(refreshActivityReviews(retry: true)));
     }
   }
 
@@ -2434,7 +2442,8 @@ class AppState extends ChangeNotifier {
     await _loadProfile();
     await _refreshNightlyRhr();
     await _deriveScheduler.init();
-    unawaited(refreshActivityReviews());
+    // Headless wakes don't roll up; openSession picks pending reviews up.
+    if (!_background) unawaited(refreshActivityReviews());
     lastSynced = await LocalDb.latestSample();
     // The true data-edge frontier is the `rec_ts_hw` sync cursor, NOT
     // lastDecodedRecTs() (MAX(rec_ts) FROM decoded_onehz). decoded_onehz only
@@ -5073,6 +5082,7 @@ class AppState extends ChangeNotifier {
     // Back in the foreground with an OS CPU/memory budget again — let the
     // scheduler drain any derive jobs that queued (durably) while backgrounded.
     _deriveScheduler.setBackground(false);
+    unawaited(refreshActivityReviews(retry: true));
     if (wasBackground && engine.isConnected) {
       IosBleRestore.foregroundActive = true;
       await IosBleRestore.setOwnsBand(true);

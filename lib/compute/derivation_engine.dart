@@ -4630,15 +4630,20 @@ class DerivationEngine {
         ...await activityStore.reconcile(ActivityKind.nap, blocks.napSuggestions),
       ];
       for (final suggestion in newSuggestions) {
-        if (forceFinalize || !await activityStore.mayNotifyNew(suggestion)) continue;
-        final nap = suggestion.kind == ActivityKind.nap;
-        await NotificationCenter.instance.emit(NotificationEvent(
-          dedupeKey: '${day.date}:activity:${suggestion.id}',
-          category: NotifCategory.reminders, priority: NotifPriority.normal,
-          title: nap ? 'Did you nap?' : 'Did you work out?',
-          body: 'A possible ${nap ? 'nap' : 'workout'} is ready to review.',
-          date: day.date, route: activitySuggestionRoute(suggestion.id, suggestion.kind.name),
-        ), allowPermissionPrompt: false);
+        // The rows are already banked; a failed prompt must not mark the day partial.
+        try {
+          if (forceFinalize || !await activityStore.mayNotifyNew(suggestion)) continue;
+          final nap = suggestion.kind == ActivityKind.nap;
+          await NotificationCenter.instance.emit(NotificationEvent(
+            dedupeKey: '${day.date}:activity:${suggestion.id}',
+            category: NotifCategory.reminders, priority: NotifPriority.normal,
+            title: nap ? 'Did you nap?' : 'Did you work out?',
+            body: 'A possible ${nap ? 'nap' : 'workout'} is ready to review.',
+            date: day.date, route: activitySuggestionRoute(suggestion.id, suggestion.kind.name),
+          ), allowPermissionPrompt: false);
+        } catch (e) {
+          _log('activity prompt failed for ${suggestion.id}: $e');
+        }
       }
 
       await _persistWakeDayFeatures(dayId: day.date, wake: blocks.wake);
