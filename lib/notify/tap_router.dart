@@ -139,8 +139,8 @@ const Map<String, int> _tabRoutes = {
 };
 
 // Sub-screen routes → the shell tab they sit on top of. Most briefing/journal
-// deep links live over Today (0); the detected-workout review sits over the
-// Workouts tab (4) so the tab underneath is the natural place to land on close.
+// deep links live over Today (0), and so do the detected-workout and
+// detected-activity reviews: Home is where they are surfaced and land on close.
 //
 // /profile and /recap were BOTH being emitted with neither table knowing them,
 // so resolveTapRoute fell through to Today and every band-battery alert landed

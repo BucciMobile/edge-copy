@@ -5143,6 +5143,8 @@ class AppState extends ChangeNotifier {
     // Back in the foreground with an OS CPU/memory budget again — let the
     // scheduler drain any derive jobs that queued (durably) while backgrounded.
     _deriveScheduler.setBackground(false);
+    // Fresh backoff budget per resume, so a chain that gave up earlier retries.
+    _activityReviewAttempts = 0;
     unawaited(refreshActivityReviews(retry: true));
     if (wasBackground && engine.isConnected) {
       IosBleRestore.foregroundActive = true;
