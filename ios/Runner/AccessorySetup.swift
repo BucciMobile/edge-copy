@@ -34,6 +34,7 @@ import AccessorySetupKit
 ///   - `showPicker`         -> String (the band provisioned by THIS call; throws on cancel/error)
 ///                             optional Bool argument: true = add another accessory
 ///   - `removeAll`          -> nil    (deprovision every band, sensors kept — used on unpair)
+///   - `removeSensor`       -> nil    (`{"services": [...]}`: deprovision those sensors only)
 ///
 /// The service UUIDs the picker matches on are NOT duplicated here: they come from
 /// Info.plist's NSAccessorySetupBluetoothServices, which Apple requires to list every
@@ -111,6 +112,15 @@ enum AccessorySetup {
       case "removeAll":
         if #available(iOS 18.0, *) {
           Impl.shared.removeAll { result(nil) }
+        } else {
+          result(nil)
+        }
+
+      case "removeSensor":
+        if #available(iOS 18.0, *),
+           let args = call.arguments as? [String: Any],
+           let services = args["services"] as? [String] {
+          Impl.shared.removeSensor(services: services) { result(nil) }
         } else {
           result(nil)
         }
@@ -459,6 +469,23 @@ private final class Impl {
       guard let svc = service(of: a) else { return true }
       return !sensors.contains(svc)
     }
+    remove(accessories, completion)
+  }
+
+  /// Deprovisions the SENSORS provisioned under [services] (sensor services only). Without
+  /// it a ring once approved could never be replaced: `showSensorPicker` hands back the
+  /// approved one with no sheet, so a forgotten, lost or wrongly picked ring kept coming
+  /// back and a new one was never offered.
+  func removeSensor(services: [String], _ completion: @escaping () -> Void) {
+    ensureActivated()
+    let wanted = Set(services.map { $0.uppercased() }).intersection(sensorServices)
+    remove(session.accessories.filter { a in
+      guard let svc = service(of: a) else { return false }
+      return wanted.contains(svc)
+    }, completion)
+  }
+
+  private func remove(_ accessories: [ASAccessory], _ completion: @escaping () -> Void) {
     guard !accessories.isEmpty else { completion(); return }
     let group = DispatchGroup()
     for acc in accessories {

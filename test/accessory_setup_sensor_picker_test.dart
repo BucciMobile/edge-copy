@@ -42,6 +42,14 @@ void main() {
     });
   });
 
+  test('dropping a stale ring approval names only its own service', () async {
+    await AccessorySetup.removeSensor([kOura.service]);
+    expect(calls.single.method, 'removeSensor');
+    expect(calls.single.arguments, {
+      'services': [kOura.service.toUpperCase()],
+    });
+  });
+
   test('the band picker still sends no argument', () async {
     await AccessorySetup.showPicker();
     expect(calls.single.arguments, isNull);
