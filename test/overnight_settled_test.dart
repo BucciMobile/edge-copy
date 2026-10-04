@@ -140,13 +140,29 @@ void main() {
   });
 
   test('no window with the edge caught up → no sleep is the answer', () {
+    final afternoon =
+        DateTime(2026, 10, 4, 15).millisecondsSinceEpoch ~/ 1000;
     expect(
       overnightSettled(
         sleepOffsetSec: null,
-        dataEdgeSec: nowSec - 10 * 60,
-        nowSec: nowSec,
+        dataEdgeSec: afternoon - 10 * 60,
+        nowSec: afternoon,
       ),
       isTrue,
+    );
+  });
+
+  test('no window just after midnight is a night not started, not no sleep',
+      () {
+    // Still awake at 00:30 with the band live: the coming sleep has no window.
+    final late = DateTime(2026, 10, 4, 0, 30).millisecondsSinceEpoch ~/ 1000;
+    expect(
+      overnightSettled(
+        sleepOffsetSec: null,
+        dataEdgeSec: late - 60,
+        nowSec: late,
+      ),
+      isFalse,
     );
   });
 
@@ -209,7 +225,8 @@ void main() {
       'computed_at': 1,
       'finalized': 0,
     });
-    final edge = nowSec - 10 * 60;
+    // Settled by the give-up, so the result doesn't hang on the time of day.
+    final edge = nowSec - 13 * 3600;
     await db.insert('decoded_onehz', {
       'ts_ms': edge * 1000,
       'rec_ts': edge,

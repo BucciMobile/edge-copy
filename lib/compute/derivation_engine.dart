@@ -1986,16 +1986,20 @@ const int kOvernightGiveUpSec = 12 * 60 * 60;
 /// A null [sleepOffsetSec] is a night with no window yet. Mid-drain that is
 /// usually an edge still before sleep onset, not a night without sleep, so it
 /// only settles once the band edge has caught up to [nowSec], or gone quiet
-/// for the give-up.
+/// for the give-up. A caught-up edge before local noon is still a night that
+/// may not have started (awake at 00:30, the coming sleep has no window yet),
+/// so "no sleep" waits for noon.
 bool overnightSettled({
   required int? sleepOffsetSec,
   required int dataEdgeSec,
   int? nowSec,
 }) {
   if (sleepOffsetSec == null) {
-    return nowSec != null &&
-        (dataEdgeSec >= nowSec - _headlineFreezeMarginSec ||
-            nowSec >= dataEdgeSec + kOvernightGiveUpSec);
+    if (nowSec == null) return false;
+    final now = DateTime.fromMillisecondsSinceEpoch(nowSec * 1000);
+    return (now.hour >= 12 &&
+            dataEdgeSec >= nowSec - _headlineFreezeMarginSec) ||
+        nowSec >= dataEdgeSec + kOvernightGiveUpSec;
   }
   return dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
       (nowSec != null && nowSec >= sleepOffsetSec + kOvernightGiveUpSec);
