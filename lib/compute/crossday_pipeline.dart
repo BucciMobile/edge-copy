@@ -218,7 +218,8 @@ Map<String, dynamic> buildCrossDayBundle(
   // ── true Phillips SRI across days on a 1440-epoch (1-min) clock grid ───────
   final (sri, sriDates) = _crossDaySri(days);
   // SLP-08 — which two nights. `SriPair.dayIndex` indexes the SRI grid (one
-  // per calendar day, gaps padded) and nothing else (the analytics never sees a date), so here is the only place
+  // per day row, plus one pad per gap) and nothing else (the analytics never
+  // sees a date), so here is the only place
   // it can be resolved into the two nights it compared. Pairs the mask left too
   // thin were already dropped upstream, so a half-unobserved weekend cannot top
   // the list for having no data.
@@ -998,9 +999,10 @@ bool _isNextDay(String a, String b) {
 /// with no hypnogram coverage => valid=false), concatenate across days, then run
 /// the true Phillips SRI. If too few covered days, the package returns absent.
 ///
-/// SRI pairs grids by position, so a calendar day with no row gets an
-/// all-invalid grid: without it nights D and D+2 were scored as adjacent.
-/// Returns the grid's date labels alongside, one per grid.
+/// The SRI compares grid d-1 with grid d as if they were 24 h apart, so a
+/// gap of missing calendar days gets one all-invalid grid rather than letting
+/// the nights either side of it pair up. Returns the date of every grid, padding
+/// included, since `SriPair.dayIndex` indexes those grids, not [days].
 (ana.Metric<ana.SriResult>, List<String>) _crossDaySri(
     List<Map<String, dynamic>> days) {
   const epochsPerDay = 1440; // 1-minute epochs over 24 h
@@ -1010,17 +1012,20 @@ bool _isNextDay(String a, String b) {
 
   for (final d in days) {
     final date = (d['date'] as String?) ?? '';
-    final prev = gridDates.isEmpty ? null : gridDates.last;
-    final from = prev == null ? null : DateTime.tryParse('${prev}T00:00:00Z');
-    final to = DateTime.tryParse('${date}T00:00:00Z');
-    if (from != null && to != null) {
-      final gap = to.difference(from).inDays - 1;
-      // Same bound as the TRIMP densifier: an absurd span is not a gap.
-      for (var g = 1; g <= gap && gap < _maxDenseTrimpDays; g++) {
+    if (gridDates.isNotEmpty) {
+      final prev = DateTime.tryParse('${gridDates.last}T00:00:00Z');
+      final cur = DateTime.tryParse('${date}T00:00:00Z');
+      final gap = prev == null || cur == null ? 1 : cur.difference(prev).inDays;
+      // One all-invalid grid already breaks the pair, so a gap of any length
+      // pads ONE grid. The day list is the newest 90 rows, not 90 calendar
+      // days: padding every missing day of a months-long break would allocate
+      // 1440-epoch grids for all of it. The pad never surfaces in a pair (it
+      // has no valid minutes), so its date is only a placeholder.
+      for (var k = 1; k < math.min(gap, 2); k++) {
+        final pad = prev!.add(Duration(days: k));
+        gridDates.add(pad.toIso8601String().substring(0, 10));
         sleepWake.addAll(List<bool>.filled(epochsPerDay, false));
         valid.addAll(List<bool>.filled(epochsPerDay, false));
-        gridDates.add(
-            from.add(Duration(days: g)).toIso8601String().substring(0, 10));
       }
     }
     gridDates.add(date);
@@ -1055,6 +1060,9 @@ bool _isNextDay(String a, String b) {
         final endMin =
             endMinRaw < startMin ? endMinRaw + epochsPerDay : endMinRaw;
         final span = math.min(endMin - startMin, epochsPerDay);
+        // 'unobserved' is the band seeing nothing (off wrist, lost contact):
+        // neither asleep nor awake, so those minutes stay uncovered.
+        if (stage == 'unobserved') continue;
         final asleepSeg = stage != null && stage != 'wake';
         for (var k = 0; k < span; k++) {
           final m = (startMin + k) % epochsPerDay;

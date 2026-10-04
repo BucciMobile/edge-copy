@@ -535,6 +535,49 @@ void _wiredFamilies() {
       expect((reg['value'] as Map)['days'], 2);
       expect(reg['confidence'] as num, lessThanOrEqualTo(0.3));
     });
+
+    test('a gap past the densify bound still breaks the pair', () {
+      // Two runs of nights 500 days apart. No pair may span the break.
+      final days = _synthDays(10);
+      for (var i = 5; i < 10; i++) {
+        days[i]['date'] = DateTime.utc(2025, 5, 15 + i)
+            .toIso8601String()
+            .substring(0, 10);
+      }
+      final reg = (buildCrossDayBundle(days, const {})['regularity'] as Map)
+          .cast<String, dynamic>();
+      for (final p in ((reg['value'] as Map)['pairs'] as List).cast<Map>()) {
+        final prev = DateTime.parse('${p['prev_date']}T00:00:00Z');
+        final cur = DateTime.parse('${p['date']}T00:00:00Z');
+        expect(cur.difference(prev).inDays, 1);
+      }
+      expect((reg['value'] as Map)['days'], 9);
+    });
+
+    test('unobserved minutes are not scored as sleep', () {
+      // Every night is light 23:00-03:00. After 03:00, half the nights are
+      // awake and the other half the band saw nothing. Only 23:00-03:00 is
+      // observed on both sides of any pair, and it agrees perfectly.
+      int at(int day, int h) =>
+          DateTime(2024, 3, 4 + day, h).millisecondsSinceEpoch ~/ 1000;
+      final days = [
+        for (var i = 0; i < 14; i++)
+          {
+            'date': '2024-03-${(5 + i).toString().padLeft(2, '0')}',
+            'hypnogram': [
+              {'start': at(i, 23), 'end': at(i + 1, 3), 'stage': 'light'},
+              {
+                'start': at(i + 1, 3),
+                'end': at(i + 1, 7),
+                'stage': i.isEven ? 'wake' : 'unobserved',
+              },
+            ],
+          },
+      ];
+      final reg = (buildCrossDayBundle(days, const {})['regularity'] as Map)
+          .cast<String, dynamic>();
+      expect((reg['value'] as Map)['sri'], closeTo(100, 1e-9));
+    });
   });
 
   group('sleep performance is last night only', () {
