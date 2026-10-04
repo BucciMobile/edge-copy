@@ -12658,5 +12658,13 @@
   "devicesWornOtherSub": "A pocket or bag. The band cannot see gait well there.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
+    },
+  "tabHome": "Home",
+  "tabHealth": "Health",
+  "tabNutrition": "Nutrition",
+  "tabWorkout": "Workout",
+  "tabWellness": "Wellness",
+  "@tabHome": {
+    "description": "Bottom tab bar labels (tabHome..tabWellness). Keep short; the five must read as different words."
   }
 }

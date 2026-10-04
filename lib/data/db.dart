@@ -2284,6 +2284,16 @@ class LocalDb {
       'source': source,
       'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await releaseFrozenHeadline(dayId);
+  }
+
+  /// A sleep correction to the pinned day is the user's word, not drift: drop
+  /// the morning pin so the re-derive pins the corrected readiness instead of
+  /// holding the old night's value until midnight.
+  static Future<void> releaseFrozenHeadline(String dayId) async {
+    if ((await frozenHeadline())?.day == dayId) {
+      await deleteCursor(kFrozenHeadlineCursor);
+    }
   }
 
   /// The user's sleep window for [dayId], or null if none.
@@ -2302,6 +2312,7 @@ class LocalDb {
   static Future<void> deleteSleepOverride(String dayId) async {
     final db = await instance;
     await db.delete('sleep_override', where: 'day_id = ?', whereArgs: [dayId]);
+    await releaseFrozenHeadline(dayId);
   }
 
   /// Every day that currently has a user override — these must be force-derived
@@ -2749,6 +2760,27 @@ class LocalDb {
       where: 'session_id = ?',
       whereArgs: [uuid],
     );
+  }
+
+  /// Drop every imported workout whose source is one of [sources], AND its
+  /// route, like [deleteImportedWorkout].
+  static Future<void> deleteImportedWorkoutsFrom(Set<String> sources) async {
+    if (sources.isEmpty) return;
+    final db = await instance;
+    final marks = List.filled(sources.length, '?').join(',');
+    await db.transaction((txn) async {
+      await txn.delete(
+        'workout_route',
+        where: 'session_id IN (SELECT uuid FROM imported_workout '
+            'WHERE source IN ($marks))',
+        whereArgs: [...sources],
+      );
+      await txn.delete(
+        'imported_workout',
+        where: 'source IN ($marks)',
+        whereArgs: [...sources],
+      );
+    });
   }
 
   // ── EXTERNAL HEART-RATE SENSOR (0x180D) ─────────────────────────────────────
@@ -8112,11 +8144,11 @@ class LocalDb {
   /// The stored sleep WINDOW for each of the [limit] most recent days, newest
   /// first, WITHOUT touching `payload_json`.
   ///
-  /// `day_result.window_json` already holds the sleep-window Metric envelope
-  /// (`{value: {onset_ms, offset_ms, …}, confidence, tier, …}`) in its own
-  /// column, so onset/offset are one small projected read — no bundle decode,
-  /// no per-day round trip. Rows: `{day_id, window_json}`. [before] keeps
-  /// only days strictly earlier than that day_id.
+  /// `day_result.window_json` already holds the sleep window (a bare
+  /// `SleepWindow.toJson()`, `{onset_ms, offset_ms, …}`) in its own column, so
+  /// onset/offset are one small projected read — no bundle decode, no per-day
+  /// round trip. Rows: `{day_id, window_json}`. [before] keeps only days
+  /// strictly earlier than that day_id.
   static Future<List<Map<String, dynamic>>> sleepWindowRows(int limit,
       {String? before}) async {
     final db = await instance;
@@ -8129,6 +8161,19 @@ class LocalDb {
       'ORDER BY r.day_id DESC LIMIT ?',
       [?before, limit],
     );
+  }
+
+  /// One day's stored `window_json` (see [sleepWindowRows]), or null.
+  static Future<String?> sleepWindowJsonFor(String dayId) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT r.window_json AS window_json '
+      'FROM day_result r '
+      '$_servedDayJoin '
+      'WHERE r.skipped = 0 AND r.day_id = ? LIMIT 1',
+      [dayId],
+    );
+    return rows.isEmpty ? null : rows.first['window_json'] as String?;
   }
 
   /// Every day_id that has a `day_result` row at its LATEST algo_version, newest
@@ -8217,12 +8262,18 @@ class LocalDb {
 
   /// The set of day_id labels that are FINALIZED at [algoVersion] (locked). A
   /// finalized day is never recomputed even on a version bump.
+  ///
+  /// An imported snapshot never locks: importers finalize a date the band has
+  /// no rows for yet, and band rows for it arriving later must still derive
+  /// and replace the snapshot ([isMeasuredDayRow]). Every caller intersects
+  /// this with days that have raw, so a raw-less import is still left alone.
   static Future<Set<String>> finalizedDayIds(int algoVersion) async {
     final db = await instance;
     final rows = await db.query(
       'day_result',
       columns: ['day_id'],
-      where: 'algo_version = ? AND finalized = 1',
+      where: 'algo_version = ? AND finalized = 1 '
+          "AND payload_json NOT LIKE '%\"imported\":true%'",
       whereArgs: [algoVersion],
     );
     return {for (final r in rows) r['day_id'] as String};
@@ -9977,18 +10028,24 @@ class LocalDb {
   /// [measuredOnly] defaults ON here, unlike [metricSeries]: this helper exists
   /// to build a rolling baseline, and a baseline blended with another vendor's
   /// derived numbers is not a baseline of this person (see [importedDates]).
+  ///
+  /// [before] (a `yyyy-MM-dd` day label) limits the window to days strictly
+  /// before it, so a past day is measured against its own trailing baseline
+  /// rather than today's, and never against itself.
   static Future<List<double>> trailingSeriesValues(
     String key,
     int n, {
     bool measuredOnly = true,
+    String? before,
   }) async {
     final db = await instance;
     final rows = await db.rawQuery(
       'SELECT value FROM metric_series '
       'WHERE key = ? AND value IS NOT NULL '
+      '${before != null ? 'AND date < ? ' : ''}'
       '${measuredOnly ? 'AND date NOT IN ($_importedDatesSql) ' : ''}'
       'ORDER BY date DESC LIMIT ?',
-      [key, n],
+      [key, ?before, n],
     );
     return [for (final r in rows.reversed) (r['value'] as num).toDouble()];
   }
@@ -10358,8 +10415,11 @@ class LocalDb {
       // serving it showed a partial night and its readiness as this morning's.
       // A row with no window is held too: mid-drain the edge can still sit
       // before sleep onset, and that read as a settled 'no sleep' night.
-      final offsetMs = (((decoded['sleep'] as Map?)?['window'] as Map?)?['value']
-          as Map?)?['offset_ms'];
+      // A no-sleep window's `value` is the string '—', not a Map.
+      final sleepMap = decoded['sleep'];
+      final windowMap = sleepMap is Map ? sleepMap['window'] : null;
+      final windowVal = windowMap is Map ? windowMap['value'] : null;
+      final offsetMs = windowVal is Map ? windowVal['offset_ms'] : null;
       final wakeSec = offsetMs is num ? offsetMs ~/ 1000 : null;
       if (dayId == today &&
           !overnightSettled(
@@ -10477,11 +10537,14 @@ class LocalDb {
     final db = await instance;
     final now = DateTime.now().millisecondsSinceEpoch;
     await db.transaction((txn) async {
+      // Only a QUEUED job covers a new request. A running pass may have
+      // loaded its substrate before the batch behind this request landed, so
+      // it queues behind it and drains when the pass finishes.
       final active = await txn.query(
         'compute_jobs',
         columns: ['id', 'type', 'state'],
-        where: 'scope = ? AND state IN (?, ?)',
-        whereArgs: ['derive', 'queued', 'running'],
+        where: 'scope = ? AND state = ?',
+        whereArgs: ['derive', 'queued'],
       );
       bool hasType(String t) =>
           active.any((row) => row['type']?.toString() == t);
@@ -10496,7 +10559,9 @@ class LocalDb {
         );
       }
       await txn.insert('compute_jobs', {
-        'id': 'derive_${type}_$now',
+        // Microseconds: the running job this one may queue behind can share
+        // its millisecond, and a PK collision would throw.
+        'id': 'derive_${type}_${DateTime.now().microsecondsSinceEpoch}',
         'type': type,
         'scope': 'derive',
         'priority': type == 'derive_heavy' ? 200 : 100,

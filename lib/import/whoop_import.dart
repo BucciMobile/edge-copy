@@ -216,6 +216,9 @@ class WhoopImporter {
   /// what the earlier file already contributed for the same date.
   static (String, Map<String, dynamic>)? _extractDayFields(_Row row) {
     String get(List<String> names) => row.get(names);
+    // sleeps.csv lists naps as their own rows, filed under the same date as
+    // the night that ended that morning. A nap is not the day's sleep.
+    if (get(['nap']).toLowerCase() == 'true') return null;
     final wakeTs = _parseTs(get(['wake onset', 'sleep onset', 'cycle start time']));
     final cycleStart = _parseTs(get(['cycle start time', 'sleep onset']));
     final anchor = wakeTs ?? cycleStart;
@@ -237,7 +240,10 @@ class WhoopImporter {
       'deepMin': n(['deep (sws) duration (min)', 'deep sleep duration (min)', 'deep (sws) duration (minutes)']),
       'remMin': n(['rem duration (min)', 'rem duration (minutes)']),
       'awakeMin': n(['awake duration (min)', 'awake duration (minutes)']),
-      'effPct': n(['sleep performance %', 'sleep efficiency %', 'sleep performance']),
+      // Efficiency only. 'Sleep performance %' is hours slept against sleep
+      // need, a different number; _pick takes the first column that exists,
+      // so listing it here stored performance as efficiency.
+      'effPct': n(['sleep efficiency %']),
       'sleepOnset': _parseTs(get(['sleep onset'])),
       'sleepWake': _parseTs(get(['wake onset'])),
     });
@@ -269,7 +275,11 @@ class WhoopImporter {
     final deepMin = f['deepMin'] as num?;
     final remMin = f['remMin'] as num?;
     final awakeMin = f['awakeMin'] as num?;
-    final effPct = f['effPct'] as num?;
+    // No efficiency column: asleep over in bed is the definition.
+    final effPct = f['effPct'] as num? ??
+        (asleepMin != null && inBedMin != null && inBedMin > 0
+            ? asleepMin / inBedMin * 100
+            : null);
     final sleepOnset = f['sleepOnset'] as int?;
     final sleepWake = f['sleepWake'] as int?;
 

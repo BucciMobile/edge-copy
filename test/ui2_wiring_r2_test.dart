@@ -56,17 +56,22 @@ class _FakeRepo extends LocalRepository {
   /// day id -> the `daytime_hrv` block `getDayHeart` serves for it.
   final Map<String, Map<String, dynamic>> daytimeHrv;
 
+  /// day id -> the night `getDaySleepV2` serves for it.
+  final Map<String, Map<String, dynamic>> nights;
+
   _FakeRepo(
       {this.insights = const {},
       this.days = const [],
       this.today = const {},
-      this.daytimeHrv = const {}});
+      this.daytimeHrv = const {},
+      this.nights = const {}});
 
   @override
   Future<Map<String, dynamic>> getDayHeart(String date) async =>
       {'daytime_hrv': ?daytimeHrv[date]};
   @override
-  Future<Map<String, dynamic>> getDaySleepV2(String date) async => const {};
+  Future<Map<String, dynamic>> getDaySleepV2(String date) async =>
+      nights[date] ?? const {};
 
   @override
   Future<Map<String, dynamic>> getToday() async => today;
@@ -883,6 +888,26 @@ void main() {
   // The item's own note is that the abstention is what gets quietly removed
   // later if it is not pinned first. So it is pinned first.
   group('alertness forecast', () {
+    Future<CircadianData> loadWithNight(int back) {
+      final d = DateTime.parse(_day(back));
+      final wake = DateTime(d.year, d.month, d.day, 7);
+      return CircadianData.load(_FakeRepo(days: [_day(back)], nights: {
+        _day(back): {
+          'onset_ts': wake.millisecondsSinceEpoch ~/ 1000 - 7 * 3600,
+          'wake_ts': wake.millisecondsSinceEpoch ~/ 1000,
+          'duration_min': 420,
+        },
+      }));
+    }
+
+    test('last night drives the forecast', () async {
+      expect((await loadWithNight(0)).alertness.value, isNotNull);
+    });
+
+    test('a weeks-old night is not last night, so no forecast', () async {
+      expect((await loadWithNight(9)).alertness.value, isNull);
+    });
+
     Future<void> pumpC(WidgetTester t, CircadianData d,
         {double scale = 1}) async {
       t.view.physicalSize = Size(390 * 3, 4000 * 3 * scale);

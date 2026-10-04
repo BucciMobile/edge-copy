@@ -8,8 +8,10 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/local_repository_impl.dart';
 import 'package:openstrap_edge/compute/manual_session.dart';
@@ -552,6 +554,39 @@ void main() {
       );
     });
   });
+
+  test(
+    'marking an exported workout private re-exports its day',
+    () async {
+      // Its calories come back into the day's active energy, and a day
+      // behind the export cursor is otherwise never written again.
+      SharedPreferences.setMockInitialValues({});
+      final start = sessionStart - 20 * 86400;
+      final day = dayLabelOf(DateTime.fromMillisecondsSinceEpoch(start * 1000));
+      await LocalDb.putSession({
+        'id': 'w-private-old',
+        'start_ts': start,
+        'end_ts': start + 1800,
+        'type': 'run',
+        'status': 'done',
+        'source': 'manual',
+        'created_at': start * 1000,
+      });
+      addTearDown(() => LocalDb.deleteSession('w-private-old'));
+      final through = dayLabelOf(DateTime.now());
+      await LocalDb.setCursor('health_export_through', through);
+      addTearDown(() => LocalDb.setCursor('health_export_through', ''));
+
+      await repo.setWorkoutPrivate('w-private-old', true);
+      String? cursor;
+      for (var i = 0; i < 50; i++) {
+        cursor = await LocalDb.getCursor('health_export_through');
+        if (cursor != through) break;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(cursor!.compareTo(day), lessThan(0));
+    },
+  );
 
   test(
     'a different window on the same start second is refused, not replaced',

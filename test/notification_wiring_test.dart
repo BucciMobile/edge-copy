@@ -14,6 +14,7 @@ import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
 import 'package:openstrap_edge/notify/notification_prefs.dart';
 import 'package:openstrap_edge/notify/tap_router.dart';
+import 'package:openstrap_edge/state/clock_format.dart';
 
 NotificationEvent _ev(NotifCategory c, NotifPriority p, String route) =>
     NotificationEvent(
@@ -147,6 +148,12 @@ void main() {
           const NotificationPrefs(windDownEnabled: true), 20.0);
       expect(t, 21 * 60 + 30);
     });
+
+    test('the copy names the learned bedtime, not the capped slot', () {
+      // Bedtime 23:30 caps the slot to 21:30; the body must still say 23:30.
+      expect(NotificationCenter.windDownBody(23 * 60 + 30.0),
+          contains(formatClockMinute(23 * 60 + 30)));
+    });
   });
 
   group('alarmNightCheckSlot', () {
@@ -236,6 +243,16 @@ void main() {
         _day(date: '7', rhr: 48),
       ]);
       expect(down, contains('lower'));
+    });
+
+    test('only the last week of the rollup counts', () {
+      final f = NotificationCenter.weeklyLookbackFinding([
+        _day(date: 'old', illness: true, rhr: 45),
+        for (var i = 0; i < 20; i++) _day(date: 'mid$i', rhr: 45),
+        for (var i = 0; i < 7; i++) _day(date: 'week$i', rhr: 52),
+      ]);
+      expect(f, isNull,
+          reason: 'a flag and an RHR level from weeks ago are not this week');
     });
 
     test('too few RHR nights stays silent even if the drift looks big', () {

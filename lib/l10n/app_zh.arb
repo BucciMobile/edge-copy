@@ -2448,5 +2448,10 @@
   "devicesWornOtherSub": "口袋或包里。手环在那里很难看清步伐。",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "首页",
+  "tabHealth": "健康",
+  "tabNutrition": "营养",
+  "tabWorkout": "锻炼",
+  "tabWellness": "身心"
 }

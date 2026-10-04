@@ -646,7 +646,10 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
       await rememberDeletedUuid(w.id);
       await LocalDb.deleteImportedWorkout(w.id);
     } else {
-      await LocalDb.deleteSession(w.id);
+      // Through AppState: if this row is the session still running, its
+      // timer, route and Live Activity stop too, or stopWorkout would write
+      // the deleted row straight back.
+      await context.read<AppState>().deleteWorkout(w.id);
     }
     if (!mounted) return;
     setState(() {
@@ -772,7 +775,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
         });
         return;
       }
-      final res = await importer.sync();
+      final res = await importer.sync(prompt: true);
       if (res.workouts == 0) {
         if (!mounted) return;
         final loc = AppLocalizations.of(context);

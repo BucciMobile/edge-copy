@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/day_label.dart';
 import '../data/db.dart';
 import '../data/series_codec.dart';
 import 'health_heart_rate_batch.dart';
@@ -93,6 +94,18 @@ List<HealthDataType> healthDeleteTypes({required bool isApplePlatform}) {
       ? types
       : types.where((type) => type != HealthDataType.HEART_RATE).toList();
 }
+
+/// The kcal a workout sample carries, or null when it carries none.
+///
+/// Health Connect stores a workout's energy as a separate
+/// TotalCaloriesBurnedRecord inserted in the same atomic batch, so without that
+/// write permission the whole workout write fails. On Android the session's
+/// kcal stays in the day's hourly active energy instead.
+@visibleForTesting
+int? healthWorkoutEnergyKcal(
+  Map<String, Object?> r, {
+  required bool isApplePlatform,
+}) => isApplePlatform ? (r['calories'] as num?)?.round() : null;
 
 /// Does a `delete()` answer mean the window is now clear of OUR samples — i.e.
 /// is it safe to write the replacement?
@@ -176,6 +189,58 @@ Future<void> ensureHealthSleepExportEpoch({
   await setCursor('health_export_through', '');
   await setCursor('health_export_retry_state', '');
   await setCursor(kHealthSleepExportEpochCursor, epoch);
+}
+
+/// Hourly buckets spanning [dayStart, dayEnd), shared by the active/basal
+/// energy writers. Each bucket is a real elapsed clock-hour (not 1/24th of the
+/// day's span — that would give 57.5min/62.5min "hours" on DST-transition
+/// days); the day's actual length (23/24/25 real hours) instead changes the
+/// bucket count, with the final bucket clipped to dayEnd so it never spills
+/// into the next calendar day. Today stops at [now]: its energy so far belongs
+/// in the hours that have happened, not spread into ones that haven't.
+@visibleForTesting
+List<DateTime> healthEnergyBucketBounds(
+  DateTime dayStart,
+  DateTime dayEnd,
+  DateTime now,
+) {
+  final end = now.isBefore(dayEnd) ? now : dayEnd;
+  final bounds = <DateTime>[dayStart];
+  while (bounds.last.isBefore(end)) {
+    final next = bounds.last.add(const Duration(hours: 1));
+    bounds.add(next.isAfter(end) ? end : next);
+  }
+  return bounds;
+}
+
+const kHealthStepsPrefixPurgeCursor = 'health_steps_prefix_purged';
+
+/// One-shot purge of the legacy STEPS samples on days behind the export
+/// [cursor]. The per-day purge only runs for days exportAll still exports, and
+/// days already behind the cursor are never exported again, so on a store that
+/// never had its cursor cleared those samples would stay forever.
+Future<void> purgeLegacyStepsBehindCursor({
+  required String cursor,
+  required Future<String?> Function(String name) getCursor,
+  required Future<void> Function(String name, String value) setCursor,
+  required Future<bool> Function(DateTime start, DateTime end) deleteSteps,
+}) async {
+  if (cursor.isEmpty) return;
+  if ((await getCursor(kHealthStepsPrefixPurgeCursor) ?? '').isNotEmpty) {
+    return;
+  }
+  final d = DateTime.tryParse(cursor);
+  if (d == null) return;
+  try {
+    // HealthKit and Health Connect only delete this app's own samples.
+    await deleteSteps(
+      DateTime.fromMillisecondsSinceEpoch(0),
+      DateTime(d.year, d.month, d.day + 1),
+    );
+    await setCursor(kHealthStepsPrefixPurgeCursor, cursor);
+  } catch (e) {
+    debugPrint('[health] purge legacy steps behind $cursor: $e');
+  }
 }
 
 bool shouldAttemptHealthExport({
@@ -270,6 +335,16 @@ Future<PrioritySleepExportResult> exportPrioritySleepBeforeBulk({
   if (!priorityResult.succeeded) return priorityResult;
   await exportBulk(priorityResult.date);
   return priorityResult;
+}
+
+/// The export cursor that puts [date] back in front of it, or null when [date]
+/// is already ahead (an empty cursor means nothing has been skipped yet).
+/// exportAll skips every day at or before the cursor, so an edit to a day
+/// behind it would otherwise never be written again.
+String? healthExportCursorBefore(String cursor, String date) {
+  if (cursor.isEmpty || cursor.compareTo(date) < 0) return null;
+  final d = DateTime.parse(date);
+  return dayLabelOf(DateTime(d.year, d.month, d.day - 1));
 }
 
 class HealthExportSingleFlight {
@@ -377,6 +452,26 @@ class HealthExporter {
     } catch (e) {
       debugPrint('[health] exportWorkoutId $id: $e');
       return false;
+    }
+  }
+
+  @visibleForTesting
+  Future<T> debugRunLocked<T>(Future<T> Function() op) => _workoutLock.run(op);
+
+  /// Rewind the export cursor so the next [exportAll] re-writes [date] and
+  /// every day after it. Under the same lock as [exportAll], so a pass already
+  /// running can't advance the cursor back over it. Never throws.
+  static Future<void> reexportFrom(String date) async {
+    try {
+      await shared._workoutLock.run(() async {
+        final cursor = await LocalDb.getCursor('health_export_through') ?? '';
+        final next = healthExportCursorBefore(cursor, date);
+        if (next != null) {
+          await LocalDb.setCursor('health_export_through', next);
+        }
+      });
+    } catch (e) {
+      debugPrint('[health] reexportFrom $date: $e');
     }
   }
 
@@ -705,6 +800,16 @@ class HealthExporter {
         await LocalDb.setCursor(_kRetryCursor, '');
       }
       final cursor = await LocalDb.getCursor('health_export_through') ?? '';
+      await purgeLegacyStepsBehindCursor(
+        cursor: cursor,
+        getCursor: LocalDb.getCursor,
+        setCursor: (name, value) => LocalDb.setCursor(name, value),
+        deleteSteps: (start, end) => _health.delete(
+          type: HealthDataType.STEPS,
+          startTime: start,
+          endTime: end,
+        ),
+      );
       final retryState = await _loadRetryState();
       var retryStateDirty = false;
       // METADATA ONLY — 400 days of payload is ~300 MB resident, measured, and
@@ -1018,7 +1123,21 @@ class HealthExporter {
     // on both stores (Health Connect SleepSessionRecord; HealthKit inBed+Core).
     if (Platform.isAndroid && !androidSleepAlreadyWritten) {
       try {
-        if (!await _androidSleep.replace(b)) {
+        // No night today means a clear, which must stop short of yesterday's
+        // night if that one woke after noon.
+        DateTime? previousWake;
+        if (normalizeHealthSleepSession(b) == null) {
+          final prev = DateTime(dayStart.year, dayStart.month, dayStart.day - 1);
+          final pb = _decode(
+            (await LocalDb.dayResult(dayLabelOf(prev)))?['payload_json'],
+          );
+          if (pb != null) previousWake = normalizeHealthSleepSession(pb)?.end;
+        }
+        if (!await _androidSleep.replace(
+          b,
+          dayStart: dayStart,
+          previousWake: previousWake,
+        )) {
           debugPrint('[health] write Android sleep session returned false');
           success = false;
         }
@@ -1047,6 +1166,55 @@ class HealthExporter {
     // Outside the success accounting on purpose — see the method doc.
     await _purgeLegacyStepsIfNeeded(date, dayStart, dayEnd);
 
+    // Continuous Heart Rate (minute-by-minute average).
+    List<Map<String, Object?>>? hrRows;
+    try {
+      final db = await LocalDb.instance;
+      final startTs = dayStart.millisecondsSinceEpoch ~/ 1000;
+      final endTs = dayEnd.millisecondsSinceEpoch ~/ 1000;
+      // Group by minute to downsample
+      hrRows = await db.rawQuery(
+        'SELECT (rec_ts / 60) * 60 AS minute_ts, AVG(hr) as avg_hr '
+        'FROM decoded_onehz '
+        // THE BAND'S OWN SECONDS, AND DELIBERATELY NOT `derivableSourceSql()`.
+        //
+        // This is the one read in the app where a wider predicate would be
+        // wrong even for a VERIFIED sensor, and it is the same argument the
+        // steps block below makes: a sample that lands in Apple Health or
+        // Health Connect carries no qualifier, no source seam and no way for
+        // the user to unpick it later. Every other app on the device then
+        // treats it as one continuous series measured one way.
+        //
+        // A chest strap's HR under the same identity as the wrist's is exactly
+        // the systematic-difference blending this project refuses everywhere
+        // else (ASSUMPTIONS D2) — except that here the blend happens inside a
+        // system store we do not own and cannot correct. Deleting our prior
+        // samples for the window (which this exporter already does on every
+        // re-derive) is the only reversal available, and it is ours to run, not
+        // the user's.
+        //
+        // So: no external sensor's HR is written to the OS health store, ever,
+        // whatever its verification tier. If a sensor's readings should reach
+        // HealthKit, that sensor's own app is the honest writer of them. A
+        // separate per-source export identity is the only thing that would
+        // change this call, and it needs a decision (F5-shaped) rather than a
+        // predicate.
+        'WHERE rec_ts >= ? AND rec_ts < ? AND hr > 0 AND $kPrimaryBandSourceSql '
+        'GROUP BY minute_ts',
+        [startTs, endTs],
+      );
+    } catch (e) {
+      debugPrint('[health] query continuous hr: $e');
+      success = false;
+    }
+    // Minute HR is rebuilt from decoded_onehz, which is pruned
+    // rawRetentionDays behind the data edge, mid-day. Only the span it still
+    // covers may be cleared, or re-exporting an older day deletes HR it can
+    // never write back.
+    final hrFrom = healthHeartRateRewriteFrom(
+      normalizeHealthHeartRateSamples(hrRows ?? const [], dayStart, dayEnd),
+    );
+
     // Idempotency: remove OUR previously-written samples for this day (HealthKit /
     // Health Connect only let an app delete its own data), then re-write fresh.
     // Sleep is not in this list — native replace already deleted it.
@@ -1070,7 +1238,9 @@ class HealthExporter {
     // per-session instead of day-wide.
     var workoutCleared = true;
     for (final t in _rewriteTypes) {
-      if (await _deleteOwnSamples(t, dayStart, dayEnd)) continue;
+      final from = t == HealthDataType.HEART_RATE ? hrFrom : dayStart;
+      if (from == null) continue;
+      if (await _deleteOwnSamples(t, from, dayEnd)) continue;
       debugPrint('[health] delete ${t.name} did not clear the day');
       success = false;
       if (t == HealthDataType.WORKOUT) workoutCleared = false;
@@ -1128,22 +1298,17 @@ class HealthExporter {
       mid,
     );
 
-    // Hourly buckets spanning [dayStart, dayEnd), shared by the active/basal
-    // energy writers below. Each bucket is a real elapsed clock-hour (not
-    // 1/24th of the day's span — that would give 57.5min/62.5min "hours" on
-    // DST-transition days); the day's actual length (23/24/25 real hours)
-    // instead changes bucketCount, with the final bucket clipped to dayEnd so
-    // it never spills into the next calendar day.
-    final bucketBounds = <DateTime>[dayStart];
-    while (bucketBounds.last.isBefore(dayEnd)) {
-      final next = bucketBounds.last.add(const Duration(hours: 1));
-      bucketBounds.add(next.isAfter(dayEnd) ? dayEnd : next);
-    }
+    final bucketBounds = healthEnergyBucketBounds(
+      dayStart,
+      dayEnd,
+      DateTime.now(),
+    );
     final bucketCount = bucketBounds.length - 1;
 
     // Active energy: chunked into hourly buckets over the day.
     // We subtract workout calories to prevent double-counting, because workouts
-    // are exported separately (their totalEnergyBurned already covers it).
+    // are exported separately (their totalEnergyBurned already covers it, on
+    // Apple only — see healthWorkoutEnergyKcal).
     // Upper bound is exclusive (dayEnd - 1s): sessionsInRange is inclusive on
     // both ends, so a workout starting exactly at midnight would otherwise be
     // double-subtracted from both this day and the next.
@@ -1153,16 +1318,8 @@ class HealthExporter {
         dayStart.millisecondsSinceEpoch ~/ 1000,
         (dayEnd.millisecondsSinceEpoch ~/ 1000) - 1,
       );
-      var workoutCal = 0.0;
-      for (final r in rows) {
-        if ((r['status']?.toString() ?? '') == 'live') continue;
-        // A fabricated session's calories never get their own WORKOUT
-        // sample (_writeOneWorkout skips it) — subtracting them here too
-        // would make them vanish from the day entirely instead of just
-        // staying in the active-energy total where they still belong.
-        if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) continue;
-        workoutCal += (r['calories'] as num?)?.toDouble() ?? 0.0;
-      }
+      final workoutCal =
+          healthWorkoutCaloriesToSubtract(rows, isApplePlatform: isApple);
       cal = (cal > workoutCal) ? cal - workoutCal : 0.0;
     } catch (e) {
       // Unknown whether cal is workout-adjusted — still write our best guess
@@ -1172,7 +1329,7 @@ class HealthExporter {
       success = false;
     }
 
-    if (cal > 0) {
+    if (cal > 0 && bucketCount > 0) {
       final calPerHour = cal / bucketCount;
       for (int i = 0; i < bucketCount; i++) {
         try {
@@ -1197,7 +1354,10 @@ class HealthExporter {
     // Basal energy = total daily energy (TDEE) − active, chunked hourly.
     final calTotal = sc('calories_total');
     final rawCal = sc('calories');
-    if (calTotal != null && rawCal != null && calTotal > rawCal) {
+    if (calTotal != null &&
+        rawCal != null &&
+        calTotal > rawCal &&
+        bucketCount > 0) {
       final basal = (calTotal - rawCal).toDouble();
       final basalPerHour = basal / bucketCount;
       for (int i = 0; i < bucketCount; i++) {
@@ -1220,47 +1380,6 @@ class HealthExporter {
       }
     }
 
-    // Continuous Heart Rate (minute-by-minute average).
-    List<Map<String, Object?>>? hrRows;
-    try {
-      final db = await LocalDb.instance;
-      final startTs = dayStart.millisecondsSinceEpoch ~/ 1000;
-      final endTs = dayEnd.millisecondsSinceEpoch ~/ 1000;
-      // Group by minute to downsample
-      hrRows = await db.rawQuery(
-        'SELECT (rec_ts / 60) * 60 AS minute_ts, AVG(hr) as avg_hr '
-        'FROM decoded_onehz '
-        // THE BAND'S OWN SECONDS, AND DELIBERATELY NOT `derivableSourceSql()`.
-        //
-        // This is the one read in the app where a wider predicate would be
-        // wrong even for a VERIFIED sensor, and it is the same argument the
-        // steps block below makes: a sample that lands in Apple Health or
-        // Health Connect carries no qualifier, no source seam and no way for
-        // the user to unpick it later. Every other app on the device then
-        // treats it as one continuous series measured one way.
-        //
-        // A chest strap's HR under the same identity as the wrist's is exactly
-        // the systematic-difference blending this project refuses everywhere
-        // else (ASSUMPTIONS D2) — except that here the blend happens inside a
-        // system store we do not own and cannot correct. Deleting our prior
-        // samples for the window (which this exporter already does on every
-        // re-derive) is the only reversal available, and it is ours to run, not
-        // the user's.
-        //
-        // So: no external sensor's HR is written to the OS health store, ever,
-        // whatever its verification tier. If a sensor's readings should reach
-        // HealthKit, that sensor's own app is the honest writer of them. A
-        // separate per-source export identity is the only thing that would
-        // change this call, and it needs a decision (F5-shaped) rather than a
-        // predicate.
-        'WHERE rec_ts >= ? AND rec_ts < ? AND hr > 0 AND $kPrimaryBandSourceSql '
-        'GROUP BY minute_ts',
-        [startTs, endTs],
-      );
-    } catch (e) {
-      debugPrint('[health] query continuous hr: $e');
-      success = false;
-    }
     if (hrRows != null) {
       final wroteHeartRate = await exportContinuousHeartRateDay(
         rows: hrRows,
@@ -1359,6 +1478,10 @@ class HealthExporter {
     if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) {
       return null; // skip, not a failure
     }
+    // "Private session" is hidden from exports, and Health is one.
+    if ((r['private'] as num?)?.toInt() == 1) {
+      return null; // skip, not a failure
+    }
     final st = (r['start_ts'] as num?)?.toInt();
     final en = (r['end_ts'] as num?)?.toInt();
     if (st == null || en == null || en <= st) {
@@ -1369,7 +1492,7 @@ class HealthExporter {
         activityType: _activity(r['type']?.toString()),
         start: DateTime.fromMillisecondsSinceEpoch(st * 1000),
         end: DateTime.fromMillisecondsSinceEpoch(en * 1000),
-        totalEnergyBurned: (r['calories'] as num?)?.round(),
+        totalEnergyBurned: healthWorkoutEnergyKcal(r, isApplePlatform: isApple),
         title: healthWorkoutTitleForType(r['type']?.toString()),
       );
     } catch (e) {
@@ -1511,6 +1634,25 @@ String? healthWorkoutTitleForType(String? type) {
       .join(' ');
 }
 
+/// Calories of the day's sessions that get their own WORKOUT sample, and so
+/// come off the day's active energy. A session [HealthExporter] skips (live,
+/// fabricated end, private) keeps its calories in the active-energy total —
+/// subtracting them too would make them vanish from the day entirely. Only
+/// the energy the WORKOUT sample itself carries comes off
+/// ([healthWorkoutEnergyKcal]: none on Android).
+@visibleForTesting
+double healthWorkoutCaloriesToSubtract(List<Map<String, Object?>> rows,
+    {bool isApplePlatform = true}) {
+  var total = 0.0;
+  for (final r in rows) {
+    if ((r['status']?.toString() ?? '') == 'live') continue;
+    if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) continue;
+    if ((r['private'] as num?)?.toInt() == 1) continue;
+    total += healthWorkoutEnergyKcal(r, isApplePlatform: isApplePlatform) ?? 0;
+  }
+  return total;
+}
+
 /// Parameterised by [ios] rather than reading `Platform` directly so a unit
 /// test can exercise BOTH platform branches on a host VM (where `Platform.isIOS`
 /// and `Platform.isAndroid` are both false) — see
@@ -1542,14 +1684,19 @@ HealthWorkoutActivityType healthActivityForType(
   switch ((type ?? '').toLowerCase()) {
     case 'run':
     case 'running':
+    case 'treadmill':
+    case 'sprinting':
       return HealthWorkoutActivityType.RUNNING;
     case 'cycle':
     case 'cycling':
     case 'bike':
     case 'biking':
+    case 'indoor_bike':
+    case 'mountain_biking':
       return HealthWorkoutActivityType.BIKING;
     case 'walk':
     case 'walking':
+    case 'dog_walking':
       return HealthWorkoutActivityType.WALKING;
     case 'swim':
     case 'swimming':
@@ -1559,6 +1706,11 @@ HealthWorkoutActivityType healthActivityForType(
     case 'strength':
     case 'weights':
     case 'lifting':
+    // The catalogue's stored keys (`Activity.typeKey`). Without them a
+    // 'Weight training' session landed in Apple Health as Other, #184 again.
+    case 'weight_training':
+    case 'powerlifting':
+    case 'kettlebell':
       return ios
           ? HealthWorkoutActivityType.TRADITIONAL_STRENGTH_TRAINING
           : HealthWorkoutActivityType.STRENGTH_TRAINING;

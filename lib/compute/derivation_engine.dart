@@ -1767,7 +1767,16 @@ import 'substrate.dart';
 // 104 → 105 (gen5 on-chip step counter spans, issue #475): a strap_counter
 // day also stores hourly `steps.spans` off the counter's per-record times,
 // scaled to the calibrated `value`, so the day screen can place them. Edge-only.
-const int kAlgoVersion = 105;
+// 105 → 106 (sweep batch, edge#506 #512): manual HR zones reach the day
+// derive (Profile.toMap dropped `hr_zone_bounds`, so zone timeline/zone_source
+// banded on the automatic set); the habitual-midsleep prior reads the bare
+// `SleepWindow.toJson()` every writer stores (it never had history and every
+// night anchored on the 03:30 cold start); tonight's sleep begun before
+// midnight leaves the waking series behind strain/TRIMP/zones/calories,
+// daytime HRV and the HR dip, and is no longer also booked as this day's nap
+// (`PreparedDerivationDay.tonightSleepOnsetSec`); a saved session's HRR
+// abstains when recording resumed more than 30 s after its end. Edge-only.
+const int kAlgoVersion = 106;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -2642,6 +2651,10 @@ class DerivationEngine {
   static bool _running = false;
   bool get running => _running;
 
+  /// Hold or release the process-wide latch, as another pass would.
+  @visibleForTesting
+  static set debugRunning(bool v) => _running = v;
+
   /// Run [body] under the process-wide derivation lock, returning [busy]
   /// unchanged if a pass is already in flight. Only for entry points that do
   /// NOT call another locked entry point (which would deadlock-by-skip).
@@ -2685,7 +2698,9 @@ class DerivationEngine {
   /// freshness-critical day: TODAY when raw has reached today, else the latest
   /// pending day. [heavy]=true sweeps every recomputable day.
   /// [force]=true recomputes EVERY non-finalized day regardless of the cursor.
-  /// Re-entrant calls are coalesced. Returns the number of days computed.
+  /// A call while another pass holds the latch is DROPPED (returns 0); a
+  /// caller that must run waits on [running] first. Returns the number of
+  /// days computed.
   Future<int> run(
     Profile profile, {
     bool heavy = false,
@@ -2924,6 +2939,15 @@ class DerivationEngine {
       } catch (e) {
         _log('[derive] strain rescale failed (kept old values): $e');
       }
+      // Restamp Today's freshness here, not in each caller: the iOS
+      // background pass has no caller to do it, and getToday reads the
+      // night from `overnight_day`, so a night settled in the background
+      // kept serving the previous one.
+      try {
+        await LocalDb.refreshComputeFreshness();
+      } catch (e) {
+        _log('[derive] freshness refresh failed: $e');
+      }
       _running = false;
       final finishedAt = DateTime.now().millisecondsSinceEpoch;
       _diag
@@ -3134,13 +3158,39 @@ class DerivationEngine {
     if (stats.rows > (_diag['max_day_raw_rows'] as int)) {
       _diag['max_day_raw_rows'] = stats.rows;
     }
+    // Tonight's sleep is the NEXT day's main sleep; it is only known once
+    // that day has derived, and this day keeps re-deriving until it
+    // finalizes, so it converges on the following pass.
+    final tonight = tonightSleep(
+      storedWindowSpan(await LocalDb.sleepWindowJsonFor(localDateLabel(dayEnd))),
+      dayStartSec: dayStart,
+      dayEndSec: dayEnd,
+      sleepOffsetSec: candidate.present ? candidate.sleepOffsetSec : 0,
+    );
     return candidate.toPreparedDay(
       daySub: daySub,
       napSub: napSub,
       sleepSub: sleepSub,
+      tonightSleepOnsetSec: tonight?.startSec ?? 0,
+      tonightSleepOffsetSec: tonight?.endSec ?? 0,
       ownership: ownership,
       priority: priority,
     );
+  }
+
+  /// [next] (the following day's main sleep) when it is TONIGHT's from this
+  /// day's side: begun inside this day and after its own sleep ended.
+  @visibleForTesting
+  static ({int startSec, int endSec})? tonightSleep(
+    ({int startSec, int endSec})? next, {
+    required int dayStartSec,
+    required int dayEndSec,
+    required int sleepOffsetSec,
+  }) {
+    if (next == null) return null;
+    if (next.startSec < dayStartSec || next.startSec >= dayEndSec) return null;
+    if (next.startSec < sleepOffsetSec) return null;
+    return next;
   }
 
   /// Who owns each anchor signal over `[from, to]`, plus the order that
@@ -3282,11 +3332,19 @@ class DerivationEngine {
     // [_kFoldedDaysKey] for why this exists and why a legacy profile that
     // lacks it is discarded rather than trusted.
     final foldedDays = SleepProfilePolicy.foldedDays(profileJson);
-    final mayFold = SleepProfilePolicy.shouldFold(
-      alreadyFolded: foldedDays,
-      dayId: dayId,
-      hasOverride: override != null,
-    );
+    // A fold is once per day_id, ever, so it must not take a pass that staged
+    // the night while it was still going (the first light pass after 00:15
+    // sees an hour of it). The day re-stages until it finalizes, so a pass
+    // after the day's window has closed is always still to come.
+    final mayFold = SleepProfilePolicy.nightOver(
+          dataEdgeSec: await LocalDb.lastDecodedRecTs(),
+          dayEndSec: range.$2,
+        ) &&
+        SleepProfilePolicy.shouldFold(
+          alreadyFolded: foldedDays,
+          dayId: dayId,
+          hasOverride: override != null,
+        );
     // The habitual-midsleep prior needs 14 distinct days and this call carries
     // ~36 h of substrate, so without the STORED windows the prior can never
     // fire in production and every night is anchored to the 03:30 cold start.
@@ -3547,25 +3605,40 @@ class DerivationEngine {
       for (final r in await LocalDb.sleepWindowRows(days)) {
         final dayKey = r['day_id'] as String?;
         if (dayKey == null || dayKey.isEmpty || dayKey == excludeDay) continue;
-        final raw = r['window_json'];
-        if (raw is! String || raw.isEmpty) continue;
-        final decoded = jsonDecode(raw);
-        // `value` is the string '—' on a night with no sleep — only a Map when
-        // a window was actually found.
-        final v = decoded is Map ? decoded['value'] : null;
-        if (v is! Map) continue;
-        final onsetMs = (v['onset_ms'] as num?)?.toDouble();
-        final offsetMs = (v['offset_ms'] as num?)?.toDouble();
-        if (onsetMs == null || offsetMs == null) continue;
-        final startSec = (onsetMs / 1000).round();
-        final endSec = (offsetMs / 1000).round();
-        if (startSec <= 0 || endSec <= startSec) continue;
-        out.add((startSec: startSec, endSec: endSec, dayKey: dayKey));
+        final span = storedWindowSpan(r['window_json']);
+        if (span == null) continue;
+        out.add((startSec: span.startSec, endSec: span.endSec, dayKey: dayKey));
       }
     } catch (e) {
       _log('sleep history for midsleep prior FAILED/skipped: $e');
     }
     return out;
+  }
+
+  /// One `day_result.window_json` as epoch seconds, or null when it holds no
+  /// window. Every writer (this engine and both importers) stores a BARE
+  /// `SleepWindow.toJson()`; only reading a `value` envelope skipped every row,
+  /// so the midsleep prior never had history. Envelope still accepted (its
+  /// `value` is the string '—' on a night with no sleep).
+  @visibleForTesting
+  static ({int startSec, int endSec})? storedWindowSpan(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(raw);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map) return null;
+    final env = decoded['value'];
+    final v = env is Map ? env : decoded;
+    final onsetMs = (v['onset_ms'] as num?)?.toDouble();
+    final offsetMs = (v['offset_ms'] as num?)?.toDouble();
+    if (onsetMs == null || offsetMs == null) return null;
+    final startSec = (onsetMs / 1000).round();
+    final endSec = (offsetMs / 1000).round();
+    if (startSec <= 0 || endSec <= startSec) return null;
+    return (startSec: startSec, endSec: endSec);
   }
 
   Future<Substrate> _loadSubstrateRange(
@@ -4084,6 +4157,7 @@ class DerivationEngine {
       await _runNotifications();
       // Store the new signature so the next tick is a cheap no-op until it moves.
       await LocalDb.setCursor('baseline_sig', await _baselineSignature());
+      await LocalDb.refreshComputeFreshness();
       return done;
     } catch (e, st) {
       _log('rescan ERROR: $e\n$st');
@@ -4210,11 +4284,20 @@ class DerivationEngine {
     // Under the SAME lock as run()/runDays(): this writes day_result rows, and
     // an import racing a background derive of the same day is exactly the
     // partial-overwrites-complete case the lock exists for.
+    //
+    // It WAITS for the lock instead of taking the busy skip: the substrate
+    // lives only in the caller's buffer, which is evicted right after, so a
+    // skipped import day is gone for good. No await between the loop's last
+    // check and the lock taking it, so nothing can slip in between.
+    while (_running) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
     return _withRunLock(0, () async {
       final days = calendarDays(sub);
       final dataNowSec = sub.lastTs ?? 0;
       var done = 0;
-      for (final day in days) {
+      for (var i = 0; i < days.length; i++) {
+        final day = days[i];
         if (!dates.contains(day.date)) continue;
         // NEVER clobber a day the band measured. `forceFinalize: true` below
         // both replaces the measured result and locks the day out of every
@@ -4227,7 +4310,9 @@ class DerivationEngine {
           continue;
         }
         try {
-          await _deriveDay(sub, day, profile, dataNowSec, forceFinalize: true);
+          await _deriveDay(sub, day, profile, dataNowSec,
+              forceFinalize: true,
+              next: i + 1 < days.length ? days[i + 1] : null);
           done++;
           onDayDone?.call(day.date);
         } catch (e) {
@@ -4251,6 +4336,7 @@ class DerivationEngine {
     // their own, so the import must not report failure.
     if (!await _runCrossDay(profile)) _log('import: crossday rollup deferred');
     await _runNotifications();
+    await LocalDb.refreshComputeFreshness();
   }
 
   /// Durable review jobs outlive a busy derive or a terminated process.
@@ -4279,6 +4365,7 @@ class DerivationEngine {
     Profile profile,
     int dataNowSec, {
     bool forceFinalize = false,
+    PhysioDay? next,
   }) async {
     final daySub = sub.slice(day.startSec, day.endSec);
     // Same buffered slice prepareDerivationPayload uses — without it, imported
@@ -4307,6 +4394,18 @@ class DerivationEngine {
         : (win.offsetMs != null
               ? (win.offsetMs! / 1000).round() + 1
               : ((sleepSub.lastTs ?? -1) + 1));
+    final nextWin = next?.sleep.window;
+    final tonight = tonightSleep(
+      nextWin?.onsetMs == null || nextWin?.offsetMs == null
+          ? null
+          : (
+              startSec: (nextWin!.onsetMs! / 1000).round(),
+              endSec: (nextWin.offsetMs! / 1000).round(),
+            ),
+      dayStartSec: _localDayLabelToSec(day.date),
+      dayEndSec: _localNextDayLabelToSec(day.date),
+      sleepOffsetSec: offsetSec,
+    );
     await _derivePreparedDay(
       PreparedDerivationDay(
         date: day.date,
@@ -4320,6 +4419,8 @@ class DerivationEngine {
         daySub: daySub,
         napSub: napSub,
         sleepSub: sleepSub,
+        tonightSleepOnsetSec: tonight?.startSec ?? 0,
+        tonightSleepOffsetSec: tonight?.endSec ?? 0,
       ),
       profile,
       dataNowSec,
@@ -4388,6 +4489,7 @@ class DerivationEngine {
       hypnoStages: day.hypnoStages,
       sleepOnsetSec: day.sleepOnsetSec,
       sleepOffsetSec: day.sleepOffsetSec,
+      tonightSleepOnsetSec: day.tonightSleepOnsetSec,
       profile: profile.toMap(),
       dayConfidence: day.confidence,
       dayFlags: day.flags,
@@ -4545,6 +4647,7 @@ class DerivationEngine {
     // partial night. Every path (algo bump, force, override, rescan) lands here.
     if (!producedNothing &&
         (nightSubstrateRegressed(
+              sleepRejected: day.sleepSource == 'rejected',
               sleepSubEmpty: sleepSub.isEmpty,
               nightScalarsNull: scMap == null ||
                   (scMap['rhr'] == null &&
@@ -4552,7 +4655,9 @@ class DerivationEngine {
                       scMap['readiness'] == null),
             ) ||
             // An import brings its own substrate, the prune can't have cut it.
+            // A rejected night has nothing to protect either.
             (!suppliedSubstrate &&
+                day.sleepSource != 'rejected' &&
                 windowTruncatedByPrune(
                   day.date,
                   await LocalDb.getCursorInt(_prunedBeforeCursor),
@@ -4748,6 +4853,8 @@ class DerivationEngine {
         dayStartSec: _localDayLabelToSec(day.date),
         dayEndSec: day.endSec,
         dataNowSec: dataNowSec,
+        tonightSleepOnsetSec: day.tonightSleepOnsetSec,
+        tonightSleepOffsetSec: day.tonightSleepOffsetSec,
       );
       final blocks =
           await _runDayBlocksCancellable(blocksInput, _perDayTimeout);
@@ -5190,10 +5297,15 @@ class DerivationEngine {
   /// shape is unit-testable without the full pipeline; the caller still has to
   /// confirm an EXISTING result actually had real night scalars before
   /// declining to write over it.
+  ///
+  /// [sleepRejected] (the user said "not sleep") is never a regression: the
+  /// null night is what they asked for, and the existing row is the very
+  /// night they rejected.
   static bool nightSubstrateRegressed({
+    bool sleepRejected = false,
     required bool sleepSubEmpty,
     required bool nightScalarsNull,
-  }) => sleepSubEmpty && nightScalarsNull;
+  }) => !sleepRejected && sleepSubEmpty && nightScalarsNull;
 
   /// Whether [row] is a REAL derived day result worth protecting — i.e. not a
   /// skip marker and not an all-absent shell.
@@ -6156,8 +6268,9 @@ class DerivationEngine {
   static ({List<int> keys, List<double> hr}) _perMinuteMeanWake(
     Substrate s,
     int sleepOnsetSec,
-    int sleepOffsetSec,
-  ) {
+    int sleepOffsetSec, {
+    int tonightSleepOnsetSec = 0,
+  }) {
     final buckets = <int, List<double>>{};
     for (var i = 0; i < s.hr.length && i < s.tsSec.length; i++) {
       if (s.hr[i] <= 0) continue;
@@ -6167,6 +6280,8 @@ class DerivationEngine {
           t < sleepOffsetSec) {
         continue;
       }
+      // Tonight's sleep, begun before midnight: asleep, not waking.
+      if (tonightSleepOnsetSec > 0 && t >= tonightSleepOnsetSec) continue;
       (buckets[t ~/ 60] ??= []).add(s.hr[i].toDouble());
     }
     final keys = buckets.keys.toList()..sort();
@@ -6352,12 +6467,16 @@ class DerivationEngine {
     /// Step-counter calibration, read by the caller; null = uncalibrated.
     StepCalibrationProfile? counterProfile,
     int counterWearing = Wearing.wrist,
+    /// Onset of tonight's sleep when it began before midnight, 0 = none. See
+    /// `PreparedDerivationDay.tonightSleepOnsetSec`.
+    int tonightSleepOnsetSec = 0,
   }) {
     final wake = _buildWakeDayFeatures(
       daySub,
       profile,
       sleepOnsetSec: sleepOnsetSec,
       sleepOffsetSec: sleepOffsetSec,
+      tonightSleepOnsetSec: tonightSleepOnsetSec,
       dayStartSec: dayStartSec,
       dayCalendarEndSec: dayCalendarEndSec,
       dataNowSec: dataNowSec,
@@ -6970,6 +7089,7 @@ class DerivationEngine {
     double? restingHr,
     double? dynFloorG,
     List<List<int>> stepSpans = const [],
+    int tonightSleepOnsetSec = 0,
   }) {
     final activeMin = _activeMinutes(daySub, sleepOnsetSec, sleepOffsetSec);
     final wear = _wearBlock(
@@ -6978,8 +7098,9 @@ class DerivationEngine {
       dayCalendarEndSec: dayCalendarEndSec,
       dataNowSec: dataNowSec,
     );
-    final wakeSeries =
-        _perMinuteMeanWake(daySub, sleepOnsetSec, sleepOffsetSec);
+    final wakeSeries = _perMinuteMeanWake(
+        daySub, sleepOnsetSec, sleepOffsetSec,
+        tonightSleepOnsetSec: tonightSleepOnsetSec);
     final perMin = wakeSeries.hr;
     // The day's MEASURED walking cadence, minute-aligned to the same wake
     // buckets — from the resolved `live_coverage` spans, so band/phone overlap
@@ -7756,7 +7877,8 @@ class DerivationEngine {
   /// so: no score, no 0-100, no battery, no gauge, no "current stress". a
   /// timeline of RMSSD over still minutes, labelled as variability, is the
   /// whole allowed surface.
-  static Map<String, dynamic> _daytimeHrv(Substrate s, int onsetSec, int offsetSec) {
+  static Map<String, dynamic> _daytimeHrv(Substrate s, int onsetSec, int offsetSec,
+      {int tonightSleepOnsetSec = 0}) {
     const binSec = 300;
     final cut = ana.calibrationFor(_quietEnmoCutG, s.deviceFamily);
     if (cut == null) {
@@ -7781,9 +7903,10 @@ class DerivationEngine {
     double? prev;
     for (var k = 0; k < s.rrMs.length; k++) {
       final tSec = s.rrTsMs[k] ~/ 1000;
-      if (offsetSec > onsetSec && tSec >= onsetSec && tSec < offsetSec) {
+      if ((offsetSec > onsetSec && tSec >= onsetSec && tSec < offsetSec) ||
+          (tonightSleepOnsetSec > 0 && tSec >= tonightSleepOnsetSec)) {
         prev = null;
-        continue; // skip the sleep window
+        continue; // skip the sleep window (and tonight's, begun before midnight)
       }
       if (!quiet.contains(tSec)) {
         prev = null; // moving, or no accel to say otherwise — break the pair
@@ -8136,6 +8259,8 @@ class DerivationEngine {
     // lie-in the band rule removed from the night cannot be reclaimed as a
     // nap. Null = [offsetSec].
     int? napExcludeEndSec,
+    int tonightSleepOnsetSec = 0,
+    int tonightSleepOffsetSec = 0,
   }) {
     try {
       final n = s.length;
@@ -8210,6 +8335,14 @@ class DerivationEngine {
       // would double-count it.
       final naps = m.value!.where((nap) {
         if (leadingEdgeOwnedByYesterday && nap.startsAtRecordEdge) {
+          return false;
+        }
+        // Tonight's sleep, begun before midnight, is TOMORROW's main sleep.
+        // A night that ends inside the buffer (up at 02:00) is not deferred as
+        // unfinished, so without this it was booked here as a nap too.
+        if (tonightSleepOffsetSec > tonightSleepOnsetSec &&
+            t0 + nap.startSec < tonightSleepOffsetSec &&
+            t0 + nap.endSec > tonightSleepOnsetSec) {
           return false;
         }
         if (attributionEndSec == null) return true;
@@ -8482,9 +8615,11 @@ class DerivationEngine {
       dynHistoryDays: inp.dynHistoryDays,
       stepSpans: inp.stepSpans,
       sessions: inp.savedSessions,
+      tonightSleepOnsetSec: inp.tonightSleepOnsetSec,
     );
 
-    bundlePatch['daytime_hrv'] = _daytimeHrv(daySub, onset, offset);
+    bundlePatch['daytime_hrv'] = _daytimeHrv(daySub, onset, offset,
+        tonightSleepOnsetSec: inp.tonightSleepOnsetSec);
     seriesPatch['hrv_day'] = dayHrvCurve(daySub);
     seriesPatch['resp_day'] = dayRespCurve(daySub);
     seriesPatch['skin_temp_day'] = _daySkinTempCurve(daySub);
@@ -8510,6 +8645,8 @@ class DerivationEngine {
       napEdits: inp.napEdits,
       candidates: napSuggestions,
       napExcludeEndSec: inp.napExcludeEndSec ?? offset,
+      tonightSleepOnsetSec: inp.tonightSleepOnsetSec,
+      tonightSleepOffsetSec: inp.tonightSleepOffsetSec,
     );
     bundlePatch['sleep_periods'] = _sleepPeriods(
       onset,
@@ -8857,6 +8994,11 @@ class DerivationEngine {
       }
     }
     if (endIdx < 0) endIdx = n - 1;
+    // A hole across the bout end (strap back on, sync gap) makes the first
+    // sample after it a moment the band only started recording again: its HR
+    // is not the exercise peak and the drop from it is not a recovery.
+    // hrRecovery's own 30 s gap tolerance, measured from the bout end.
+    if (s.tsSec[endIdx] - endSec > 30) return none;
     // SLICE BY TIME, not by array position. The substrate is one row per
     // DECODED RECORD, not a dense 1 Hz grid, so `endIdx ± 30/75` used to cut a
     // window whose real duration depended on how gappy the tail was: on a sparse
@@ -9096,6 +9238,11 @@ class DerivationEngine {
         mainTstMin: mainTstMin,
         mainEfficiency: mainEfficiency,
       );
+  @visibleForTesting
+  static ({double? hrrBpm, double? tauSec}) debugHrrForBout(
+          Substrate s, int endSec) =>
+      _hrrForBout(s, endSec);
+
   /// Test seam for [_attachNaps] — the day-boundary attribution rules (drop
   /// tomorrow's leading nap, drop yesterday's trailing one) decide which day a
   /// nap's minutes are credited to, and are cheap to state directly.
@@ -9113,6 +9260,8 @@ class DerivationEngine {
     List<NapEdit> napEdits = const [],
     List<Map<String, dynamic>>? candidates,
     int? napExcludeEndSec,
+    int tonightSleepOnsetSec = 0,
+    int tonightSleepOffsetSec = 0,
   }) =>
       _attachNaps(
         bundle,
@@ -9127,6 +9276,8 @@ class DerivationEngine {
         napEdits: napEdits,
         candidates: candidates,
         napExcludeEndSec: napExcludeEndSec,
+        tonightSleepOnsetSec: tonightSleepOnsetSec,
+        tonightSleepOffsetSec: tonightSleepOffsetSec,
       );
 
   void _log(String m) {
@@ -9235,6 +9386,10 @@ class _DayBlocksInput {
   final int dayStartSec;
   final int dayEndSec;
   final int dataNowSec;
+
+  /// See `PreparedDerivationDay.tonightSleepOnsetSec`. 0 = none.
+  final int tonightSleepOnsetSec;
+  final int tonightSleepOffsetSec;
   const _DayBlocksInput({
     required this.daySub,
     required this.napSub,
@@ -9262,6 +9417,8 @@ class _DayBlocksInput {
     required this.dayStartSec,
     required this.dayEndSec,
     required this.dataNowSec,
+    this.tonightSleepOnsetSec = 0,
+    this.tonightSleepOffsetSec = 0,
   });
 }
 

@@ -132,6 +132,21 @@ void main() {
     expect(trailing, isNot(equals(leadingVals)));
   });
 
+  test('trailingSeriesValues(before:) is the window strictly before that day',
+      () async {
+    await (await LocalDb.instance).delete('metric_series');
+    for (var i = 1; i <= 30; i++) {
+      await seedDay('2026-05-${i.toString().padLeft(2, '0')}', 40.0 + i);
+    }
+    // A past day's baseline: days before 05-20 only (01..19), never 05-20
+    // itself and never the newer days that came after it.
+    final past = await LocalDb.trailingSeriesValues('readiness', 28,
+        before: '2026-05-20');
+    expect(past.length, 19);
+    expect(past.first, 41.0);
+    expect(past.last, 59.0);
+  });
+
   // ── The read path never trusts a polluted-but-valid on-disk artifact ───────
 
   test('load ignores a valid polluted rolling_artifact, even when all finalized',

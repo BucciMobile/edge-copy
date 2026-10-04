@@ -433,4 +433,46 @@ void main() {
       expect(sc['nap_min'], 0.0);
     });
   });
+
+  group('tonight\'s sleep is tomorrow\'s night, not today\'s nap', () {
+    const midnight = 1750000800;
+    // Bed 21:30, up at 02:00 for an early flight, band on until 03:00. The
+    // bout ends inside the 3 h buffer, so it is not deferred as unfinished.
+    const first = midnight + 18 * 3600;
+    const bed = midnight + 21 * 3600 + 1800;
+    const up = midnight + 86400 + 2 * 3600;
+    final s = _daySubstrate(
+      startSec: first,
+      lengthSec: 9 * 3600,
+      napFromSec: bed - first,
+      napToSec: up - first,
+    );
+
+    // Detected naps are review proposals now, so the candidate list is what
+    // would get booked.
+    List<Map<String, dynamic>> attach({int onset = 0, int offset = 0}) {
+      final candidates = <Map<String, dynamic>>[];
+      DerivationEngine.debugAttachNaps(
+        <String, dynamic>{},
+        <String, dynamic>{},
+        s,
+        0,
+        0,
+        candidates: candidates,
+        attributionStartSec: midnight,
+        attributionEndSec: midnight + 86400,
+        tonightSleepOnsetSec: onset,
+        tonightSleepOffsetSec: offset,
+      );
+      return candidates;
+    }
+
+    test('without tomorrow\'s window the night reads as a nap', () {
+      expect(attach(), isNotEmpty);
+    });
+
+    test('with it, the night is not booked twice', () {
+      expect(attach(onset: bed, offset: up), isEmpty);
+    });
+  });
 }
