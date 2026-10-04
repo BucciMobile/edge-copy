@@ -6757,18 +6757,38 @@ class AppState extends ChangeNotifier {
           _nudgeLive(); // a resumed workout owns its streams too
         } else {
           // A stale live row has no end_ts (it was never stopped). We don't
-          // know when the workout actually ended, so the honest stamp is
-          // reconcile-time (stated as such), not a guess at the real finish
-          // (edge#277) — and for the same reason this is NEVER exported to
-          // Health: [end_ts] here is fabricated, so a [start,end_ts] Health
-          // workout sample would report a bogus duration as real data.
+          // know when the workout actually ended (edge#277), so this is NEVER
+          // exported to Health: [end_ts] here is fabricated, so a
+          // [start,end_ts] Health workout sample would report a bogus
+          // duration as real data.
           // `end_ts_fabricated` records that so `_writeOneWorkout` can skip it
           // on every later periodic export pass too, not just this call site —
           // without the flag the row looks like any other finished workout and
           // gets exported on the next drain/derive cycle regardless.
-          final reconciledEndTs = nowMs ~/ 1000;
+          //
+          // The stamp is the LAST TALLY SNAPSHOT (written every 30 s while the
+          // session ticked), not reconcile-time: a run killed at 18:40 and
+          // reopened at 07:30 would otherwise span the whole night, and the
+          // substrate re-score bills that night's HR as workout calories,
+          // strain and zone minutes, and the suggestion sweep retires every
+          // auto-detected workout inside it. No snapshot means it never
+          // ticked, so there is no evidence it ran past its start.
+          final nowSec = nowMs ~/ 1000;
+          final startTs = (row['start_ts'] as num?)?.toInt() ?? nowSec;
           final hadRealEnd = row['end_ts'] != null;
-          final finalEndTs = (row['end_ts'] as int?) ?? reconciledEndTs;
+          // Best-effort: a failed or malformed snapshot read falls back to
+          // startTs rather than leaving this (and later) stale rows unfinalized.
+          var lastTickSec = startTs;
+          if (!hadRealEnd) {
+            try {
+              final updatedTs = (await LocalDb.liveWorkoutTally(
+                row['id'] as String? ?? '',
+              ))?['updated_ts'];
+              if (updatedTs is num) lastTickSec = updatedTs.toInt() ~/ 1000;
+            } catch (_) {}
+          }
+          final finalEndTs = (row['end_ts'] as int?) ??
+              math.max(startTs, math.min(lastTickSec, nowSec));
           await LocalDb.putSession({
             ...row,
             'status': 'done',
@@ -6778,7 +6798,7 @@ class AppState extends ChangeNotifier {
           // Never resumed, so its tally snapshot (if any) is now orphaned.
           unawaited(LocalDb.deleteLiveWorkoutTally(row['id'] as String? ?? ''));
           await _dismissSupersededSuggestions(
-            startSec: row['start_ts'] as int,
+            startSec: startTs,
             endSec: finalEndTs,
           );
           _log('[workout] finalized a stale live-session row from a previous run (id=${row['id']}).');

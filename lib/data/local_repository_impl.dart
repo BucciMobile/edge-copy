@@ -510,10 +510,13 @@ class LocalRepositoryImpl extends LocalRepository {
         : {
             'rmssd': rmssd,
             'sdnn': _scalar(b, 'sdnn'),
-            // Same baseline getDayHeart emits. Without it TodayData.hrv.baseline
-            // was always null, WidgetService pushed -1, and the HRV ring on the
-            // widget and the Watch could never fill on any day.
-            'baseline': (await _seriesMean('rmssd'))?.round(),
+            // Same baseline getDayHeart emits: the 28 nights before this
+            // bundle's day. Without it TodayData.hrv.baseline was always null,
+            // WidgetService pushed -1, and the HRV ring on the widget and the
+            // Watch could never fill on any day.
+            'baseline': (await _seriesMean('rmssd',
+                    before: (sleepBundle?['date'] as String?) ?? todayDay))
+                ?.round(),
             'confidence': (hrvTime?['confidence'] as num?) ?? 0.5,
           };
 
@@ -525,7 +528,8 @@ class LocalRepositoryImpl extends LocalRepository {
       if (sleepBundle != null && rhrEnv != null)
         'nocturnal': _nocturnal(
           sleepBundle,
-          baselineRhr: await _seriesMean('rhr'),
+          baselineRhr: await _seriesMean('rhr',
+              before: (sleepBundle['date'] as String?) ?? todayDay),
         ),
       // No `resp['rsa'] is Map` gate. `getDayLungs` never had one, so Health →
       // Overview could say "no respiratory rate" on a day whose Vitals tab
@@ -805,6 +809,10 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, dynamic>> getDayHeart(String date) async {
     final b = await _bundleForDate(date);
     if (b == null) return const {};
+    // The baseline window ends at the day actually served: Today falls back
+    // to the latest complete day, and that night must not sit in its own
+    // baseline (same as getToday).
+    final served = (b['date'] as String?) ?? date;
     final hrCurve = (_sub(b, 'series')?['hr_curve'] as List?) ?? const [];
     final rmssd = _scalar(b, 'rmssd');
     final cd = await _crossDay();
@@ -817,7 +825,7 @@ class LocalRepositoryImpl extends LocalRepository {
       'hrv': {
         if (rmssd != null) 'rmssd': rmssd.round(),
         'sdnn': _scalar(b, 'sdnn')?.round(),
-        'baseline': (await _seriesMean('rmssd'))?.round(),
+        'baseline': (await _seriesMean('rmssd', before: served))?.round(),
         // HRV stability (CV %) + LF/HF — both now computed.
         'cv': _sub(b, 'clinical')?['cv'],
         // Rounded to 2dp for display — the raw clinical metric is round6()'d
@@ -840,7 +848,10 @@ class LocalRepositoryImpl extends LocalRepository {
       'baselines': b['baselines'],
       // Waking ultradian HRV timeline (RMSSD over the day, outside sleep).
       'daytime_hrv': b['daytime_hrv'],
-      'nocturnal': _nocturnal(b, baselineRhr: await _seriesMean('rhr')),
+      'nocturnal': _nocturnal(
+        b,
+        baselineRhr: await _seriesMean('rhr', before: served),
+      ),
       'resp': _respObj(b),
       // 'spo2' (oxygen dips) moved to _daySleep()/getDaySleep — it's an
       // overnight signal, grouped with the Sleep tab's nocturnal numbers now,
@@ -856,12 +867,14 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, dynamic>> getDayHrv(String date) async {
     final b = await _bundleForDate(date);
     if (b == null) return const {};
+    // Baseline window ends at the served day, see getDayHeart.
+    final served = (b['date'] as String?) ?? date;
     return {
       'timeline': (_sub(b, 'series')?['hrv_timeline'] as List?) ?? const [],
       'rmssd': _scalar(b, 'rmssd'),
       'sdnn': _scalar(b, 'sdnn'),
       'ln_rmssd': _scalar(b, 'ln_rmssd'),
-      'baseline': await _seriesMean('rmssd'),
+      'baseline': await _seriesMean('rmssd', before: served),
       'hrv_time': _sub(b, 'clinical.hrv_time'),
       'hrv_freq': _sub(b, 'clinical.hrv_freq'),
       'prsa_dc': _sub(b, 'clinical.prsa_dc'),
@@ -940,6 +953,8 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, dynamic>> _daySleep(String date) async {
     final b = await _bundleForDate(date);
     if (b == null) return const {};
+    // Baseline window ends at the served day, see getDayHeart.
+    final served = (b['date'] as String?) ?? date;
     // Each is a Metric envelope — read the inner `.value` where the fields live.
     final acct = _sub(b, 'sleep.accounting.value');
     final win = _sub(b, 'sleep.window.value');
@@ -1043,7 +1058,10 @@ class LocalRepositoryImpl extends LocalRepository {
       // screen can say so. The night is published normally and the caveat rides
       // with it; see `sleepChargingBlock` for why it has no confidence penalty.
       'charging': b['sleep_charging'],
-      'nocturnal': _nocturnal(b, baselineRhr: await _seriesMean('rhr')),
+      'nocturnal': _nocturnal(
+        b,
+        baselineRhr: await _seriesMean('rhr', before: served),
+      ),
       'resp': _respObj(b),
       // Oxygen dips (SpO2/ODI) — moved here from getDayHeart's payload: an
       // overnight signal belongs with the rest of this night's numbers, not
@@ -4120,8 +4138,8 @@ class LocalRepositoryImpl extends LocalRepository {
 
   // ── small series helpers ─────────────────────────────────────────────────────
 
-  Future<double?> _seriesMean(String key) async {
-    final vs = await LocalDb.trailingSeriesValues(key, 28);
+  Future<double?> _seriesMean(String key, {String? before}) async {
+    final vs = await LocalDb.trailingSeriesValues(key, 28, before: before);
     if (vs.isEmpty) return null;
     return vs.reduce((a, b) => a + b) / vs.length;
   }
