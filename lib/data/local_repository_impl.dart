@@ -755,7 +755,7 @@ class LocalRepositoryImpl extends LocalRepository {
       'hrv': {
         if (rmssd != null) 'rmssd': rmssd.round(),
         'sdnn': _scalar(b, 'sdnn')?.round(),
-        'baseline': (await _seriesMean('rmssd'))?.round(),
+        'baseline': (await _seriesMean('rmssd', before: date))?.round(),
         // HRV stability (CV %) + LF/HF — both now computed.
         'cv': _sub(b, 'clinical')?['cv'],
         // Rounded to 2dp for display — the raw clinical metric is round6()'d
@@ -778,7 +778,10 @@ class LocalRepositoryImpl extends LocalRepository {
       'baselines': b['baselines'],
       // Waking ultradian HRV timeline (RMSSD over the day, outside sleep).
       'daytime_hrv': b['daytime_hrv'],
-      'nocturnal': _nocturnal(b, baselineRhr: await _seriesMean('rhr')),
+      'nocturnal': _nocturnal(
+        b,
+        baselineRhr: await _seriesMean('rhr', before: date),
+      ),
       'resp': _respObj(b),
       // 'spo2' (oxygen dips) moved to _daySleep()/getDaySleep — it's an
       // overnight signal, grouped with the Sleep tab's nocturnal numbers now,
@@ -799,7 +802,7 @@ class LocalRepositoryImpl extends LocalRepository {
       'rmssd': _scalar(b, 'rmssd'),
       'sdnn': _scalar(b, 'sdnn'),
       'ln_rmssd': _scalar(b, 'ln_rmssd'),
-      'baseline': await _seriesMean('rmssd'),
+      'baseline': await _seriesMean('rmssd', before: date),
       'hrv_time': _sub(b, 'clinical.hrv_time'),
       'hrv_freq': _sub(b, 'clinical.hrv_freq'),
       'prsa_dc': _sub(b, 'clinical.prsa_dc'),
@@ -981,7 +984,10 @@ class LocalRepositoryImpl extends LocalRepository {
       // screen can say so. The night is published normally and the caveat rides
       // with it; see `sleepChargingBlock` for why it has no confidence penalty.
       'charging': b['sleep_charging'],
-      'nocturnal': _nocturnal(b, baselineRhr: await _seriesMean('rhr')),
+      'nocturnal': _nocturnal(
+        b,
+        baselineRhr: await _seriesMean('rhr', before: date),
+      ),
       'resp': _respObj(b),
       // Oxygen dips (SpO2/ODI) — moved here from getDayHeart's payload: an
       // overnight signal belongs with the rest of this night's numbers, not
@@ -3936,8 +3942,8 @@ class LocalRepositoryImpl extends LocalRepository {
 
   // ── small series helpers ─────────────────────────────────────────────────────
 
-  Future<double?> _seriesMean(String key) async {
-    final vs = await LocalDb.trailingSeriesValues(key, 28);
+  Future<double?> _seriesMean(String key, {String? before}) async {
+    final vs = await LocalDb.trailingSeriesValues(key, 28, before: before);
     if (vs.isEmpty) return null;
     return vs.reduce((a, b) => a + b) / vs.length;
   }

@@ -9461,18 +9461,24 @@ class LocalDb {
   /// [measuredOnly] defaults ON here, unlike [metricSeries]: this helper exists
   /// to build a rolling baseline, and a baseline blended with another vendor's
   /// derived numbers is not a baseline of this person (see [importedDates]).
+  ///
+  /// [before] (a `yyyy-MM-dd` day label) limits the window to days strictly
+  /// before it, so a past day is measured against its own trailing baseline
+  /// rather than today's, and never against itself.
   static Future<List<double>> trailingSeriesValues(
     String key,
     int n, {
     bool measuredOnly = true,
+    String? before,
   }) async {
     final db = await instance;
     final rows = await db.rawQuery(
       'SELECT value FROM metric_series '
       'WHERE key = ? AND value IS NOT NULL '
+      '${before != null ? 'AND date < ? ' : ''}'
       '${measuredOnly ? 'AND date NOT IN ($_importedDatesSql) ' : ''}'
       'ORDER BY date DESC LIMIT ?',
-      [key, n],
+      [key, ?before, n],
     );
     return [for (final r in rows.reversed) (r['value'] as num).toDouble()];
   }
