@@ -169,8 +169,11 @@ bool recoveryNightSettled({
   required int nowSec,
 }) {
   if (dayId != todayLabel()) return true;
-  final offsetMs = (((payload?['sleep'] as Map?)?['window'] as Map?)?['value']
-      as Map?)?['offset_ms'];
+  // A no-sleep window's `value` is the string '—', not a Map.
+  final sleep = payload?['sleep'];
+  final window = sleep is Map ? sleep['window'] : null;
+  final value = window is Map ? window['value'] : null;
+  final offsetMs = value is Map ? value['offset_ms'] : null;
   return overnightSettled(
     sleepOffsetSec: offsetMs is num ? offsetMs ~/ 1000 : null,
     dataEdgeSec: dataEdgeSec,
