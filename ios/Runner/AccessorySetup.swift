@@ -139,7 +139,10 @@ private final class Impl {
   // so a successfully provisioned accessory gets reported to Dart as cancelled.
   private var retryInFlight = false
   // True from a `showPicker` completion with no error and no new accessory listed, until
-  // `.accessoryAdded` (the pick) or `.pickerDidDismiss` (no pick) resolves the call.
+  // `.pickerDidDismiss` resolves the call. `.accessoryAdded` only records the pick in
+  // `awaitingAddedId`: the sheet is still up then and ASK is still finishing authorization,
+  // and the adapter power-cycles across the sheet, so Dart must not get the id (and start
+  // a connect or re-create a central) until the sheet is gone.
   //
   // The completion is NOT the user's choice. Traced on iOS 27: event `.pickerDidPresent`,
   // then the completion with error == nil and `session.accessories` still empty, then —
@@ -151,6 +154,8 @@ private final class Impl {
   // `.pickerDidDismiss` resolution of an `awaitingAdded` call.
   private var awaitingKnown: Set<String> = []
   private var awaitingFallback: () -> String? = { nil }
+  // The id `.accessoryAdded` reported for the current sheet, held until it dismisses.
+  private var awaitingAddedId: String?
 
   struct PickerError: Error { let message: String }
 
@@ -168,27 +173,24 @@ private final class Impl {
     // pending showPicker as "cancelled".
     switch event.eventType {
     case .accessoryAdded:
-      // The late half of a successful picker — see `awaitingAdded`.
-      guard awaitingAdded, let cb = pickerResult else { return }
-      awaitingAdded = false
-      pickerResult = nil
-      if let id = event.accessory?.bluetoothIdentifier?.uuidString.uppercased() {
-        NSLog("[ASK] accessory added after the picker returned: %@", id)
-        cb(.success(id))
-      } else {
-        cb(.failure(PickerError(message: "The accessory was added without a Bluetooth identifier.")))
-      }
+      // The pick, but the sheet is still up — hold it for `.pickerDidDismiss`.
+      guard awaitingAdded else { return }
+      awaitingAddedId = event.accessory?.bluetoothIdentifier?.uuidString.uppercased()
+      NSLog("[ASK] accessory added; holding %@ until the sheet dismisses",
+            awaitingAddedId ?? "(no bluetooth id)")
     case .pickerDidDismiss:
       // Ignore the first sheet's dismissal while the Gen 4 retry is in flight —
       // see `retryInFlight`'s doc comment.
       guard !retryInFlight else { return }
-      // A sheet that closed with no `.accessoryAdded`: whatever is listed now that was not
-      // before is the pick (an add can land in the list without its event), else the band
-      // picker's fallback, else nothing was chosen.
+      // The held `.accessoryAdded` id, else whatever is listed now that was not before (an
+      // add can land in the list without its event), else the band picker's fallback, else
+      // nothing was chosen.
       if awaitingAdded {
         awaitingAdded = false
         let known = awaitingKnown
-        let id = allIdList.first { !known.contains($0) } ?? awaitingFallback()
+        let id = awaitingAddedId ?? allIdList.first { !known.contains($0) } ?? awaitingFallback()
+        awaitingAddedId = nil
+        NSLog("[ASK] picker dismissed; provisioned %@", id ?? "nothing")
         if let cb = pickerResult {
           pickerResult = nil
           if let id = id {
@@ -443,6 +445,7 @@ private final class Impl {
       NSLog("[ASK] picker presented; waiting for the user's pick")
       self.awaitingKnown = knownSet
       self.awaitingFallback = fallback
+      self.awaitingAddedId = nil
       self.awaitingAdded = true
     }
   }
