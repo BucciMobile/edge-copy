@@ -33,7 +33,7 @@ import AccessorySetupKit
 ///   - `provisionedId`      -> String?(uppercased UUID of an already-provisioned band, or nil)
 ///   - `showPicker`         -> String (the band provisioned by THIS call; throws on cancel/error)
 ///                             optional Bool argument: true = add another accessory
-///   - `removeAll`          -> nil    (deprovision all — used on unpair)
+///   - `removeAll`          -> nil    (deprovision every band, sensors kept — used on unpair)
 ///
 /// The service UUIDs the picker matches on are NOT duplicated here: they come from
 /// Info.plist's NSAccessorySetupBluetoothServices, which Apple requires to list every
@@ -450,9 +450,15 @@ private final class Impl {
     }
   }
 
+  /// Deprovisions every BAND. Sensors are kept: the WHOOP's unpair must not take the
+  /// ring's ASK approval with it, or the ring's row stays and its sync can never reach it.
   func removeAll(_ completion: @escaping () -> Void) {
     ensureActivated()
-    let accessories = session.accessories
+    let sensors = sensorServices
+    let accessories = session.accessories.filter { a in
+      guard let svc = service(of: a) else { return true }
+      return !sensors.contains(svc)
+    }
     guard !accessories.isEmpty else { completion(); return }
     let group = DispatchGroup()
     for acc in accessories {

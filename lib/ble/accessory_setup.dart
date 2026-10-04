@@ -85,7 +85,7 @@ class AccessorySetup {
     return id;
   }
 
-  /// Deprovision all ASK accessories (called on unpair). Best-effort.
+  /// Deprovision every ASK band, sensors kept (called on unpair). Best-effort.
   static Future<void> removeAll() async {
     if (!Platform.isIOS) return;
     try {
