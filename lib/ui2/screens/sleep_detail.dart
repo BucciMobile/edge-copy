@@ -45,6 +45,41 @@ const _recordNights = 14;
 /// enough to still be "you lately" rather than "you last season".
 const _window = 28;
 
+/// The window a "Change the times" correction means. Each picked clock time
+/// lands on whichever calendar day puts it nearest the time it corrects, so a
+/// bedtime moved across midnight (23:50 → 00:20, or 00:30 → 23:40) stays on
+/// the same night instead of jumping a whole day. A wake still at or before
+/// the onset becomes the first `up` after it. `day + k` rather than adding a Duration:
+/// calendar arithmetic across a possible DST boundary, not elapsed time.
+/// A picker left on the measured clock time keeps the measured instant:
+/// rebuilding it drops the seconds, and in a DST fall-back hour the local
+/// wall time names two instants.
+(DateTime, DateTime) correctedSleepWindow(
+    DateTime onset, DateTime wake, TimeOfDay bed, TimeOfDay up) {
+  DateTime nearest(DateTime ref, TimeOfDay t) {
+    if (ref.hour == t.hour && ref.minute == t.minute) return ref;
+    DateTime? best;
+    for (var k = -1; k <= 1; k++) {
+      final c = DateTime(ref.year, ref.month, ref.day + k, t.hour, t.minute);
+      if (best == null ||
+          c.difference(ref).abs() < best.difference(ref).abs()) {
+        best = c;
+      }
+    }
+    return best!;
+  }
+
+  final newOnset = nearest(onset, bed);
+  var newWake = nearest(wake, up);
+  // First occurrence of `up` after the onset, not onset.day + 1: the nearest
+  // pick can land a day early (truncated window, wake moved >12h later).
+  for (var k = 0; !newWake.isAfter(newOnset); k++) {
+    newWake = DateTime(newOnset.year, newOnset.month, newOnset.day + k,
+        up.hour, up.minute);
+  }
+  return (newOnset, newWake);
+}
+
 /// A per-second label from the segmenter, or NULL for a second nobody watched.
 ///
 /// `unobserved` is not a stage. The catch-all used to be `SleepStage.light`, so
@@ -98,36 +133,6 @@ int? _noonOf(String? day) => day == null
   final s = [...xs]..sort();
   double q(double f) => s[((s.length - 1) * f).round()];
   return (lo: q(.25), mid: q(.5), hi: q(.75), n: s.length);
-}
-
-/// The window a bed/wake time correction means. The bedtime lands on whichever
-/// of the measured onset's day, the day before or the day after puts it
-/// closest to the measured onset — 23:30 picked over a 00:30 onset is the
-/// evening before, not 23 hours later. The wake is the first one after that
-/// bedtime. Calendar arithmetic (`day ± 1`), never a Duration: a DST day is 23
-/// or 25 hours long. A picker left on the measured clock time keeps the
-/// measured instant: rebuilding it drops the seconds, and in a DST fall-back
-/// hour the local wall time names two instants.
-(DateTime, DateTime) correctedSleepWindow(
-    DateTime onset, DateTime wake, TimeOfDay bed, TimeOfDay up) {
-  bool same(DateTime d, TimeOfDay t) =>
-      d.hour == t.hour && d.minute == t.minute;
-  DateTime at(int dayOffset, TimeOfDay t) => DateTime(
-      onset.year, onset.month, onset.day + dayOffset, t.hour, t.minute);
-  int off(DateTime d) => d.difference(onset).inSeconds.abs();
-  var newOnset = same(onset, bed) ? onset : at(0, bed);
-  for (final o in const [-1, 1]) {
-    if (off(at(o, bed)) < off(newOnset)) newOnset = at(o, bed);
-  }
-  var newWake = same(wake, up) && wake.isAfter(newOnset)
-      ? wake
-      : DateTime(
-          newOnset.year, newOnset.month, newOnset.day, up.hour, up.minute);
-  if (!newWake.isAfter(newOnset)) {
-    newWake = DateTime(
-        newOnset.year, newOnset.month, newOnset.day + 1, up.hour, up.minute);
-  }
-  return (newOnset, newWake);
 }
 
 String _pct(double v) => '${v.round()}%';
@@ -306,10 +311,12 @@ class SleepData {
     final wakeups = _on(await repo.getChart('awakenings'), cut);
     final longest = _on(await repo.getChart('longest_sleep_min'), cut);
     final sol = _on(await repo.getChart('sol_min'), cut);
-    final wins = await repo.sleepWindows(days: _window + 1);
+    // The nights BEFORE this one, like the series above. The newest nights
+    // overall would compare a past night against nights that came after it.
+    final wins = await repo.sleepWindows(days: _window, before: day);
     final onsets = <int>[
       for (final w in wins.reversed)
-        if (w['date'] != day && w['onset_ts'] is num) (w['onset_ts'] as num).round(),
+        if (w['onset_ts'] is num) (w['onset_ts'] as num).round(),
     ];
 
     return SleepData(
@@ -768,8 +775,7 @@ class _SleepDetailState extends State<SleepDetail> {
       _runOverride(() => context.read<AppState>().rejectSleep(day));
 
   /// Two pickers, seeded from the window we already have — the user is
-  /// correcting times, not entering a date. See [correctedSleepWindow] for
-  /// which dates the picked clock times land on.
+  /// correcting times, not entering a date. See [correctedSleepWindow].
   Future<void> _editWindow(String day, int t0, int t1) async {
     final onset = DateTime.fromMillisecondsSinceEpoch(t0 * 1000);
     final wake = DateTime.fromMillisecondsSinceEpoch(t1 * 1000);
