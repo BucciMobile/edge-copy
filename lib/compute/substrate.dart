@@ -13,6 +13,7 @@
 
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:collection/collection.dart' show lowerBound;
 
 import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
@@ -886,11 +887,129 @@ int? hardwareStepsFromCounter(
   Substrate sub, {
   required int? cumulativeCounterModulus,
   int maxStepsPerSecond = 5,
+}) =>
+    counterDeltasFromSubstrate(sub,
+            cumulativeCounterModulus: cumulativeCounterModulus,
+            maxStepsPerSecond: maxStepsPerSecond)
+        ?.total;
+
+/// [hardwareStepsFromCounter]'s walk with its coverage: the total plus how
+/// much of the day the counter did not see.
+class CounterDeltas {
+  const CounterDeltas({required this.total, required this.droppedBoundaries,
+      required this.gapSeconds, required this.sampleCount});
+  final int total;
+  /// Boundaries whose delta failed the budget (resets) and were dropped.
+  final int droppedBoundaries;
+  /// Seconds between consecutive counter records beyond the 1 s cadence.
+  final int gapSeconds;
+  /// Records that carried a counter value (always >= 1).
+  final int sampleCount;
+}
+
+CounterDeltas? counterDeltasFromSubstrate(
+  Substrate sub, {
+  required int? cumulativeCounterModulus,
+  int maxStepsPerSecond = 5,
 }) {
+  final wrap = cumulativeCounterModulus;
+  if (wrap == null || wrap <= 0) return null;
+  int? prev;
+  int? prevTs;
   var total = 0;
-  final seen = _walkCounterDeltas(sub, cumulativeCounterModulus,
-      maxStepsPerSecond, (_, _, delta) => total += delta);
-  return seen ? total : null;
+  var seen = false;
+  var dropped = 0;
+  var gapSeconds = 0;
+  var sampleCount = 0;
+  for (var i = 0; i < sub.length; i++) {
+    final c = sub.stepCounterAt(i);
+    if (c == null) continue;
+    seen = true;
+    sampleCount++;
+    final ts = sub.tsSec[i];
+    if (prev != null && prevTs != null && ts > prevTs) {
+      final gap = ts - prevTs;
+      if (gap > 1) gapSeconds += gap - 1;
+      final delta = _creditedCounterDelta(prev, c, gap, wrap, maxStepsPerSecond);
+      if (delta == null) {
+        dropped++;
+      } else {
+        total += delta;
+      }
+    }
+    prev = c;
+    prevTs = ts;
+  }
+  if (!seen) return null;
+  return CounterDeltas(
+    total: total,
+    droppedBoundaries: dropped,
+    gapSeconds: gapSeconds,
+    sampleCount: sampleCount,
+  );
+}
+
+/// One record-to-record counter delta: credited in full, 0 for none, or null
+/// for a reset (over the `clamp(gap, 60 s, 3600 s) x maxStepsPerSecond`
+/// budget) that is dropped.
+int? _creditedCounterDelta(
+    int prev, int c, int gap, int wrap, int maxStepsPerSecond) {
+  final budget = gap.clamp(60, 3600) * maxStepsPerSecond;
+  var delta = c - prev;
+  if (delta < 0) delta += wrap; // wrap candidate; a reset overshoots below
+  if (delta > budget) return null;
+  return delta > 0 ? delta : 0;
+}
+
+/// Counter ticks inside each `[start, end)` window, credited like
+/// [counterDeltasFromSubstrate]. A window's entry is null when the counter did
+/// not see it end to end: no record within [maxGapSec] of an edge, or a record
+/// gap over [maxGapSec] or a dropped reset inside it. Null overall when the
+/// family has no counter.
+List<int?>? counterTicksPerWindow(
+  Substrate sub,
+  List<(int, int)> windows, {
+  required int? cumulativeCounterModulus,
+  int maxStepsPerSecond = 5,
+  int maxGapSec = 60,
+}) {
+  final wrap = cumulativeCounterModulus;
+  if (wrap == null || wrap <= 0) return null;
+  final ts = <int>[];
+  final cum = <int>[]; // credited ticks up to each record
+  final breaks = <int>[]; // coverage breaks up to each record
+  int? prev;
+  for (var i = 0; i < sub.length; i++) {
+    final c = sub.stepCounterAt(i);
+    if (c == null) continue;
+    final t = sub.tsSec[i];
+    if (ts.isEmpty) {
+      ts.add(t);
+      cum.add(0);
+      breaks.add(0);
+    } else if (t > ts.last) {
+      final gap = t - ts.last;
+      final d = _creditedCounterDelta(prev!, c, gap, wrap, maxStepsPerSecond);
+      ts.add(t);
+      cum.add(cum.last + (d ?? 0));
+      breaks.add(breaks.last + (d == null || gap > maxGapSec ? 1 : 0));
+    }
+    prev = c;
+  }
+  if (ts.isEmpty) return null;
+  return [
+    for (final (start, end) in windows)
+      () {
+        final i0 = lowerBound(ts, start + 1) - 1; // last record <= start
+        var i1 = lowerBound(ts, end); // first record >= end
+        // Data ending at `end - 1` closes the last 1 Hz second of the window.
+        if (i1 == ts.length && ts.last == end - 1) i1--;
+        if (i0 < 0 || i1 >= ts.length) return null;
+        if (start - ts[i0] > maxGapSec || ts[i1] - end > maxGapSec) return null;
+        if (breaks[i1] != breaks[i0]) return null;
+        return cum[i1] - cum[i0];
+      }(),
+  ];
 }
 
 /// The same credited deltas as [hardwareStepsFromCounter], placed on the
@@ -906,48 +1025,16 @@ int? hardwareStepsFromCounter(
 /// Local, not `ts ~/ 3600`: in a half-hour-offset zone a UTC hour crosses a
 /// local hour line, and the day chart spreads a span evenly over its extent,
 /// so a UTC-hour span would push steps into the wrong local hour.
-/// The spans sum to exactly [hardwareStepsFromCounter]'s total. Null whenever
-/// that is null.
+/// The spans sum to exactly [hardwareStepsFromCounter]'s total (raw ticks,
+/// before any calibration). Null whenever that is null.
 List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
   Substrate sub, {
   required int? cumulativeCounterModulus,
   int maxStepsPerSecond = 5,
 }) {
+  final wrap = cumulativeCounterModulus;
+  if (wrap == null || wrap <= 0) return null;
   final out = <({int startTs, int endTs, int steps})>[];
-  final seen = _walkCounterDeltas(sub, cumulativeCounterModulus,
-      maxStepsPerSecond, (fromTs, ts, delta) {
-    final last = out.isEmpty ? null : out.last;
-    final hour = _localHourStart(ts);
-    if (last != null &&
-        _localHourStart(last.endTs) == hour &&
-        _localHourStart(last.startTs) == hour) {
-      out[out.length - 1] =
-          (startTs: last.startTs, endTs: ts, steps: last.steps + delta);
-    } else {
-      out.add((startTs: fromTs, endTs: ts, steps: delta));
-    }
-  });
-  return seen ? out : null;
-}
-
-/// Epoch second of the start of the local clock hour containing [ts].
-int _localHourStart(int ts) {
-  final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-  return ts - d.minute * 60 - d.second;
-}
-
-/// Walks [sub]'s counter and calls [credit] once per delta that passes the
-/// wrap/reset/budget rules documented on [hardwareStepsFromCounter]. Returns
-/// whether any record carried a counter at all.
-bool _walkCounterDeltas(
-  Substrate sub,
-  int? wrap,
-  int maxStepsPerSecond,
-  void Function(int fromTs, int ts, int delta) credit,
-) {
-  if (wrap == null || wrap <= 0) return false;
-  const minGapSecForBudget = 60;
-  const maxGapSecForBudget = 3600;
   int? prev;
   int? prevTs;
   var seen = false;
@@ -957,17 +1044,31 @@ bool _walkCounterDeltas(
     seen = true;
     final ts = sub.tsSec[i];
     if (prev != null && prevTs != null && ts > prevTs) {
-      final gap = ts - prevTs;
-      final budget =
-          gap.clamp(minGapSecForBudget, maxGapSecForBudget) * maxStepsPerSecond;
-      var delta = c - prev;
-      if (delta < 0) delta += wrap; // wrap candidate; a reset overshoots below
-      if (delta > 0 && delta <= budget) credit(prevTs, ts, delta);
+      final delta =
+          _creditedCounterDelta(prev, c, ts - prevTs, wrap, maxStepsPerSecond);
+      if (delta != null && delta > 0) {
+        final last = out.isEmpty ? null : out.last;
+        final hour = _localHourStart(ts);
+        if (last != null &&
+            _localHourStart(last.endTs) == hour &&
+            _localHourStart(last.startTs) == hour) {
+          out[out.length - 1] =
+              (startTs: last.startTs, endTs: ts, steps: last.steps + delta);
+        } else {
+          out.add((startTs: prevTs, endTs: ts, steps: delta));
+        }
+      }
     }
     prev = c;
     prevTs = ts;
   }
-  return seen;
+  return seen ? out : null;
+}
+
+/// Epoch second of the start of the local clock hour containing [ts].
+int _localHourStart(int ts) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  return ts - d.minute * 60 - d.second;
 }
 
 class _Rec {
