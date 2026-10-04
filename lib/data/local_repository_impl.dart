@@ -2625,12 +2625,22 @@ class LocalRepositoryImpl extends LocalRepository {
     // A retimed session keeps its id, so the row under that id may no longer
     // start at this second. It is not this entry at all: give the new one its
     // own id instead of REPLACEing (and inheriting the route of) the moved one.
+    // An entry already logged that way lives under `$id:<ms>`, so a retry of
+    // it is found there and stays an update.
     final id = manualSessionId(startTs);
-    final prior = await LocalDb.session(id);
+    var prior = await LocalDb.session(id);
     final moved =
         prior != null && (prior['start_ts'] as num?)?.toInt() != startTs;
+    if (moved) {
+      prior = null;
+      for (final r in await LocalDb.sessionsInRange(startTs, startTs)) {
+        if ((r['id'] as String?)?.startsWith('$id:') ?? false) {
+          prior = r;
+          break;
+        }
+      }
+    }
     final same = prior != null &&
-        !moved &&
         (prior['end_ts'] as num?)?.toInt() == endTs &&
         prior['type'] == type;
     return _writeManualSession(
@@ -2640,7 +2650,9 @@ class LocalRepositoryImpl extends LocalRepository {
       existing: same ? prior : null,
       sessionId:
           moved ? '$id:${DateTime.now().millisecondsSinceEpoch}' : null,
-      validateAgainstId: same || prior == null ? id : null,
+      validateAgainstId: same
+          ? prior['id'] as String
+          : (prior == null && !moved ? id : null),
     );
   }
 

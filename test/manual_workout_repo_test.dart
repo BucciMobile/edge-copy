@@ -584,6 +584,13 @@ void main() {
       final added = await LocalDb.session(fresh['workout_id'] as String);
       expect(added!['start_ts'], start);
       expect(added['type'], 'strength');
+
+      // A retry of that exact entry updates it rather than tripping over it.
+      final retry = await repo.logManualWorkout(
+          startTs: start, endTs: start + 1200, type: 'strength');
+      expect(retry['workout_id'], fresh['workout_id']);
+      final rows = await LocalDb.sessionsInRange(start, start);
+      expect(rows, hasLength(1));
     },
   );
 }
