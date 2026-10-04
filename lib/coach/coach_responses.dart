@@ -1,45 +1,24 @@
 import 'dart:convert';
 
-import 'coach_config.dart';
-
 /// Converts the Coach's canonical chat history to OpenAI Responses and back.
 /// HTTP, tool execution, and persistence remain owned by CoachEngine.
 /// https://developers.openai.com/api/docs/guides/migrate-to-responses
 /// https://developers.openai.com/api/docs/guides/reasoning
 class CoachResponses {
-  static bool usesResponses(String apiBase, String model) {
-    if (coachEndpointOrigin(apiBase) != 'https://api.openai.com') return false;
-    // These legacy o1 models support only Chat Completions, including their
-    // dated snapshots. Newer o-series models support Responses.
-    // https://developers.openai.com/api/docs/models/o1-mini
-    // https://developers.openai.com/api/docs/models/o1-preview
-    if (RegExp(r'^o1-(?:mini|preview)(?:-|$)').hasMatch(model)) return false;
-    final gpt = RegExp(r'^gpt-(\d+)(?:[.-]|$)').firstMatch(model);
-    return (gpt != null && int.parse(gpt.group(1)!) >= 5) ||
-        RegExp(r'^o\d+(?:-|$)').hasMatch(model);
-  }
-
-  /// Internal response items are local history metadata, never Chat fields.
-  static Map<String, dynamic> chatRequest(Map<String, dynamic> body) => {
-    ...body,
-    'messages': [
-      for (final message in _maps(body['messages']))
-        Map<String, dynamic>.from(message)
-          ..remove('_responses_output')
-          ..remove('_responses_model'),
-    ],
-  };
-
-  static Map<String, dynamic> request(Map<String, dynamic> body) {
+  static Map<String, dynamic> request(
+    Map<String, dynamic> body, {
+    required String apiBase,
+  }) {
     final model = body['model'] as String? ?? '';
     final input = <Map<String, dynamic>>[];
     for (final message in _maps(body['messages'])) {
       final role = message['role'];
       if (role == 'assistant' &&
           message['_responses_model'] == model &&
+          message['_responses_api_base'] == apiBase &&
           message['_responses_output'] is List) {
-        // Replay the full output in order, including opaque reasoning and
-        // assistant phase. Reconstructing only text/calls loses reasoning.
+        // Replay this endpoint's full output in order, including opaque
+        // reasoning and assistant phase. Other endpoints get canonical history.
         input.addAll(
           _maps(
             message['_responses_output'],
@@ -96,8 +75,7 @@ class CoachResponses {
     ]) {
       result.remove(key);
     }
-    // Preserve each model's default effort instead of guessing capabilities
-    // (Sol 6.1/Astra reject none; pro variants can require higher efforts).
+    // Preserve the provider's default effort instead of guessing capabilities.
     if (body['reasoning_effort'] != null) {
       result['reasoning'] = {
         if (body['reasoning'] is Map) ...body['reasoning'] as Map,
@@ -141,8 +119,9 @@ class CoachResponses {
 
   static Map<String, dynamic> reply(
     Map<String, dynamic> response,
-    String model,
-  ) {
+    String model, {
+    required String apiBase,
+  }) {
     final status = response['status'];
     if ((status != null && status != 'completed') ||
         response['error'] != null) {
@@ -209,6 +188,7 @@ class CoachResponses {
       if (refusals.isNotEmpty) 'refusal': refusals.join('\n'),
       '_responses_output': output,
       '_responses_model': model,
+      '_responses_api_base': apiBase,
     };
   }
 

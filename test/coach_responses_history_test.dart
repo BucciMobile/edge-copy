@@ -166,13 +166,17 @@ void main() {
       addTearDown(engine.dispose);
       engine.debugHistory.addAll([
         {'role': 'user', 'content': 'Old question'},
-        CoachResponses.reply({
-          'status': 'completed',
-          'output': [
-            _reasoning('rs_old', CoachEngine.kMaxHistoryChars + 1000),
-            _renderCall(),
-          ],
-        }, 'gpt-6.1-sol'),
+        CoachResponses.reply(
+          {
+            'status': 'completed',
+            'output': [
+              _reasoning('rs_old', CoachEngine.kMaxHistoryChars + 1000),
+              _renderCall(),
+            ],
+          },
+          'gpt-6.1-sol',
+          apiBase: CoachConfig.defaultBaseUrl,
+        ),
         {
           'role': 'tool',
           'tool_call_id': 'call_render',
@@ -278,6 +282,7 @@ void main() {
       ]);
       final pending = resumed.debugHistory[1];
       expect(pending['_responses_model'], 'gpt-6.1-sol');
+      expect(pending['_responses_api_base'], CoachConfig.defaultBaseUrl);
       expect(pending['_responses_output'], [reasoning, commentary, call]);
       expect(resumed.debugHistory.last['_responses_output'], [finalAnswer]);
 
@@ -334,10 +339,14 @@ void main() {
           ..['call_id'] = 'call_turn_$turn';
         engine.debugHistory.addAll([
           {'role': 'user', 'content': 'Old question $turn'},
-          CoachResponses.reply({
-            'status': 'completed',
-            'output': [_reasoning('rs_turn_$turn', 32), call],
-          }, 'gpt-6.1-sol'),
+          CoachResponses.reply(
+            {
+              'status': 'completed',
+              'output': [_reasoning('rs_turn_$turn', 32), call],
+            },
+            'gpt-6.1-sol',
+            apiBase: CoachConfig.defaultBaseUrl,
+          ),
           {
             'role': 'tool',
             'tool_call_id': 'call_turn_$turn',
@@ -363,12 +372,13 @@ void main() {
       expect(history.length, lessThanOrEqualTo(60));
       expect(history.first, {'role': 'user', 'content': 'Old question 2'});
       expect(history.last['_responses_model'], 'gpt-6.1-sol');
+      expect(history.last['_responses_api_base'], CoachConfig.defaultBaseUrl);
       expect(history.last['content'], 'Newest answer');
       final input =
           (CoachResponses.request({
                     'model': 'gpt-6.1-sol',
                     'messages': history,
-                  })['input']
+                  }, apiBase: CoachConfig.defaultBaseUrl)['input']
                   as List)
               .cast<Map>();
       final calls = input

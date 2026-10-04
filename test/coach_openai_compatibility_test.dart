@@ -84,6 +84,7 @@ Future<Map<String, dynamic>> _capture(
     if (responses) {
       expect(reply['_responses_output'], _responsesReply()['output']);
       expect(reply['_responses_model'], body['model']);
+      expect(reply['_responses_api_base'], config.apiBase);
     }
     return sent!;
   } finally {
@@ -95,22 +96,13 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  group('official OpenAI reasoning-model requests', () {
+  group('official OpenAI Responses requests regardless of model naming', () {
     for (final model in [
-      'gpt-5',
-      'gpt-5-mini',
-      'gpt-5.3',
       'gpt-5.6-terra',
-      'gpt-5.6-terra-2026-08-11',
-      'gpt-5.6-sol',
       'gpt-6-luna',
-      'gpt-6-luna-2026-10-03',
-      'gpt-6-astra',
       'gpt-6.1-sol',
-      'gpt-7',
-      'o1',
-      'o3-mini',
-      'o4-mini',
+      'opaque-model-id',
+      'gpt-4o-mini',
     ]) {
       for (final tools in [true, false]) {
         test(
@@ -214,18 +206,23 @@ void main() {
           return http.Response(jsonEncode(_responsesReply()), 200);
         });
         addTearDown(client.close);
-        final assistant = CoachResponses.reply({
-          'status': 'completed',
-          'output': [
-            {
-              'id': 'rs_large',
-              'type': 'reasoning',
-              'summary': <dynamic>[],
-              'encrypted_content': 'x' * (CoachEngine.kMaxRequestBytes + 1024),
-            },
-            ...(_responsesReply()['output'] as List),
-          ],
-        }, 'gpt-6.1-sol');
+        final assistant = CoachResponses.reply(
+          {
+            'status': 'completed',
+            'output': [
+              {
+                'id': 'rs_large',
+                'type': 'reasoning',
+                'summary': <dynamic>[],
+                'encrypted_content':
+                    'x' * (CoachEngine.kMaxRequestBytes + 1024),
+              },
+              ...(_responsesReply()['output'] as List),
+            ],
+          },
+          'gpt-6.1-sol',
+          apiBase: CoachConfig.defaultBaseUrl,
+        );
         await expectLater(
           CoachEngine.postChat(CoachConfig(), {
             'model': 'gpt-6.1-sol',
@@ -263,25 +260,157 @@ void main() {
     expect(contacted, isFalse);
   });
 
-  group('unaffected OpenAI legacy or unrecognized model requests', () {
+  group('explicit OpenAI Chat Completions override', () {
     for (final model in [
       'gpt-3.5-turbo',
       'gpt-4o-mini',
-      'gpt-4.1',
-      'gpt-4-turbo',
       'o1-mini',
-      'o1-mini-2024-09-12',
       'o1-preview',
-      'o1-preview-2024-09-12',
-      'custom-model',
-      'openai/gpt-6.1-sol',
+      'opaque-model-id',
     ]) {
       test('$model retains Chat Completions and sampling', () async {
+        final config = CoachConfig();
+        addTearDown(config.dispose);
+        await config.save(api: CoachApi.chatCompletions);
         final body = _body(model);
-        expect(await _capture(CoachConfig(), body, responses: false), body);
+        expect(await _capture(config, body, responses: false), body);
       });
     }
   });
+
+  group('explicit Responses on a custom provider', () {
+    for (final base in [
+      'http://localhost:11434/v1',
+      'https://openrouter.ai/api/v1',
+    ]) {
+      test('$base uses Responses without classifying the model ID', () async {
+        final config = CoachConfig();
+        addTearDown(config.dispose);
+        await config.save(baseUrl: base, api: CoachApi.responses);
+        final body = _body('provider/arbitrary-model-id');
+        final before = jsonDecode(jsonEncode(body));
+        final sent = await _capture(config, body, responses: true);
+        expect(sent['model'], 'provider/arbitrary-model-id');
+        expect(sent['input'], body['messages']);
+        expect(sent['store'], isFalse);
+        expect(sent, isNot(contains('reasoning_effort')));
+        expect(sent, isNot(contains('temperature')));
+        expect(body, before);
+      });
+    }
+  });
+
+  test(
+    'same model switches Responses providers in flight without replaying opaque state',
+    () async {
+      const model = 'same-model-on-two-providers';
+      const destination = 'https://another-responses-provider.example/v1';
+      final output = [
+        {
+          'id': 'rs_endpoint_a',
+          'type': 'reasoning',
+          'summary': <dynamic>[],
+          'encrypted_content': 'encrypted-for-endpoint-a-only',
+        },
+        {
+          'id': 'msg_endpoint_a',
+          'type': 'message',
+          'status': 'completed',
+          'role': 'assistant',
+          'content': [
+            {
+              'type': 'output_text',
+              'text': 'Reading your day.',
+              'annotations': [],
+            },
+          ],
+        },
+        {
+          'id': 'fc_endpoint_a',
+          'type': 'function_call',
+          'status': 'completed',
+          'call_id': 'call_lookup',
+          'name': 'lookup',
+          'arguments': '{}',
+        },
+      ];
+      final config = CoachConfig();
+      addTearDown(config.dispose);
+      final requests = <http.Request>[];
+      final client = MockClient((request) async {
+        requests.add(request);
+        if (requests.length == 1) {
+          await config.save(baseUrl: destination, api: CoachApi.responses);
+        }
+        return http.Response(
+          jsonEncode(
+            requests.length == 1
+                ? {'status': 'completed', 'output': output}
+                : _responsesReply(),
+          ),
+          200,
+        );
+      });
+      addTearDown(client.close);
+      final reply = await CoachEngine.postChat(
+        config,
+        _body(model),
+        client: client,
+      );
+      expect(reply['_responses_api_base'], CoachConfig.defaultBaseUrl);
+      expect(config.apiBase, destination);
+      final body = {
+        'model': model,
+        'messages': [
+          reply,
+          {
+            'role': 'tool',
+            'tool_call_id': 'call_lookup',
+            'content': 'observed data',
+          },
+          {'role': 'user', 'content': 'Continue'},
+        ],
+      };
+      final before = jsonDecode(jsonEncode(body));
+      final finalReply = await CoachEngine.postChat(
+        config,
+        body,
+        client: client,
+      );
+      expect(finalReply['content'], 'Hello back');
+      expect(finalReply['_responses_api_base'], destination);
+      expect(requests.map((request) => request.url.toString()), [
+        '${CoachConfig.defaultBaseUrl}/responses',
+        '$destination/responses',
+      ]);
+      final sent = jsonDecode(requests.last.body) as Map<String, dynamic>;
+      expect(sent['input'], [
+        {'role': 'assistant', 'content': 'Reading your day.'},
+        {
+          'type': 'function_call',
+          'call_id': 'call_lookup',
+          'name': 'lookup',
+          'arguments': '{}',
+        },
+        {
+          'type': 'function_call_output',
+          'call_id': 'call_lookup',
+          'output': 'observed data',
+        },
+        {'role': 'user', 'content': 'Continue'},
+      ]);
+      for (final privateValue in [
+        'encrypted-for-endpoint-a-only',
+        'rs_endpoint_a',
+        'msg_endpoint_a',
+        'fc_endpoint_a',
+        '_responses_api_base',
+      ]) {
+        expect(requests.last.body, isNot(contains(privateValue)));
+      }
+      expect(body, before);
+    },
+  );
 
   group('unaffected provider requests', () {
     for (final base in [
@@ -314,10 +443,11 @@ void main() {
         () async {
           final config = CoachConfig();
           addTearDown(config.dispose);
-          await config.save(baseUrl: base);
+          await config.save(baseUrl: base, api: CoachApi.chatCompletions);
           final assistant = CoachResponses.reply(
             _responsesReply(),
             'gpt-6.1-sol',
+            apiBase: CoachConfig.defaultBaseUrl,
           );
           final body = {
             'model': 'gpt-4o-mini',

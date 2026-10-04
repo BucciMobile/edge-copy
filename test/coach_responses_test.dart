@@ -3,6 +3,19 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/coach/coach_responses.dart';
 
+const _apiBase = 'https://api.openai.com/v1';
+
+Map<String, dynamic> _request(
+  Map<String, dynamic> body, {
+  String apiBase = _apiBase,
+}) => CoachResponses.request(body, apiBase: apiBase);
+
+Map<String, dynamic> _reply(
+  Map<String, dynamic> response,
+  String model, {
+  String apiBase = _apiBase,
+}) => CoachResponses.reply(response, model, apiBase: apiBase);
+
 Map<String, dynamic> _message(String id, String text) => {
   'id': id,
   'type': 'message',
@@ -78,7 +91,7 @@ void main() {
         'temperature': 0.3,
       };
       final original = jsonDecode(jsonEncode(body));
-      final request = CoachResponses.request(body);
+      final request = _request(body);
       expect(request['input'], [
         {'role': 'system', 'content': 'Answer from observed data.'},
         {'role': 'user', 'content': 'Read my day.'},
@@ -110,9 +123,9 @@ void main() {
           {'role': 'user', 'content': 'Hello'},
         ],
       };
-      expect(CoachResponses.request(body), isNot(contains('reasoning')));
+      expect(_request(body), isNot(contains('reasoning')));
       body['reasoning_effort'] = 'medium';
-      expect(CoachResponses.request(body)['reasoning'], {'effort': 'medium'});
+      expect(_request(body)['reasoning'], {'effort': 'medium'});
       expect(body['reasoning_effort'], 'medium');
     });
 
@@ -130,10 +143,7 @@ void main() {
         final between = _message('msg_between', 'Reading the second value.');
         final second = _call('fc_second', 'call_second', 'get_medications');
         final output = [reasoning, commentary, first, between, second];
-        final assistant = CoachResponses.reply(
-          _response(output),
-          'gpt-6.1-sol',
-        );
+        final assistant = _reply(_response(output), 'gpt-6.1-sol');
         final body = <String, dynamic>{
           'model': 'gpt-6.1-sol',
           'messages': [
@@ -152,7 +162,7 @@ void main() {
           ],
         };
         final original = jsonDecode(jsonEncode(body));
-        final request = CoachResponses.request(body);
+        final request = _request(body);
         expect(request['input'], [
           {'role': 'user', 'content': 'Read two values'},
           ...output,
@@ -175,7 +185,7 @@ void main() {
     );
 
     test('does not replay encrypted output after changing model', () {
-      final assistant = CoachResponses.reply(
+      final assistant = _reply(
         _response([
           {
             'id': 'rs_old',
@@ -196,7 +206,7 @@ void main() {
         ],
       };
       final before = jsonDecode(jsonEncode(body));
-      final request = CoachResponses.request(body);
+      final request = _request(body);
       expect(request['input'], [
         {'role': 'assistant', 'content': 'Reading your day.'},
         {
@@ -214,21 +224,89 @@ void main() {
       expect(jsonEncode(request), isNot(contains('private-old-model-state')));
       expect(body, before);
     });
+
+    for (final provenance in ['another endpoint', 'missing endpoint']) {
+      test(
+        '$provenance reconstructs canonical calls and results for the same model',
+        () {
+          const model = 'same-model-id';
+          final assistant = _reply(
+            _response([
+              {
+                'id': 'rs_source',
+                'type': 'reasoning',
+                'summary': <dynamic>[],
+                'encrypted_content': 'opaque-source-provider-state',
+              },
+              _message('msg_source', 'Reading your day.'),
+              _call('fc_source', 'call_shared', 'lookup'),
+            ]),
+            model,
+          );
+          if (provenance == 'missing endpoint') {
+            assistant.remove('_responses_api_base');
+          }
+          final body = <String, dynamic>{
+            'model': model,
+            'messages': [
+              assistant,
+              {
+                'role': 'tool',
+                'tool_call_id': 'call_shared',
+                'content': 'day result',
+              },
+            ],
+          };
+          final before = jsonDecode(jsonEncode(body));
+          final request = _request(
+            body,
+            apiBase: provenance == 'another endpoint'
+                ? 'https://other-provider.example/v1'
+                : _apiBase,
+          );
+          expect(request['input'], [
+            {'role': 'assistant', 'content': 'Reading your day.'},
+            {
+              'type': 'function_call',
+              'call_id': 'call_shared',
+              'name': 'lookup',
+              'arguments': '{"date":"2026-10-04"}',
+            },
+            {
+              'type': 'function_call_output',
+              'call_id': 'call_shared',
+              'output': 'day result',
+            },
+          ]);
+          for (final privateValue in [
+            'opaque-source-provider-state',
+            'rs_source',
+            'msg_source',
+            'fc_source',
+            '_responses_api_base',
+          ]) {
+            expect(jsonEncode(request), isNot(contains(privateValue)));
+          }
+          expect(body, before);
+        },
+      );
+    }
   });
 
   group('Responses reply normalization', () {
     test('normalizes text and keeps private output provenance', () {
       final output = [_message('msg_answer', 'Observed steps: 100.')];
-      final reply = CoachResponses.reply(_response(output), 'gpt-6.1-sol');
+      final reply = _reply(_response(output), 'gpt-6.1-sol');
       expect(reply['role'], 'assistant');
       expect(reply['content'], 'Observed steps: 100.');
       expect(reply['_responses_output'], output);
       expect(reply['_responses_model'], 'gpt-6.1-sol');
+      expect(reply['_responses_api_base'], _apiBase);
     });
 
     test('tool-only reply maps call_id rather than the output item id', () {
       final output = [_call('fc_item', 'call_execution', 'lookup')];
-      final reply = CoachResponses.reply(_response(output), 'gpt-6.1-sol');
+      final reply = _reply(_response(output), 'gpt-6.1-sol');
       expect(reply['content'], anyOf(isNull, isEmpty));
       expect(reply['tool_calls'], [
         {
@@ -240,7 +318,7 @@ void main() {
     });
 
     test('surfaces refusal text to the existing Coach UI', () {
-      final reply = CoachResponses.reply(
+      final reply = _reply(
         _response([
           {
             'id': 'msg_refusal',
@@ -325,7 +403,7 @@ void main() {
     for (final entry in invalidResponses.entries) {
       test('rejects ${entry.key}', () {
         expect(
-          () => CoachResponses.reply(entry.value, 'gpt-6.1-sol'),
+          () => _reply(entry.value, 'gpt-6.1-sol'),
           throwsA(isA<FormatException>()),
         );
       });

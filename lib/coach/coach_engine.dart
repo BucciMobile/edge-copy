@@ -22,6 +22,7 @@ import '../data/day_label.dart';
 import '../data/db.dart';
 import '../data/local_repository.dart';
 import 'coach_actions.dart';
+import 'coach_chat_completions.dart';
 import 'coach_config.dart';
 import 'coach_db.dart';
 import 'coach_prompt.dart';
@@ -549,6 +550,8 @@ class CoachEngine {
           '_responses_output': reply['_responses_output'],
         if (reply['_responses_model'] is String)
           '_responses_model': reply['_responses_model'],
+        if (reply['_responses_api_base'] is String)
+          '_responses_api_base': reply['_responses_api_base'],
       };
 
       if (toolCalls.isEmpty) {
@@ -671,8 +674,8 @@ class CoachEngine {
   /// THE one provider POST. Every LLM call in the app
   /// (the coach tool loop, the daily briefings, the journal chat) goes through
   /// here so there is exactly ONE provider client + error contract. Returns the
-  /// normalized assistant message. Modern official OpenAI models use Responses;
-  /// other providers keep Chat Completions. Throws [CoachException] on errors.
+  /// normalized assistant message. The configured API selects the wire format;
+  /// model identifiers are passed through unchanged. Throws [CoachException].
   static Future<Map<String, dynamic>> postChat(
     CoachConfig config,
     Map<String, dynamic> body, {
@@ -680,11 +683,13 @@ class CoachEngine {
   }) async {
     final c = client ?? http.Client();
     final model = body['model'] as String? ?? '';
-    final responses = CoachResponses.usesResponses(config.apiBase, model);
+    final api = config.api;
+    final apiBase = config.apiBase;
     try {
-      body = responses
-          ? CoachResponses.request(body)
-          : CoachResponses.chatRequest(body);
+      body = switch (api) {
+        CoachApi.responses => CoachResponses.request(body, apiBase: apiBase),
+        CoachApi.chatCompletions => CoachChatCompletions.request(body),
+      };
       // Recent Claude models reject sampling params with a 400, on Anthropic's
       // own endpoint and through any pass-through provider alike. Strip them for
       // exactly those model versions; older Claude models and every other
@@ -710,9 +715,7 @@ class CoachEngine {
       }
       final resp = await c
           .post(
-            Uri.parse(
-              '${config.apiBase}/${responses ? 'responses' : 'chat/completions'}',
-            ),
+            Uri.parse('$apiBase/${api.endpoint}'),
             headers: {
               if (config.hasKey) 'Authorization': 'Bearer ${config.apiKey}',
               'content-type': 'application/json',
@@ -735,38 +738,14 @@ class CoachEngine {
         );
       }
       if (j is! Map) throw CoachException('Unexpected response from provider.');
-      if (responses) {
-        return CoachResponses.reply(j.cast<String, dynamic>(), model);
-      }
-      final choices = (j['choices'] as List?) ?? const [];
-      if (choices.isEmpty) {
-        throw CoachException('Empty response from provider.');
-      }
-      // Every shape below is a REAL thing OpenAI-compatible proxies return:
-      // a streaming chunk (`delta` instead of `message`), the legacy
-      // completions shape (`text`), or a bare string. Reaching for
-      // `choices.first['message'] as Map<String,dynamic>` blind surfaced a raw
-      // TypeError ("type 'Null' is not a subtype of type 'Map<String,
-      // dynamic>'") instead of the documented CoachException, so the UI showed
-      // a Dart type name to the user rather than an actionable message.
-      final first = choices.first;
-      if (first is! Map) {
-        throw CoachException('Unexpected response from provider.');
-      }
-      final msg = first['message'] ?? first['delta'];
-      if (msg is Map) return msg.cast<String, dynamic>();
-      final text = first['text'];
-      if (text is String) return <String, dynamic>{'content': text};
-      throw CoachException(
-        'Provider returned an unsupported response shape (no message/delta). '
-        'Streaming-only endpoints are not supported — use a standard '
-        'OpenAI-compatible /chat/completions endpoint.',
-      );
-    } on FormatException {
-      throw CoachException(
-        'Provider returned an invalid or incomplete response, '
-        'or the conversation could not be converted. Try again or start a new chat.',
-      );
+      return switch (api) {
+        CoachApi.responses => CoachResponses.reply(
+            j.cast<String, dynamic>(), model, apiBase: apiBase),
+        CoachApi.chatCompletions => CoachChatCompletions.reply(
+            j.cast<String, dynamic>()),
+      };
+    } on FormatException catch (e) {
+      throw CoachException(e.message);
     } finally {
       if (client == null) c.close();
     }

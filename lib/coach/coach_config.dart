@@ -1,5 +1,5 @@
 // CoachConfig — local, BYOK settings for the AI coach. The API key is stored in
-// the platform keychain/keystore (flutter_secure_storage); base URL + model in
+// the platform keychain/keystore (flutter_secure_storage); endpoint, API + model in
 // SharedPreferences. NOTHING here ever touches our backend — the key stays on the
 // device and the app calls the OpenAI-compatible provider directly.
 
@@ -19,6 +19,23 @@ String coachEndpointOrigin(String url) {
   final u = Uri.tryParse(url.trim());
   if (u == null || u.host.isEmpty) return url.trim();
   return u.origin;
+}
+
+/// The provider's wire format. Model identifiers never select the protocol.
+enum CoachApi {
+  responses('responses'),
+  chatCompletions('chat/completions');
+
+  const CoachApi(this.endpoint);
+  final String endpoint;
+
+  /// Also migrates settings saved before an API choice existed.
+  static CoachApi defaultFor(String baseUrl) {
+    final base = baseUrl.trim().isEmpty ? CoachConfig.defaultBaseUrl : baseUrl;
+    return coachEndpointOrigin(base) == 'https://api.openai.com'
+        ? responses
+        : chatCompletions;
+  }
 }
 
 /// What the coach setup screen's Save should pass as [CoachConfig.save]'s
@@ -91,6 +108,7 @@ bool _isDuplicateItemError(Object e) {
 class CoachConfig extends ChangeNotifier {
   static const _kBaseUrl = 'coach_base_url';
   static const _kModel = 'coach_model';
+  static const _kApi = 'coach_api';
   static const _kKey = 'coach_api_key'; // secure storage
   static const _kTimeoutSeconds = 'coach_timeout_seconds';
 
@@ -144,6 +162,7 @@ class CoachConfig extends ChangeNotifier {
   final FlutterSecureStorage _secure = const FlutterSecureStorage();
 
   String _baseUrl = defaultBaseUrl;
+  CoachApi _api = CoachApi.defaultFor(defaultBaseUrl);
   String _model = '';
   String? _key; // cached in-memory after load
   int _timeoutSeconds = defaultTimeoutSeconds;
@@ -208,6 +227,7 @@ class CoachConfig extends ChangeNotifier {
   }
 
   String get baseUrl => _baseUrl;
+  CoachApi get api => _api;
   String get model => _model;
   /// The saved, user-configurable timeout — meaningful only for a local
   /// endpoint (see [requestTimeout]), but kept intact and readable regardless
@@ -249,6 +269,11 @@ class CoachConfig extends ChangeNotifier {
   Future<void> load({bool trusted = false}) async {
     final prefs = await SharedPreferences.getInstance();
     _baseUrl = prefs.getString(_kBaseUrl) ?? defaultBaseUrl;
+    _api = switch (prefs.getString(_kApi)) {
+      'responses' => CoachApi.responses,
+      'chatCompletions' => CoachApi.chatCompletions,
+      _ => CoachApi.defaultFor(_baseUrl),
+    };
     _model = prefs.getString(_kModel) ?? '';
     _timeoutSeconds = prefs.getInt(_kTimeoutSeconds) ?? defaultTimeoutSeconds;
     final marker = prefs.getBool(_kKeyPresent); // null = undetermined
@@ -347,14 +372,23 @@ class CoachConfig extends ChangeNotifier {
   /// class exists to stop.
   Future<void> save({
     String? baseUrl,
+    CoachApi? api,
     String? model,
     String? apiKey,
     int? timeoutSeconds,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     if (baseUrl != null) {
+      final previousOrigin = coachEndpointOrigin(_baseUrl);
       _baseUrl = baseUrl.trim().isEmpty ? defaultBaseUrl : baseUrl.trim();
+      if (api == null && coachEndpointOrigin(_baseUrl) != previousOrigin) {
+        api = CoachApi.defaultFor(_baseUrl);
+      }
       await prefs.setString(_kBaseUrl, _baseUrl);
+    }
+    if (api != null) {
+      _api = api;
+      await prefs.setString(_kApi, api.name);
     }
     if (model != null) {
       _model = model.trim();
