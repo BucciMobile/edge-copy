@@ -2448,5 +2448,10 @@
   "devicesWornOtherSub": "जेब या बैग। बैंड वहाँ चाल अच्छे से नहीं देख सकता।",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "होम",
+  "tabHealth": "स्वास्थ्य",
+  "tabNutrition": "पोषण",
+  "tabWorkout": "वर्कआउट",
+  "tabWellness": "वेलनेस"
 }

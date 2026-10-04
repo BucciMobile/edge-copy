@@ -2567,5 +2567,10 @@
   "devicesWornOtherSub": "Eine Tasche oder ein Beutel. Das Band sieht dort das Gehen schlecht.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "Start",
+  "tabHealth": "Gesundheit",
+  "tabNutrition": "Ernährung",
+  "tabWorkout": "Training",
+  "tabWellness": "Wohlbefinden"
 }

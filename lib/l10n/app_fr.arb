@@ -2448,5 +2448,10 @@
   "devicesWornOtherSub": "Une poche ou un sac. Le bracelet y voit mal la marche.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "Accueil",
+  "tabHealth": "Santé",
+  "tabNutrition": "Nutrition",
+  "tabWorkout": "Entraînement",
+  "tabWellness": "Bien-être"
 }

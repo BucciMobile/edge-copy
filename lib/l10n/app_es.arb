@@ -2477,5 +2477,10 @@
   "devicesWornOtherSub": "Un bolsillo o bolso. La banda no ve bien la marcha ahí.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "Inicio",
+  "tabHealth": "Salud",
+  "tabNutrition": "Nutrición",
+  "tabWorkout": "Entrenamiento",
+  "tabWellness": "Bienestar"
 }
