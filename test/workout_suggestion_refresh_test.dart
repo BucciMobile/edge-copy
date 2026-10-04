@@ -45,6 +45,13 @@ void main() {
     expect(rows.single['created_at'], 1);
   });
 
+  test('a stale pass with an earlier end does not shrink the span', () async {
+    await LocalDb.putWorkoutSuggestion(row(2200, 20, 3));
+    final rows = await LocalDb.activeWorkoutSuggestions();
+    expect(rows.single['end_ts'], 4600);
+    expect(rows.single['duration_min'], 60);
+  });
+
   test('a dismissed suggestion stays dismissed', () async {
     await LocalDb.dismissWorkoutSuggestion('2026-10-01:1000');
     await LocalDb.putWorkoutSuggestion(row(5000, 66, 3));

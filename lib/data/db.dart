@@ -4460,8 +4460,12 @@ class LocalDb {
           ])
             if (row.containsKey(k)) k: row[k],
         },
-        where: 'id = ?',
-        whereArgs: [row['id']],
+        // A slower pass from another engine can land after a newer one; the
+        // span of a same-start bout only grows, so never move end_ts back.
+        where: row.containsKey('end_ts') ? 'id = ? AND end_ts <= ?' : 'id = ?',
+        whereArgs: row.containsKey('end_ts')
+            ? [row['id'], row['end_ts']]
+            : [row['id']],
       );
     });
   }
