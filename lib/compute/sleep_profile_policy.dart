@@ -89,12 +89,12 @@ class SleepProfilePolicy {
   }) =>
       !hasOverride && !alreadyFolded.contains(dayId);
 
-  /// Whether the data has run past the day's window ([dayEndSec], the last
-  /// second of the day), so its night is over and complete. Before that a
+  /// Whether the data has reached the end of the day's window ([dayEndSec],
+  /// the last second of the day), so its night is over and complete. Before that a
   /// pass stages the night only up to the data edge, and folding that
   /// fragment would use up the day's one fold.
   static bool nightOver({required int? dataEdgeSec, required int dayEndSec}) =>
-      dataEdgeSec != null && dataEdgeSec > dayEndSec;
+      dataEdgeSec != null && dataEdgeSec >= dayEndSec;
 
   /// Whether a profile with [nights] folded nights may influence staging.
   static bool shouldBlend(int? nights) =>

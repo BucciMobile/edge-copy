@@ -72,6 +72,10 @@ void main() {
           SleepProfilePolicy.nightOver(
               dataEdgeSec: dayEnd + 60, dayEndSec: dayEnd),
           isTrue);
+      // A record at the day's last second already covers the whole day.
+      expect(
+          SleepProfilePolicy.nightOver(dataEdgeSec: dayEnd, dayEndSec: dayEnd),
+          isTrue);
     });
 
     test('an override night never folds — the window is asserted, not measured',
