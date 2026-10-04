@@ -18,6 +18,7 @@ import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
+import 'package:openstrap_edge/state/alarm_schedule.dart';
 import 'package:openstrap_edge/state/app_state.dart';
 import 'package:openstrap_edge/sync/paired_device.dart';
 
@@ -337,6 +338,29 @@ void main() {
       expect(engine.armed.single.weekday, DateTime.wednesday);
       expect(app.alarmEpoch,
           engine.armed.single.millisecondsSinceEpoch ~/ 1000);
+    });
+
+    test('a headless re-arm shows up once the foreground connects', () async {
+      await silenceOsPresent();
+      final engine = _ArmRecordingEngine();
+      final app = AppState.forTesting(engine: engine);
+      addTearDown(app.dispose);
+      await app.setScheduleDay(weekday: 2, enabled: true); // offline: no arm
+      final next = nextAlarmOccurrence(app.alarmSchedule, DateTime.now())!;
+      final headless = next.millisecondsSinceEpoch ~/ 1000;
+      // Headless armed it under this live process; the session still holds
+      // an older optimistic epoch.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('alarm_epoch', headless);
+      await prefs.setBool('alarm_epoch_confirmed', true);
+      app.device.alarmEpoch = 1785000000;
+      app.device.connection = 'connected';
+
+      await app.setScheduleDay(weekday: 2, enabled: true);
+
+      expect(engine.armed, isEmpty, reason: 'already armed, no rewrite');
+      expect(app.alarmEpoch, headless);
+      expect(app.alarmConfirmed, isTrue);
     });
 
     test('ALARM_SET (event 56) leaves the armed alarm alone', () async {

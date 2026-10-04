@@ -4631,12 +4631,17 @@ class AppState extends ChangeNotifier {
       final onDisk = prefs.getInt('alarm_epoch');
       if (onDisk != _savedAlarm) {
         _savedAlarm = onDisk;
+        // The optimistic in-session epoch is older than what headless armed,
+        // and it wins in [alarmEpoch]; drop it so Home and the alarm screen
+        // show the arm that's actually on the strap.
+        device.alarmEpoch = null;
         if (onDisk != null) {
           _alarm.set(onDisk, DateTime.now().millisecondsSinceEpoch);
           _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
         } else {
           _alarm.disable();
         }
+        notifyListeners();
       }
       final result = await armNextScheduledOccurrence(
         engine: engine,
