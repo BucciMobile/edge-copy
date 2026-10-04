@@ -1735,9 +1735,12 @@ import 'substrate.dart';
 // across a missing day. Edge-only.
 // 99 → 100 (SRI, edge#494): 'unobserved' minutes no longer count as asleep,
 // and a gap of any length pads one grid. Edge-only.
-// 100 → 101: detected naps require review; only accepted naps receive sleep credit.
+// 100 → 101 (crossday, edge#501): imported days' vendor scores are masked out
+// of the rollup, and today's night counts as settled once the data edge is
+// past its wake, so illness/anomaly alerts can fire the same day. Edge-only.
+// 101 → 102: detected naps require review; only accepted naps receive sleep credit.
 // Detector methods and sibling pins are unchanged.
-const int kAlgoVersion = 101;
+const int kAlgoVersion = 102;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1973,9 +1976,9 @@ const int _baselineWindowDays = 28;
 /// day (#128: "morning it was 49, now 45"). Once today's overnight is genuinely
 /// COMPLETE we PIN the first such readiness as the headline so it stops moving.
 ///
-/// "Complete" must be stronger than `overnight_state == 'ready'` — that flips as
-/// soon as the FIRST sleep-bearing row lands (mid-drain), so pinning on it could
-/// freeze a partial-night value. We instead require the drained data edge to
+/// "Complete" cannot be "a sleep-bearing row exists" — that is true as soon as
+/// the FIRST one lands (mid-drain), so pinning on it could freeze a
+/// partial-night value. We instead require the drained data edge to
 /// have moved at least this far PAST the sleep offset (wake): the whole sleep
 /// window is then decoded and the segmentation-placed wake is settled, so the
 /// overnight inputs are final. Same "edge past the window" model finalisation
@@ -1983,6 +1986,57 @@ const int _baselineWindowDays = 28;
 /// reached within the first post-wake sync in practice; raise it to trade a
 /// slightly later freeze for more safety margin.
 const int _headlineFreezeMarginSec = 60 * 60;
+
+/// How long after a night's wake we stop waiting for the data edge to pass
+/// it. A strap that went quiet right after waking (flat battery, taken off and
+/// not recording) never moves the edge again, and the night we hold is then
+/// the whole night as far as any sync will ever know.
+// ponytail: wall-clock give-up; a persisted "drain complete" marker would be exact.
+const int kOvernightGiveUpSec = 12 * 60 * 60;
+
+/// Whether a night whose sleep ends at [sleepOffsetSec] is SETTLED: the drained
+/// data edge has moved [_headlineFreezeMarginSec] past the wake, so the window
+/// is no longer just where the sync happened to stop (#448: mid-drain, the
+/// newest record is still inside the night and the stager closes the window at
+/// it, so a partial night and its readiness showed as this morning's). Home and
+/// the readiness freeze both read this, on the same band-only edge
+/// ([LocalDb.lastDecodedRecTs]).
+///
+/// [nowSec] enables the wall-clock give-up. Only Home passes it: a drain that
+/// stalled mid-night looks exactly like a strap that went quiet at wake, and
+/// Home recovers on the next derive, but the freeze pins for the whole day, so
+/// it waits for the edge.
+///
+/// A null [sleepOffsetSec] is a night with no window yet. Mid-drain that is
+/// usually an edge still before sleep onset, not a night without sleep, so it
+/// only settles once the band edge has caught up to [nowSec], or gone quiet
+/// for the give-up. A caught-up edge before local noon is still a night that
+/// may not have started (awake at 00:30, the coming sleep has no window yet),
+/// so "no sleep" waits for noon.
+bool overnightSettled({
+  required int? sleepOffsetSec,
+  required int dataEdgeSec,
+  int? nowSec,
+}) {
+  if (sleepOffsetSec == null) {
+    if (nowSec == null) return false;
+    final now = DateTime.fromMillisecondsSinceEpoch(nowSec * 1000);
+    return (now.hour >= 12 &&
+            dataEdgeSec >= nowSec - _headlineFreezeMarginSec) ||
+        nowSec >= dataEdgeSec + kOvernightGiveUpSec;
+  }
+  return dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
+      (nowSec != null && nowSec >= sleepOffsetSec + kOvernightGiveUpSec);
+}
+
+/// The cross-day inputs an importer fills with its vendor's own scores.
+const _crossDayVendorScoreKeys = [
+  'rhr',
+  'rmssd',
+  'readiness',
+  'resp_rate',
+  'skin_temp_z',
+];
 
 /// The frozen morning readiness headline that should be persisted/surfaced for
 /// [today], given the current pin and a fresh look at today's live readiness and
@@ -1995,17 +2049,30 @@ const int _headlineFreezeMarginSec = 60 * 60;
 ///   drift — a re-derive that would RAISE or LOWER the score is ignored).
 /// - A new day → the prior day's pin no longer applies; re-pins once the new
 ///   day's overnight completes.
+/// - Same day, but the night's wake [wakeSec] moved a margin or more from the
+///   pinned one → a different sleep block is now the night (segmentation only
+///   bridges gaps under an hour, so a long mid-night awakening settles the
+///   first block, then a later one takes over as main sleep). Re-pins once that
+///   night settles; until then the old pin holds.
 @visibleForTesting
-({String day, int value})? nextFrozenHeadline({
+({String day, int value, int? wakeSec})? nextFrozenHeadline({
   required String today,
   required bool overnightComplete,
   required int? liveReadiness,
-  required ({String day, int value})? current,
+  required ({String day, int value, int? wakeSec})? current,
+  int? wakeSec,
 }) {
-  if (current != null && current.day == today) return current; // pinned; hold
+  final sameNight = current != null &&
+      current.day == today &&
+      (current.wakeSec == null ||
+          wakeSec == null ||
+          (wakeSec - current.wakeSec!).abs() < _headlineFreezeMarginSec);
+  if (sameNight) return current; // pinned; hold
   if (overnightComplete && liveReadiness != null) {
-    return (day: today, value: liveReadiness); // first complete settle → pin
+    // first complete settle of this night → pin
+    return (day: today, value: liveReadiness, wakeSec: wakeSec);
   }
+  if (current != null && current.day == today) return current;
   return null; // nothing to pin yet for today
 }
 
@@ -3933,11 +4000,11 @@ class DerivationEngine {
         _log('rescan: no data edge');
         return 0;
       }
-      final cutoffSec = dataNowSec - _rescanWindowDays * 86400;
-      final todoDays = [
-        for (final dayId in rawByDay.keys)
-          if (_localNextDayLabelToSec(dayId) >= cutoffSec) dayId,
-      ]..sort();
+      final todoDays = rescanDayIds(
+        rawDayIds: rawByDay.keys,
+        dataNowSec: dataNowSec,
+        prunedBeforeSec: await LocalDb.getCursorInt(_prunedBeforeCursor),
+      );
       if (todoDays.isEmpty) {
         _log('rescan: no recent decoded-backed days');
         await LocalDb.setCursor('baseline_sig', sig);
@@ -3990,6 +4057,42 @@ class DerivationEngine {
       _running = false;
     }
   }
+
+  /// The days [rescanRecent] re-derives: every day with substrate inside the
+  /// rescan window, minus any whose derive window ([_targetDayWindow], from the
+  /// previous noon) reaches below [prunedBeforeSec]. The prune cuts on local
+  /// midnight, so the oldest kept day has its own rows but lost the evening
+  /// half of its night; re-deriving it would REPLACE a full-night result with
+  /// a truncated one that no empty-substrate guard catches. Its stored result
+  /// was computed from the whole night, so it keeps that.
+  @visibleForTesting
+  static List<String> rescanDayIds({
+    required Iterable<String> rawDayIds,
+    required int dataNowSec,
+    int? prunedBeforeSec,
+  }) {
+    final cutoffSec = dataNowSec - _rescanWindowDays * 86400;
+    return [
+      for (final dayId in rawDayIds)
+        if (_localNextDayLabelToSec(dayId) >= cutoffSec &&
+            !windowTruncatedByPrune(dayId, prunedBeforeSec))
+          dayId,
+    ]..sort();
+  }
+
+  /// Whether [dayId]'s derive window ([_targetDayWindow], from the previous
+  /// noon) starts below [prunedBeforeSec], i.e. part of its night is gone.
+  /// A user-set sleep window ([forcedOnsetSec]) only needs its own onset kept.
+  @visibleForTesting
+  static bool windowTruncatedByPrune(
+    String dayId,
+    int? prunedBeforeSec, {
+    int? forcedOnsetSec,
+  }) =>
+      prunedBeforeSec != null &&
+      (forcedOnsetSec ??
+              _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec) <
+          prunedBeforeSec;
 
   /// A stable, cheap signature of the CURRENT rolling baseline — the same inputs
   /// the readiness/illness baselines fold over. We take the trailing
@@ -4186,6 +4289,7 @@ class DerivationEngine {
       dataNowSec,
       await _BaselineHistoryCache.load(),
       forceFinalize: forceFinalize,
+      suppliedSubstrate: true,
     );
   }
 
@@ -4195,6 +4299,7 @@ class DerivationEngine {
     int dataNowSec,
     _BaselineHistoryCache history, {
     bool forceFinalize = false,
+    bool suppliedSubstrate = false,
   }) async {
     final daySub = day.daySub;
     final sleepSub = day.sleepSub;
@@ -4377,14 +4482,29 @@ class DerivationEngine {
     // `partial` row was considered instead, but `partial` still gets written
     // to `day_result` and would still shadow the better older row for
     // day-detail reads; declining is what actually protects it.
+    //
+    // Same decline when the prune has cut into this day's window: the midnight
+    // cut keeps the oldest kept day's own rows but drops the evening half of
+    // its night, so sleepSub is non-empty and the scalars come back from a
+    // partial night. Every path (algo bump, force, override, rescan) lands here.
     if (!producedNothing &&
-        nightSubstrateRegressed(
-          sleepSubEmpty: sleepSub.isEmpty,
-          nightScalarsNull: scMap == null ||
-              (scMap['rhr'] == null &&
-                  scMap['rmssd'] == null &&
-                  scMap['readiness'] == null),
-        )) {
+        (nightSubstrateRegressed(
+              sleepSubEmpty: sleepSub.isEmpty,
+              nightScalarsNull: scMap == null ||
+                  (scMap['rhr'] == null &&
+                      scMap['rmssd'] == null &&
+                      scMap['readiness'] == null),
+            ) ||
+            // An import brings its own substrate, the prune can't have cut it.
+            (!suppliedSubstrate &&
+                windowTruncatedByPrune(
+                  day.date,
+                  await LocalDb.getCursorInt(_prunedBeforeCursor),
+                  forcedOnsetSec: day.sleepSource == 'manual' ||
+                          day.sleepSource == 'confirmed'
+                      ? day.sleepOnsetSec
+                      : null,
+                )))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
           (existingNight['rhr'] != null ||
@@ -4393,7 +4513,7 @@ class DerivationEngine {
       if (existingHadNight) {
         _log('derive ${day.date}: sleep-window substrate pruned out from '
             "under a day that already had real night scalars — kept the "
-            'existing result rather than nulling the readiness baseline '
+            'existing result rather than overwriting the readiness baseline '
             '(edge#305)');
         return;
       }
@@ -4732,7 +4852,11 @@ class DerivationEngine {
     await LocalDb.putDayResult(
       dayId: day.date,
       algoVersion: kAlgoVersion,
-      payloadJson: jsonEncode(bundle),
+      // The data edge this row was derived against. The cross-day settled
+      // test compares the row's wake with THIS edge, not a fresher one read
+      // later: ingest keeps committing during a pass, and a newer edge would
+      // call a night settled whose wake came from a truncated substrate.
+      payloadJson: jsonEncode({...bundle, 'data_edge_sec': dataNowSec}),
       windowJson: jsonEncode(
         ((day.sleepJson['window'] as Map?) ?? const {}).cast<String, dynamic>(),
       ),
@@ -4876,23 +5000,27 @@ class DerivationEngine {
     if (day.date != todayLabel()) return;
     final hasSleep = day.sleepOffsetSec > day.sleepOnsetSec;
     if (!hasSleep) return;
-    final overnightComplete =
-        dataNowSec >= day.sleepOffsetSec + _headlineFreezeMarginSec;
+    final overnightComplete = overnightSettled(
+      sleepOffsetSec: day.sleepOffsetSec,
+      dataEdgeSec: dataNowSec,
+    );
     final current = await LocalDb.frozenHeadline();
     final next = nextFrozenHeadline(
       today: day.date,
       overnightComplete: overnightComplete,
       liveReadiness: readiness?.round(),
       current: current,
+      wakeSec: day.sleepOffsetSec,
     );
     if (next == null) return;
     // Already pinned to this exact value → skip the redundant write.
     if (current != null &&
         current.day == next.day &&
-        current.value == next.value) {
+        current.value == next.value &&
+        current.wakeSec == next.wakeSec) {
       return;
     }
-    await LocalDb.setFrozenHeadline(next.day, next.value);
+    await LocalDb.setFrozenHeadline(next.day, next.value, wakeSec: next.wakeSec);
     _log('froze headline readiness ${next.value} for ${next.day}');
   }
 
@@ -5311,34 +5439,20 @@ class DerivationEngine {
     final reviewRevision = await LocalDb.activityReviewRevision();
     final rows = await LocalDb.recentDayResults(_crossDayWindow);
     final today = LocalDb.localDayLabelNow();
+    final imported = await LocalDb.importedDates();
     final (days, json) = await _runIsolateCancellable(() {
       final days = <Map<String, dynamic>>[];
       for (final row in rows.reversed) {
         final payload = _decodeBundle(row['payload_json']);
         if (payload == null) continue;
         if (payload['skipped'] == true) continue;
-        final rec = _crossDayRecord(row, payload);
-        if (rec == null) continue;
-        // Today's own row updates on every derive pass while the night is
-        // still syncing/settling — feeding that partial reading into the
-        // illness/anomaly CUSUM can fire a false "possible illness onset" on
-        // data that's really just a truncated/mid-drain night. Only exclude
-        // TODAY specifically; older days already had their 48h to settle.
-        //
-        // FLAG it rather than DROP it: `days` is the single input list for the
-        // whole cross-day bundle, so dropping today also silently removed it
-        // from readiness/glass-box, the resting-HR trend-shift CUSUM, load,
-        // sleep debt and `recent` (whose last row dates every notification).
-        // buildCrossDayBundle nulls only the alert inputs for a flagged day.
-        if (row['day_id'] == today && (row['finalized'] as num?) != 1) {
-          rec['unsettled'] = true;
-        }
-        // Explicit identity for TODAY-scoped reads. `unsettled` cannot serve
-        // this purpose — it is only set while today is unfinalized. Without a
-        // flag, a today-scoped consumer can only take the LAST record
-        // positionally, which on a day with no derived row is YESTERDAY's.
-        if (row['day_id'] == today) rec['is_today'] = true;
-        days.add(rec);
+        final rec = crossDayInputRecord(
+          row,
+          payload,
+          today: today,
+          imported: imported,
+        );
+        if (rec != null) days.add(rec);
       }
       // `built_for_day` is what makes the `is_today` stamps inside `days`
       // interpretable later. Without it the envelope carries day-relative facts
@@ -5534,6 +5648,63 @@ class DerivationEngine {
   static Map<String, dynamic>? _decodeBundle(Object? json) =>
       SeriesCodec.decodePayloadJson(json);
 
+  /// One `day_result` row as a cross-day input record, with the per-day
+  /// masks the rollup needs. Static and pure so it runs in the isolate.
+  @visibleForTesting
+  static Map<String, dynamic>? crossDayInputRecord(
+    Map<String, dynamic> row,
+    Map<String, dynamic> payload, {
+    required String today,
+    required Set<String> imported,
+  }) {
+    final rec = _crossDayRecord(row, payload);
+    if (rec == null) return null;
+    // An imported day's scores are another vendor's maths. The baseline
+    // cache already masks them; the cross-day families (illness CUSUM,
+    // anomaly, glass-box, percentiles) need the same mask or tonight's
+    // reading is scored against that vendor's history. Sleep timing and
+    // load stay, they are not an algorithm's opinion of the night.
+    if (imported.contains(row['day_id'])) {
+      for (final k in _crossDayVendorScoreKeys) {
+        rec[k] = null;
+      }
+    }
+    // Today's own row updates on every derive pass while the night is
+    // still syncing/settling — feeding that partial reading into the
+    // illness/anomaly CUSUM can fire a false "possible illness onset" on
+    // data that's really just a truncated/mid-drain night. Only exclude
+    // TODAY specifically; older days already had their 48h to settle.
+    //
+    // FLAG it rather than DROP it: `days` is the single input list for the
+    // whole cross-day bundle, so dropping today also silently removed it
+    // from readiness/glass-box, the resting-HR trend-shift CUSUM, load,
+    // sleep debt and `recent` (whose last row dates every notification).
+    // buildCrossDayBundle nulls only the alert inputs for a flagged day.
+    //
+    // Today is never finalized (that waits 48 h behind the data edge), so
+    // "not finalized" alone held the alerts off all day, every day. The night
+    // is done once the data edge is [_headlineFreezeMarginSec] past its wake,
+    // the same test the headline pin uses; no wake yet is no complete night.
+    // The edge is the one the row was derived against (`data_edge_sec`), so
+    // the wake and the edge come from the same substrate; a row without one
+    // stays unsettled.
+    final wakeSec = (rec['wake_sec'] as num?)?.toInt();
+    final dataEdgeSec = (payload['data_edge_sec'] as num?)?.toInt();
+    if (row['day_id'] == today &&
+        (row['finalized'] as num?) != 1 &&
+        (wakeSec == null ||
+            dataEdgeSec == null ||
+            dataEdgeSec < wakeSec + _headlineFreezeMarginSec)) {
+      rec['unsettled'] = true;
+    }
+    // Explicit identity for TODAY-scoped reads. `unsettled` cannot serve
+    // this purpose — it is only set while today's night is unsettled. Without a
+    // flag, a today-scoped consumer can only take the LAST record
+    // positionally, which on a day with no derived row is YESTERDAY's.
+    if (row['day_id'] == today) rec['is_today'] = true;
+    return rec;
+  }
+
   /// Build the cross-day record from a day_result row + its payload bundle.
   static Map<String, dynamic>? _crossDayRecord(
     Map<String, dynamic> row,
@@ -5669,6 +5840,9 @@ class DerivationEngine {
   /// the whole install, forever, at ~12 MB/day.
   static const int _maxRawHoldDays = 14;
 
+  /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
+  static const String _prunedBeforeCursor = 'decoded_pruned_before';
+
   /// The `rec_ts` below which decoded substrate may be deleted, or null when
   /// nothing may be. PURE — the decision the raw prune is, separated from the
   /// two DB calls that surround it. See [_pruneOldDecoded] for the contract.
@@ -5682,7 +5856,7 @@ class DerivationEngine {
     if (cutoffSec <= 0) return null;
     final pending = rawDayIds.where((d) => !derivedDayIds.contains(d)).toList()
       ..sort();
-    if (pending.isEmpty) return cutoffSec;
+    if (pending.isEmpty) return _localDayStartOf(cutoffSec);
     // Hold at the START of the oldest day still owed a result — its own rows
     // survive, everything before it goes — floored so a permanently stuck day
     // cannot hold the whole install (see [_maxRawHoldDays]).
@@ -5690,8 +5864,17 @@ class DerivationEngine {
       _localDayLabelToSec(pending.first),
       dataNowSec - _maxRawHoldDays * 86400,
     );
-    return barrier < cutoffSec ? barrier : cutoffSec;
+    return _localDayStartOf(barrier < cutoffSec ? barrier : cutoffSec);
   }
+
+  /// Local midnight of the day [sec] falls in. The prune deletes WHOLE days:
+  /// a cutoff mid-day left that day half-pruned, still in `decodedRecTsMaxByDay`,
+  /// so the next rescan re-derived it from the surviving afternoon and replaced
+  /// its full curve/wear with one starting wherever the cutoff happened to sit
+  /// (#450). A fully-pruned day drops out of the rescan and keeps its result.
+  static int _localDayStartOf(int sec) => _localDayLabelToSec(
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(sec * 1000)),
+      );
 
   /// Prune raw older than [rawRetentionDays] BEHIND THE DATA EDGE. Retention is
   /// measured against the last record timestamp we actually drained
@@ -5732,7 +5915,14 @@ class DerivationEngine {
       derivedDayIds: derivedIds,
     );
     if (cutoffSec == null) return;
-    final deleted = await LocalDb.pruneDecodedBeforeRecTs(cutoffSec);
+    // Highest cutoff ever applied: a held-back pass can cut lower, but rows
+    // below an earlier cut are still gone. See [rescanDayIds]. Advanced inside
+    // the delete's own transaction, so a kill can't split the two and a
+    // concurrent lower-cutoff run can't write it backwards.
+    final deleted = await LocalDb.pruneDecodedBeforeRecTs(
+      cutoffSec,
+      cursorName: _prunedBeforeCursor,
+    );
     if (deleted > 0) {
       _log('pruned $deleted decoded rows with rec_ts < $cutoffSec');
     }
@@ -8572,7 +8762,8 @@ class DerivationEngine {
     }
   }
 
-  // static: pure day-label arithmetic, and `rawPruneCutoffSec` needs it.
+  // static: pure day-label arithmetic, and `rawPruneCutoffSec` /
+  // `rescanDayIds` need them.
   static int _localDayLabelToSec(String day) {
     final d = DateTime.tryParse(day);
     if (d == null) return 0;
@@ -8585,7 +8776,7 @@ class DerivationEngine {
   // .millisecondsSinceEpoch already respects local DST rules, so just asking
   // for the START of the NEXT day gets this right without hardcoding a
   // day length.
-  int _localNextDayLabelToSec(String day) {
+  static int _localNextDayLabelToSec(String day) {
     final d = DateTime.tryParse(day);
     if (d == null) return 0;
     return DateTime(d.year, d.month, d.day + 1).millisecondsSinceEpoch ~/ 1000;

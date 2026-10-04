@@ -118,7 +118,7 @@ void main() {
   });
 
   test(
-    'schema 54 upgrades additively and retains dismissed legacy workouts',
+    'schema 55 upgrades additively and retains dismissed legacy workouts',
     () async {
       await db.insert('workout_suggestions', {
         'id': 'legacy-upgrade',
@@ -135,11 +135,11 @@ void main() {
       ]) {
         await db.execute('DROP TABLE $table');
       }
-      await db.execute('PRAGMA user_version = 54');
+      await db.execute('PRAGMA user_version = 55');
       await LocalDb.close();
       db = await LocalDb.instance;
       store = ActivityStore(db);
-      expect(await db.getVersion(), 55);
+      expect(await db.getVersion(), LocalDb.schemaVersion);
       expect(await store.pending(), isEmpty);
       expect(
         (await store.get('legacy-upgrade'))!.status,
