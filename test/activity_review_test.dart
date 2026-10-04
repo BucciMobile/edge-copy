@@ -568,7 +568,15 @@ void main() {
       );
       final row = (await LocalDb.napEdits(label)).single;
       expect((row['end_ts'] as int) - (row['start_ts'] as int), 5 * 3600);
-      expect(await db.query('activity_review_days'), hasLength(2));
+      // both the detected and the edited start's local day get revised; they
+      // are two days only where the host zone puts midnight between them
+      final days = (await db.query('activity_review_days'))
+          .map((r) => r['day_id'])
+          .toSet();
+      expect(days, {
+        label,
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(st * 1000)),
+      });
     },
   );
 
