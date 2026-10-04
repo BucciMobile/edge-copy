@@ -3342,8 +3342,11 @@ class AppState extends ChangeNotifier {
       // Survives `_resetLivePedometer()` — see [_workoutSawSamples].
       if (w != null) {
         _workoutSawSamples = true;
-        final last = _workoutLastGaitMs;
-        if (last != null && nowMs - last > _kWorkoutImuGapMs) {
+        // The first frame is measured against the start, so a stream that
+        // only came up minutes in is a gap too, not full coverage.
+        final last =
+            _workoutLastGaitMs ?? w.startTime.millisecondsSinceEpoch;
+        if (nowMs - last > _kWorkoutImuGapMs) {
           _workoutStepsGap = true;
         }
         _workoutLastGaitMs = nowMs;

@@ -374,6 +374,19 @@ void main() {
       return LocalDb.session('gap$gapMs');
     }
 
+    test('a stream that only came up minutes in banks no steps', () async {
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      app.startWorkout(workoutId: 'late', type: 'walking');
+      final base = DateTime.now().millisecondsSinceEpoch + 60000;
+      for (var f = 0; f < 1200; f++) {
+        app.debugFeedLiveAccel(_walkFrame(f, 10), atMs: base + f * 100);
+      }
+      expect(app.workoutStepsMeasured, isNull);
+      await app.stopWorkout();
+      expect((await LocalDb.session('late'))!['steps'], isNull);
+    });
+
     test('a covered walk banks its steps', () async {
       final row = await walk(gapMs: 0);
       expect((row!['steps'] as num).toInt(), greaterThan(0));
