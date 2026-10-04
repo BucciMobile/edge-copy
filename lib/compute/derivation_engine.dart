@@ -1728,7 +1728,10 @@ import 'substrate.dart';
 // marginally for everyone (per-minute means instead of raw 1 Hz). The bars
 // also gate on the set, not the age estimate, so a manual or observed set with
 // no age gets bars instead of "add your age". Edge-only.
-const int kAlgoVersion = 98;
+// 98 → 99 (crossday sleep performance + SRI, edge#493): performance scored an
+// older night's TST when last night had none; SRI paired non-adjacent nights
+// across a missing day. Edge-only.
+const int kAlgoVersion = 99;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
