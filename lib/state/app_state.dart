@@ -3379,6 +3379,21 @@ class AppState extends ChangeNotifier {
   /// rebasing it negative rather than dropping it.
   bool _workoutSawSamples = false;
 
+  /// Phone-clock time of the last gait accel frame for the active workout.
+  /// Unlike `_liveLastIngestMs` it survives `_resetLivePedometer()`, so a
+  /// reconnect gap is still seen as a gap.
+  int? _workoutLastGaitMs;
+
+  /// The workout's accel stream went quiet for longer than
+  /// [_kWorkoutImuGapMs] at some point (screen locked, link dropped, process
+  /// relaunched). The count then covers only part of the session and is not
+  /// its total — see [workoutStepsMeasured].
+  bool _workoutStepsGap = false;
+
+  /// Far above the frame cadence (1-10 frames/s) and above a brief glance at
+  /// the lock screen; anything longer is time the pedometer did not see.
+  static const int _kWorkoutImuGapMs = 30000;
+
   /// Steps for the active workout, or NULL when nothing gait-capable was ever
   /// measured for it (issue #183).
   ///
@@ -3389,11 +3404,26 @@ class AppState extends ChangeNotifier {
   /// 1 Hz HR keep flowing. Reporting `0` in that state is a fabricated
   /// measurement, and it is what the issue screenshotted: a mile walked, HR and
   /// distance both right, "0 STEPS" beside them.
-  int? get workoutStepsMeasured {
+  int? get workoutStepsMeasured =>
+      _workoutStepsMeasuredAt(DateTime.now().millisecondsSinceEpoch);
+
+  /// [workoutStepsMeasured] with coverage judged as of [nowMs], so
+  /// [stopWorkout] can judge it at the moment of stop rather than after the
+  /// route/sensor teardown it awaits.
+  int? _workoutStepsMeasuredAt(int nowMs) {
     if (activeWorkout == null || _workoutRawBase == null) return null;
     // Nothing gait-capable has arrived for this workout — unmeasured, as
     // opposed to zero steps having been measured.
     if (!_workoutSawSamples) return null;
+    // Partial coverage is not a total: backgrounding a gait workout turns the
+    // IMU off (see [_liveOwners]) while HR and GPS keep going, so 2 counted
+    // minutes of a 40-minute walk would otherwise bank as the walk's steps.
+    final last = _workoutLastGaitMs;
+    if (_workoutStepsGap ||
+        (last != null &&
+            nowMs - last > _kWorkoutImuGapMs)) {
+      return null;
+    }
     final raw = _liveRaw - _workoutRawBase!;
     return raw > 0 ? (raw * ana.StepParams.gain).round() : 0;
   }
@@ -3424,7 +3454,17 @@ class AppState extends ChangeNotifier {
     final w = activeWorkout;
     if (w == null || isGaitStepType(w.type)) {
       // Survives `_resetLivePedometer()` — see [_workoutSawSamples].
-      if (w != null) _workoutSawSamples = true;
+      if (w != null) {
+        _workoutSawSamples = true;
+        // The first frame is measured against the start, so a stream that
+        // only came up minutes in is a gap too, not full coverage.
+        final last =
+            _workoutLastGaitMs ?? w.startTime.millisecondsSinceEpoch;
+        if (nowMs - last > _kWorkoutImuGapMs) {
+          _workoutStepsGap = true;
+        }
+        _workoutLastGaitMs = nowMs;
+      }
       // The chunk's clock starts at the PREVIOUS frame's arrival (this one is
       // when its samples landed), so the span measured at commit is exactly the
       // wall time this chunk's samples took. `_liveLastIngestMs` is still the
@@ -6362,6 +6402,8 @@ class AppState extends ChangeNotifier {
     final id = workoutId ?? 'w${start.millisecondsSinceEpoch}';
     _workoutRawBase = _liveRaw;
     _workoutSawSamples = false;
+    _workoutLastGaitMs = null;
+    _workoutStepsGap = false;
     _workoutMinuteSteps.clear();
     _zoneAlert =
         zoneAlertEnabled ? ZoneCrossingAlert(targetZone: zoneAlertTargetZone) : null;
@@ -6680,6 +6722,11 @@ class AppState extends ChangeNotifier {
           // calories/strain/zone-minutes already (honestly) do here.
           _workoutRawBase = _liveRaw;
           _workoutSawSamples = false;
+          _workoutLastGaitMs = null;
+          // The steps before the relaunch are gone, so a count from here
+          // would be only part of the session: it stays unmeasured rather
+          // than banking as the total (see [_workoutStepsGap]).
+          _workoutStepsGap = true;
           _workoutMinuteSteps.clear();
           _zoneAlert = zoneAlertEnabled
               ? ZoneCrossingAlert(targetZone: zoneAlertTargetZone)
@@ -6768,6 +6815,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> stopWorkout() async {
     if (activeWorkout == null) return;
+    // Step coverage is judged at the moment of stop: the teardown awaited
+    // below can take long enough to look like an accel gap that never happened.
+    final stopMs = DateTime.now().millisecondsSinceEpoch;
     _workoutTimer?.cancel();
     _workoutTimer = null;
     // Stop GPS route recording and AWAIT the buffered-tail flush before the
@@ -6803,7 +6853,7 @@ class AppState extends ChangeNotifier {
     final finalKcal = w.caloriesOrNull;
     // Nullable: an unmeasured workout must leave the column unset rather than
     // bank a zero that reads as "you took no steps".
-    final wSteps = workoutStepsMeasured;
+    final wSteps = _workoutStepsMeasuredAt(stopMs);
     // Measured walking cadence, or null when this session had too few gait-like
     // minutes to have one — most indoor sessions. Never 0.
     final wCadence =
@@ -6884,6 +6934,8 @@ class AppState extends ChangeNotifier {
     LiveDraft.clear();
     _workoutRawBase = null;
     _workoutSawSamples = false;
+    _workoutLastGaitMs = null;
+    _workoutStepsGap = false;
     _workoutMinuteSteps.clear();
     _zoneAlert = null;
     notifyListeners();
@@ -6938,6 +6990,8 @@ class AppState extends ChangeNotifier {
     _nudgeLive(); // the workout's stream ownership ends with it
     _workoutRawBase = null;
     _workoutSawSamples = false;
+    _workoutLastGaitMs = null;
+    _workoutStepsGap = false;
     _workoutMinuteSteps.clear();
     _zoneAlert = null;
     LiveActivity.end();
