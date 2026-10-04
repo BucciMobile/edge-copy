@@ -278,6 +278,7 @@ void main() {
       // The counter is still disclosed — it is just not the answer.
       expect(steps['band_measured'], 622);
       expect(steps['by_source'], {'phone': 18856});
+      expect(steps.containsKey('spans'), isFalse);
     });
 
     test('it DOES answer when no span source covered the day at all', () {
@@ -289,6 +290,12 @@ void main() {
       expect(scalars['steps'], 622.0);
       expect(steps['source'], 'strap_counter');
       expect(steps['by_source'], {'strap_counter': 622});
+      // Issue #475: the counter's own record times place it on a clock.
+      final spans = (steps['spans'] as List).cast<Map>();
+      expect(spans, isNotEmpty);
+      expect(spans.fold<int>(0, (a, s) => a + (s['steps'] as int)), 622);
+      expect(spans.first['start_ts'], gen5.tsSec.first);
+      expect(spans.last['end_ts'], gen5.tsSec.last);
     });
 
     test('a learned factor scales the counter and is disclosed only when '
@@ -308,6 +315,9 @@ void main() {
       // The chip's row says what the chip counted; the factor is separate.
       expect(alone['by_source'], {'strap_counter': 622});
       expect(alone['note'], contains('scaled by 1.50 from 4 days'));
+      // The hourly spans carry the same factor, so the chart sums to `value`.
+      final spans = (alone['spans'] as List).cast<Map>();
+      expect(spans.fold<int>(0, (a, s) => a + (s['steps'] as int)), 933);
       final (withPhone, _) = _derive(gen5,
           liveStepsReal: 18856, liveStepsFromStrap: 0, counterProfile: bicep);
       expect(withPhone['value'], 18856);
