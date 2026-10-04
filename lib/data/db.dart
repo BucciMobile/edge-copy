@@ -353,7 +353,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 54;
+  static const int schemaVersion = 55;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -1077,6 +1077,12 @@ class LocalDb {
           // next free rung rather than collide with any of them.
           await _createEcgTables(db);
         }
+        if (oldV < 55) {
+          // One-time heal of the °C skin_temp_z older WHOOP imports wrote.
+          // Here, not on the onOpen repair pass: it reads every day_result
+          // payload, and new imports no longer write the key, so once is enough.
+          await _scrubImportedSkinTempZ(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1171,6 +1177,29 @@ class LocalDb {
     // / notifications all existing. DROP+CREATE so a shape change takes effect.
     await _ensureCoachViews(db);
     await _dropRawStore(db);
+  }
+
+  /// Older WHOOP CSV imports filed the export's absolute skin temp (°C) under
+  /// `scalars.skin_temp_z`, which every reader treats as SDs off baseline, so
+  /// 33 °C read as +33 SD in the cross-day temp inputs and the skin temp card.
+  /// Imported days are finalized with no raw behind them and never re-derive,
+  /// so the import fix alone can't heal them: drop the key from those rows.
+  /// Best-effort: a failed heal must never fail the open (that quarantines
+  /// the database), it just leaves the stale key behind.
+  static Future<void> _scrubImportedSkinTempZ(Database db) async {
+    try {
+      await db.execute(
+        "UPDATE day_result SET payload_json = "
+        "json_remove(payload_json, '\$.scalars.skin_temp_z') "
+        "WHERE payload_json LIKE '%skin_temp_z%' "
+        "AND payload_json LIKE '%whoop_export%' "
+        'AND json_valid(payload_json) '
+        "AND json_extract(payload_json, '\$.source') = 'whoop_export' "
+        "AND json_type(payload_json, '\$.scalars.skin_temp_z') IS NOT NULL",
+      );
+    } catch (_) {
+      // best-effort, see above
+    }
   }
 
   /// Periodic snapshot of a LIVE workout's per-second tallies (per-minute HR
