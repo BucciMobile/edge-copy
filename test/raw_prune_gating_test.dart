@@ -29,14 +29,14 @@ int _midnightOf(int sec) {
 
 void main() {
   group('rawPruneCutoffSec', () {
-    // A settled install: everything with raw is derived, so the plain
+    // A settled install: everything with raw is finalized, so the plain
     // retention window applies.
-    test('prunes at the retention edge when every raw day is derived', () {
+    test('prunes at the retention edge when every raw day is finalized', () {
       const dataNow = 1780000000;
       final cutoff = DerivationEngine.rawPruneCutoffSec(
         dataNowSec: dataNow,
         rawDayIds: const ['2026-05-01', '2026-05-02', '2026-05-03'],
-        derivedDayIds: const {'2026-05-01', '2026-05-02', '2026-05-03'},
+        finalizedDayIds: const {'2026-05-01', '2026-05-02', '2026-05-03'},
       );
       expect(cutoff, _midnightOf(dataNow - rawRetentionDays * 86400));
     });
@@ -49,37 +49,56 @@ void main() {
       final cutoff = DerivationEngine.rawPruneCutoffSec(
         dataNowSec: dataNow,
         rawDayIds: const ['2026-05-16', '2026-05-17', '2026-05-20'],
-        derivedDayIds: const {'2026-05-16', '2026-05-17', '2026-05-20'},
+        finalizedDayIds: const {'2026-05-16', '2026-05-17', '2026-05-20'},
       );
-      // 05-17 09:47 is the raw retention edge; 05-17 survives whole.
-      expect(cutoff, _dayStart('2026-05-17'));
+      // The retention edge falls mid-morning; that day survives whole.
+      expect(cutoff, _midnightOf(dataNow - rawRetentionDays * 86400));
+      expect(cutoff, isNot(dataNow - rawRetentionDays * 86400));
     });
 
-    test('an un-derived day holds the cutoff at ITS OWN start, not off', () {
-      // Data edge well past the un-derived day, so the plain cutoff would
+    test('an unfinalized day holds the cutoff, not off', () {
+      // Data edge well past the unfinalized day, so the plain cutoff would
       // otherwise delete it.
       final dataNow = _dayStart('2026-05-20') + 12 * 3600;
       final cutoff = DerivationEngine.rawPruneCutoffSec(
         dataNowSec: dataNow,
         rawDayIds: const ['2026-05-12', '2026-05-13', '2026-05-19'],
-        derivedDayIds: const {'2026-05-12', '2026-05-19'},
+        finalizedDayIds: const {'2026-05-12', '2026-05-19'},
       );
-      // Held at 05-13 — that day's own rows survive…
-      expect(cutoff, _dayStart('2026-05-13'));
-      // …but 05-12, which IS derived, is still reclaimed. The old guard
-      // returned early and kept it too.
-      expect(cutoff, greaterThan(_dayStart('2026-05-12')));
+      // Held at 05-12 (05-13's night search starts 05-12 noon)…
+      expect(cutoff, _dayStart('2026-05-12'));
+      // …but older finalized days are still reclaimed. The old guard
+      // returned early and kept them too.
+      expect(cutoff, greaterThan(_dayStart('2026-05-11')));
+    });
+
+    // Day D's night starts the evening before. A day with a result that has
+    // not LOCKED yet is still re-derived; cutting D-1's evening first made
+    // that re-derive score a half night, overwrite the good row, then lock.
+    test('keeps the evening before an unfinalized day with a result', () {
+      // Past the plain retention edge for 05-16 and 05-17.
+      final dataNow = _dayStart('2026-05-16') +
+          (rawRetentionDays + 1) * 86400 +
+          21 * 3600;
+      final cutoff = DerivationEngine.rawPruneCutoffSec(
+        dataNowSec: dataNow,
+        rawDayIds: const ['2026-05-14', '2026-05-15', '2026-05-16'],
+        // 05-16 has a complete row but never got locked.
+        finalizedDayIds: const {'2026-05-14', '2026-05-15'},
+      )!;
+      final eveningBefore = _dayStart('2026-05-16') - 4 * 3600;
+      expect(cutoff, lessThanOrEqualTo(eveningBefore));
+      expect(cutoff, _dayStart('2026-05-15'));
     });
 
     test('the hold is bounded — a permanently stuck day cannot wedge it', () {
-      // A day that never completes: `partial` rows are excluded from
-      // `dayResultIds` AND are never finalized by age, so this state is
-      // reachable and used to be permanent.
+      // A day that never completes: `partial` rows are never finalized by
+      // age, so this state is reachable and used to be permanent.
       final dataNow = _dayStart('2026-06-30');
       final cutoff = DerivationEngine.rawPruneCutoffSec(
         dataNowSec: dataNow,
         rawDayIds: const ['2026-01-05', '2026-06-29'],
-        derivedDayIds: const {'2026-06-29'},
+        finalizedDayIds: const {'2026-06-29'},
       )!;
       expect(cutoff, greaterThan(_dayStart('2026-01-05')));
       // Never keeps more than the documented ceiling behind the data edge.
@@ -91,9 +110,9 @@ void main() {
       final cutoff = DerivationEngine.rawPruneCutoffSec(
         dataNowSec: dataNow,
         rawDayIds: const ['2026-05-19'],
-        derivedDayIds: const {},
+        finalizedDayIds: const {},
       );
-      // The un-derived day is newer than the retention edge, so the edge wins.
+      // The unfinalized day is newer than the retention edge, so the edge wins.
       expect(cutoff, _midnightOf(dataNow - rawRetentionDays * 86400));
     });
 
@@ -102,7 +121,7 @@ void main() {
         DerivationEngine.rawPruneCutoffSec(
           dataNowSec: 0,
           rawDayIds: const [],
-          derivedDayIds: const {},
+          finalizedDayIds: const {},
         ),
         isNull,
       );
@@ -197,6 +216,19 @@ void main() {
         if (lines[i].contains('Future<void>')) continue; // the declaration
         expect(lines[i], contains('scope.rawDays'), reason: 'line ${i + 1}');
       }
+    });
+
+    test('the prune holds for FINALIZED days, not merely derived ones', () {
+      // A day with a complete but unfinalized result still re-derives; if a
+      // derived row were enough to release the hold, D-1's evening would be
+      // cut and D would re-derive from half a night, then lock.
+      final start =
+          lines.indexWhere((l) => l.contains('Future<void> _pruneOldDecoded('));
+      expect(start, isNot(-1), reason: 'the prune declaration vanished');
+      final end = lines.indexWhere((l) => l.startsWith('  }'), start);
+      final body = lines.sublist(start, end).join('\n');
+      expect(body, contains('LocalDb.finalizedDayIds('));
+      expect(body, isNot(contains('dayResultIds')));
     });
   });
 }
