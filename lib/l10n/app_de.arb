@@ -221,6 +221,9 @@
   "pairSensorPairAnother": "Weiteren koppeln",
   "pairSensorExplainer": "Ein Sensor wird nur während eines laufenden Trainings genutzt, und nur für Herzfrequenz und Herzschlag-Abstände. Er ersetzt dein Band nicht, wird nachts nie verwendet, und seine Messwerte fließen bisher in keinen Score ein – sie werden nur gespeichert und angezeigt.",
   "pairSensorSearchWouldHideSheet": "Die Suche würde das Kopplungsfenster des Systems verdecken",
+  "pairSensorKeyTitle": "Schon anderswo eingerichtet?",
+  "pairSensorKeyBody": "Wenn du den Schlüssel hast, den dieses Gerät bereits verwendet, füge ihn hier ein – dann wird es ohne Zurücksetzen auf Werkseinstellungen gekoppelt und nichts auf das Gerät geschrieben. Lass das Feld leer, um wie gewohnt zu koppeln.",
+  "pairSensorKeyHint": "32 Hex-Ziffern oder Base64",
   "pairSensorSearchAnyway": "Trotzdem suchen",
   "devicePickerTitle": "Geräte verbinden",
   "devicePickerSubtitle": "Verbinde, was du nutzt. Weitere kannst du jederzeit hinzufügen.",
@@ -943,6 +946,7 @@
   "investigatePhonePedometer": "Smartphone · Schrittzähler",
   "investigateDayTotal": "Tagessumme",
   "investigateStrapChipReported": "vom Band-Chip gemeldet",
+  "investigateStrapCounterFactor": "integrierter Zähler · Smartphone-Faktor",
   "investigateTimeDomain": "Zeitbereich",
   "investigateRmssd": "RMSSD",
   "investigateSdnn": "SDNN",
@@ -2522,5 +2526,45 @@
   "ecgProgress": "{pct} % abgeschlossen",
   "ecgWaveformEmpty": "Zu dieser Aufnahme wurde keine Kurve gespeichert.",
   "ecgWaveformLabel": "Übernommene Kurve in Mikrovolt, so wie das Band sie gesendet hat. Lücken sind fehlende Sekunden.",
-  "ecgSampleNote": "{count} Messwerte bei {rate} Hz, gefiltert, eingangsbezogene µV. Es wird keine bestimmte Ableitung oder Polarität angenommen."
+  "ecgSampleNote": "{count} Messwerte bei {rate} Hz, gefiltert, eingangsbezogene µV. Es wird keine bestimmte Ableitung oder Polarität angenommen.",
+  "devicesWornOn": "Getragen an",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "Wo das Band sitzt. Wird zur Kalibrierung der Schritte genutzt.",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "Handgelenk",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "Oberarm",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "Anderswo",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "Wo trägst du es?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "Der Standard. Die beste Schrittzähl-Genauigkeit, die das Band bieten kann.",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "Zählt zu wenige Schritte – der Oberarm schwingt weniger als das Handgelenk.",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "Unbekannt",
+  "@devicesWornUnknown": {
+    "description": "Gerätedetail: gespeicherter Trageort ist diesem Build nicht bekannt"
+  },
+  "devicesWornOtherSub": "Eine Tasche oder ein Beutel. Das Band sieht dort das Gehen schlecht.",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }
