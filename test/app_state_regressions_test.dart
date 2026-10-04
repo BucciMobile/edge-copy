@@ -120,6 +120,42 @@ void main() {
     });
   });
 
+  // ── 6b. "Sync the band" on a link that is already up ───────────────────────
+  group('syncNow (already connected)', () {
+    test('asks the band for an offload instead of reusing the link', () async {
+      final engine = _ConnectedEngine();
+      final app = AppState.forTesting(engine: engine);
+      addTearDown(app.dispose);
+      app.paired = PairedDevice('r-1', '4C2248092');
+
+      // openSession on a live link reuses it and only joins an offload, so
+      // the tap never sent SEND_HISTORICAL and nothing came off the band.
+      await app.syncNow();
+
+      expect(engine.foregroundRequests, 1);
+      expect(app.busy, isFalse);
+    });
+
+    test('goes through the floored foreground pull, not a manual one',
+        () async {
+      // A manual request is never floored, so quick repeat taps on a band
+      // that just drained each got an empty offload, and three of those
+      // flip the clock-lost status and back the periodic pull off.
+      final engine = _ConnectedEngine();
+      final app = AppState.forTesting(engine: engine);
+      addTearDown(app.dispose);
+      app.paired = PairedDevice('r-1', '4C2248092');
+
+      await app.syncNow();
+      await app.syncNow();
+      await app.syncNow();
+
+      expect(engine.historyRequests, 0);
+      expect(engine.foregroundRequests, 3);
+      expect(engine.syncs, 1);
+    });
+  });
+
   // ── 7. the orphan-workout reconcile must not clobber a live workout ────────
   group('_reconcileOrphanedLiveWorkout (startWorkout race)', () {
     test('a workout started inside the DB round-trip is not overwritten',
@@ -736,6 +772,31 @@ void main() {
       expect(await LocalDb.liveWorkoutTally(id), isNull);
     });
   });
+}
+
+class _ConnectedEngine extends BleEngine {
+  _ConnectedEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
+  int historyRequests = 0;
+  int foregroundRequests = 0;
+  int syncs = 0;
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Future<void> requestHistorySync() async => historyRequests++;
+
+  // Stands in for the 90 s floor: only the first ask goes out.
+  @override
+  Future<bool> requestForegroundSync() async => ++foregroundRequests == 1;
+
+  @override
+  Future<SyncReport> runSync({
+    Duration timeout = const Duration(seconds: 600),
+  }) async {
+    syncs++;
+    return SyncReport(0, 0, true);
+  }
 }
 
 /// Records every SET_ALARM instead of writing to a band.
