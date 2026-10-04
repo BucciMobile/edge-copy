@@ -85,17 +85,6 @@ class AccessorySetup {
     return id;
   }
 
-  /// Deprovision the sensors approved under [services], so the next
-  /// [showSensorPicker] opens a sheet instead of handing back the old one.
-  /// Best-effort, like [removeAll]. Only reached on the iOS picker path.
-  static Future<void> removeSensor(List<String> services) async {
-    try {
-      await _ch.invokeMethod('removeSensor', <String, Object>{
-        'services': [for (final s in services) s.toUpperCase()],
-      });
-    } catch (_) {}
-  }
-
   /// Deprovision every ASK band, sensors kept (called on unpair). Best-effort.
   static Future<void> removeAll() async {
     if (!Platform.isIOS) return;

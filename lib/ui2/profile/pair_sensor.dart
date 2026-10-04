@@ -208,13 +208,6 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
     // band (see `IosBleRestore.reacquireCentral`).
     await IosBleRestore.releaseCentralForPicker();
     try {
-      // Nothing paired here means any approval iOS still holds for this
-      // sensor is stale (forgotten, lost, or a pick that never paired), and
-      // the picker would hand it straight back with no sheet, so a new ring
-      // could never be offered. Dropped first; a paired one is left alone.
-      if (_paired == null) {
-        await AccessorySetup.removeSensor([widget.entry.service]);
-      }
       id = await AccessorySetup.showSensorPicker([widget.entry.service]);
     } on PlatformException catch (e) {
       failure = l?.pairSensorCouldNotPair(e.message ?? e.code) ??
