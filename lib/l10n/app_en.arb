@@ -987,11 +987,11 @@
   "@pairSensorKeyTitle": {
     "description": "Section title for pairing with an existing device key."
   },
-  "pairSensorKeyBody": "If you have the key this device already uses, paste it here and it pairs without a factory reset — nothing is written to the device. Leave it empty to pair the usual way.",
+  "pairSensorKeyBody": "If you have the key this device already uses, paste it here and it pairs without a factory reset — nothing is written to the device. Several keys, one per line, are tried in turn until one is accepted, which is handy when you have a few and do not know which belongs to this device. Leave it empty to pair the usual way.",
   "@pairSensorKeyBody": {
     "description": "Explainer under the existing-key section title."
   },
-  "pairSensorKeyHint": "32 hex digits or base64",
+  "pairSensorKeyHint": "32 hex digits or base64 — one key per line",
   "@pairSensorKeyHint": {
     "description": "Hint text in the existing-key field."
   },

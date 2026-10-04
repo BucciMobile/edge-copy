@@ -62,7 +62,8 @@ enum InputSignal {
   vendorScalars,
 
   // There is deliberately NO `ecg` / `ppgWaveform` member. `decoded_onehz` is
-  // one row per second and raw prunes at three days, so a waveform has nowhere
-  // to live. Adding the member before the store exists would let an adapter
-  // declare a capability with nothing behind it — see ADDING_A_DEVICE.md §5.
+  // one row per second and raw prunes at `rawRetentionDays`, so a waveform has
+  // nowhere to live. Adding the member before the store exists would let an
+  // adapter declare a capability with nothing behind it — see
+  // ADDING_A_DEVICE.md §5.
 }

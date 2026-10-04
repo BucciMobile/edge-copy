@@ -17,6 +17,12 @@ The action has about 25 seconds, including app startup. A large backlog can need
 - **A sync request is already active:** another sync owns the band, so nothing new was started.
 - **Skipped:** Bluetooth was unavailable or the band was unreachable, with the option on.
 
+## Sync Data (Long Running)
+
+On iOS 27, builds made with Xcode 27 also expose **Sync Data (Long Running)**. Same sync and **Ignore Connectivity Errors** option as Sync Data, but iOS gives it extended background time. Edge caps it at ten minutes including startup; iOS may stop it sooner. Cancelling or timing out keeps everything already saved.
+
+iOS shows its own progress Live Activity with a stop button. Progress counts saved batches and stays indeterminate, since the band doesn't report a total up front.
+
 ## Open Edge and Sync
 
 Brings the app forward and runs the same sync. Use it interactively, not from locked-phone automations.

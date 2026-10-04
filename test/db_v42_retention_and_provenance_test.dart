@@ -7,7 +7,7 @@
 //     decoder's absent sentinel) mapped to NULL so an unconfirmed record never
 //     reads as a real measurement of total darkness.
 //   • metric_series_version — which build's maths wrote a day's scalars.
-//   • band_events keeps its wear/charge transitions past the 3-day prune, so a
+//   • band_events keeps its wear/charge transitions past the raw prune, so a
 //     re-derive of an old day stops running the nap detector with both
 //     rejection lists empty.
 //   • raw_archive is thinned to a stated 1-in-60 sample behind the retention
@@ -247,7 +247,7 @@ void main() {
     expect(await LocalDb.foreignFamilyDates(), isEmpty);
   });
 
-  test('the 3-day prune keeps wear/charge transitions and drops the rest',
+  test('the raw prune keeps wear/charge transitions and drops the rest',
       () async {
     await _useFreshDb('v42_band_events_test.db');
     const old = 1000;
@@ -445,8 +445,8 @@ void main() {
       'launch-path ladder takes to do it',
       () async {
         // `onUpgrade` runs inside openDatabase, on iOS's launch-path CPU
-        // watchdog. The v47 rebuild is bounded by `rawRetentionDays` (~3 days
-        // of 1 Hz), which is what makes it safe to run there — this test is
+        // watchdog. The v47 rebuild is bounded by `rawRetentionDays` days
+        // of 1 Hz, which is what makes it safe to run there — this test is
         // where that claim gets a number instead of an assurance.
         final name = 'v47_${p.basenameWithoutExtension(src)}.db';
         await _useFreshDb(name);
