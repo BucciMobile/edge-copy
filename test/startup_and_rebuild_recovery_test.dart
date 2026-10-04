@@ -420,6 +420,18 @@ void main() {
       );
     });
 
+    test('the salvage list copies owners before the rows that name them',
+        () {
+      // A salvage cut short must not leave routes without their workout or
+      // device-keyed rows without their device.
+      final order = LocalDb.salvageTablesForTest;
+      expect(order.first, 'device');
+      expect(
+        order,
+        containsAllInOrder(['sessions', 'imported_workout', 'workout_route']),
+      );
+    });
+
     test('a garbage file is quarantined byte-for-byte and the app still opens',
         () async {
       const name = 'rebuild_garbage_test.db';

@@ -165,6 +165,10 @@ class LocalDb {
   /// is the 3-day substrate: re-syncable in principle, but the band trims its
   /// flash as we ACK, so in practice this is the only copy of those days too.
   static const _salvageTables = [
+    // Secondary devices first: tiny, and every device-keyed row below needs
+    // its device to still have a name if the salvage stops partway. The
+    // primary row is skipped by the merge, as on a restore.
+    'device',
     // Hand-entered. The only copy that exists anywhere.
     'journal',
     'journal_metric',
@@ -185,13 +189,15 @@ class LocalDb {
     // Vendor, typed-in and imported scalars: a `reports` band trims its own
     // history and the source app may be gone.
     'observation',
+    // Owners before their routes: `workout_route` is keyed by a session id
+    // or an imported workout's uuid.
     'sessions',
+    'imported_workout',
     'workout_route',
     'workout_split',
     // The only copy of what a paired sensor measured during a session.
     'external_hr',
     'imported_measurement',
-    'imported_workout',
     // User-initiated ECG readings and the band's raw ECG records recovered
     // through history — the band trims its flash on ACK, so these too are
     // the only copy. Parent before child.
@@ -204,9 +210,6 @@ class LocalDb {
     'metric_series_version',
     'baselines',
     'raw_archive',
-    // Secondary devices, so their decoded rows still name a device. The
-    // primary row is skipped by the merge, as on a restore.
-    'device',
     'device_coverage',
     'signal_priority',
     'sync_cursor',
