@@ -1395,9 +1395,10 @@ class _MetricDetailState extends State<MetricDetail> {
         // sparse month comparable — only refuse to pretend.
         //
         // A day with no `worn_min` row draws NOTHING, not a zero: wear older
-        // than the 3-day substrate window is knowable only through this derived
-        // key, and nothing here reconstructs it. Same card, not a new one; the
-        // denominator is part of reading the chart, not a second claim.
+        // than the `rawRetentionDays` substrate window is knowable only through
+        // this derived key, and nothing here reconstructs it. Same card, not a
+        // new one; the denominator is part of reading the chart, not a second
+        // claim.
         if (win >= 30 && spec.chartKey != 'wear' && wear.isNotEmpty)
           Builder(builder: (c) {
             final hrs = [

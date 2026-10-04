@@ -23,8 +23,18 @@ int _dayStart(String label) {
 
 void main() {
   group('rawPruneCutoffSec', () {
-    test('keeps five days of raw substrate', () {
-      expect(rawRetentionDays, 5);
+    // A day stays recomputable until 48 h after its end; the prune must not
+    // have reached its first rows by the time it finalizes.
+    test('a day that has just finalized still has its raw', () {
+      final start = _dayStart('2026-05-10');
+      final end = _dayStart('2026-05-11');
+      final dataNow = end + 48 * 3600 + 1;
+      final cutoff = DerivationEngine.rawPruneCutoffSec(
+        dataNowSec: dataNow,
+        rawDayIds: const ['2026-05-10'],
+        derivedDayIds: const {'2026-05-10'},
+      )!;
+      expect(cutoff, lessThanOrEqualTo(start));
     });
 
     // A settled install: everything with raw is derived, so the plain

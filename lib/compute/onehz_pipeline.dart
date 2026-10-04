@@ -1325,8 +1325,8 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     // no zones. TS-05's 28-day distribution is gated on this, not captioned.
     // WHICH STRAP measured this day, echoed onto the bundle. The zone ceiling
     // is a per-family constant, so a screen printing zone EDGES has to name the
-    // strap — and `decoded_onehz` is pruned at ~3 days, so the derived day is
-    // the only place that provenance survives a quiet week.
+    // strap — and `decoded_onehz` is pruned at `rawRetentionDays`, so the
+    // derived day is the only place that provenance survives a quiet week.
     'device_family': d.deviceFamily,
     'zone_source': zoneSet?.source,
     'zone_max_hr': zoneSet == null ? null : _round(zoneSet.maxHr, 0),

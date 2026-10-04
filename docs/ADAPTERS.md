@@ -66,9 +66,9 @@ nothing, which is a silent wrong answer rather than a clean refusal.
 
 There is deliberately **no** `ecg` / `ppgWaveform` member on `InputSignal`
 (`signals.dart`'s closing comment says so explicitly). `decoded_onehz` is one
-row per second and raw prunes at three days — a waveform has nowhere to live
-today. Adding the member before a store exists for it would let an adapter
-declare a capability with nothing behind it, which is exactly the
+row per second and raw prunes at `rawRetentionDays` — a waveform has nowhere
+to live today. Adding the member before a store exists for it would let an
+adapter declare a capability with nothing behind it, which is exactly the
 declared-but-absent trap above. Build the store first.
 
 ## Where an adapter may NOT reach

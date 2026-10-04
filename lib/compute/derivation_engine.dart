@@ -783,11 +783,12 @@ import 'substrate.dart';
 //      tested and never called from edge. They now run in the cross-day rollup
 //      over a new per-day field, `hourly_hr` — 24 local-hour HR means projected
 //      from the stored `series.hr_curve`. HR, not accelerometry, because the
-//      1 Hz substrate is pruned at 3 days and `day_result` is not: no multi-day
-//      accel exists to analyse. Only runs of calendar-CONSECUTIVE days whose 24
-//      bins are ALL covered are admitted (no imputation — a filled hour is
-//      exactly the smooth signal IS rewards), and each family abstains with the
-//      standard `need_baseline:have=H,need=N` note below its own minimum (7 days
+//      1 Hz substrate is pruned at `rawRetentionDays` and `day_result` is
+//      not: no multi-day accel exists to analyse. Only runs of
+//      calendar-CONSECUTIVE days whose 24 bins are ALL covered are admitted
+//      (no imputation — a filled hour is exactly the smooth signal IS
+//      rewards), and each family abstains with the standard
+//      `need_baseline:have=H,need=N` note below its own minimum (7 days
 //      nonparametric, 3 cosinor). New bundle keys: `circadian_rhythm`,
 //      `circadian_cosinor`, `circadian_coverage`.
 //
@@ -1004,8 +1005,9 @@ import 'substrate.dart';
 //   3. TWO NEW `metric_series` KEYS: `midsleep_sec` and `sleep_onset_sec` —
 //      signed seconds either side of 04:00 LOCAL, tz-corrected per instant and
 //      unwrapped. Not a second-of-day, not an epoch. FORWARD-ONLY: midsleep was
-//      never persisted, the 1 Hz substrate they come from is pruned at 3 days
-//      and a day locks ~48 h after wake, so no past night can be given one.
+//      never persisted, the 1 Hz substrate they come from is pruned at
+//      `rawRetentionDays` and a day locks ~48 h after wake, so no past night
+//      can be given one.
 //
 //   4. `day_result` stamps `source: 'band'`. An importer's day is a different
 //      vendor's derived score and must carry its own tag; a day whose
@@ -1952,9 +1954,9 @@ const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 // all live in SleepProfilePolicy (pure, unit-tested) — see
 // lib/compute/sleep_profile_policy.dart for the evidence behind each rule.
 
-/// Raw is kept this many days past derivation, then pruned (derived stays).
-/// Five days leaves additional recovery time beyond the ~48 h recomputation
-/// window before source data is permanently removed.
+/// Raw is kept this many days behind the data edge, then pruned (derived
+/// stays). A day stays recomputable until 48 h after its end (~72 h after its
+/// start), so 5 days keeps ~48 h of substrate past finalization.
 const int rawRetentionDays = 5;
 
 /// A day stays recomputable for this long after its wake, then FINALIZES (locks)
@@ -4301,15 +4303,16 @@ class DerivationEngine {
     final scMap = (bundle['scalars'] as Map?)?.cast<String, dynamic>();
 
     // ── NEVER WRITE NOTHING OVER SOMETHING ───────────────────────────────────
-    // Raw retention is 3 days, but derived history is forever — so a day older
-    // than retention has a good `day_result` and NO raw. Re-deriving it (which
-    // "Advanced data → Select all → Re-analyze" does for EVERY listed day, via
-    // runDays(force: true) → _prepareTargetDay, whose empty substrate yields an
-    // all-absent bundle) used to overwrite that good row: `putDayResult` is
-    // ConflictAlgorithm.replace on BOTH `day_result` and `metric_series`, so
-    // every scalar for the date was NULLed — and, because an empty bundle's
-    // endSec was 0, the blank was written FINALIZED and could never re-derive.
-    // Only `run()` had a pruned-raw guard, and only for user-override days.
+    // Raw retention is `rawRetentionDays`, but derived history is forever — so
+    // a day older than retention has a good `day_result` and NO raw.
+    // Re-deriving it (which "Advanced data → Select all → Re-analyze" does for
+    // EVERY listed day, via runDays(force: true) → _prepareTargetDay, whose
+    // empty substrate yields an all-absent bundle) used to overwrite that good
+    // row: `putDayResult` is ConflictAlgorithm.replace on BOTH `day_result` and
+    // `metric_series`, so every scalar for the date was NULLed — and, because
+    // an empty bundle's endSec was 0, the blank was written FINALIZED and could
+    // never re-derive. Only `run()` had a pruned-raw guard, and only for
+    // user-override days.
     //
     // Detect it BEFORE the offloaded second half so its own writes
     // (wake_day_features) can't clobber the early-read path either. With no day
@@ -4848,8 +4851,8 @@ class DerivationEngine {
         // onehz_pipeline's sleepClockOffsetSec). Written so a schedule-shift
         // segmentation has a series to run on in six months. FORWARD-ONLY:
         // mid-sleep was never persisted, the 1 Hz substrate it comes from is
-        // gone at 3 days, and days lock ~48 h after wake — so every night
-        // before this shipped has no value and cannot be given one.
+        // gone at `rawRetentionDays`, and days lock ~48 h after wake — so every
+        // night before this shipped has no value and cannot be given one.
         'midsleep_sec': sc('midsleep_sec'),
         'sleep_onset_sec': sc('sleep_onset_sec'),
         // TS-03 — this day's observed HR ceiling (bpm), or NULL on the ordinary
@@ -5056,13 +5059,13 @@ class DerivationEngine {
   /// A SKIP MARKER MUST NEVER OVERWRITE A REAL RESULT. `putDayResult` is
   /// ConflictAlgorithm.replace on both `day_result` AND `metric_series`, so this
   /// used to blank a good day's every scalar on a single [_perDayTimeout]
-  /// overrun — and, once the day sat >48 h behind the data edge, wrote the blank
-  /// FINALIZED, making it permanent (raw is pruned 3 days later, so there is
-  /// nothing left to re-derive from). It hit TODAY too: a good 08:00 result
-  /// replaced by a skip marker after one transient 09:00 timeout on a loaded
-  /// phone. `rescanRecent` explicitly refuses to do this for exactly this
-  /// reason; `run()` did it anyway. Now: write the marker only when there is no
-  /// good row to lose, and never lock a transient failure.
+  /// overrun — and, once the day sat >48 h behind the data edge, wrote the
+  /// blank FINALIZED, making it permanent (raw is pruned at `rawRetentionDays`,
+  /// so there is nothing left to re-derive from). It hit TODAY too: a good
+  /// 08:00 result replaced by a skip marker after one transient 09:00 timeout
+  /// on a loaded phone. `rescanRecent` explicitly refuses to do this for
+  /// exactly this reason; `run()` did it anyway. Now: write the marker only
+  /// when there is no good row to lose, and never lock a transient failure.
   Future<void> _markDaySkipped(
     String dayId,
     int dayEndSec,
@@ -5593,10 +5596,11 @@ class DerivationEngine {
       'hypnogram': series?['hypnogram'],
       // 24 local-hour means of this day's HR curve — the ONLY intraday series
       // that survives long enough to support cross-day circadian analysis.
-      // `day_result` is never pruned; the 1 Hz substrate is gone after 3 days,
-      // so accelerometry (the textbook ENMO input) simply does not exist far
-      // enough back. `circadianNonparametric` documents HR as an accepted
-      // input alongside activity. 24 numbers a day, so the artifact stays small.
+      // `day_result` is never pruned; the 1 Hz substrate is gone at
+      // `rawRetentionDays`, so accelerometry (the textbook ENMO input) simply
+      // does not exist far enough back. `circadianNonparametric` documents HR
+      // as an accepted input alongside activity. 24 numbers a day, so the
+      // artifact stays small.
       'hourly_hr': hourlyHrProfile(series?['hr_curve']),
     };
   }
