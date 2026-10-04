@@ -217,8 +217,9 @@ Map<String, dynamic> buildCrossDayBundle(
 
   // ── true Phillips SRI across days on a 1440-epoch (1-min) clock grid ───────
   final (sri, sriDates) = _crossDaySri(days);
-  // SLP-08 — which two nights. `SriPair.dayIndex` indexes THIS day list and
-  // nothing else (the analytics never sees a date), so here is the only place
+  // SLP-08 — which two nights. `SriPair.dayIndex` indexes the SRI grid (one
+  // per day row, plus one pad per gap) and nothing else (the analytics never
+  // sees a date), so here is the only place
   // it can be resolved into the two nights it compared. Pairs the mask left too
   // thin were already dropped upstream, so a half-unobserved weekend cannot top
   // the list for having no data.
@@ -373,8 +374,10 @@ Map<String, dynamic> buildCrossDayBundle(
           !needNoStrain.present)
       ? null
       : ((need.value!.needSec - needNoStrain.value!.needSec) / 60).round();
-  // last night's TST (sec) for performance.
-  final lastTstMin = _lastNum(days, 'tst_min');
+  // last night's TST (sec) for performance. Today's row carries the main sleep
+  // that ended this morning; `_lastNum` reached back to an older night when
+  // last night had none, and scored that as last night's performance.
+  final lastTstMin = _todayNum(days, 'tst_min');
   final perf = (need.present && lastTstMin != null)
       ? ana.sleepPerformance(lastTstMin * 60.0, need.value!.needSec)
       : ana.Metric<ana.SleepPerformance>.absent(
@@ -636,9 +639,9 @@ double? _median(List<double> xs) {
 /// The value of [key] on the MOST RECENT day only, or null if that day did not
 /// produce one.
 ///
-/// Unlike [_lastNum] this never reaches back to an earlier day. For a
+/// Unlike a walk back to the last non-null, this never reaches back to an earlier day. For a
 /// TODAY-scoped quantity that is the difference between "we have no reading"
-/// and a fabricated one: `_lastNum(days, 'nap_min')` would credit YESTERDAY's
+/// and a fabricated one: a backward walk over 'nap_min' would credit YESTERDAY's
 /// naps against tonight's sleep need whenever today's nap detection abstained,
 /// which is imputation (AGENTS §3.3) and always errs toward recommending less
 /// sleep than the user needs.
@@ -651,15 +654,6 @@ double? _todayNum(List<Map<String, dynamic>> days, String key) {
   final last = days.last;
   if (last['is_today'] != true) return null;
   return _numOrNull(last[key]);
-}
-
-/// The last non-null value of [key] across the (oldest-first) day records.
-double? _lastNum(List<Map<String, dynamic>> days, String key) {
-  for (var i = days.length - 1; i >= 0; i--) {
-    final v = _numOrNull(days[i][key]);
-    if (v != null) return v;
-  }
-  return null;
 }
 
 /// Sat/Sun => free day. We lack a real work/free calendar; the weekday split is
@@ -1093,8 +1087,31 @@ bool _isNextDay(String a, String b) {
   // out the half-unobserved weekend the floor exists for, and it does NOT move
   // the published SRI: every accepted epoch counts toward the total whether or
   // not its pair is emitted.
+  final m =
+      ana.phillipsSri(sleepWake, epochsPerDay, valid: valid, minPairCases: 240);
+  final r = m.value;
+  if (r == null) return (m, gridDates);
+  // phillipsSri sizes `days` and confidence off the grid length, so every
+  // padded (all-invalid) day above would count as a comparison. Size them off
+  // the pairs actually observed on both days instead, same formula.
+  var observed = 0;
+  for (var d = 1; d < gridDates.length; d++) {
+    for (var e = 0; e < epochsPerDay; e++) {
+      if (valid[(d - 1) * epochsPerDay + e] && valid[d * epochsPerDay + e]) {
+        observed++;
+        break;
+      }
+    }
+  }
   return (
-    ana.phillipsSri(sleepWake, epochsPerDay, valid: valid, minPairCases: 240),
+    ana.Metric<ana.SriResult>(
+      value: ana.SriResult(r.sri, observed + 1, r.cases, r.pairs),
+      confidence: (observed / 7.0).clamp(0.3, 0.95),
+      tier: m.tier,
+      inputs_used: m.inputs_used,
+      drivers: m.drivers,
+      note: m.note,
+    ),
     gridDates,
   );
 }
