@@ -55,6 +55,9 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
   NutritionWindow? _week;
   Metric? _burned;
   double? _waterMl;
+  /// The day [_waterMl] was read for. Past midnight on a tab nobody reloaded
+  /// it is still yesterday's, and a full yesterday disabled today's + button.
+  String? _waterDate;
   bool _loading = true;
 
   /// The local profile map, read once per load. Targets live here rather than
@@ -82,18 +85,20 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
     final week = await NutritionDb.window(db, days: 7);
     Metric? burned;
     double? water;
+    final date = _date;
     final repo = app.repo;
     if (repo != null) {
       final today = await repo.getToday();
       final daily = today['daily'];
       if (daily is Map) burned = Metric.parse(daily['calories_total']);
-      water = (await repo.getJournalMetrics(_date))['water_ml']?.value;
+      water = (await repo.getJournalMetrics(date))['water_ml']?.value;
     }
     if (!stillNewest(#nutrition, t)) return;
     setState(() {
       _week = week;
       _burned = burned;
       _waterMl = water;
+      _waterDate = date;
       _profile = {...?app.user};
       _loading = false;
     });
@@ -134,29 +139,38 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
     final repo = context.read<AppState>().repo;
     if (repo == null || _writingWater) return;
     _writingWater = true;
-    final spec = _waterSpec;
-    final v = _waterMl;
-    double? next;
-    if (dir > 0) {
-      next = ((v ?? 0) + spec.step).clamp(0, spec.max).toDouble();
-    } else {
-      final down = (v ?? 0) - spec.step;
-      next = down <= 0 ? (v == 0 ? null : 0.0) : down;
-    }
-    setState(() => _waterMl = next);
     try {
       // Inside the try, not before it: the READ can throw too, and with the
       // guard already set that left both buttons dead until the screen was
       // rebuilt — the flag outliving the operation it was protecting.
       //
+      // Step from what is stored for today, not from `_waterMl`: that is the
+      // last load's figure, and on a tab left open past midnight it is still
+      // yesterday's total, so the first tap wrote yesterday + 250 ml to today.
+      //
       // Drop the key rather than omitting it from a spread: `putJournalMetrics`
       // clears the day and re-inserts what it is handed, so leaving `water_ml`
       // out is what "no answer today" looks like on disk — and spreading the
       // old map back in is exactly what made this un-clearable.
-      final fields =
-          {...await repo.getJournalMetrics(_date)}..remove('water_ml');
+      final date = _date;
+      final fields = {...await repo.getJournalMetrics(date)};
+      final v = fields.remove('water_ml')?.value;
+      final spec = _waterSpec;
+      double? next;
+      if (dir > 0) {
+        next = ((v ?? 0) + spec.step).clamp(0, spec.max).toDouble();
+      } else {
+        final down = (v ?? 0) - spec.step;
+        next = down <= 0 ? (v == null || v == 0 ? null : 0.0) : down;
+      }
+      if (mounted) {
+        setState(() {
+          _waterMl = next;
+          _waterDate = date;
+        });
+      }
       if (next != null) fields['water_ml'] = JournalMetricValue(next);
-      await repo.postJournalMetrics(_date, fields);
+      await repo.postJournalMetrics(date, fields);
       await _load();
     } finally {
       // Cleared unconditionally; the setState is only for the repaint. Gating
@@ -269,10 +283,11 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
         Builder(builder: (bc) {
           final live = bc.select<AppState, bool>((a) => a.repo != null) &&
               !_writingWater;
+          final ml = _waterDate == _date ? _waterMl : null;
           return _WaterRow(
-            ml: _waterMl,
-            onDown: (!live || _waterMl == null) ? null : () => _stepWater(-1),
-            onUp: (!live || (_waterMl ?? 0) >= _waterSpec.max)
+            ml: ml,
+            onDown: (!live || ml == null) ? null : () => _stepWater(-1),
+            onUp: (!live || (ml ?? 0) >= _waterSpec.max)
                 ? null
                 : () => _stepWater(1),
           );

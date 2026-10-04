@@ -190,10 +190,17 @@ class CircadianData {
     // pinned. Naps are not passed — the forecast is for today and today's naps
     // have not happened; the card says it only knows last night.
     final wake = (latestNight?['wake_ts'] as num?)?.round();
-    final wakeLocal = wake == null
+    final wakeAt = wake == null
         ? null
         : DateTime.fromMillisecondsSinceEpoch(wake * 1000);
-    final tstMin = (latestNight?['duration_min'] as num?)?.toDouble();
+    // Last night only. `latestNight` is just the newest night in the window,
+    // which is weeks old when the band sat on the charger; a forecast for
+    // today built from that wake time is a fabricated one.
+    final wakeLocal =
+        wakeAt != null && dayLabelOf(wakeAt) == today ? wakeAt : null;
+    final tstMin = wakeLocal == null
+        ? null
+        : (latestNight?['duration_min'] as num?)?.toDouble();
 
     return CircadianData(
       actogram: cols,

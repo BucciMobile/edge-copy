@@ -336,7 +336,13 @@ class NotificationPrefs {
     // it FOR a time, usually inside the quiet window, and its off switch is
     // cancelling the alarm rather than a preference buried in settings.
     if (klass == NotifClass.alarm) return true;
-    if (!activityPrompt && !categoryEnabled(event.category)) return false;
+    // The reminders switch is the Weekly lookback row. The activity prompts and
+    // the movement/step nudges have rows of their own, so it must not silence
+    // them as well.
+    final ownSwitch = activityPrompt ||
+        (event.category == NotifCategory.reminders &&
+            const {kRouteMovement, kRouteSteps}.contains(activityRoute));
+    if (!ownSwitch && !categoryEnabled(event.category)) return false;
     if (inQuietHours(minuteOfDay)) {
       return event.priority == NotifPriority.critical && criticalOverridesQuiet;
     }

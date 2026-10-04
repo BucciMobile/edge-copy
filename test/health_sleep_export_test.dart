@@ -611,6 +611,77 @@ void main() {
     );
 
     test(
+      'a day whose night is gone (rejected) clears the night exported earlier',
+      () async {
+        const channel = MethodChannel('openstrap/test_health_connect_clear');
+        final calls = <MethodCall>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              calls.add(call);
+              return true;
+            });
+        addTearDown(() {
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+        });
+        final exporter = HealthConnectSleepSessionExporter(
+          writer: MethodChannelHealthConnectSleepSessionWriter(
+            channel: channel,
+          ),
+        );
+
+        final noWindow = _overnightBundle()..remove('sleep');
+        expect(
+          await exporter.replace(noWindow, dayStart: DateTime(2026, 8, 5)),
+          isTrue,
+        );
+        expect(calls.single.method, 'clearSleepSessions');
+        final args = (calls.single.arguments as Map).cast<String, Object?>();
+        expect(
+          args['startTime'],
+          DateTime(2026, 8, 4, 12).millisecondsSinceEpoch,
+          reason: 'a night that started at 23:00 the evening before is '
+              'matched by its start, so the clear has to reach back to it',
+        );
+        expect(
+          args['endTime'],
+          DateTime(2026, 8, 5, 12).millisecondsSinceEpoch,
+          reason: 'noon: tonight\'s night (starting this evening) is not ours',
+        );
+      },
+    );
+
+    test(
+      'the clear stops short of yesterday\'s night when it woke after noon',
+      () async {
+        final cleared = <(DateTime, DateTime)>[];
+        final exporter = HealthConnectSleepSessionExporter(
+          writer: _RecordingClearWriter(cleared),
+        );
+        final noWindow = _overnightBundle()..remove('sleep');
+
+        // Yesterday's sleep ran 14:00-22:00: its record starts inside today's
+        // noon-to-noon window but belongs to yesterday.
+        await exporter.replace(
+          noWindow,
+          dayStart: DateTime(2026, 8, 5),
+          previousWake: DateTime(2026, 8, 4, 22),
+        );
+        expect(cleared.single.$1, DateTime(2026, 8, 4, 22, 0, 1));
+        expect(cleared.single.$2, DateTime(2026, 8, 5, 12));
+
+        // A morning wake is behind the window already: unchanged.
+        cleared.clear();
+        await exporter.replace(
+          noWindow,
+          dayStart: DateTime(2026, 8, 5),
+          previousWake: DateTime(2026, 8, 4, 7),
+        );
+        expect(cleared.single.$1, DateTime(2026, 8, 4, 12));
+      },
+    );
+
+    test(
       're-export uses the replace operation and a false result propagates',
       () async {
         const channel = MethodChannel('openstrap/test_health_connect_replace');
@@ -904,6 +975,20 @@ void main() {
         );
       },
     );
+
+    test('a sleep edit behind the export cursor pulls that day back in', () {
+      // Finalized and already exported: exportAll skips it, so a rejected
+      // night's session would never be cleared from Health Connect.
+      expect(healthExportCursorBefore('2026-09-30', '2026-09-28'),
+          '2026-09-27');
+      expect(healthExportCursorBefore('2026-09-28', '2026-09-28'),
+          '2026-09-27');
+      expect(healthExportCursorBefore('2026-03-01', '2026-03-01'),
+          '2026-02-28');
+      // Still ahead of the cursor (or nothing exported yet): leave it alone.
+      expect(healthExportCursorBefore('2026-09-27', '2026-09-28'), isNull);
+      expect(healthExportCursorBefore('', '2026-09-28'), isNull);
+    });
   });
 
   test('nightly scalars stay inside the day their delete covers', () {
@@ -938,4 +1023,19 @@ void main() {
       DateTime(2026, 8, 2, 12),
     );
   });
+}
+
+class _RecordingClearWriter implements HealthConnectSleepSessionWriter {
+  _RecordingClearWriter(this.cleared);
+
+  final List<(DateTime, DateTime)> cleared;
+
+  @override
+  Future<bool> replace(HealthSleepSession session) async => true;
+
+  @override
+  Future<bool> clear(DateTime start, DateTime end) async {
+    cleared.add((start, end));
+    return true;
+  }
 }

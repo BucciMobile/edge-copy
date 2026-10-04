@@ -59,6 +59,7 @@
   "profileSetupOptional": "FACULTATIF",
   "profileSetupPickOneToContinue": "Choisissez une option ci-dessus pour continuer.",
   "alarmNavTitle": "Alarme",
+  "alarmFiredAt": "Déclenchée à {time}",
   "alarmNavSub": "Vous réveille via le bracelet, pas le téléphone",
   "alarmArmedFor": "ARMÉE POUR",
   "alarmNotConnectedTitle": "Le bracelet n’est pas connecté",
@@ -428,7 +429,7 @@
   "dayStepsOnDay": "le {day}",
   "dayStepsNoTimesTitle": "Aucun horaire derrière ce total {when}",
   "dayStepsNoStepsTitle": "Aucun pas compté {when}",
-  "dayStepsStrapCounterBody": "Les {count} pas comptés {when} proviennent du compteur de pas propre au bracelet, qui indique un total journalier sans horaires. Il n'y a rien à placer sur une horloge.",
+  "dayStepsStrapCounterBody": "Les {count} pas comptés {when} proviennent du compteur de pas propre au bracelet, et leurs horaires n'ont pas été conservés pour ce jour. Il n'y a rien à placer sur une horloge.",
   "dayStepsNothingCounted": "Rien de capable de compter les pas n'a enregistré de données {when}.",
   "dayStepsChartTitle": "QUAND ILS ONT ÉTÉ COMPTÉS",
   "dayStepsUnit": "pas",
@@ -2447,5 +2448,10 @@
   "devicesWornOtherSub": "Une poche ou un sac. Le bracelet y voit mal la marche.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "Accueil",
+  "tabHealth": "Santé",
+  "tabNutrition": "Nutrition",
+  "tabWorkout": "Entraînement",
+  "tabWellness": "Bien-être"
 }

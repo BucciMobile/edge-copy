@@ -292,4 +292,20 @@ void main() {
       isTrue,
     );
   });
+
+  test("recovery push reads a no-sleep window ('—') as no window", () {
+    expect(
+      recoveryNightSettled(
+        dayId: todayLabel(),
+        payload: {
+          'sleep': {
+            'window': {'value': '—'},
+          },
+        },
+        dataEdgeSec: nowSec - 5 * 60 * 60,
+        nowSec: nowSec,
+      ),
+      isFalse,
+    );
+  });
 }

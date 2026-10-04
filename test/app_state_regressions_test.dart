@@ -19,12 +19,16 @@ import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/compute/hr_max.dart';
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/data/local_repository.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
 import 'package:openstrap_edge/notify/notification_service.dart';
 import 'package:openstrap_edge/state/alarm_schedule.dart';
 import 'package:openstrap_edge/state/app_state.dart';
+import 'package:openstrap_edge/state/prefs.dart';
+import 'package:openstrap_edge/ui2/activity/catalogue.dart';
+import 'package:openstrap_edge/ui2/activity/live.dart';
 import 'package:openstrap_edge/sync/paired_device.dart';
 
 void main() {
@@ -281,6 +285,76 @@ void main() {
           reason: 'without this flag the row looks like any other finished '
               'workout and _writeOneWorkout would export it on the very next '
               'periodic exportAll pass, minutes later');
+      expect(row?['end_ts'], nowSec - 7 * 60 * 60,
+          reason: 'no tally snapshot = it never ticked; stamping relaunch '
+              'time would bill 7 h of 1 Hz HR to it on re-score');
+    });
+
+    test('a stale orphan ends at its last tally snapshot, not at relaunch',
+        () async {
+      // Run started 18:00, app killed at 18:40, reopened 13.5 h later. The
+      // re-score bills whatever 1 Hz HR sits in [start_ts, end_ts], so a
+      // relaunch-time end turned the whole night into workout calories.
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final startSec = nowSec - 13 * 60 * 60 - 30 * 60;
+      final lastTickSec = startSec + 40 * 60;
+      const id = 'stale-with-tally';
+      await LocalDb.putSession({
+        'id': id,
+        'start_ts': startSec,
+        'end_ts': null,
+        'type': 'run',
+        'status': 'live',
+        'source': 'manual',
+        'created_at': startSec * 1000,
+      });
+      await LocalDb.saveLiveWorkoutTally({
+        'workout_id': id,
+        'updated_ts': lastTickSec * 1000,
+        'per_minute_hr': '[]',
+        'zone_seconds': '[]',
+        'seconds_by_bpm': '{}',
+      });
+
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      await app.debugReconcileOrphanedLiveWorkout();
+
+      final row = await LocalDb.session(id);
+      expect(row?['status'], 'done');
+      expect(row?['end_ts'], lastTickSec);
+      expect(row?['end_ts_fabricated'], 1);
+    });
+
+    test('a malformed tally snapshot still finalizes the stale orphan',
+        () async {
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final startSec = nowSec - 5 * 60 * 60;
+      const id = 'stale-bad-tally';
+      await LocalDb.putSession({
+        'id': id,
+        'start_ts': startSec,
+        'end_ts': null,
+        'type': 'run',
+        'status': 'live',
+        'source': 'manual',
+        'created_at': startSec * 1000,
+      });
+      await LocalDb.saveLiveWorkoutTally({
+        'workout_id': id,
+        'updated_ts': 'garbage',
+        'per_minute_hr': '[]',
+        'zone_seconds': '[]',
+        'seconds_by_bpm': '{}',
+      });
+
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      await app.debugReconcileOrphanedLiveWorkout();
+
+      final row = await LocalDb.session(id);
+      expect(row?['status'], 'done');
+      expect(row?['end_ts'], startSec);
     });
   });
 
@@ -314,9 +388,11 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
       expect(prefs.getInt('alarm_epoch'), isNull);
-      // `alarmFiredAt` had no reader in lib (alarm.dart derives its own arm
-      // state from alarmConfirmed/alarmPending), so the getter is gone and
-      // with it the only thing this line could assert on.
+      // the alarm screen shows the fire instead of silently swapping times
+      expect(app.alarmFiredAt, isNotNull);
+      // and a relaunch later that day still shows it
+      expect(prefs.getInt('alarm_fired_at'),
+          app.alarmFiredAt!.millisecondsSinceEpoch ~/ 1000);
     });
 
     test('the app-side EXECUTED id (58) is a RUN_ALARM buzz, the arm stays',
@@ -445,6 +521,33 @@ void main() {
     });
   });
 
+  test('a late event 56 after a relaunch still confirms the earlier arm',
+      () async {
+    // Armed an hour ago, no 56 inside the grace window, app killed. The
+    // relaunch used to restamp setAtMs to launch time, so the strap's pending
+    // 56 (stamped at the real arm) read as a replay and was dropped.
+    final armMs =
+        DateTime.now().subtract(const Duration(hours: 1)).millisecondsSinceEpoch;
+    final epoch = armMs ~/ 1000 + 10 * 3600;
+    SharedPreferences.setMockInitialValues({
+      'alarm_epoch': epoch,
+      'alarm_epoch_confirmed': false,
+      'alarm_set_at_ms': armMs,
+    });
+    final app = AppState.forTesting();
+    await app.debugInit();
+    // Let start-up's fire-and-forget tails land before dispose.
+    addTearDown(() async {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      app.dispose();
+    });
+    expect(app.alarmConfirmed, isFalse);
+
+    app.debugHandleAlarmEvent(56, tsSec: armMs ~/ 1000);
+
+    expect(app.alarmConfirmed, isTrue);
+  });
+
   // ── 10. dispose must release EVERYTHING AppState owns ──────────────────────
   group('dispose', () {
     testWidgets('cancels every owned timer', (t) async {
@@ -534,6 +637,99 @@ void main() {
       expect(w.zoneSeconds.reduce((x, y) => x + y), billed,
           reason: 'no zone-second for a second with no measurement');
       expect(w.maxHrSeen, peak, reason: 'the peak is untouched by an absence');
+    });
+
+    test('a paused session holds its clock and its tallies', () async {
+      await Prefs.ensureLoaded();
+      final app = connected(150);
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 50)),
+        targetKcal: 300,
+        workoutId: 'w1',
+        type: 'run',
+      );
+      app.activeWorkout = w;
+      final d = LiveDraft.begin(activityByName('running')!);
+      // 20 of the 50 minutes were spent paused.
+      d.pausedSec = 20 * 60;
+      app.debugTickWorkout();
+      expect(w.elapsed.inMinutes, 30);
+      final billed = w.zoneSeconds.reduce((x, y) => x + y);
+
+      d.setPaused(true);
+      app.debugTickWorkout();
+      expect(w.elapsed.inMinutes, 30, reason: 'the clock holds while paused');
+      expect(w.zoneSeconds.reduce((x, y) => x + y), billed,
+          reason: 'no zone-second billed while paused');
+    });
+
+    test('finishing a session that came back paused saves its real length',
+        () async {
+      await Prefs.ensureLoaded();
+      const id = 'paused-at-relaunch';
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      // A relaunch rebuilds the session with elapsed 0, and a paused draft
+      // means no tick ever moves it.
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 50)),
+        targetKcal: 300,
+        workoutId: id,
+        type: 'run',
+      );
+      app.activeWorkout = w;
+      LiveDraft.begin(activityByName('running')!).pausedAt =
+          DateTime.now().subtract(const Duration(minutes: 10));
+      app.debugTickWorkout();
+      expect(w.elapsed.inMinutes, 40);
+
+      w.elapsed = Duration.zero;
+      await app.stopWorkout();
+      expect((await LocalDb.session(id))?['duration_min'], 40);
+    });
+
+    test('a paused draft left from an older session does not hold a new one',
+        () async {
+      await Prefs.ensureLoaded();
+      final app = connected(150);
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      LiveDraft.begin(activityByName('running')!).setPaused(true);
+      // The gesture path: startWorkout with no setup screen, so no new draft.
+      app.startWorkout(type: 'other');
+      addTearDown(app.stopWorkout); // no live row left for later reconciles
+      expect(LiveDraft.current, isNull);
+      app.debugTickWorkout();
+      expect(app.activeWorkout!.zoneSeconds.reduce((x, y) => x + y), 1,
+          reason: 'the new session ticks');
+    });
+
+    test('resuming after a long pause does not ask "still working out?"',
+        () async {
+      await Prefs.ensureLoaded();
+      final app = connected(null);
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'w1',
+        type: 'run',
+      );
+      app.activeWorkout = w;
+      final d = LiveDraft.begin(activityByName('running')!)
+        ..pausedAt = DateTime.now().subtract(const Duration(minutes: 25));
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNotNull,
+          reason: 'a pause left running past the threshold is still asked '
+              'about: paused and forgotten is a forgotten session');
+      d.setPaused(false);
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNull,
+          reason: 'the pause was the user, not a forgotten session');
     });
 
     test('the tick consults the idle watch — a quiet session asks', () {
@@ -771,6 +967,27 @@ void main() {
 
       expect(await LocalDb.liveWorkoutTally(id), isNull);
     });
+
+    test('deleting the running session ends it, and stop cannot bring it back',
+        () async {
+      await Prefs.ensureLoaded();
+      const id = 'deleted-while-live';
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      addTearDown(LiveDraft.clear);
+      app.repo = _DeleteRepo();
+      app.startWorkout(workoutId: id, type: 'run');
+      LiveDraft.begin(activityByName('running')!).setPaused(true);
+      expect(await LocalDb.session(id), isNotNull);
+
+      await app.deleteWorkout(id);
+
+      expect(app.activeWorkout, isNull);
+      expect(LiveDraft.current, isNull,
+          reason: 'a paused draft left behind would freeze the next session');
+      await app.stopWorkout();
+      expect(await LocalDb.session(id), isNull);
+    });
   });
 }
 
@@ -809,4 +1026,9 @@ class _ArmRecordingEngine extends BleEngine {
     armed.add(when);
     return when;
   }
+}
+
+class _DeleteRepo extends LocalRepository {
+  @override
+  Future<void> deleteWorkout(String id) => LocalDb.deleteSession(id);
 }

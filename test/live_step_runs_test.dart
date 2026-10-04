@@ -350,6 +350,55 @@ void main() {
     });
   });
 
+  // A gait workout backgrounded mid-walk loses its IMU stream (the owner is
+  // foreground-only) while HR and GPS keep recording. The minutes counted
+  // before the lock are not the walk's total.
+  group('a gap in the workout\'s accel stream', () {
+    Future<Map<String, Object?>?> walk({required int gapMs}) async {
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      app.startWorkout(workoutId: 'gap$gapMs', type: 'walking');
+      final base = DateTime.now().millisecondsSinceEpoch - 130000 - gapMs;
+      for (var f = 0; f < 1200; f++) {
+        app.debugFeedLiveAccel(
+          _walkFrame(f, 10),
+          atMs: base + f * 100 + (f >= 600 ? gapMs : 0),
+        );
+      }
+      if (gapMs == 0) {
+        expect(app.workoutStepsMeasured, greaterThan(0));
+      } else {
+        expect(app.workoutStepsMeasured, isNull);
+      }
+      await app.stopWorkout();
+      return LocalDb.session('gap$gapMs');
+    }
+
+    test('a stream that only came up minutes in banks no steps', () async {
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      app.startWorkout(workoutId: 'late', type: 'walking');
+      final base = DateTime.now().millisecondsSinceEpoch + 60000;
+      for (var f = 0; f < 1200; f++) {
+        app.debugFeedLiveAccel(_walkFrame(f, 10), atMs: base + f * 100);
+      }
+      expect(app.workoutStepsMeasured, isNull);
+      await app.stopWorkout();
+      expect((await LocalDb.session('late'))!['steps'], isNull);
+    });
+
+    test('a covered walk banks its steps', () async {
+      final row = await walk(gapMs: 0);
+      expect((row!['steps'] as num).toInt(), greaterThan(0));
+    });
+
+    test('a walk with a locked-screen gap banks no step total', () async {
+      final row = await walk(gapMs: 10 * 60 * 1000);
+      expect(row, isNotNull);
+      expect(row!['steps'], isNull);
+    });
+  });
+
   test('a session that never counted writes nothing', () async {
     final app = AppState.forTesting();
     addTearDown(app.dispose);

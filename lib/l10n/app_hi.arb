@@ -59,6 +59,7 @@
   "profileSetupOptional": "वैकल्पिक",
   "profileSetupPickOneToContinue": "जारी रखने के लिए ऊपर एक विकल्प चुनें।",
   "alarmNavTitle": "अलार्म",
+  "alarmFiredAt": "{time} पर बजा",
   "alarmNavSub": "फ़ोन नहीं, बैंड पर आपको जगाता है",
   "alarmArmedFor": "इसके लिए सेट",
   "alarmNotConnectedTitle": "बैंड कनेक्ट नहीं है",
@@ -428,7 +429,7 @@
   "dayStepsOnDay": "{day} को",
   "dayStepsNoTimesTitle": "{when} की गिनती के पीछे कोई समय दर्ज नहीं",
   "dayStepsNoStepsTitle": "{when} कोई कदम नहीं गिने गए",
-  "dayStepsStrapCounterBody": "{when} गिने गए {count} कदम बैंड के अपने स्टेप काउंटर से आए हैं, जो पूरे दिन का कुल तो बताता है पर कोई समय नहीं। यहाँ घड़ी पर दिखाने लायक कुछ नहीं है।",
+  "dayStepsStrapCounterBody": "{when} गिने गए {count} कदम बैंड के अपने स्टेप काउंटर से आए हैं, पर इस दिन के उनके समय सहेजे नहीं गए। यहाँ घड़ी पर दिखाने लायक कुछ नहीं है।",
   "dayStepsNothingCounted": "{when} कदम गिनने वाला कोई भी उपकरण सक्रिय नहीं था।",
   "dayStepsChartTitle": "कब गिने गए",
   "dayStepsUnit": "कदम",
@@ -2447,5 +2448,10 @@
   "devicesWornOtherSub": "जेब या बैग। बैंड वहाँ चाल अच्छे से नहीं देख सकता।",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "होम",
+  "tabHealth": "स्वास्थ्य",
+  "tabNutrition": "पोषण",
+  "tabWorkout": "वर्कआउट",
+  "tabWellness": "वेलनेस"
 }

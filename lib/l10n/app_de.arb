@@ -59,6 +59,7 @@
   "profileSetupOptional": "OPTIONAL",
   "profileSetupPickOneToContinue": "Wähle oben eine Option, um fortzufahren.",
   "alarmNavTitle": "Wecker",
+  "alarmFiredAt": "Ausgelöst um {time}",
   "alarmNavSub": "Weckt dich über das Band, nicht über dein Smartphone",
   "alarmArmedFor": "GESTELLT AUF",
   "alarmNextLabel": "NÄCHSTER",
@@ -465,7 +466,7 @@
   "dayStepsOnDay": "am {day}",
   "dayStepsNoTimesTitle": "Keine Uhrzeiten zu den Schritten {when}",
   "dayStepsNoStepsTitle": "Keine Schritte gezählt {when}",
-  "dayStepsStrapCounterBody": "Die {count} Schritte {when} stammen vom Schrittzähler des Bands. Er liefert nur eine laufende Tagessumme ohne Uhrzeiten – es gibt also nichts, was sich zeitlich einordnen ließe.",
+  "dayStepsStrapCounterBody": "Die {count} Schritte {when} stammen vom Schrittzähler des Bands; die Uhrzeiten dazu wurden für diesen Tag nicht gespeichert – es gibt also nichts, was sich zeitlich einordnen ließe.",
   "dayStepsNothingCounted": "Kein Gerät, das Schritte zählen kann, hat {when} etwas aufgezeichnet.",
   "dayStepsChartTitle": "WANN SIE GEZÄHLT WURDEN",
   "dayStepsUnit": "Schritte",
@@ -2566,5 +2567,10 @@
   "devicesWornOtherSub": "Eine Tasche oder ein Beutel. Das Band sieht dort das Gehen schlecht.",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "Start",
+  "tabHealth": "Gesundheit",
+  "tabNutrition": "Ernährung",
+  "tabWorkout": "Training",
+  "tabWellness": "Wohlbefinden"
 }

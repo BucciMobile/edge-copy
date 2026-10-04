@@ -59,6 +59,7 @@
   "profileSetupOptional": "可选",
   "profileSetupPickOneToContinue": "请选择上方的一个选项以继续。",
   "alarmNavTitle": "闹钟",
+  "alarmFiredAt": "已于 {time} 响铃",
   "alarmNavSub": "通过腕带而非手机唤醒您",
   "alarmArmedFor": "已设置为",
   "alarmNotConnectedTitle": "腕带未连接",
@@ -428,7 +429,7 @@
   "dayStepsOnDay": "{day}",
   "dayStepsNoTimesTitle": "{when}的步数没有对应的时间记录",
   "dayStepsNoStepsTitle": "{when}没有记录到步数",
-  "dayStepsStrapCounterBody": "{when}记录的 {count} 步来自设备自带的计步器，它只报告全天累计总数，没有具体时间。这里没有可以标注在时钟上的内容。",
+  "dayStepsStrapCounterBody": "{when}记录的 {count} 步来自设备自带的计步器，这一天没有保留对应的时间。这里没有可以标注在时钟上的内容。",
   "dayStepsNothingCounted": "{when}没有任何设备记录到步数。",
   "dayStepsChartTitle": "计步时间分布",
   "dayStepsUnit": "步",
@@ -2447,5 +2448,10 @@
   "devicesWornOtherSub": "口袋或包里。手环在那里很难看清步伐。",
   "@devicesWornOtherSub": {
     "description": "Step calibration wearing-location setting"
-  }
+  },
+  "tabHome": "首页",
+  "tabHealth": "健康",
+  "tabNutrition": "营养",
+  "tabWorkout": "锻炼",
+  "tabWellness": "身心"
 }

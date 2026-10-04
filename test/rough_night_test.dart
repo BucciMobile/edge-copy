@@ -76,6 +76,40 @@ Map<String, Map<String, double>> _series([
 }
 
 void main() {
+  group('late training', () {
+    int sec(DateTime t) => t.millisecondsSinceEpoch ~/ 1000;
+    Map<String, Object?> session(DateTime from, DateTime to) =>
+        {'start_ts': sec(from), 'end_ts': sec(to)};
+
+    test('only the evening before the night counts', () {
+      final latest = lateTrainingEnd('2026-08-15', [
+        // The evening before: this is the one that ran into the night.
+        session(DateTime(2026, 8, 14, 20), DateTime(2026, 8, 14, 21, 10)),
+        // This evening, hours after the night ended. Never its cause.
+        session(DateTime(2026, 8, 15, 18, 30), DateTime(2026, 8, 15, 19, 40)),
+      ]);
+      expect(latest, DateTime(2026, 8, 14, 21, 10));
+    });
+
+    test('an early session the day before is not late', () {
+      expect(
+        lateTrainingEnd('2026-08-15', [
+          session(DateTime(2026, 8, 14, 7), DateTime(2026, 8, 14, 8)),
+        ]),
+        isNull,
+      );
+    });
+
+    test('a session that ran past midnight still counts', () {
+      expect(
+        lateTrainingEnd('2026-08-15', [
+          session(DateTime(2026, 8, 14, 23, 30), DateTime(2026, 8, 15, 0, 20)),
+        ]),
+        DateTime(2026, 8, 15, 0, 20),
+      );
+    });
+  });
+
   group('the gate', () {
     test('never fires on 17 days of the real export', () {
       final s = _series();
