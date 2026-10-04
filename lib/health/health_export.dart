@@ -701,6 +701,15 @@ class HealthExporter {
           // sleep session, rather than decoding every pending day up front.
           MapEntry<String, Map<String, dynamic>>? priorityDay;
           for (final day in pendingDays.where((d) => !d.skipped)) {
+            // A finalized day that already exported cleanly is done; picking
+            // it here would rewrite it and could hold bulk behind its backoff.
+            final done = (retryState[day.date] as Map?)
+                ?.cast<String, dynamic>();
+            if (day.finalized &&
+                (done?['finalized'] as bool? ?? false) &&
+                done?['ok_ms'] != null) {
+              continue;
+            }
             final bundle = await bundleFor(day.date);
             if (bundle == null || bundle['skipped'] == true) continue;
             if (normalizeHealthSleepSession(bundle) != null) {

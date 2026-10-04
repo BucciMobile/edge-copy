@@ -315,7 +315,11 @@ class HealthWorkoutImporter {
       ]);
       // Drop the copies earlier imports already stored.
       for (final uuid in mine) {
-        await LocalDb.deleteImportedWorkout(uuid);
+        try {
+          await LocalDb.deleteImportedWorkout(uuid);
+        } catch (e) {
+          debugPrint('[imported_workout] drop own $uuid: $e');
+        }
       }
     } catch (e) {
       debugPrint('[imported_workout] read: $e');
