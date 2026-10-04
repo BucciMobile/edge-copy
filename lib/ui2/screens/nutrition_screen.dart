@@ -55,6 +55,9 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
   NutritionWindow? _week;
   Metric? _burned;
   double? _waterMl;
+  /// The day [_waterMl] was read for. Past midnight on a tab nobody reloaded
+  /// it is still yesterday's, and a full yesterday disabled today's + button.
+  String? _waterDate;
   bool _loading = true;
 
   /// The local profile map, read once per load. Targets live here rather than
@@ -82,18 +85,20 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
     final week = await NutritionDb.window(db, days: 7);
     Metric? burned;
     double? water;
+    final date = _date;
     final repo = app.repo;
     if (repo != null) {
       final today = await repo.getToday();
       final daily = today['daily'];
       if (daily is Map) burned = Metric.parse(daily['calories_total']);
-      water = (await repo.getJournalMetrics(_date))['water_ml']?.value;
+      water = (await repo.getJournalMetrics(date))['water_ml']?.value;
     }
     if (!stillNewest(#nutrition, t)) return;
     setState(() {
       _week = week;
       _burned = burned;
       _waterMl = water;
+      _waterDate = date;
       _profile = {...?app.user};
       _loading = false;
     });
@@ -158,7 +163,12 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
         final down = (v ?? 0) - spec.step;
         next = down <= 0 ? (v == null || v == 0 ? null : 0.0) : down;
       }
-      if (mounted) setState(() => _waterMl = next);
+      if (mounted) {
+        setState(() {
+          _waterMl = next;
+          _waterDate = date;
+        });
+      }
       if (next != null) fields['water_ml'] = JournalMetricValue(next);
       await repo.postJournalMetrics(date, fields);
       await _load();
@@ -273,10 +283,11 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
         Builder(builder: (bc) {
           final live = bc.select<AppState, bool>((a) => a.repo != null) &&
               !_writingWater;
+          final ml = _waterDate == _date ? _waterMl : null;
           return _WaterRow(
-            ml: _waterMl,
-            onDown: (!live || _waterMl == null) ? null : () => _stepWater(-1),
-            onUp: (!live || (_waterMl ?? 0) >= _waterSpec.max)
+            ml: ml,
+            onDown: (!live || ml == null) ? null : () => _stepWater(-1),
+            onUp: (!live || (ml ?? 0) >= _waterSpec.max)
                 ? null
                 : () => _stepWater(1),
           );
