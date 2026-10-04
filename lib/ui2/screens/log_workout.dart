@@ -591,7 +591,7 @@ class _LogWorkoutState extends State<LogWorkout> {
       await HealthExporter.exportWorkoutId(
           (r['workout_id'] ?? widget.sessionId) as String?);
       // Say what was actually banked. A window with no 1 Hz substrate left
-      // behind it — anything past the ~3-day retention, or a stretch the band
+      // behind it — anything past the ~5-day retention, or a stretch the band
       // was off — is saved UNSCORED, and a screen that pops silently would let
       // the athlete believe a strain was computed for it.
       app?.insightsRevision.value++;

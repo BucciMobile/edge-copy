@@ -840,7 +840,7 @@ typedef _Circadian = ({
 /// Nonparametric circadian metrics + a 24 h cosinor over the HOURLY HR profile.
 ///
 /// INPUT HONESTY. The textbook input is continuous accelerometry (ENMO), and we
-/// cannot use it: the 1 Hz substrate is pruned after 3 days, so no multi-day
+/// cannot use it: the 1 Hz substrate is pruned after 5 days, so no multi-day
 /// accel series exists to analyse. What survives is `day_result`, which is never
 /// pruned, and the per-day hourly HR profile stored on it. `circadianNonparametric`
 /// names an HR series as an accepted input alongside activity, and HR carries the

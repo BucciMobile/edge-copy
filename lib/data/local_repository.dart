@@ -182,7 +182,7 @@ abstract class LocalRepository {
   /// point list with the reason it is empty.
   ///
   /// RETENTION-BOUNDED AND SAYS SO. This reads `decoded_onehz`, which prunes at
-  /// `rawRetentionDays = 3` (held to `_maxRawHoldDays = 14` for a day that has
+  /// `rawRetentionDays = 5` (held to `_maxRawHoldDays = 14` for a day that has
   /// not produced a complete result). Outside that window there is nothing to
   /// read and the honest answer is `bounded: true` with `oldest` naming the
   /// edge — never an empty chart with no explanation, and never a per-device

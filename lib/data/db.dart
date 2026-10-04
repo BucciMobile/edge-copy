@@ -163,7 +163,7 @@ class LocalDb {
   /// it, nothing re-derives it, and it is not in the band's flash. The second
   /// block is measured-once data whose raw substrate is pruned at
   /// `rawRetentionDays`, so it is equally unrecoverable in practice. The third
-  /// is the 3-day substrate: re-syncable in principle, but the band trims its
+  /// is the 5-day substrate: re-syncable in principle, but the band trims its
   /// flash as we ACK, so in practice this is the only copy of those days too.
   static const _salvageTables = [
     // Hand-entered. The only copy that exists anywhere.
@@ -863,7 +863,7 @@ class LocalDb {
           //  * metric_series_version.source — measured vs imported, in every
           //    export (export-provenance), on L13's existing side table.
           //  * workout_split — per-km splits frozen at finalize (CV-01/TS-07),
-          //    because `decoded_onehz` is gone at 3 days and cannot be re-read.
+          //    because `decoded_onehz` is gone at 5 days and cannot be re-read.
           await _ensureDecodedOneHzBandFields(db);
           await _addColumnIfMissing(db, 'sessions', 'rpe', 'REAL');
           await _addColumnIfMissing(db, 'sessions', 'cadence_spm', 'INTEGER');
@@ -2624,7 +2624,7 @@ class LocalDb {
   /// device produced `signal` rows across [start_ts, end_ts)".
   ///
   /// WHY IT IS A TABLE AND NOT A DERIVE-TIME COMPUTATION. The 1 Hz substrate is
-  /// pruned at `rawRetentionDays = 3`, so "what was recording last March" cannot
+  /// pruned at `rawRetentionDays = 5`, so "what was recording last March" cannot
   /// be reconstructed from rows — they are gone. This is written at INGEST and
   /// survives the prune, which makes it the only artifact that can answer the
   /// question at all. Five integers per few hours per device: a decade of two
@@ -2697,7 +2697,7 @@ class LocalDb {
   /// v51 step 6: coverage intervals for the substrate rows that survive.
   ///
   /// WHAT IT CLAIMS, AND WHAT IT REFUSES TO CLAIM. Only the days
-  /// `decoded_onehz` / `decoded_rr` still hold, which is `rawRetentionDays = 3`
+  /// `decoded_onehz` / `decoded_rr` still hold, which is `rawRetentionDays = 5`
   /// plus whatever `_maxRawHoldDays` has held back. A day already pruned gets
   /// NO coverage row. That is correct and it is the honest answer: we do not
   /// know what was recording, so we do not claim.
@@ -2709,7 +2709,7 @@ class LocalDb {
   /// resolver's own grid, so nothing is lost), then coalesce adjacent buckets
   /// in Dart.
   ///
-  /// BOUNDED, which is what makes it safe on the launch path: 3 days x 1,440
+  /// BOUNDED, which is what makes it safe on the launch path: 5 days x 1,440
   /// minutes x 5 signals = 21,600 rows worst case, and in practice far fewer.
   ///
   /// SIGNALS ARE READ OFF COLUMNS, one predicate each, and each predicate says
@@ -3220,7 +3220,7 @@ class LocalDb {
   /// [deviceId] is required, not optional-with-default: without it, one
   /// device's charging spans mask a DIFFERENT device's worn night — put band
   /// B on the charger and band A's real sleep gets excluded as "charging",
-  /// silently, and it survives the 3-day prune into the baselines.
+  /// silently, and it survives the 5-day prune into the baselines.
   static Future<List<List<int>>> _toggleSpans(
     int loSec,
     int hiSec, {
@@ -3762,7 +3762,7 @@ class LocalDb {
   /// what the coach sees. So the stamp lives beside it, one row per day.
   ///
   /// WHAT IT IS FOR. Days lock at finalized ~48 h after wake and are never
-  /// recomputed on a bump, and the 1 Hz substrate is gone at 3 days, so a March
+  /// recomputed on a bump, and the 1 Hz substrate is gone at 5 days, so a March
   /// day physically cannot be re-derived in December. `kAlgoVersion` moved
   /// 65 → 66 → 68 inside two weeks. A 12-month chart therefore splices values
   /// from several different algorithms with nothing marking the seams. This
@@ -4398,7 +4398,7 @@ class LocalDb {
     await _addColumnIfMissing(db, 'sessions', 'steps', 'INTEGER');
     await _addColumnIfMissing(db, 'sessions', 'hrr_bpm', 'REAL');
     // Mean HR over the session window. Stored rather than recomputed because
-    // the 1 Hz substrate it comes from is pruned after 3 days: without a column
+    // the 1 Hz substrate it comes from is pruned after 5 days: without a column
     // every workout older than that permanently loses its average, while
     // `max_hr` (already a column) survives. Additive + nullable, so old rows
     // read NULL — the truth for them — and the read path still recomputes from
@@ -4925,7 +4925,7 @@ class LocalDb {
     // indexed READ key — every query in this file and in health_export ranges
     // over it — but it can no longer be the identity, because a second device
     // measuring the same second is a DIFFERENT reading, and REPLACE on a
-    // shared rec_ts silently deletes the first one (raw prunes at 3 days, so
+    // shared rec_ts silently deletes the first one (raw prunes at 5 days, so
     // that loss is permanent). See [_rekeyTableByDevice].
     //
     // `device_id = ''` IS RESERVED PERMANENTLY FOR THE PRIMARY BAND. Not a
@@ -5331,7 +5331,7 @@ class LocalDb {
   /// PRIMARY KEY` written with REPLACE and `decoded_rr` was cleared by an
   /// unscoped `DELETE … WHERE rec_ts = ?`, so a second device measuring the
   /// same second did not merge with the first — it DELETED it, row and beats.
-  /// `raw_archive` prunes at `rawRetentionDays = 3`, so within three days the
+  /// `raw_archive` prunes at `rawRetentionDays = 5`, so within three days the
   /// bytes that could rebuild the evicted row are gone too. Every other item on
   /// the band-agnostic roadmap can be done after a second device has written;
   /// this one cannot.
@@ -5463,7 +5463,7 @@ class LocalDb {
   /// Self-skipping: a database whose `hr` is already nullable — every fresh
   /// create at v43+ — does no work at all. That also keeps it cheap under the
   /// launch-path CPU watchdog `onUpgrade` runs inside (invariant 11); the table
-  /// is retention-capped at ~3 days, so the one-time copy is bounded.
+  /// is retention-capped at ~5 days, so the one-time copy is bounded.
   static Future<void> _relaxDecodedHrNull(Database db) async {
     final info = await db.rawQuery('PRAGMA table_info(decoded_onehz)');
     // No table yet on this upgrade path ⇒ the current DDL already carries a
@@ -5985,7 +5985,7 @@ class LocalDb {
   }) {
     // SCOPED TO THE WRITING DEVICE (v47). Unscoped, this cleared every device's
     // beats for the second — so a second band writing one row deleted the
-    // first band's R-R for that second, permanently (raw prunes at 3 days).
+    // first band's R-R for that second, permanently (raw prunes at 5 days).
     // Same key prefix as the parent row, so the PK serves the delete.
     if (preDeviceKey) {
       batch.rawDelete('DELETE FROM decoded_rr WHERE rec_ts = ?', [recTs]);
@@ -7561,7 +7561,7 @@ class LocalDb {
   /// WHICH DEVICES WERE PHYSICALLY RECORDING each LOCAL day in a window, per
   /// signal — from `device_coverage`, which is written at ingest and never
   /// pruned, so this answers for days whose 1 Hz substrate went at
-  /// `rawRetentionDays = 3`.
+  /// `rawRetentionDays = 5`.
   ///
   /// NOT the same question as `metric_series_version.coverage_devices`. That
   /// says which devices FED THE NUMBER; this says which were recording. They
@@ -10664,7 +10664,7 @@ class LocalDb {
   /// The zone ceiling is a per-family constant, so a screen that prints zone
   /// EDGES has to say which strap they belong to — and it has to be able to say
   /// it for a user who has not synced in a week (`decoded_onehz` is pruned at
-  /// ~3 days; `sessions` is not). NULL is unknown and stays unknown: a
+  /// ~5 days; `sessions` is not). NULL is unknown and stays unknown: a
   /// pre-schema-41 session, an import and a raw replay all carry none, and an
   /// uncalibrated strap is never gen4 with a different badge.
   static Future<String?> latestSessionDeviceFamily() async {
@@ -10729,7 +10729,7 @@ class LocalDb {
   /// workout_split — per-KILOMETRE splits, frozen at finalize (CV-01 / TS-07).
   ///
   /// WHY A TABLE AND NOT A QUERY. A split's `avg_hr` is computed on demand by
-  /// joining the route against `decoded_onehz`, which is gone at ~3 days. So
+  /// joining the route against `decoded_onehz`, which is gone at ~5 days. So
   /// there is NO retroactive index here and never can be: this write is the
   /// whole gate, it is FORWARD-ONLY, and it produces its first honest chart
   /// 8-12 weeks after it ships. Nothing reads this table yet.
@@ -11155,7 +11155,7 @@ class LocalDb {
   /// Keeping more than one matters: a user on a GitHub release can roll back
   /// to the previous build, and pruning down to only the current version
   /// would leave that build with nothing to read for a day it never
-  /// re-derives (raw retention is 3 days; a day older than that only gets a
+  /// re-derives (raw retention is 5 days; a day older than that only gets a
   /// fresh-version row if something forces a re-derive).
   ///
   /// Scoped PER day_id, not table-wide. A table-wide "keep the 2 highest

@@ -23,7 +23,7 @@
 // HONESTY CONTRACT. `strain` and `calories` are computed ONLY from real 1 Hz
 // HR inside the window, through the same published methods the day-level
 // derivation uses (Banister TRIMP -> log-squash strain; Keytel 2005 calories).
-// No HR in the window — because it predates the ~3-day `decoded_onehz`
+// No HR in the window — because it predates the ~5-day `decoded_onehz`
 // retention, or the band was off — means those columns stay NULL and the UI
 // renders "—". A duration alone NEVER becomes a strain or a calorie figure.
 
@@ -421,7 +421,7 @@ Map<String, dynamic> buildManualSessionRow({
     'strain': stats.strain,
     'max_hr': stats.maxHr,
     // Banked, not recomputed on read: the 1 Hz window this was measured over is
-    // pruned after 3 days, and an average that vanishes from every workout older
+    // pruned after 5 days, and an average that vanishes from every workout older
     // than that is worse than one stored beside the peak it belongs with.
     'avg_hr': stats.avgHr,
     'duration_min': (endSec - startSec) ~/ 60,
