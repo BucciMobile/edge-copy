@@ -19,6 +19,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../compute/substrate.dart' show beatTimesMs;
@@ -26,7 +27,8 @@ import '../compute/substrate.dart' show beatTimesMs;
 // version, which every day_result read applies as a CEILING (see [dayResult]).
 // `show` keeps the rest of the engine out of this namespace.
 import '../coach/coach_db.dart' show CoachDb;
-import '../compute/derivation_engine.dart' show kAlgoVersion;
+import '../compute/derivation_engine.dart' show kAlgoVersion, kOvernightGiveUpSec, overnightSettled;
+import '../compute/sleep_profile_policy.dart' show SleepProfilePolicy;
 import '../ble/adapters/adapter.dart' show NeutralSample;
 import '../ble/adapters/signals.dart' show InputSignal;
 import '../import/import_container.dart';
@@ -34,6 +36,7 @@ import 'coverage_resolver.dart' show CoverageInterval;
 import 'day_label.dart';
 import 'journal_fields.dart';
 import 'live_coverage_policy.dart';
+import 'step_calibration.dart';
 import 'med_store.dart';
 import 'models.dart';
 import 'nutrition_store.dart';
@@ -162,9 +165,13 @@ class LocalDb {
   /// it, nothing re-derives it, and it is not in the band's flash. The second
   /// block is measured-once data whose raw substrate is pruned at
   /// `rawRetentionDays`, so it is equally unrecoverable in practice. The third
-  /// is the 3-day substrate: re-syncable in principle, but the band trims its
+  /// is the 1 Hz substrate: re-syncable in principle, but the band trims its
   /// flash as we ACK, so in practice this is the only copy of those days too.
   static const _salvageTables = [
+    // Secondary devices first: tiny, and every device-keyed row below needs
+    // its device to still have a name if the salvage stops partway. The
+    // primary row is skipped by the merge, as on a restore.
+    'device',
     // Hand-entered. The only copy that exists anywhere.
     'journal',
     'journal_metric',
@@ -182,9 +189,18 @@ class LocalDb {
     'sleep_override',
     'sleep_nap',
     'breathing_session',
+    // Vendor, typed-in and imported scalars: a `reports` band trims its own
+    // history and the source app may be gone.
+    'observation',
+    // Owners before their routes: `workout_route` is keyed by a session id
+    // or an imported workout's uuid.
     'sessions',
+    'imported_workout',
     'workout_route',
     'workout_split',
+    // The only copy of what a paired sensor measured during a session.
+    'external_hr',
+    'imported_measurement',
     // User-initiated ECG readings and the band's raw ECG records recovered
     // through history — the band trims its flash on ACK, so these too are
     // the only copy. Parent before child.
@@ -196,8 +212,13 @@ class LocalDb {
     'metric_series',
     'metric_series_version',
     'baselines',
+    'step_calibration',
+    'step_calibration_day',
     'raw_archive',
     'device_coverage',
+    // Step windows. Every day's steps are read from here, and the band's live
+    // pedometer windows exist nowhere else.
+    'live_coverage',
     'signal_priority',
     'sync_cursor',
     // The retention window. Big, and last for that reason.
@@ -349,7 +370,7 @@ class LocalDb {
   /// pass it: sqflite throws `ArgumentError('onCreate must be null if no
   /// version is specified')` BEFORE opening anything when `onCreate` is given
   /// without `version` (sqflite_common database_mixin.dart).
-  static const int schemaVersion = 54;
+  static const int schemaVersion = 56;
 
   /// SQLite caps host parameters per statement (`SQLITE_MAX_VARIABLE_NUMBER` —
   /// only 999 on the builds shipped with older Android/iOS). Any `IN (?, ?, …)`
@@ -370,6 +391,12 @@ class LocalDb {
   /// A SECONDARY device gets a real id, issued by its adapter from something
   /// the band emits across the handshake — never from the link.
   static const String kPrimaryDeviceId = '';
+
+  /// Prefs key holding `[remoteId, wearing, wearing_set_ts]`: an explicit
+  /// wearing choice waiting for the next primary pairing to adopt it. A
+  /// forgotten band leaves its own remoteId; a restore onto an install with
+  /// no band yet leaves `''`, which whichever band pairs next takes.
+  static const String kPendingWornOnPref = 'paired_worn_on';
 
   /// The `sync_cursor` name for a per-offloading-device bookmark.
   ///
@@ -859,7 +886,8 @@ class LocalDb {
           //  * metric_series_version.source — measured vs imported, in every
           //    export (export-provenance), on L13's existing side table.
           //  * workout_split — per-km splits frozen at finalize (CV-01/TS-07),
-          //    because `decoded_onehz` is gone at 3 days and cannot be re-read.
+          //    because `decoded_onehz` is gone at `rawRetentionDays` and
+          //    cannot be re-read.
           await _ensureDecodedOneHzBandFields(db);
           await _addColumnIfMissing(db, 'sessions', 'rpe', 'REAL');
           await _addColumnIfMissing(db, 'sessions', 'cadence_spm', 'INTEGER');
@@ -1073,6 +1101,20 @@ class LocalDb {
           // next free rung rather than collide with any of them.
           await _createEcgTables(db);
         }
+        if (oldV < 55) {
+          // One-time heal of the °C skin_temp_z older WHOOP imports wrote.
+          // Here, not on the onOpen repair pass: it reads every day_result
+          // payload, and new imports no longer write the key, so once is enough.
+          await _scrubImportedSkinTempZ(db);
+        }
+        if (oldV < 56) {
+          // Step calibration tables, plus when `device.wearing` was last
+          // changed (NULL = never; that column has had DEFAULT 1 since v51).
+          await _addColumnIfMissing(
+            db, 'device', 'wearing_set_ts', 'INTEGER',
+          );
+          await _createStepCalibration(db);
+        }
       },
       onOpen: (db) async {
         await _repairOpenSchema(db);
@@ -1163,10 +1205,37 @@ class LocalDb {
       'INTEGER NOT NULL DEFAULT 0',
     );
     await _createEcgTables(db);
+    await _addColumnIfMissing(
+      db, 'device', 'wearing_set_ts', 'INTEGER',
+    );
+    await _createStepCalibration(db);
     // Views LAST — they depend on metric_series / day_result / baselines / sessions
     // / notifications all existing. DROP+CREATE so a shape change takes effect.
     await _ensureCoachViews(db);
     await _dropRawStore(db);
+  }
+
+  /// Older WHOOP CSV imports filed the export's absolute skin temp (°C) under
+  /// `scalars.skin_temp_z`, which every reader treats as SDs off baseline, so
+  /// 33 °C read as +33 SD in the cross-day temp inputs and the skin temp card.
+  /// Imported days are finalized with no raw behind them and never re-derive,
+  /// so the import fix alone can't heal them: drop the key from those rows.
+  /// Best-effort: a failed heal must never fail the open (that quarantines
+  /// the database), it just leaves the stale key behind.
+  static Future<void> _scrubImportedSkinTempZ(Database db) async {
+    try {
+      await db.execute(
+        "UPDATE day_result SET payload_json = "
+        "json_remove(payload_json, '\$.scalars.skin_temp_z') "
+        "WHERE payload_json LIKE '%skin_temp_z%' "
+        "AND payload_json LIKE '%whoop_export%' "
+        'AND json_valid(payload_json) '
+        "AND json_extract(payload_json, '\$.source') = 'whoop_export' "
+        "AND json_type(payload_json, '\$.scalars.skin_temp_z') IS NOT NULL",
+      );
+    } catch (_) {
+      // best-effort, see above
+    }
   }
 
   /// Periodic snapshot of a LIVE workout's per-second tallies (per-minute HR
@@ -1833,6 +1902,160 @@ class LocalDb {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_ecg_raw_packet_strap '
       'ON ecg_raw_packet(strap_seconds)',
+    );
+  }
+
+  /// Step calibration: one profile per (device_family, wearing), and the
+  /// per-day observations it is fitted from.
+  static Future<void> _createStepCalibration(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS step_calibration (
+        device_family TEXT NOT NULL,
+        wearing       INTEGER NOT NULL,
+        factor        REAL NOT NULL,
+        n_days        INTEGER NOT NULL,
+        version       INTEGER NOT NULL,
+        updated_ts    INTEGER NOT NULL,
+        PRIMARY KEY (device_family, wearing)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS step_calibration_day (
+        day           TEXT NOT NULL,
+        device_family TEXT NOT NULL,
+        wearing       INTEGER NOT NULL,
+        reference_steps INTEGER,
+        counter_ticks   INTEGER,
+        PRIMARY KEY (day, device_family, wearing)
+      )
+    ''');
+  }
+
+  /// Idempotent by key. NULL reference_steps = the phone did not cover the day.
+  static Future<void> putStepCalibrationDay({
+    required String day,
+    required String deviceFamily,
+    required int wearing,
+    int? referenceSteps,
+    int? counterTicks,
+  }) async {
+    final db = await instance;
+    await db.insert(
+      'step_calibration_day',
+      {
+        'day': day,
+        'device_family': deviceFamily,
+        'wearing': wearing,
+        'reference_steps': referenceSteps,
+        'counter_ticks': counterTicks,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Observed days for one (family, wearing) pair, most recent first.
+  static Future<List<Map<String, Object?>>> stepCalibrationDays(
+    String deviceFamily,
+    int wearing, {
+    int limit = 30,
+  }) async {
+    final db = await instance;
+    return db.query(
+      'step_calibration_day',
+      where: 'device_family = ? AND wearing = ?',
+      whereArgs: [deviceFamily, wearing],
+      orderBy: 'day DESC',
+      limit: limit,
+    );
+  }
+
+  /// Sets `device.wearing` and stamps `wearing_set_ts` only on a real change
+  /// (re-picking the same location must not invalidate learned days).
+  /// Returns rows updated; 0 means the device row is gone.
+  static Future<int> setDeviceWearing(
+    int wearing, [
+    String id = kPrimaryDeviceId,
+  ]) async {
+    final db = await instance;
+    return db.rawUpdate(
+      'UPDATE device SET wearing = ?, wearing_set_ts = '
+      'CASE WHEN wearing = ? THEN wearing_set_ts ELSE ? END '
+      'WHERE id = ?',
+      [
+        wearing,
+        wearing,
+        DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        id,
+      ],
+    );
+  }
+
+  /// Carry an EARLIER explicit wearing choice onto a row that has none of its
+  /// own (`wearing_set_ts IS NULL`: fresh after a forget/re-pair, or a restore
+  /// target nobody has set yet). The stamp is kept, not renewed — the days
+  /// before it stay refused exactly as they were. Without this the row's
+  /// DEFAULT silently says wrist while the arm profile survives, and wrist
+  /// days start learning from arm-worn data.
+  static const String _adoptWearingSql =
+      'UPDATE device SET wearing = ?, wearing_set_ts = ? '
+      'WHERE id = ? AND wearing_set_ts IS NULL';
+
+  static Future<int> adoptDeviceWearing(
+    int wearing,
+    int setTs, [
+    String id = kPrimaryDeviceId,
+  ]) async {
+    final db = await instance;
+    return db.rawUpdate(_adoptWearingSql, [wearing, setTs, id]);
+  }
+
+  /// Raw `device.wearing`, null when there is no device row.
+  static Future<int?> deviceWearingRaw([String id = kPrimaryDeviceId]) async {
+    final row = await deviceRow(id);
+    return (row?['wearing'] as num?)?.toInt();
+  }
+
+  /// The stored profile for a (family, wearing) pair, or null when none was
+  /// learned or the stored version is not this code's.
+  static Future<StepCalibrationProfile?> stepCalibrationProfile(
+    String deviceFamily,
+    int wearing,
+  ) async {
+    final db = await instance;
+    final r = await db.query(
+      'step_calibration',
+      where: 'device_family = ? AND wearing = ?',
+      whereArgs: [deviceFamily, wearing],
+      limit: 1,
+    );
+    if (r.isEmpty) return null;
+    final row = r.first;
+    final version = (row['version'] as num?)?.toInt() ?? 0;
+    if (version != kStepCalibrationVersion) return null;
+    return StepCalibrationProfile(
+      deviceFamily: deviceFamily,
+      wearing: wearing,
+      factor: (row['factor'] as num?)?.toDouble() ?? 1.0,
+      nDays: (row['n_days'] as num?)?.toInt() ?? 0,
+      version: version,
+    );
+  }
+
+  static Future<void> putStepCalibrationProfile(
+    StepCalibrationProfile p,
+  ) async {
+    final db = await instance;
+    await db.insert(
+      'step_calibration',
+      {
+        'device_family': p.deviceFamily,
+        'wearing': p.wearing,
+        'factor': p.factor,
+        'n_days': p.nDays,
+        'version': p.version,
+        'updated_ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
 
@@ -2620,15 +2843,15 @@ class LocalDb {
   /// device produced `signal` rows across [start_ts, end_ts)".
   ///
   /// WHY IT IS A TABLE AND NOT A DERIVE-TIME COMPUTATION. The 1 Hz substrate is
-  /// pruned at `rawRetentionDays = 3`, so "what was recording last March" cannot
+  /// pruned at `rawRetentionDays`, so "what was recording last March" cannot
   /// be reconstructed from rows — they are gone. This is written at INGEST and
   /// survives the prune, which makes it the only artifact that can answer the
   /// question at all. Five integers per few hours per device: a decade of two
   /// devices is well under a megabyte.
   ///
-  /// NOT PRUNED by retention, for the `band_battery` reason (`pruneDecodedBeforeRecTs`):
-  /// a 3-day cap on a series whose only use is comparing a day to the days
-  /// around it destroys it.
+  /// NOT PRUNED by retention, for the `band_battery` reason
+  /// (`pruneDecodedBeforeRecTs`): a retention cap on a series whose only use is
+  /// comparing a day to the days around it destroys it.
   ///
   /// `signal` is an `InputSignal.name` — an INPUT the device emits, never a
   /// metric key. See `ble/adapters/signals.dart`: a metric key here would make
@@ -2693,7 +2916,7 @@ class LocalDb {
   /// v51 step 6: coverage intervals for the substrate rows that survive.
   ///
   /// WHAT IT CLAIMS, AND WHAT IT REFUSES TO CLAIM. Only the days
-  /// `decoded_onehz` / `decoded_rr` still hold, which is `rawRetentionDays = 3`
+  /// `decoded_onehz` / `decoded_rr` still hold, which is `rawRetentionDays`
   /// plus whatever `_maxRawHoldDays` has held back. A day already pruned gets
   /// NO coverage row. That is correct and it is the honest answer: we do not
   /// know what was recording, so we do not claim.
@@ -2705,8 +2928,9 @@ class LocalDb {
   /// resolver's own grid, so nothing is lost), then coalesce adjacent buckets
   /// in Dart.
   ///
-  /// BOUNDED, which is what makes it safe on the launch path: 3 days x 1,440
-  /// minutes x 5 signals = 21,600 rows worst case, and in practice far fewer.
+  /// BOUNDED, which is what makes it safe on the launch path:
+  /// `rawRetentionDays` days x 1,440 minutes x 5 signals rows worst case, and
+  /// in practice far fewer.
   ///
   /// SIGNALS ARE READ OFF COLUMNS, one predicate each, and each predicate says
   /// only what the column says. There is deliberately no `ppgGreen` and no
@@ -3216,7 +3440,7 @@ class LocalDb {
   /// [deviceId] is required, not optional-with-default: without it, one
   /// device's charging spans mask a DIFFERENT device's worn night — put band
   /// B on the charger and band A's real sleep gets excluded as "charging",
-  /// silently, and it survives the 3-day prune into the baselines.
+  /// silently, and it survives the raw prune into the baselines.
   static Future<List<List<int>>> _toggleSpans(
     int loSec,
     int hiSec, {
@@ -3327,13 +3551,18 @@ class LocalDb {
   /// The pinned morning readiness headline (day + value), or null if unset /
   /// unparseable. The `day` must be compared to today's label by the caller — a
   /// pin left over from a previous day must NOT be surfaced.
-  static Future<({String day, int value})?> frozenHeadline() async {
+  static Future<({String day, int value, int? wakeSec})?> frozenHeadline() async {
     final raw = await getCursor(kFrozenHeadlineCursor);
     if (raw == null || raw.isEmpty) return null;
     try {
       final d = jsonDecode(raw);
       if (d is Map && d['day'] is String && d['value'] is num) {
-        return (day: d['day'] as String, value: (d['value'] as num).round());
+        final wake = d['wake_sec'];
+        return (
+          day: d['day'] as String,
+          value: (d['value'] as num).round(),
+          wakeSec: wake is num ? wake.toInt() : null,
+        );
       }
     } catch (_) {
       /* malformed → treat as unset */
@@ -3343,10 +3572,16 @@ class LocalDb {
 
   /// Pin [value] as the frozen readiness headline for [day] (overwrites any
   /// prior pin — first-complete-settle-per-day is enforced by the caller).
-  static Future<void> setFrozenHeadline(String day, int value) => setCursor(
-    kFrozenHeadlineCursor,
-    jsonEncode({'day': day, 'value': value}),
-  );
+  /// [wakeSec] is the wake of the night it was pinned on.
+  static Future<void> setFrozenHeadline(String day, int value, {int? wakeSec}) =>
+      setCursor(
+        kFrozenHeadlineCursor,
+        jsonEncode({
+          'day': day,
+          'value': value,
+          'wake_sec': ?wakeSec,
+        }),
+      );
 
   /// Persist a sync batch atomically: the raw records, their samples, AND the
   /// continuation cursor in ONE transaction. This is the durable half of the
@@ -3758,14 +3993,14 @@ class LocalDb {
   /// what the coach sees. So the stamp lives beside it, one row per day.
   ///
   /// WHAT IT IS FOR. Days lock at finalized ~48 h after wake and are never
-  /// recomputed on a bump, and the 1 Hz substrate is gone at 3 days, so a March
-  /// day physically cannot be re-derived in December. `kAlgoVersion` moved
-  /// 65 → 66 → 68 inside two weeks. A 12-month chart therefore splices values
-  /// from several different algorithms with nothing marking the seams. This
-  /// does NOT make those values comparable — nothing can. It makes the
-  /// incomparability VISIBLE, so a change-point search can refuse to run across
-  /// a seam instead of reporting the day the maths changed as a finding about
-  /// the user.
+  /// recomputed on a bump, and the 1 Hz substrate is gone at
+  /// `rawRetentionDays`, so a March day physically cannot be re-derived in
+  /// December. `kAlgoVersion` moved 65 → 66 → 68 inside two weeks. A 12-month
+  /// chart therefore splices values from several different algorithms with
+  /// nothing marking the seams. This does NOT make those values comparable —
+  /// nothing can. It makes the incomparability VISIBLE, so a change-point
+  /// search can refuse to run across a seam instead of reporting the day the
+  /// maths changed as a finding about the user.
   static Future<void> _createMetricSeriesVersion(DatabaseExecutor db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS metric_series_version (
@@ -4071,7 +4306,7 @@ class LocalDb {
   /// which the UI states in as many words.
   ///
   /// Derived on read, never stored: total volume, set/rep counts, 1RM
-  /// estimates, per-muscle volume, "vs last session", PR detection.
+  /// estimates, "vs last session", PR detection.
   static Future<void> _createStrengthTables(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS strength_set (
@@ -4152,6 +4387,44 @@ class LocalDb {
       orderBy: 'at_ts DESC',
       limit: limit,
     );
+  }
+
+  /// Newest-set and heaviest-set candidates per logged exercise, in two
+  /// queries. The caller keeps the first row per key (most reps wins a tie).
+  /// No window functions: minSdk 26 can ship SQLite older than 3.25.
+  static Future<({
+    List<Map<String, Object?>> previous,
+    List<Map<String, Object?>> best,
+  })> strengthHistoryCandidates() async {
+    final db = await instance;
+    final previous = await db.rawQuery('''
+      SELECT s.*
+      FROM strength_set s
+      JOIN (
+        SELECT exercise_key, MAX(COALESCE(at_ts, 0)) AS newest_at
+        FROM strength_set
+        GROUP BY exercise_key
+      ) newest
+        ON newest.exercise_key = s.exercise_key
+       AND newest.newest_at = COALESCE(s.at_ts, 0)
+      ORDER BY s.exercise_key ASC, COALESCE(s.at_ts, 0) DESC,
+               s.session_id DESC, s.seq DESC
+    ''');
+    final best = await db.rawQuery('''
+      SELECT s.*
+      FROM strength_set s
+      JOIN (
+        SELECT exercise_key, MAX(load_kg) AS best_load
+        FROM strength_set
+        WHERE load_kg IS NOT NULL
+        GROUP BY exercise_key
+      ) heaviest
+        ON heaviest.exercise_key = s.exercise_key
+       AND heaviest.best_load = s.load_kg
+      ORDER BY s.exercise_key ASC, COALESCE(s.reps, 0) DESC,
+               COALESCE(s.at_ts, 0) DESC, s.session_id DESC, s.seq DESC
+    ''');
+    return (previous: previous, best: best);
   }
 
   // ── USER-DATA STORE (journal / cycle / workouts / notifications) ────────────
@@ -4356,11 +4629,11 @@ class LocalDb {
     await _addColumnIfMissing(db, 'sessions', 'steps', 'INTEGER');
     await _addColumnIfMissing(db, 'sessions', 'hrr_bpm', 'REAL');
     // Mean HR over the session window. Stored rather than recomputed because
-    // the 1 Hz substrate it comes from is pruned after 3 days: without a column
-    // every workout older than that permanently loses its average, while
-    // `max_hr` (already a column) survives. Additive + nullable, so old rows
-    // read NULL — the truth for them — and the read path still recomputes from
-    // the substrate while it is there.
+    // the 1 Hz substrate it comes from is pruned at `rawRetentionDays`: without
+    // a column every workout older than that permanently loses its average,
+    // while `max_hr` (already a column) survives. Additive + nullable, so old
+    // rows read NULL — the truth for them — and the read path still recomputes
+    // from the substrate while it is there.
     await _addColumnIfMissing(db, 'sessions', 'avg_hr', 'INTEGER');
     // Submax VO2max estimate (ml/kg/min), backfilled from a completed km
     // route split — see `_submaxVo2maxFromSplits` in local_repository_impl.
@@ -4651,6 +4924,8 @@ class LocalDb {
     // instead of the coach having to convert a local day back into a raw
     // start_ts/end_ts epoch range itself, which silently drifted to UTC
     // (issue #129: coach mis-dated workouts near local-midnight boundaries).
+    // Private sessions stay out: this view is what the coach and the CSV
+    // export read, and private means hidden from both.
     await db.execute('''
       CREATE VIEW v_sessions AS
       SELECT id, start_ts, end_ts,
@@ -4658,6 +4933,7 @@ class LocalDb {
              type, status, calories, strain, max_hr,
              duration_min, steps, hrr_bpm, source, zone_min_json
       FROM sessions
+      WHERE private = 0
     ''');
     // Rolling personal baselines (json_extract; missing paths return NULL safely).
     await db.execute('''
@@ -4905,8 +5181,9 @@ class LocalDb {
     // indexed READ key — every query in this file and in health_export ranges
     // over it — but it can no longer be the identity, because a second device
     // measuring the same second is a DIFFERENT reading, and REPLACE on a
-    // shared rec_ts silently deletes the first one (raw prunes at 3 days, so
-    // that loss is permanent). See [_rekeyTableByDevice].
+    // shared rec_ts silently deletes the first one (raw prunes at
+    // `rawRetentionDays`, so that loss is permanent). See
+    // [_rekeyTableByDevice].
     //
     // `device_id = ''` IS RESERVED PERMANENTLY FOR THE PRIMARY BAND. Not a
     // migration default — a standing rule, and it is load-bearing twice over:
@@ -5311,7 +5588,7 @@ class LocalDb {
   /// PRIMARY KEY` written with REPLACE and `decoded_rr` was cleared by an
   /// unscoped `DELETE … WHERE rec_ts = ?`, so a second device measuring the
   /// same second did not merge with the first — it DELETED it, row and beats.
-  /// `raw_archive` prunes at `rawRetentionDays = 3`, so within three days the
+  /// `raw_archive` prunes at `rawRetentionDays`, so within that window the
   /// bytes that could rebuild the evicted row are gone too. Every other item on
   /// the band-agnostic roadmap can be done after a second device has written;
   /// this one cannot.
@@ -5323,10 +5600,10 @@ class LocalDb {
   /// there is no `kAlgoVersion` bump with it.
   ///
   /// Cheap enough for the launch-path CPU watchdog `onUpgrade` runs inside:
-  /// the decoded store is retention-capped at `rawRetentionDays`, ~260 k rows,
-  /// and every copy is a server-side `INSERT … SELECT` with zero host-bound
-  /// variables (so the iOS `SQLITE_MAX_VARIABLE_NUMBER` never applies and no
-  /// chunking is needed).
+  /// the decoded store is retention-capped at `rawRetentionDays`, ~86 k rows a
+  /// day, and every copy is a server-side `INSERT … SELECT` with zero
+  /// host-bound variables (so the iOS `SQLITE_MAX_VARIABLE_NUMBER` never
+  /// applies and no chunking is needed).
   static Future<void> _rekeyStoresByDeviceId(Database db) async {
     await _rekeyTableByDevice(db, 'decoded_onehz');
     await _rekeyTableByDevice(db, 'decoded_rr', keyTail: const ['beat_index']);
@@ -5443,7 +5720,8 @@ class LocalDb {
   /// Self-skipping: a database whose `hr` is already nullable — every fresh
   /// create at v43+ — does no work at all. That also keeps it cheap under the
   /// launch-path CPU watchdog `onUpgrade` runs inside (invariant 11); the table
-  /// is retention-capped at ~3 days, so the one-time copy is bounded.
+  /// is retention-capped at `rawRetentionDays`, so the one-time copy is
+  /// bounded.
   static Future<void> _relaxDecodedHrNull(Database db) async {
     final info = await db.rawQuery('PRAGMA table_info(decoded_onehz)');
     // No table yet on this upgrade path ⇒ the current DDL already carries a
@@ -5965,8 +6243,9 @@ class LocalDb {
   }) {
     // SCOPED TO THE WRITING DEVICE (v47). Unscoped, this cleared every device's
     // beats for the second — so a second band writing one row deleted the
-    // first band's R-R for that second, permanently (raw prunes at 3 days).
-    // Same key prefix as the parent row, so the PK serves the delete.
+    // first band's R-R for that second, permanently (raw prunes at
+    // `rawRetentionDays`). Same key prefix as the parent row, so the PK serves
+    // the delete.
     if (preDeviceKey) {
       batch.rawDelete('DELETE FROM decoded_rr WHERE rec_ts = ?', [recTs]);
     } else {
@@ -6206,7 +6485,7 @@ class LocalDb {
   /// an idle one — and `wrap_count` moving between two connects is a hard fact
   /// that data was overwritten before we ever saw it.
   ///
-  /// NOT PRUNED, for the band_battery reason: a 3-day cap on a series whose
+  /// NOT PRUNED, for the band_battery reason: a retention cap on a series whose
   /// only use is comparing today's reading to the last one destroys it. Six
   /// narrow columns per connect is not a storage problem.
   ///
@@ -7366,7 +7645,7 @@ class LocalDb {
         'SELECT counter, rec_ts, hr, ax, ay, az, '
         'spo2_red_raw, spo2_ir_raw, skin_temp_raw, '
         'step_count, step_cadence, activity_class, skin_temp_c, '
-        'on_wrist, hr_valid, hr_alt, device_family, device_id '
+        'on_wrist, hr_valid, hr_alt, device_family, device_id, band_sleep_state '
         'FROM decoded_onehz '
         'WHERE rec_ts >= ? AND rec_ts <= ? AND ${derivableSourceSql()} '
         'ORDER BY rec_ts ASC, counter ASC LIMIT ?',
@@ -7377,7 +7656,7 @@ class LocalDb {
       'SELECT counter, rec_ts, hr, ax, ay, az, '
       'spo2_red_raw, spo2_ir_raw, skin_temp_raw, '
       'step_count, step_cadence, activity_class, skin_temp_c, '
-      'on_wrist, hr_valid, hr_alt, device_family, device_id '
+      'on_wrist, hr_valid, hr_alt, device_family, device_id, band_sleep_state '
       'FROM decoded_onehz '
       'WHERE rec_ts >= ? AND rec_ts <= ? AND ${derivableSourceSql()} '
       'AND (rec_ts > ? OR (rec_ts = ? AND counter > ?)) '
@@ -7541,7 +7820,7 @@ class LocalDb {
   /// WHICH DEVICES WERE PHYSICALLY RECORDING each LOCAL day in a window, per
   /// signal — from `device_coverage`, which is written at ingest and never
   /// pruned, so this answers for days whose 1 Hz substrate went at
-  /// `rawRetentionDays = 3`.
+  /// `rawRetentionDays`.
   ///
   /// NOT the same question as `metric_series_version.coverage_devices`. That
   /// says which devices FED THE NUMBER; this says which were recording. They
@@ -7748,6 +8027,33 @@ class LocalDb {
     return rows.isEmpty ? null : _withDate(rows.first);
   }
 
+  /// The `readiness_absent_diag` diagnostic off [day]'s stored bundle — per
+  /// input `{value, baseline_n}` plus the composite's own `note`. Produced on
+  /// every day readiness comes back absent; null when [day] is null, has no
+  /// stored bundle, or scored normally (no diag is written on a scored day).
+  ///
+  /// ONE reader, not two: this used to be a private copy inside
+  /// `readiness_detail.dart` (the only place that read it); Home's "not
+  /// scored" card needed the exact same lookup for the exact same reason, and
+  /// a second copy is how the two screens' explanations drift apart.
+  ///
+  /// Best effort: a failed read is null, not a throw. It only explains an
+  /// absence, so it must never take down the screen load that asked for it.
+  static Future<Map<String, dynamic>?> readinessAbsentDiag(String? day) async {
+    if (day == null) return null;
+    try {
+      final payload = (await dayResult(day))?['payload_json'];
+      if (payload is! String || !payload.contains('"readiness_absent_diag"')) {
+        return null;
+      }
+      final b = jsonDecode(payload);
+      final diag = b is Map ? b['readiness_absent_diag'] : null;
+      return diag is Map ? diag.cast<String, dynamic>() : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The most recent day (highest day_id label), latest version, or null.
   static Future<Map<String, dynamic>?> latestDayResult() async {
     final rows = await recentDayResults(1);
@@ -7817,16 +8123,19 @@ class LocalDb {
   /// `day_result.window_json` already holds the sleep-window Metric envelope
   /// (`{value: {onset_ms, offset_ms, …}, confidence, tier, …}`) in its own
   /// column, so onset/offset are one small projected read — no bundle decode,
-  /// no per-day round trip. Rows: `{day_id, window_json}`.
-  static Future<List<Map<String, dynamic>>> sleepWindowRows(int limit) async {
+  /// no per-day round trip. Rows: `{day_id, window_json}`. [before] keeps
+  /// only days strictly earlier than that day_id.
+  static Future<List<Map<String, dynamic>>> sleepWindowRows(int limit,
+      {String? before}) async {
     final db = await instance;
     return db.rawQuery(
       'SELECT r.day_id AS day_id, r.window_json AS window_json '
       'FROM day_result r '
       '$_servedDayJoin '
       'WHERE r.skipped = 0 '
+      '${before == null ? '' : 'AND r.day_id < ? '}'
       'ORDER BY r.day_id DESC LIMIT ?',
-      [limit],
+      [?before, limit],
     );
   }
 
@@ -8085,6 +8394,9 @@ class LocalDb {
         await _createPrimitiveArtifacts(db);
         await _createLiveCoverage(db);
       },
+      // Same additive repair the live DB runs on every open, so the export's
+      // tables carry every column the source rows do (sessions.avg_hr etc.).
+      onOpen: _repairOpenSchema,
     );
 
     // Every source read on the export path is PAGED on rowid. A day-ranged
@@ -8669,8 +8981,14 @@ class LocalDb {
       'metric_series',
       'metric_series_version',
       'sessions',
+      // Every day's step windows. Append-only with an AUTOINCREMENT id, so the
+      // merge drops the id and skips windows already here (see below).
+      'live_coverage',
       'notifications',
       'baselines',
+      // Calibration observations cannot be rebuilt once raw is pruned.
+      'step_calibration',
+      'step_calibration_day',
       // The devices this phone knows about — so a SECONDARY device's identity
       // survives a backup/restore round trip rather than leaving its rows in
       // `decoded_onehz` pointing at a `device_id` nothing can name. The PRIMARY
@@ -8725,6 +9043,21 @@ class LocalDb {
     // null when day_result could not be read at all, so the caller can tell
     // "nothing imported" from "we don't know".
     Set<String>? importedDays;
+    List<String>? restoredWornOn;
+    // Days this device already finalized itself, read BEFORE anything merges.
+    // The day_result guard below protects their bundle; their series scalars,
+    // version stamp and this device's baselines are the same day's history and
+    // get the same protection, or trends and the rolling baselines would be
+    // rebuilt from the other export's numbers while day detail serves ours.
+    final finalizedDays = {
+      for (final r in await db.query(
+        'day_result',
+        columns: ['day_id'],
+        where: 'finalized = 1',
+        distinct: true,
+      ))
+        '${r['day_id']}',
+    };
     try {
       for (final t in (only ?? tables)) {
         try {
@@ -8794,6 +9127,47 @@ class LocalDb {
               for (final r in fin) '${r['day_id']}|${r['algo_version']}',
             };
           }
+          // live_coverage is a SUM with no natural key, so a REPLACE on `id`
+          // would clobber or double-count local windows. Key on the window.
+          String coverageKey(Map<String, Object?> r) =>
+              '${r['start_ts']}|${r['end_ts']}|'
+              '${r['source'] ?? kStepSourceBand}|'
+              '${r['device_id'] ?? kPrimaryDeviceId}';
+          final haveCoverage = <String>{
+            if (t == 'live_coverage')
+              for (final r in await db.query(
+                'live_coverage',
+                columns: ['start_ts', 'end_ts', 'source', 'device_id'],
+              ))
+                coverageKey(r),
+          };
+          // Phone rows are a per-day SNAPSHOT (replacePhoneCoverageForDay), not
+          // windows: a backup taken mid-hour holds a partial current-hour row
+          // whose key differs from the full hour this device has since written,
+          // and same-device phone rows sum. So a day this device already has a
+          // phone snapshot for keeps it whole; the backup's only fills days
+          // with none.
+          final havePhoneDays = <String>{
+            if (t == 'live_coverage')
+              for (final r in await db.query(
+                'live_coverage',
+                columns: ['day'],
+                where: 'source = ?',
+                whereArgs: [kStepSourcePhone],
+                distinct: true,
+              ))
+                '${r['day']}',
+          };
+          // sleep_user_profile is an accumulator (one fold per finalized
+          // night), so the local-wins rule below would let a few local nights
+          // throw away a backup's months. The side that folded more nights
+          // keeps it; restored nights arrive finalized and never re-fold.
+          final localProfileNights = t == 'baselines'
+              ? SleepProfilePolicy.foldedDays(
+                  (await LocalDb.baseline('sleep_user_profile'))?['payload_json']
+                      as String?,
+                ).length
+              : 0;
           var copied = 0;
           var page = firstPage;
           // ONE TRANSACTION PER PAGE, not per table. The whole-table transaction
@@ -8849,7 +9223,31 @@ class LocalDb {
                 // same install needs nothing from here: the row is already
                 // present, and the SharedPreferences mirror re-establishes it
                 // if the database was rebuilt.
-                if (t == 'device' && row['id'] == kPrimaryDeviceId) continue;
+                //
+                // HOW the band is worn is the person's, not the install's, and
+                // `step_calibration*` (keyed by it) does come across — so the
+                // explicit choice rides along onto a local row that has none.
+                if (t == 'device' && row['id'] == kPrimaryDeviceId) {
+                  final w = row['wearing'];
+                  final ts = row['wearing_set_ts'];
+                  if (w is num && ts is num) {
+                    // No band paired yet (the usual new-phone restore runs at
+                    // Welcome, before pairing): nothing to update, so it waits
+                    // for the pairing to adopt it.
+                    final local = await txn.query('device',
+                        columns: ['id'],
+                        where: 'id = ?',
+                        whereArgs: [kPrimaryDeviceId]);
+                    if (local.isEmpty) {
+                      restoredWornOn = ['', '${w.toInt()}', '${ts.toInt()}'];
+                    } else {
+                      batch.rawUpdate(_adoptWearingSql,
+                          [w.toInt(), ts.toInt(), kPrimaryDeviceId]);
+                      if (++ops >= chunkOps) await flush();
+                    }
+                  }
+                  continue;
+                }
                 if (t == 'day_result') {
                   if (protectedKeys.contains(
                     '${row['day_id']}|${row['algo_version']}',
@@ -8857,6 +9255,18 @@ class LocalDb {
                     continue; // locally finalized — never overwritten by import
                   }
                   importedDays?.add('${row['day_id']}');
+                }
+                if ((t == 'metric_series' || t == 'metric_series_version') &&
+                    finalizedDays.contains('${row['date']}')) {
+                  continue;
+                }
+                if (t == 'live_coverage') {
+                  row.remove('id');
+                  if (row['source'] == kStepSourcePhone &&
+                      havePhoneDays.contains('${row['day']}')) {
+                    continue;
+                  }
+                  if (!haveCoverage.add(coverageKey(row))) continue;
                 }
                 // A LEGACY export's decoded_rr carries no rec_ts column; derive
                 // it from rr_ts_ms (= rec_ts*1000) so the NOT NULL PK column is
@@ -8928,7 +9338,17 @@ class LocalDb {
                 batch.insert(
                   t,
                   row,
-                  conflictAlgorithm: ConflictAlgorithm.replace,
+                  // A device with its own finalized history keeps its own
+                  // baselines (the frozen movement floor among them).
+                  conflictAlgorithm: t == 'baselines' &&
+                          (row['key'] == 'sleep_user_profile'
+                              ? SleepProfilePolicy.foldedDays(
+                                          row['payload_json'] as String?)
+                                      .length <=
+                                  localProfileNights
+                              : finalizedDays.isNotEmpty)
+                      ? ConflictAlgorithm.ignore
+                      : ConflictAlgorithm.replace,
                 );
                 copied++;
                 if (t == 'decoded_rr') {
@@ -8971,6 +9391,14 @@ class LocalDb {
       }
     } finally {
       await src.close();
+    }
+    final wornOn = restoredWornOn;
+    if (wornOn != null) {
+      final prefs = await SharedPreferences.getInstance();
+      // A forgotten band's stash is a choice made on THIS install; it wins.
+      if (!prefs.containsKey(kPendingWornOnPref)) {
+        await prefs.setStringList(kPendingWornOnPref, wornOn);
+      }
     }
     // An import writes day_result rows with a raw batch.insert, deliberately
     // bypassing putDayResult (and therefore the curve-encode seam), so the rows
@@ -9318,7 +9746,8 @@ class LocalDb {
       out[key] =
           Sqflite.firstIntValue(
             await db.rawQuery(
-              'SELECT COUNT(*) FROM metric_series WHERE key = ? AND value IS NOT NULL',
+              'SELECT COUNT(*) FROM metric_series WHERE key = ? AND value IS NOT NULL'
+              '${_validSql(key)}',
               [key],
             ),
           ) ??
@@ -9421,13 +9850,22 @@ class LocalDb {
     final db = await instance;
     return db.query(
       'metric_series',
-      where: 'key = ? AND value IS NOT NULL'
+      where: 'key = ? AND value IS NOT NULL${_validSql(key)}'
           '${measuredOnly ? ' AND date NOT IN ($_importedDatesSql)' : ''}',
       whereArgs: [key],
       orderBy: 'date ASC',
       limit: limit,
     );
   }
+
+  /// Drops stored `spo2` rows that are not a blood oxygen percentage: WHOOP export
+  /// cells outside 70-100 banked before the importer dropped them, and the old
+  /// cloud_v2 importer's relative index, written under the same key.
+  static String _validSql(String key) => key != 'spo2'
+      ? ''
+      : ' AND value BETWEEN 70 AND 100 AND date NOT IN ('
+          'SELECT r.day_id FROM day_result r $_servedDayJoin '
+          "WHERE r.day_id IS NOT NULL AND r.payload_json LIKE '%\"source\":\"cloud_v2\"%')";
 
   /// The TRAILING [n] non-null values for [key] — the newest n days, returned
   /// oldest→newest. Unlike [metricSeries] (which is `date ASC LIMIT n`, i.e. the
@@ -9779,11 +10217,16 @@ class LocalDb {
     final today = localDayLabelNow();
     final latestRawTs = (raw['max_rec_ts'] as num?)?.toInt();
     final todayWake = await wakeDayFeatures(today);
+    final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // The band's edge, same as the readiness freeze: a peripheral streaming
+    // this morning says nothing about how far the band's night has drained.
+    final bandEdgeSec = await lastDecodedRecTs() ?? 0;
     String? latestOvernightDay;
     int? latestOvernightComputedAt;
     String? latestRecoveryDay;
     int? latestRecoveryComputedAt;
     Map<String, dynamic>? todayRow;
+    int? overnightRecheckAt;
     for (final row in recent) {
       final dayId = row['day_id']?.toString();
       if (dayId == null || dayId.isEmpty) continue;
@@ -9792,6 +10235,25 @@ class LocalDb {
           SeriesCodec.decodePayloadJson(row['payload_json']) ??
           const <String, dynamic>{};
       if (decoded['skipped'] == true) continue;
+      // #448: today's night is not today's overnight until the drain has
+      // passed its wake. Mid-drain the window closes at the newest record, so
+      // serving it showed a partial night and its readiness as this morning's.
+      // A row with no window is held too: mid-drain the edge can still sit
+      // before sleep onset, and that read as a settled 'no sleep' night.
+      final offsetMs = (((decoded['sleep'] as Map?)?['window'] as Map?)?['value']
+          as Map?)?['offset_ms'];
+      final wakeSec = offsetMs is num ? offsetMs ~/ 1000 : null;
+      if (dayId == today &&
+          !overnightSettled(
+            sleepOffsetSec: wakeSec,
+            dataEdgeSec: bandEdgeSec,
+            nowSec: nowSec,
+          )) {
+        // When the give-up lands; getToday re-checks then, since a quiet
+        // strap triggers no derive to do it.
+        overnightRecheckAt = (wakeSec ?? bandEdgeSec) + kOvernightGiveUpSec;
+        continue;
+      }
       final scalars = ((decoded['scalars'] as Map?) ?? const {})
           .cast<String, dynamic>();
       if (latestOvernightDay == null) {
@@ -9849,6 +10311,7 @@ class LocalDb {
         'overnight_day': latestOvernightDay,
         'overnight_state': overnightState,
         'overnight_computed_at': latestOvernightComputedAt,
+        'overnight_recheck_at': overnightRecheckAt,
         'recovery_day': latestRecoveryDay,
         'recovery_computed_at': latestRecoveryComputedAt,
         'showing_prior_overnight':
@@ -10556,8 +11019,8 @@ class LocalDb {
   /// The zone ceiling is a per-family constant, so a screen that prints zone
   /// EDGES has to say which strap they belong to — and it has to be able to say
   /// it for a user who has not synced in a week (`decoded_onehz` is pruned at
-  /// ~3 days; `sessions` is not). NULL is unknown and stays unknown: a
-  /// pre-schema-41 session, an import and a raw replay all carry none, and an
+  /// `rawRetentionDays`; `sessions` is not). NULL is unknown and stays unknown:
+  /// a pre-schema-41 session, an import and a raw replay all carry none, and an
   /// uncalibrated strap is never gen4 with a different badge.
   static Future<String?> latestSessionDeviceFamily() async {
     final db = await instance;
@@ -10621,10 +11084,11 @@ class LocalDb {
   /// workout_split — per-KILOMETRE splits, frozen at finalize (CV-01 / TS-07).
   ///
   /// WHY A TABLE AND NOT A QUERY. A split's `avg_hr` is computed on demand by
-  /// joining the route against `decoded_onehz`, which is gone at ~3 days. So
-  /// there is NO retroactive index here and never can be: this write is the
-  /// whole gate, it is FORWARD-ONLY, and it produces its first honest chart
-  /// 8-12 weeks after it ships. Nothing reads this table yet.
+  /// joining the route against `decoded_onehz`, which is gone at
+  /// `rawRetentionDays`. So there is NO retroactive index here and never can
+  /// be: this write is the whole gate, it is FORWARD-ONLY, and it produces its
+  /// first honest chart 8-12 weeks after it ships. Nothing reads this table
+  /// yet.
   ///
   /// `net_elev_m` is the elevation change over the WHOLE kilometre, not a
   /// per-point sum. GPS altitude error is tens of metres pointwise and there is
@@ -10911,13 +11375,25 @@ class LocalDb {
 
   /// Delete decoded substrate / structured band signals / events whose RECORD
   /// TIME (epoch seconds) is strictly before [cutoffSec].
-  static Future<int> pruneDecodedBeforeRecTs(int cutoffSec) async {
+  ///
+  /// [cursorName], when given, is raised to [cutoffSec] in the same
+  /// transaction, never lowered.
+  static Future<int> pruneDecodedBeforeRecTs(
+    int cutoffSec, {
+    String? cursorName,
+  }) async {
     final db = await instance;
     // `deleted` used to just stay 0 forever - none of the txn.delete() calls'
     // return values (rows actually deleted) were ever added to it, so the
     // caller's `if (deleted > 0) log(...)` never fired even on a real prune.
     int deleted = 0;
     await db.transaction((txn) async {
+      if (cursorName != null) {
+        final previous = await _cursorIntVia(txn, cursorName);
+        if (previous == null || cutoffSec > previous) {
+          await setCursor(cursorName, '$cutoffSec', txn: txn);
+        }
+      }
       // decoded_rr shares the rec_ts key, so a plain rec_ts range delete covers
       // every beat in the window — no counter subquery, no orphan sweep (there
       // are no counter-orphans once parent and child are keyed the same way).
@@ -10945,11 +11421,12 @@ class LocalDb {
       // else in it goes at the cutoff. `detectNaps` rejects bouts that overlap
       // an off-wrist or on-charger span, and those spans are built by
       // `_toggleSpans` out of exactly these four ids — so with them pruned at
-      // 3 days, any re-derive of an older day ran the nap detector with BOTH
-      // rejection lists empty and a charging session on the desk could score as
-      // a nap. Nap history rewrote itself, quietly, just for being looked at.
+      // `rawRetentionDays`, any re-derive of an older day ran the nap detector
+      // with BOTH rejection lists empty and a charging session on the desk
+      // could score as a nap. Nap history rewrote itself, quietly, just for
+      // being looked at.
       //
-      // Same shape as the band_battery exemption below (a 3-day cap
+      // Same shape as the band_battery exemption below (a retention cap
       // structurally destroys a lifetime series), and the same size argument:
       // on the three real exports these four ids are 87, 22 and 12 rows across
       // 8 to 11 days — a few thousand a year. Event 33 alone is ~1900 A DAY,
@@ -10969,13 +11446,13 @@ class LocalDb {
       // [thinRawArchiveBefore] — this is the only caller, so the archive is
       // capped by the same retention pass that caps the substrate.
       deleted += await _thinRawArchiveVia(txn, cutoffSec * 1000);
-      // band_battery is NOT pruned here. It was, at the 3-day substrate cutoff,
-      // which structurally capped the battery-health series at 3 days — while
-      // batteryHealth() reports `charge_cycles` (rising 0→1 charging edges) and
-      // `full_charge_mv` (rolling max mV while charging), both of which only
-      // mean anything across the life of the pack. A year-old band would have
-      // reported 1 cycle. Six narrow columns a few minutes apart is not a
-      // storage problem; the 1 Hz substrate is.
+      // band_battery is NOT pruned here. It was, at the substrate cutoff,
+      // which structurally capped the battery-health series at
+      // `rawRetentionDays` — while batteryHealth() reports `charge_cycles`
+      // (rising 0→1 charging edges) and `full_charge_mv` (rolling max mV while
+      // charging), both of which only mean anything across the life of the
+      // pack. A year-old band would have reported 1 cycle. Six narrow columns a
+      // few minutes apart is not a storage problem; the 1 Hz substrate is.
       // ponytail: unbounded, so give it its own multi-year cutoff if a real
       // install's table ever shows up big.
     });
@@ -11047,8 +11524,8 @@ class LocalDb {
   /// Keeping more than one matters: a user on a GitHub release can roll back
   /// to the previous build, and pruning down to only the current version
   /// would leave that build with nothing to read for a day it never
-  /// re-derives (raw retention is 3 days; a day older than that only gets a
-  /// fresh-version row if something forces a re-derive).
+  /// re-derives (raw retention is `rawRetentionDays`; a day older than that
+  /// only gets a fresh-version row if something forces a re-derive).
   ///
   /// Scoped PER day_id, not table-wide. A table-wide "keep the 2 highest
   /// versions present ANYWHERE" cutoff deletes a day's only cached

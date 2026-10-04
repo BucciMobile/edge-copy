@@ -105,6 +105,8 @@ import '../sync/band_ownership.dart';
 import '../sync/high_freq_wake_window.dart';
 import '../sync/ios_bg_task.dart';
 import '../sync/reset_gate.dart';
+import '../sync/ios_shortcut_sync.dart';
+import '../sync/shortcut_sync_task.dart';
 import '../sync/paired_device.dart';
 import '../sync/sync_policy.dart'
     show
@@ -153,6 +155,26 @@ PairedDevice? healedPairing(PairedDevice? current, String? reportedSerial) {
   if (clean == null || clean == current.serial) return null;
   if (current.remoteId.isEmpty) return null;
   return PairedDevice(current.remoteId, clean, generation: current.generation);
+}
+
+/// Whether [dayId]'s night is settled enough to announce its recovery: today's
+/// row goes through the same [overnightSettled] gate Home uses (#448), older
+/// rows are past it.
+@visibleForTesting
+bool recoveryNightSettled({
+  required String dayId,
+  required Map<String, dynamic>? payload,
+  required int dataEdgeSec,
+  required int nowSec,
+}) {
+  if (dayId != todayLabel()) return true;
+  final offsetMs = (((payload?['sleep'] as Map?)?['window'] as Map?)?['value']
+      as Map?)?['offset_ms'];
+  return overnightSettled(
+    sleepOffsetSec: offsetMs is num ? offsetMs ~/ 1000 : null,
+    dataEdgeSec: dataEdgeSec,
+    nowSec: nowSec,
+  );
 }
 
 class AppState extends ChangeNotifier {
@@ -1363,22 +1385,28 @@ class AppState extends ChangeNotifier {
       // `DrainController.commit` still reads durability from a throw.
       onCommitBatch: (raws, samples, trimTokenHex,
           {archives, ecgRawPackets, deviceFamily}) async {
-        // THROWS, never silently succeeds. This is the ACK gate: only
-        // `onCommit` can bank raws + archives + trim cursor in one
-        // transaction, and DrainController reads durability FROM A THROW
-        // (see its safe-trim invariant). Returning quietly here would tell
-        // the drain the chunk was banked, it would ACK, and the band would
-        // trim flash that this reset refused to store — turning a race into
-        // real data loss on a band the user may not be deleting after all if
-        // the reset then fails. A throw blocks the ACK and the records stay
-        // on the strap.
-        if (ResetGate.active) {
-          throw StateError('data reset in progress — refusing to commit');
+        try {
+          // THROWS, never silently succeeds. This is the ACK gate: only
+          // `onCommit` can bank raws + archives + trim cursor in one
+          // transaction, and DrainController reads durability FROM A THROW
+          // (see its safe-trim invariant). Returning quietly here would tell
+          // the drain the chunk was banked, it would ACK, and the band would
+          // trim flash that this reset refused to store — turning a race into
+          // real data loss on a band the user may not be deleting after all if
+          // the reset then fails. A throw blocks the ACK and the records stay
+          // on the strap.
+          if (ResetGate.active) {
+            throw StateError('data reset in progress — refusing to commit');
+          }
+          await _bandHost.commitNativeBatch(raws, samples, trimTokenHex,
+              archives: archives,
+              ecgRawPackets: ecgRawPackets,
+              deviceFamily: deviceFamily);
+        } catch (_) {
+          IosShortcutSync.foregroundCommitFailed();
+          rethrow;
         }
-        return _bandHost.commitNativeBatch(raws, samples, trimTokenHex,
-            archives: archives,
-            ecgRawPackets: ecgRawPackets,
-            deviceFamily: deviceFamily);
+        IosShortcutSync.foregroundCommitted(samples.length);
       },
       // Pre-setup fallback only: the drain path archives inside commitSyncBatch.
       onArchiveRecord: (raw) async {
@@ -1445,6 +1473,7 @@ class AppState extends ChangeNotifier {
     // skip the headless BLE path (it would fight FBP for the peripheral) — route
     // them to a catch-up pull over the existing live connection instead.
     IosBgTask.foregroundPull = foregroundCatchUp;
+    IosShortcutSync.attachForeground(syncForShortcut, () => engine);
     taskerBridge; // force init: register the method channel handler
     // A paired sensor's live beats, into the same trace as the band's. Touches
     // no radio — `HrsLink.reading` is a plain notifier whose identity survives
@@ -1557,6 +1586,10 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    if (IosShortcutSync.foregroundSync == syncForShortcut) {
+      IosShortcutSync.foregroundSync = null;
+      IosShortcutSync.foregroundEngine = null;
+    }
     _syncQuietTimer?.cancel();
     _syncQuietTimer = null;
     _disposed = true;
@@ -1734,10 +1767,11 @@ class AppState extends ChangeNotifier {
       // Same signal, for the surfaces that can't listen: home/lock-screen
       // widget, Watch mirror, Siri intents (WidgetService.refresh).
       unawaited(WidgetService.refresh(repo));
-      // A heavy finalize is where a freshly-closed sleep window + recovery for a
-      // new physiological day lands — fire the "recovery ready" push off it.
+      // "Recovery ready" push, on light passes too: it waits for the settled
+      // night (#448), and once a heavy has run before the edge passed the
+      // wake, only light drains are left to see it settle.
+      unawaited(_maybeNotifyRecoveryReady());
       if (heavy) {
-        unawaited(_maybeNotifyRecoveryReady());
         // Baseline-dirty rescan: new data may have shifted the rolling baseline,
         // so refresh baseline-dependent scalars (readiness/illness/stress) on
         // recent FINALIZED days. Cheap when the baseline is unchanged (a single
@@ -1836,18 +1870,27 @@ class AppState extends ChangeNotifier {
       if (score == null) {
         return; // recovery not computed (no nocturnal HRV) → no fire
       }
-
       final prefs = await SharedPreferences.getInstance();
       if (prefs.getString(_kLastRecoveryNotifDay) == dayId) {
         return; // already fired
+      }
+      final payload = SeriesCodec.decodePayloadJson(
+        (row['payload_json'] ?? '{}').toString(),
+      );
+      // Home holds a partial night back; announcing it would also spend the
+      // day's guard before the real recovery lands.
+      if (!recoveryNightSettled(
+        dayId: dayId,
+        payload: payload,
+        dataEdgeSec: await LocalDb.lastDecodedRecTs() ?? 0,
+        nowSec: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      )) {
+        return;
       }
 
       // Sleep hours from the day's bundle accounting (tst), for the body copy.
       String slept = '';
       try {
-        final payload = SeriesCodec.decodePayloadJson(
-          (row['payload_json'] ?? '{}').toString(),
-        );
         if (payload != null) {
           final acct = ((payload['sleep'] as Map?)?['accounting'] as Map?);
           final tstSec = ((acct?['value'] as Map?)?['tst_sec'] as num?)
@@ -2441,6 +2484,18 @@ class AppState extends ChangeNotifier {
     if (_savedAlarm != null) {
       _alarm.set(_savedAlarm!, DateTime.now().millisecondsSinceEpoch);
       _alarm.confirmed = alarmPrefs.getBool('alarm_epoch_confirmed') ?? false;
+      // Resume the not-confirmed alert a killed process was still holding.
+      final saved = _savedAlarm!;
+      final resume = alarmLatchAlertResumeDelay(
+          alarmPrefs.getStringList('alarm_latch_alert'),
+          savedEpoch: saved,
+          confirmed: _alarm.confirmed,
+          nowMs: DateTime.now().millisecondsSinceEpoch);
+      if (resume != null) {
+        _alarmGraceTimer = Timer(resume, () {
+          if (!_disposed) unawaited(_notifyAlarmLatchFailed(saved));
+        });
+      }
     }
     await _loadAlarmSchedule();
     await _seedAlarmScheduleFromLegacyIfNeeded();
@@ -4241,7 +4296,8 @@ class AppState extends ChangeNotifier {
     // real progress, so this only runs long when there's genuinely a lot to pull.
     int maxSessions = 20,
   }) async {
-    var last = SyncReport(0, 0, false);
+    // Totals for the whole burst; `complete` is the final session's.
+    var total = SyncReport(0, 0, false);
     for (var i = 0; i < maxSessions && engine.isConnected; i++) {
       // Terminal `Stuck`: a burst failed validation
       // 15 times and the abort went out, so this connection's history is over.
@@ -4290,7 +4346,11 @@ class AppState extends ChangeNotifier {
           strapNewest != null &&
           frontierAfter != null &&
           (strapNewest - frontierAfter) > 300;
-      last = report;
+      total = SyncReport(
+        total.records + report.records,
+        total.batches + report.batches,
+        report.complete,
+      );
       await LocalDb.upsertSyncLedgerEntry(
         status: report.complete ? 'complete' : 'session_end',
         metaPatch: {
@@ -4341,7 +4401,7 @@ class AppState extends ChangeNotifier {
         'frontier still behind strap newest ($strapNewest > $frontierAfter).',
       );
     }
-    return last;
+    return total;
   }
 
   // ── pairing (LOCAL only) ────────────────────────────────────────────────────
@@ -4608,7 +4668,7 @@ class AppState extends ChangeNotifier {
   /// edited schedule or a just-fired alarm re-arms with no manual step, and a
   /// fired one-shot (which clears `_savedAlarm`) picks up its next occurrence
   /// on the very next connect.
-  Future<void> _armNextAlarmOccurrence() async {
+  Future<void> _armNextAlarmOccurrence({int? firedEpoch}) async {
     if (!isConnected) return;
     try {
       // A headless re-arm (background_sync.dart) can have rewritten
@@ -4620,17 +4680,23 @@ class AppState extends ChangeNotifier {
       final onDisk = prefs.getInt('alarm_epoch');
       if (onDisk != _savedAlarm) {
         _savedAlarm = onDisk;
+        // The optimistic in-session epoch is older than what headless armed,
+        // and it wins in [alarmEpoch]; drop it so Home and the alarm screen
+        // show the arm that's actually on the strap.
+        device.alarmEpoch = null;
         if (onDisk != null) {
           _alarm.set(onDisk, DateTime.now().millisecondsSinceEpoch);
           _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
         } else {
           _alarm.disable();
         }
+        notifyListeners();
       }
       final result = await armNextScheduledOccurrence(
         engine: engine,
         schedule: _schedule,
         currentArmedEpoch: _savedAlarm ?? device.alarmEpoch,
+        now: alarmRearmFrom(DateTime.now(), firedEpoch),
       );
       if (result.disabled) {
         // Every weekday got disabled since the last arm — the strap doesn't
@@ -4785,6 +4851,12 @@ class AppState extends ChangeNotifier {
     await prefs.setInt('alarm_epoch', epoch);
     // Not confirmed yet — event 56 (below, in _handleAlarmEvent) flips this.
     await prefs.setBool('alarm_epoch_confirmed', false);
+    // The alert timers below live in memory only; this lets a relaunch
+    // still send the critical alert if the process dies before it goes out.
+    await prefs.setStringList('alarm_latch_alert', [
+      '$epoch',
+      '${alarmLatchAlertAtMs(DateTime.now().millisecondsSinceEpoch, _alarm.graceMs)}',
+    ]);
     // Nudge the UI once the grace window elapses so an unconfirmed alarm flips to
     // its soft warning even if no event ever arrives.
     _armAlarmGraceTimer(when);
@@ -4796,9 +4868,21 @@ class AppState extends ChangeNotifier {
   void _armAlarmGraceTimer(DateTime when) {
     _alarmGraceTimer?.cancel();
     _alarmGraceTimer = Timer(
-      Duration(milliseconds: _alarm.graceMs + 250),
+      alarmGraceTimerDelay(_alarm.graceMs, retryLeft: !_alarmAutoRetried),
       () => unawaited(_onAlarmGraceElapsed(when)),
     );
+  }
+
+  /// Every retry is spent and 56 still hasn't come. While connected a slow
+  /// strap can still confirm, so the critical alert waits; [_handleAlarmEvent]
+  /// cancels this timer when 56 lands, and the alert re-checks confirmation.
+  void _escalateAlarmLatchFailed(int epoch) {
+    // A retry that resumes after a newer arm must not cancel that arm's timer.
+    if (_savedAlarm != epoch) return;
+    _alarmGraceTimer?.cancel();
+    _alarmGraceTimer = Timer(alarmLatchAlertDelay(connected: isConnected), () {
+      if (!_disposed) unawaited(_notifyAlarmLatchFailed(epoch));
+    });
   }
 
   /// Grace window elapsed with no event 56. Before showing the soft warning,
@@ -4812,11 +4896,17 @@ class AppState extends ChangeNotifier {
     // confirmation machine now; retrying the stale time would clobber it.
     if (_savedAlarm != epoch) return;
     if (_alarmAutoRetried || !isConnected) {
+      // Offline, the first window is also the last, but its timer fired just
+      // before it closes; end it so this rebuild lands on the warning.
+      _alarm.setAtMs = null;
       notifyListeners();
-      unawaited(_notifyAlarmLatchFailed(epoch));
+      _escalateAlarmLatchFailed(epoch);
       return;
     }
     _alarmAutoRetried = true;
+    // Keep showing "waiting" while the re-send is in flight instead of
+    // flashing the warning between the two windows.
+    _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
     var rearmed = false;
     try {
       // gen5 made setAlarm return the armed instant (null = the write never
@@ -4828,7 +4918,11 @@ class AppState extends ChangeNotifier {
     }
     // The write itself never landed, so the one retry was not actually spent —
     // give it back rather than latching this alarm out of any future retry.
-    if (!rearmed) _alarmAutoRetried = false;
+    if (!rearmed) {
+      _alarmAutoRetried = false;
+      // End the window opened above so the warning shows now.
+      if (_savedAlarm == epoch && !_alarm.confirmed) _alarm.setAtMs = null;
+    }
     // dispose() ran while the write was in flight — do NOT create a timer it
     // no longer has any chance to cancel (it would keep poking a torn-down
     // engine on every fire).
@@ -4840,7 +4934,7 @@ class AppState extends ChangeNotifier {
       return;
     }
     notifyListeners();
-    unawaited(_notifyAlarmLatchFailed(epoch));
+    _escalateAlarmLatchFailed(epoch);
   }
 
   /// The "alarm not confirmed" safety notification (Feature 2.1): fires once
@@ -4918,7 +5012,7 @@ class AppState extends ChangeNotifier {
   /// [disableAlarm] (the DISABLE_ALARM opcode).
   Future<void> clearAlarm() => disableAlarm();
 
-  /// Strap alarm-lifecycle events (56 set / 57–58 fired / 59 disabled). This is
+  /// Strap alarm-lifecycle events (56 set / 57 fired / 58 buzz / 59 disabled). This is
   /// the authoritative confirmation the SET write actually took. The edge DOES see
   /// the protocol EventId names (strapDrivenAlarmSet == 56, …); the pure state
   /// machine matches the raw ids so it stays dependency-free.
@@ -4939,6 +5033,9 @@ class AppState extends ChangeNotifier {
             _log('[alarm] persisting confirmation failed: $e');
           }
         }());
+        // the 7pm "no alarm set for tonight" one-shot was decided before this
+        // alarm latched; re-decide it now or it fires over a real alarm.
+        unawaited(_ensureRemindersScheduled());
         break;
       case AlarmEffect.fired:
         _log('[alarm] strap FIRED — EXECUTED (event $id) received.');
@@ -4949,7 +5046,17 @@ class AppState extends ChangeNotifier {
         // row went on advertising e.g. "06:30 (7/25)" as the CURRENT alarm
         // indefinitely — with live "Test buzz"/"Clear" affordances for an alarm
         // that is no longer armed. Clear state AND the persisted epoch.
+        final firedEpoch = _savedAlarm ?? device.alarmEpoch;
         _clearArmedAlarmState();
+        // ...and arm the schedule's next occurrence now. Otherwise nothing
+        // re-arms until the next reconnect, so a link that stays up all day
+        // leaves tomorrow unarmed and Home saying "Set an alarm". Computed
+        // past the slot that just fired (see [alarmRearmFrom]) so a strap
+        // running slightly fast doesn't re-arm the spent slot.
+        unawaited(_armNextAlarmOccurrence(firedEpoch: firedEpoch));
+        break;
+      case AlarmEffect.buzzed:
+        _log('[alarm] RUN_ALARM buzz (event $id), armed slot unchanged.');
         break;
       case AlarmEffect.cleared:
         // Same persistence gap on the strap-driven clear (event 59): state was
@@ -4989,7 +5096,7 @@ class AppState extends ChangeNotifier {
         title: 'Alarm',
         body: 'Your strap alarm just fired.',
         date: todayLabel(),
-        route: '/today',
+        route: kRouteAlarm,
       ));
     } catch (e) {
       _log('[alarm] fired-notification skipped: $e');
@@ -5034,24 +5141,36 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> openSession() async {
-    if (busy || paired == null) return;
-    BandOwnership.markForegroundIntent(true);
-    _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
+  Future<void> openSession({bool foreground = true}) async {
+    if (paired == null) return;
     // Returning to the foreground with the connection still alive (kept during
     // background): don't tear it down and reconnect — just reclaim ownership.
     final wasBackground = _background;
-    _background = false;
-    engine.setBackground(false);
+    // Applied even when a session is already in flight: a background
+    // Shortcut's openSession(foreground: false) can hold busy while the user
+    // opens the app, and nothing else clears _background. Back in the
+    // foreground with an OS CPU/memory budget again — let the scheduler drain
+    // any derive jobs that queued (durably) while backgrounded.
+    if (foreground) {
+      _background = false;
+      engine.setBackground(false);
+      _deriveScheduler.setBackground(false);
+    }
+    if (busy) {
+      if (foreground && wasBackground) {
+        _nudgeLive();
+        unawaited(_refreshHighFreqWakeWindow());
+      }
+      return;
+    }
+    BandOwnership.markForegroundIntent(true);
+    _log('[OWNERSHIP] foreground intent on (${BandOwnership.debugState})');
     // Coming back after hours (or days) suspended: re-read the phone's steps
     // for whatever day it is NOW.
-    if (phoneStepsEnabled) {
+    if (foreground && phoneStepsEnabled) {
       unawaited(syncPhoneSteps());
     }
-    // Back in the foreground with an OS CPU/memory budget again — let the
-    // scheduler drain any derive jobs that queued (durably) while backgrounded.
-    _deriveScheduler.setBackground(false);
-    if (wasBackground && engine.isConnected) {
+    if (foreground && wasBackground && engine.isConnected) {
       IosBleRestore.foregroundActive = true;
       await IosBleRestore.setOwnsBand(true);
       EdgeTracking.start(); // Android: keep the foreground service up (idempotent)
@@ -5191,6 +5310,16 @@ class AppState extends ChangeNotifier {
         _log('[OWNERSHIP] foreground intent off (${BandOwnership.debugState})');
         _releaseForegroundLease();
       }
+      // A background connect that failed (a Shortcut while the band is out of
+      // range) left foregroundActive true with no link, and no later
+      // background transition will clear it: every restore wake and BG-task
+      // sync would skip until the user next opens the app. Hand the band back
+      // to the restore path, same as the background cold-launch does.
+      // Not after unpair/endSession dropped keep-alive mid-connect: that would
+      // re-arm a pending connect for a session nobody wants.
+      if (_keepAlive && _background && !engine.isConnected) {
+        await _armRecovery();
+      }
       _setBusy(false);
     }
   }
@@ -5296,6 +5425,14 @@ class AppState extends ChangeNotifier {
           await engine.reconcileLiveStreams();
           await engine.getBattery();
           await engine.getStrapName();
+          // the link can drop inside the awaits above. _onEngineState ignored
+          // that drop because _reconnecting is still set, so nobody else arms
+          // recovery or retries: do it here instead of breaking as connected.
+          if (!engine.isConnected) {
+            _log('Link dropped during reconnect setup — retrying.');
+            if (_background) await _armRecovery();
+            continue;
+          }
           // Alarm display comes from the locally-set/persisted value; the
           // GET_ALARM readback is parked (unconfirmed format) — see ble_engine.
           _log('Reconnected — live on; draining backlog in background.');
@@ -5431,7 +5568,71 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<void> syncNow() => openSession();
+  /// "Sync the band". On a link that is already up in the foreground,
+  /// [openSession] just reuses it and joins an offload nobody asked the band
+  /// for, so the tap pulled nothing: ask for one over the current link, then
+  /// finalize whatever landed. Floored like [foregroundCatchUp]: on a band
+  /// that just drained, a few quick taps would each come back empty, and the
+  /// empty-sync detector reads three of those as a lost clock and backs the
+  /// periodic pull off.
+  Future<void> syncNow() async {
+    if (_background || !engine.isConnected) return openSession();
+    try {
+      final running = _syncBurst;
+      if (running != null) {
+        await running;
+      } else if (await engine.requestForegroundSync()) {
+        await _kickSyncBurst(kickFirst: false);
+        notifyListeners();
+        _deriveScheduler.markStoredData();
+      }
+    } catch (e) {
+      _log('Sync failed: $e');
+    }
+    _deriveScheduler.requestHeavy();
+  }
+
+  Future<SyncReport> syncForShortcut(ShortcutSyncTask task) async {
+    if (ResetGate.active) throw StateError('data reset in progress');
+    if (!initialized) task.update('starting');
+    while (!initialized && initError == null && !_disposed && !task.stopped) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (initError != null || _disposed) throw StateError('Edge is not ready');
+    if (busy) task.update('waiting');
+    while (busy && !task.stopped) {
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+    }
+    if (task.stopped) return SyncReport(0, 0, false);
+    if (ResetGate.active || _disposed) throw StateError('Edge is not ready');
+    if (engine.isConnected) {
+      final usable = await _linkUsableAfterResume('Shortcut');
+      if (task.stopped) return SyncReport(0, 0, false);
+      if (ResetGate.active || _disposed) throw StateError('Edge is not ready');
+      if (!usable) await engine.disconnect();
+    }
+    if (!engine.isConnected) {
+      task.update('connecting');
+      // A background Shortcut must not enable the UI's high-rate live streams.
+      await openSession(foreground: !_background);
+    }
+    if (task.stopped || !engine.isConnected) return SyncReport(0, 0, false);
+    // The waits above left 'starting'/'waiting', which a deadline reads as
+    // timedOut even though the burst is banking records.
+    task.update('syncing');
+    final burst = _kickSyncBurst(kickFirst: _syncBurst == null).then((report) {
+      if (_disposed) return report;
+      if (report.records > 0) _deriveScheduler.markStoredData();
+      notifyListeners();
+      return report;
+    });
+    // The burst is the app's and can run for many minutes; a stopped Shortcut
+    // stops waiting so it releases the headless gate, not the transfer.
+    return Future.any([
+      burst,
+      task.whenStopped.then((_) => SyncReport(0, 0, false)),
+    ]);
+  }
 
   /// The ONE place the band's HIGH_FREQ_SYNC prompt is programmed. Two
   /// requesters, one decision (`BandPromptPolicy`): the smart-wake window
@@ -6826,16 +7027,31 @@ class AppState extends ChangeNotifier {
       unawaited(engine.buzz());
     }
 
-    // Forgotten-session watch: judged against the SAME gate calories bill
-    // with, so "quiet" here means exactly "billed as rest there" (null when
+    // Forgotten-session watch: judged against the calorie gate (null when
     // the anchors cannot define one — then only absence counts, see
-    // WorkoutIdleWatch). The ask is a notification, once per session; the
-    // session itself is never touched — there is deliberately no auto-stop.
+    // WorkoutIdleWatch), capped at the zone-1 floor (issue #466): the calorie
+    // gate is 40 % HRR, moderate intensity, so a steady 92 bpm session the
+    // live bar shows as ZONE 1 was being told "nothing above resting effort".
+    // Quiet means below BOTH lines — billed as rest AND shown as rest. The
+    // ask is a notification, once per session; the session itself is never
+    // touched — there is deliberately no auto-stop.
+    //
+    // The cap never goes below a quarter of the way from resting HR to the
+    // calorie gate (~10 % HRR). Resting HR here is the night's LOWEST 30-min
+    // mean, so sleeping HR sits a few bpm above it: a zone-1 edge at or just
+    // above it (manual bounds only need >= 30 bpm) would make a session left
+    // open overnight read active forever, and the nudge would never go out.
+    // A wider floor (halfway) overshot a real 50 %-HRmax zone-1 edge once RHR
+    // passes ~0.375 HRmax, nudging sessions the bar shows as ZONE 1.
     final wRhr = w.restingHr;
     final wMax = w.hrMax;
-    final idleGate = (wRhr != null && wMax != null)
+    final calGate = (wRhr != null && wMax != null)
         ? ana.Calories.activeGateHr(wMax, wRhr)
         : null;
+    final z1Floor = w.zoneSet?.zones.first.lower;
+    final idleGate = (calGate == null || z1Floor == null)
+        ? calGate
+        : math.max(math.min(calGate, z1Floor), wRhr! + (calGate - wRhr) / 4);
     if (w.idleWatch.onTick(DateTime.now(), hr: hr, gate: idleGate)) {
       unawaited(_nudgeIdleWorkout(w));
     }

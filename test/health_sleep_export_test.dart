@@ -301,6 +301,23 @@ void main() {
       expect(healthSleepStageOf('unknown'), isNull);
     });
 
+    test('a failing non-finalized day retries on the rewrite cadence, never capped', () {
+      final now = DateTime(2026, 10, 4, 15);
+      bool due(int attempts, Duration sinceLast) => shouldAttemptHealthBulkExport(
+        attempts: attempts,
+        maxAttempts: 6,
+        now: now,
+        lastAttempt: now.subtract(sinceLast),
+        backoff: const Duration(hours: 24),
+        prioritySleepAlreadyWritten: false,
+        minRewriteInterval: const Duration(minutes: 30),
+      );
+      // today's minute hr must not wait out the 24h tier or stop at the cap
+      expect(due(5, const Duration(minutes: 31)), isTrue);
+      expect(due(9, const Duration(minutes: 31)), isTrue);
+      expect(due(5, const Duration(minutes: 10)), isFalse);
+    });
+
     test('manual sync bypasses retry backoff and attempt cap', () {
       final now = DateTime(2026, 8, 5, 13);
 
@@ -886,6 +903,39 @@ void main() {
           containsAll(<String>['awake', 'rem', 'light', 'deep']),
         );
       },
+    );
+  });
+
+  test('nightly scalars stay inside the day their delete covers', () {
+    final dayStart = DateTime(2026, 8, 2);
+    final dayEnd = DateTime(2026, 8, 3);
+    int ms(DateTime t) => t.millisecondsSinceEpoch;
+    DateTime at({required DateTime on, required DateTime off}) =>
+        healthNightlyScalarTime(
+          onsetMs: ms(on),
+          offsetMs: ms(off),
+          dayStart: dayStart,
+          dayEnd: dayEnd,
+        );
+
+    // 23:00 -> 07:00: the midpoint is already inside the day.
+    expect(
+      at(on: DateTime(2026, 8, 1, 23), off: DateTime(2026, 8, 2, 7)),
+      DateTime(2026, 8, 2, 3),
+    );
+    // 20:00 -> 03:00: the midpoint is the evening before, so use wake.
+    expect(
+      at(on: DateTime(2026, 8, 1, 20), off: DateTime(2026, 8, 2, 3)),
+      DateTime(2026, 8, 2, 3),
+    );
+    expect(
+      healthNightlyScalarTime(
+        onsetMs: null,
+        offsetMs: null,
+        dayStart: dayStart,
+        dayEnd: dayEnd,
+      ),
+      DateTime(2026, 8, 2, 12),
     );
   });
 }

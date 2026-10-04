@@ -23,9 +23,10 @@
 // HONESTY CONTRACT. `strain` and `calories` are computed ONLY from real 1 Hz
 // HR inside the window, through the same published methods the day-level
 // derivation uses (Banister TRIMP -> log-squash strain; Keytel 2005 calories).
-// No HR in the window — because it predates the ~3-day `decoded_onehz`
-// retention, or the band was off — means those columns stay NULL and the UI
-// renders "—". A duration alone NEVER becomes a strain or a calorie figure.
+// No HR in the window — because it predates the `rawRetentionDays`
+// `decoded_onehz` retention, or the band was off — means those columns stay
+// NULL and the UI renders "—". A duration alone NEVER becomes a strain or a
+// calorie figure.
 
 import 'dart:convert';
 
@@ -421,8 +422,9 @@ Map<String, dynamic> buildManualSessionRow({
     'strain': stats.strain,
     'max_hr': stats.maxHr,
     // Banked, not recomputed on read: the 1 Hz window this was measured over is
-    // pruned after 3 days, and an average that vanishes from every workout older
-    // than that is worse than one stored beside the peak it belongs with.
+    // pruned at `rawRetentionDays`, and an average that vanishes from every
+    // workout older than that is worse than one stored beside the peak it
+    // belongs with.
     'avg_hr': stats.avgHr,
     'duration_min': (endSec - startSec) ~/ 60,
     'zone_min_json': jsonEncode(zone.any((v) => v > 0) ? zone : const <num>[]),
@@ -435,6 +437,12 @@ Map<String, dynamic> buildManualSessionRow({
     'source': (existing?['source'] as String?) ?? source,
     'created_at':
         (existing?['created_at'] as num?)?.toInt() ?? createdAtMs,
+    // The athlete's own word about the session, not the window: a retime
+    // keeps it, or REPLACE resets private to 0 and drops the rating.
+    if (existing != null) ...{
+      'private': existing['private'] ?? 0,
+      'rpe': existing['rpe'],
+    },
   };
 }
 

@@ -41,6 +41,12 @@ import 'sleep_detail.dart';
 
 // ═══════════════════ the vocabulary ═══════════════════
 
+/// [name] as it reads in a caption. German keeps it as written: its labels
+/// can open with an adjective, so the DE strings put [name] first in the
+/// sentence instead. Everywhere else the title case comes off.
+String nounInSentence(AppLocalizations? l, String name) =>
+    l?.localeName.startsWith('de') == true ? name : name.toLowerCase();
+
 /// What a metric key means on screen, and whether we are willing to draw it.
 class MetricSpec {
   /// The alias `getChart` / `getTrend` understand (`_trendKey` maps it on).
@@ -310,6 +316,20 @@ const _specs = <String, MetricSpec>{
     citation: 'Within-user dispersion',
     requires: {InputSignal.rrIntervals},
   ),
+  // Only the WHOOP importer writes this key today; the band derive does not.
+  // The old cloud_v2 importer's relative index under the same key is kept
+  // out on read (LocalDb.metricSeries).
+  'spo2': MetricSpec(
+    chartKey: 'spo2',
+    title: 'Blood oxygen',
+    unit: '%',
+    color: C.pink,
+    icon: LucideIcons.droplet,
+    higherBetter: true,
+    method: 'WHOOP\'s own nightly value, read from the blood oxygen column of '
+        'an imported export and stored as-is.',
+    citation: 'Imported from WHOOP',
+  ),
   // Both of these were written to `metric_series` on every derive since v55 and
   // had no spec, so nothing could open them — `specOf` fell through to a
   // generic entry titled "nap min". They are 17/17 on real data.
@@ -366,7 +386,7 @@ const _specs = <String, MetricSpec>{
     citation: 'Relative only — uncalibrated ADC',
     requires: {InputSignal.skinTempRaw},
   ),
-  // `spo2`, `odi_per_hour` and `strain_effort` used to live here as cards that
+  // `odi_per_hour` and `strain_effort` used to live here as cards that
   // existed only to explain that they were empty. A metric this app does not
   // produce has no entry, no card and no key. See docs/internal/UI_ROADMAP.md.
   //
@@ -1007,11 +1027,12 @@ class _MetricDetailState extends State<MetricDetail> {
         l?.metricDetailUsingForX(device, subject) ??
         'Using $device for $subject.';
     if (!_split) {
-      return [line(_labelOf(d, _preferredId), spec.title.toLowerCase())];
+      return [line(_labelOf(d, _preferredId), nounInSentence(l, spec.title))];
     }
     return [
       for (final e in _winners.entries)
-        line(_labelOf(d, e.value), signalDisplayName(c, e.key).toLowerCase()),
+        line(_labelOf(d, e.value),
+            nounInSentence(l, signalDisplayName(c, e.key))),
     ];
   }
 
@@ -1381,9 +1402,10 @@ class _MetricDetailState extends State<MetricDetail> {
         // sparse month comparable — only refuse to pretend.
         //
         // A day with no `worn_min` row draws NOTHING, not a zero: wear older
-        // than the 3-day substrate window is knowable only through this derived
-        // key, and nothing here reconstructs it. Same card, not a new one; the
-        // denominator is part of reading the chart, not a second claim.
+        // than the `rawRetentionDays` substrate window is knowable only through
+        // this derived key, and nothing here reconstructs it. Same card, not a
+        // new one; the denominator is part of reading the chart, not a second
+        // claim.
         if (win >= 30 && spec.chartKey != 'wear' && wear.isNotEmpty)
           Builder(builder: (c) {
             final hrs = [
