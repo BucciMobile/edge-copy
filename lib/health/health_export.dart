@@ -95,6 +95,18 @@ List<HealthDataType> healthDeleteTypes({required bool isApplePlatform}) {
       : types.where((type) => type != HealthDataType.HEART_RATE).toList();
 }
 
+/// The kcal a workout sample carries, or null when it carries none.
+///
+/// Health Connect stores a workout's energy as a separate
+/// TotalCaloriesBurnedRecord inserted in the same atomic batch, so without that
+/// write permission the whole workout write fails. On Android the session's
+/// kcal stays in the day's hourly active energy instead.
+@visibleForTesting
+int? healthWorkoutEnergyKcal(
+  Map<String, Object?> r, {
+  required bool isApplePlatform,
+}) => isApplePlatform ? (r['calories'] as num?)?.round() : null;
+
 /// Does a `delete()` answer mean the window is now clear of OUR samples — i.e.
 /// is it safe to write the replacement?
 ///
@@ -177,6 +189,58 @@ Future<void> ensureHealthSleepExportEpoch({
   await setCursor('health_export_through', '');
   await setCursor('health_export_retry_state', '');
   await setCursor(kHealthSleepExportEpochCursor, epoch);
+}
+
+/// Hourly buckets spanning [dayStart, dayEnd), shared by the active/basal
+/// energy writers. Each bucket is a real elapsed clock-hour (not 1/24th of the
+/// day's span — that would give 57.5min/62.5min "hours" on DST-transition
+/// days); the day's actual length (23/24/25 real hours) instead changes the
+/// bucket count, with the final bucket clipped to dayEnd so it never spills
+/// into the next calendar day. Today stops at [now]: its energy so far belongs
+/// in the hours that have happened, not spread into ones that haven't.
+@visibleForTesting
+List<DateTime> healthEnergyBucketBounds(
+  DateTime dayStart,
+  DateTime dayEnd,
+  DateTime now,
+) {
+  final end = now.isBefore(dayEnd) ? now : dayEnd;
+  final bounds = <DateTime>[dayStart];
+  while (bounds.last.isBefore(end)) {
+    final next = bounds.last.add(const Duration(hours: 1));
+    bounds.add(next.isAfter(end) ? end : next);
+  }
+  return bounds;
+}
+
+const kHealthStepsPrefixPurgeCursor = 'health_steps_prefix_purged';
+
+/// One-shot purge of the legacy STEPS samples on days behind the export
+/// [cursor]. The per-day purge only runs for days exportAll still exports, and
+/// days already behind the cursor are never exported again, so on a store that
+/// never had its cursor cleared those samples would stay forever.
+Future<void> purgeLegacyStepsBehindCursor({
+  required String cursor,
+  required Future<String?> Function(String name) getCursor,
+  required Future<void> Function(String name, String value) setCursor,
+  required Future<bool> Function(DateTime start, DateTime end) deleteSteps,
+}) async {
+  if (cursor.isEmpty) return;
+  if ((await getCursor(kHealthStepsPrefixPurgeCursor) ?? '').isNotEmpty) {
+    return;
+  }
+  final d = DateTime.tryParse(cursor);
+  if (d == null) return;
+  try {
+    // HealthKit and Health Connect only delete this app's own samples.
+    await deleteSteps(
+      DateTime.fromMillisecondsSinceEpoch(0),
+      DateTime(d.year, d.month, d.day + 1),
+    );
+    await setCursor(kHealthStepsPrefixPurgeCursor, cursor);
+  } catch (e) {
+    debugPrint('[health] purge legacy steps behind $cursor: $e');
+  }
 }
 
 bool shouldAttemptHealthExport({
@@ -736,6 +800,16 @@ class HealthExporter {
         await LocalDb.setCursor(_kRetryCursor, '');
       }
       final cursor = await LocalDb.getCursor('health_export_through') ?? '';
+      await purgeLegacyStepsBehindCursor(
+        cursor: cursor,
+        getCursor: LocalDb.getCursor,
+        setCursor: (name, value) => LocalDb.setCursor(name, value),
+        deleteSteps: (start, end) => _health.delete(
+          type: HealthDataType.STEPS,
+          startTime: start,
+          endTime: end,
+        ),
+      );
       final retryState = await _loadRetryState();
       var retryStateDirty = false;
       // METADATA ONLY — 400 days of payload is ~300 MB resident, measured, and
@@ -1224,22 +1298,17 @@ class HealthExporter {
       mid,
     );
 
-    // Hourly buckets spanning [dayStart, dayEnd), shared by the active/basal
-    // energy writers below. Each bucket is a real elapsed clock-hour (not
-    // 1/24th of the day's span — that would give 57.5min/62.5min "hours" on
-    // DST-transition days); the day's actual length (23/24/25 real hours)
-    // instead changes bucketCount, with the final bucket clipped to dayEnd so
-    // it never spills into the next calendar day.
-    final bucketBounds = <DateTime>[dayStart];
-    while (bucketBounds.last.isBefore(dayEnd)) {
-      final next = bucketBounds.last.add(const Duration(hours: 1));
-      bucketBounds.add(next.isAfter(dayEnd) ? dayEnd : next);
-    }
+    final bucketBounds = healthEnergyBucketBounds(
+      dayStart,
+      dayEnd,
+      DateTime.now(),
+    );
     final bucketCount = bucketBounds.length - 1;
 
     // Active energy: chunked into hourly buckets over the day.
     // We subtract workout calories to prevent double-counting, because workouts
-    // are exported separately (their totalEnergyBurned already covers it).
+    // are exported separately (their totalEnergyBurned already covers it, on
+    // Apple only — see healthWorkoutEnergyKcal).
     // Upper bound is exclusive (dayEnd - 1s): sessionsInRange is inclusive on
     // both ends, so a workout starting exactly at midnight would otherwise be
     // double-subtracted from both this day and the next.
@@ -1249,7 +1318,8 @@ class HealthExporter {
         dayStart.millisecondsSinceEpoch ~/ 1000,
         (dayEnd.millisecondsSinceEpoch ~/ 1000) - 1,
       );
-      final workoutCal = healthWorkoutCaloriesToSubtract(rows);
+      final workoutCal =
+          healthWorkoutCaloriesToSubtract(rows, isApplePlatform: isApple);
       cal = (cal > workoutCal) ? cal - workoutCal : 0.0;
     } catch (e) {
       // Unknown whether cal is workout-adjusted — still write our best guess
@@ -1259,7 +1329,7 @@ class HealthExporter {
       success = false;
     }
 
-    if (cal > 0) {
+    if (cal > 0 && bucketCount > 0) {
       final calPerHour = cal / bucketCount;
       for (int i = 0; i < bucketCount; i++) {
         try {
@@ -1284,7 +1354,10 @@ class HealthExporter {
     // Basal energy = total daily energy (TDEE) − active, chunked hourly.
     final calTotal = sc('calories_total');
     final rawCal = sc('calories');
-    if (calTotal != null && rawCal != null && calTotal > rawCal) {
+    if (calTotal != null &&
+        rawCal != null &&
+        calTotal > rawCal &&
+        bucketCount > 0) {
       final basal = (calTotal - rawCal).toDouble();
       final basalPerHour = basal / bucketCount;
       for (int i = 0; i < bucketCount; i++) {
@@ -1419,7 +1492,7 @@ class HealthExporter {
         activityType: _activity(r['type']?.toString()),
         start: DateTime.fromMillisecondsSinceEpoch(st * 1000),
         end: DateTime.fromMillisecondsSinceEpoch(en * 1000),
-        totalEnergyBurned: (r['calories'] as num?)?.round(),
+        totalEnergyBurned: healthWorkoutEnergyKcal(r, isApplePlatform: isApple),
         title: healthWorkoutTitleForType(r['type']?.toString()),
       );
     } catch (e) {
@@ -1564,15 +1637,18 @@ String? healthWorkoutTitleForType(String? type) {
 /// Calories of the day's sessions that get their own WORKOUT sample, and so
 /// come off the day's active energy. A session [HealthExporter] skips (live,
 /// fabricated end, private) keeps its calories in the active-energy total —
-/// subtracting them too would make them vanish from the day entirely.
+/// subtracting them too would make them vanish from the day entirely. Only
+/// the energy the WORKOUT sample itself carries comes off
+/// ([healthWorkoutEnergyKcal]: none on Android).
 @visibleForTesting
-double healthWorkoutCaloriesToSubtract(List<Map<String, Object?>> rows) {
+double healthWorkoutCaloriesToSubtract(List<Map<String, Object?>> rows,
+    {bool isApplePlatform = true}) {
   var total = 0.0;
   for (final r in rows) {
     if ((r['status']?.toString() ?? '') == 'live') continue;
     if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) continue;
     if ((r['private'] as num?)?.toInt() == 1) continue;
-    total += (r['calories'] as num?)?.toDouble() ?? 0.0;
+    total += healthWorkoutEnergyKcal(r, isApplePlatform: isApplePlatform) ?? 0;
   }
   return total;
 }

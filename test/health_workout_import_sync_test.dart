@@ -56,6 +56,30 @@ class _FakeHealth extends Health {
       points;
 }
 
+/// Records what the permission request asked for.
+class _PermHealth extends Health {
+  List<HealthDataType>? asked;
+
+  @override
+  Future<void> configure() async {}
+
+  @override
+  Future<bool?> hasPermissions(
+    List<HealthDataType> types, {
+    List<HealthDataAccess>? permissions,
+  }) async =>
+      false;
+
+  @override
+  Future<bool> requestAuthorization(
+    List<HealthDataType> types, {
+    List<HealthDataAccess>? permissions,
+  }) async {
+    asked = types;
+    return true;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory dir;
@@ -205,5 +229,21 @@ void main() {
 
     final stored = await LocalDb.importedWorkouts();
     expect(stored.map((r) => r['uuid']), ['theirs']);
+  });
+
+  test('health connect asks for the reads the workout read needs', () async {
+    // The plugin reads distance, total calories and steps per session; a
+    // missing grant on any of them empties the whole workout read.
+    final health = _PermHealth();
+    await HealthWorkoutImporter(health: health, isApple: false)
+        .requestPermission();
+    expect(
+        health.asked,
+        containsAll([
+          HealthDataType.WORKOUT,
+          HealthDataType.DISTANCE_DELTA,
+          HealthDataType.TOTAL_CALORIES_BURNED,
+          HealthDataType.STEPS,
+        ]));
   });
 }

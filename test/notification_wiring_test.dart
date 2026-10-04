@@ -14,6 +14,7 @@ import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
 import 'package:openstrap_edge/notify/notification_prefs.dart';
 import 'package:openstrap_edge/notify/tap_router.dart';
+import 'package:openstrap_edge/state/clock_format.dart';
 
 NotificationEvent _ev(NotifCategory c, NotifPriority p, String route) =>
     NotificationEvent(
@@ -146,6 +147,12 @@ void main() {
       final t = NotificationCenter.windDownSlot(
           const NotificationPrefs(windDownEnabled: true), 20.0);
       expect(t, 21 * 60 + 30);
+    });
+
+    test('the copy names the learned bedtime, not the capped slot', () {
+      // Bedtime 23:30 caps the slot to 21:30; the body must still say 23:30.
+      expect(NotificationCenter.windDownBody(23 * 60 + 30.0),
+          contains(formatClockMinute(23 * 60 + 30)));
     });
   });
 
