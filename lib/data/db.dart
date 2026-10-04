@@ -10500,6 +10500,9 @@ class LocalDb {
         'source': source, 'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
         'payload_json': snapshot,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
+      // Derivation drops any detection under an edit, so a pending one here
+      // would never be reconciled again and could only fail to confirm.
+      await ActivityStore.supersede(tx, ActivityKind.nap, startTs, endTs);
       await ActivityStore.markDayChanged(tx, dayId);
     });
   }
@@ -10715,7 +10718,7 @@ class LocalDb {
       await tx.insert('sessions', row, conflictAlgorithm: ConflictAlgorithm.replace);
       final start = row['start_ts'] as int?;
       if (start != null) {
-        await ActivityStore.supersedeWorkouts(tx, start,
+        await ActivityStore.supersede(tx, ActivityKind.workout, start,
           (row['end_ts'] as int?) ?? DateTime.now().millisecondsSinceEpoch ~/ 1000);
       }
     });

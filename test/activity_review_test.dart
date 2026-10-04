@@ -367,17 +367,48 @@ void main() {
       repo.confirmActivity(s, endTs: now + 3600),
       throwsA(isA<ActivityReviewException>()),
     );
+    await db.insert('sleep_nap', {
+      'day_id': day,
+      'start_ts': start + 60,
+      'end_ts': start + 900,
+      'source': 'manual',
+      'created_at': now,
+    });
+    await expectLater(
+      repo.confirmActivity(s),
+      throwsA(isA<ActivityReviewException>()),
+    );
+    expect(await store.pending(), hasLength(1));
+  });
+
+  test('a manually logged nap supersedes the pending detection', () async {
+    final s = await detectNap();
     await LocalDb.putNapEdit(
       dayId: day,
       startTs: start + 60,
       endTs: start + 900,
       source: 'manual',
     );
+    expect(await store.pending(), isEmpty);
     await expectLater(
       repo.confirmActivity(s),
       throwsA(isA<ActivityReviewException>()),
     );
-    expect(await store.pending(), hasLength(1));
+    expect(await LocalDb.napEdits(day), hasLength(1));
+  });
+
+  test('a superseded suggestion refuses confirm and discard', () async {
+    final s = (await store.reconcile(ActivityKind.workout, [
+      {'start_ts': start, 'end_ts': start + 1800},
+    ])).single;
+    await db.update('activity_suggestions', {'status': 'superseded'});
+    await expectLater(
+      store.confirm(s, startTs: start, endTs: start + 1800,
+        session: {'id': 'suggestion:${s.id}', 'start_ts': start}),
+      throwsA(isA<ActivityReviewException>()),
+    );
+    await expectLater(store.discard(s), throwsA(isA<ActivityReviewException>()));
+    expect(await db.query('sessions'), isEmpty);
   });
 
   test('a manually logged workout supersedes pending detections', () async {

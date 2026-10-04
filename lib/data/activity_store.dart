@@ -311,21 +311,22 @@ class ActivityStore {
     return (await _overlappingSessions(tx, s, e)).isNotEmpty;
   }
 
-  static Future<void> supersedeWorkouts(
+  static Future<void> supersede(
     DatabaseExecutor tx,
+    ActivityKind kind,
     int s,
     int e,
   ) async {
     await tx.rawUpdate(
       "UPDATE activity_suggestions SET status = 'superseded' "
-      "WHERE kind = 'workout' AND status = 'pending' AND start_ts < ? AND end_ts > ?",
-      [e, s],
+      "WHERE kind = ? AND status = 'pending' AND start_ts < ? AND end_ts > ?",
+      [kind.name, e, s],
     );
   }
 
   Future<void> discard(ActivitySuggestion expected) =>
       db.transaction((tx) async {
-        final row = await _check(tx, expected);
+        final row = await _check(tx, expected, 'discarded');
         if (row == null) return;
         await tx.update(
           'activity_suggestions',
@@ -339,9 +340,13 @@ class ActivityStore {
         await _changed(tx, row['day_id'] as String);
       });
 
+  /// Null when the row is already [done] (a repeated tap). Any other decided
+  /// status means it changed underneath the caller, which must not report
+  /// success for a write it never made.
   static Future<Map<String, dynamic>?> _check(
     DatabaseExecutor tx,
     ActivitySuggestion expected,
+    String done,
   ) async {
     final rows = await tx.query(
       'activity_suggestions',
@@ -354,7 +359,12 @@ class ActivityStore {
       );
     }
     final row = rows.single;
-    if (row['status'] != 'pending') return null;
+    if (row['status'] == done) return null;
+    if (row['status'] != 'pending') {
+      throw const ActivityReviewException(
+        'This suggestion is no longer available.',
+      );
+    }
     if (row['revision'] != expected.revision) {
       throw const ActivityReviewException(
         'This suggestion changed as more data arrived. Review its updated times and try again.',
@@ -370,7 +380,7 @@ class ActivityStore {
     Map<String, dynamic>? session,
     bool edited = false,
   }) => db.transaction((tx) async {
-    final row = await _check(tx, expected);
+    final row = await _check(tx, expected, 'confirmed');
     if (row == null) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     if (endTs > now ~/ 1000) {
@@ -404,7 +414,7 @@ class ActivityStore {
       }
       linked = session['id'] as String;
       await tx.insert('sessions', session);
-      await supersedeWorkouts(tx, startTs, endTs);
+      await supersede(tx, ActivityKind.workout, startTs, endTs);
     } else {
       if (!manualNapWindowIsValid(startTs, endTs)) {
         throw const ActivityReviewException(
