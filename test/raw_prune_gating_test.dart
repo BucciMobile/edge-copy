@@ -217,5 +217,18 @@ void main() {
         expect(lines[i], contains('scope.rawDays'), reason: 'line ${i + 1}');
       }
     });
+
+    test('the prune holds for FINALIZED days, not merely derived ones', () {
+      // A day with a complete but unfinalized result still re-derives; if a
+      // derived row were enough to release the hold, D-1's evening would be
+      // cut and D would re-derive from half a night, then lock.
+      final start =
+          lines.indexWhere((l) => l.contains('Future<void> _pruneOldDecoded('));
+      expect(start, isNot(-1), reason: 'the prune declaration vanished');
+      final end = lines.indexWhere((l) => l.startsWith('  }'), start);
+      final body = lines.sublist(start, end).join('\n');
+      expect(body, contains('LocalDb.finalizedDayIds('));
+      expect(body, isNot(contains('dayResultIds')));
+    });
   });
 }
