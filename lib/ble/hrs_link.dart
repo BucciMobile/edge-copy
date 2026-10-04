@@ -663,12 +663,14 @@ class HrsLink {
       debugPrint('[hrs] refusing to forget the primary band from here.');
       return;
     }
-    // An ASK-paired sensor (iOS 18+) keeps its approval after its row goes, and
-    // the sensor picker would keep handing this id back.
-    await AccessorySetup.removeSensor(id);
     final row = (await LocalDb.deviceRows())
         .where((r) => r['id'] == id)
         .firstOrNull;
+    // An ASK-paired sensor (iOS 18+) keeps its approval after its row goes, and
+    // the sensor picker would keep handing it back. ASK knows it by its
+    // Bluetooth id (`remote_id`), not by this row id.
+    final remoteId = row?['remote_id'] as String?;
+    if (remoteId != null) await AccessorySetup.removeSensor(remoteId);
     if (row?['adapter_id'] == kOura.id) {
       await OuraLink.forgetRing(id);
       return;

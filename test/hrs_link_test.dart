@@ -9,6 +9,7 @@
 // simulator path, so this proves the write is correct, not that any real
 // strap sends these exact bytes.
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -399,6 +400,30 @@ void main() {
 
       final rows = await LocalDb.deviceRows();
       expect(rows.where((r) => r['id'] == id), isEmpty);
+    });
+
+    test('a forgotten ring drops its picker approval by its bluetooth id',
+        () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      const channel = MethodChannel('openstrap/accessory_setup');
+      final calls = <MethodCall>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (c) async {
+        calls.add(c);
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      await LocalDb.upsertDevice(
+        id: 'oura-a1b2c3d4',
+        adapterId: kOura.id,
+        remoteId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      );
+
+      await HrsLink.forgetDevice('oura-a1b2c3d4');
+
+      final remove = calls.where((c) => c.method == 'removeSensor');
+      expect(remove.single.arguments, 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE');
     });
   });
 
