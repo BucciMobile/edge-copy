@@ -7548,9 +7548,14 @@ class BleEngine {
   }) async {
     final isGen5 = _session?.band.isGen5 ?? false;
     if (isGen5) {
-      // Official WHOOP app SET_CLOCKs before SET_ALARM; refresh RTC drift first.
-      await setClock();
-      await Future.delayed(const Duration(milliseconds: 120));
+      // Official WHOOP app SET_CLOCKs before SET_ALARM. Await the reply so the
+      // correlation below is the drift-0 one this write produces: a
+      // fire-and-forget write left the pre-SET drift in place whenever the
+      // read-back hadn't landed yet, and the alarm was armed shifted by it.
+      if (!await _bootstrapSetClockGen5()) {
+        _log('[ALARM] pre-arm SET_CLOCK unanswered — arming against the last '
+            'correlation (drift=${_clockRef?.driftSec ?? 0}s).');
+      }
     }
     // Arm in the STRAP's RTC frame. The strap fires the wake alarm autonomously
     // on its OWN clock, so if that clock is offset from wall time (SET_CLOCK not
