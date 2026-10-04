@@ -506,6 +506,9 @@ void main() {
       final d = LiveDraft.begin(activityByName('running')!)
         ..pausedAt = DateTime.now().subtract(const Duration(minutes: 25));
       app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNotNull,
+          reason: 'a pause left running past the threshold is still asked '
+              'about: paused and forgotten is a forgotten session');
       d.setPaused(false);
       app.debugTickWorkout();
       expect(w.idleWatch.lastAskAt, isNull,

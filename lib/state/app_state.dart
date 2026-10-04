@@ -6836,10 +6836,13 @@ class AppState extends ChangeNotifier {
     // paused after a relaunch starts at elapsed 0 and would otherwise keep it.
     final now = DateTime.now();
     w.elapsed = _sessionClock(w, now);
-    if (LiveDraft.current?.pausedAt != null) {
-      // Being paused is the user acting on the session, not forgetting it:
-      // the quiet stretch restarts at resume rather than counting the pause.
-      w.idleWatch.hold(now);
+    final pausedAt = LiveDraft.current?.pausedAt;
+    if (pausedAt != null) {
+      // The quiet stretch restarts at the pause and again at resume, but a
+      // pause left running is still a forgotten session: it gets asked about.
+      if (w.idleWatch.onPausedTick(now, pausedAt)) {
+        unawaited(_nudgeIdleWorkout(w));
+      }
       return;
     }
     // [liveHr], not `device.liveHr`: a reading that is stale or arriving from a

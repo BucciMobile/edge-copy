@@ -48,6 +48,7 @@ class WorkoutIdleWatch {
 
   DateTime _lastActive;
   DateTime? _lastAsk;
+  DateTime? _pausedAt;
   bool _fired = false;
 
   /// When the watch last asked, or null if it never has. Read by the wiring
@@ -61,6 +62,14 @@ class WorkoutIdleWatch {
   /// `Calories.activeGateHr` for this session's anchors, or null when the
   /// anchors cannot define one.
   bool onTick(DateTime now, {required int? hr, required num? gate}) {
+    if (_pausedAt != null) {
+      // First tick after resume: resuming is the user acting on the session,
+      // so the quiet stretch starts over here.
+      _pausedAt = null;
+      _lastActive = now;
+      _lastAsk = null;
+      return false;
+    }
     final active = hr != null && hr > 0 && (gate == null || hr >= gate);
     if (active) {
       _lastActive = now;
@@ -69,6 +78,10 @@ class WorkoutIdleWatch {
       _lastAsk = null;
       return false;
     }
+    return _ask(now);
+  }
+
+  bool _ask(DateTime now) {
     if (_fired) return false;
     if (now.difference(_lastActive) < nudgeAfter) return false;
     final ask = _lastAsk;
@@ -77,11 +90,20 @@ class WorkoutIdleWatch {
     return true;
   }
 
-  /// The session is paused: the user is plainly still there, so the quiet
-  /// stretch starts over from [now] instead of counting the pause.
-  void hold(DateTime now) {
-    _lastActive = now;
-    _lastAsk = null;
+  /// Feed one tick while the session is paused since [pausedAt]. Pausing is
+  /// the user acting on the session, so the quiet stretch restarts at the
+  /// pause, and resuming restarts it again (see [onTick]). The pause itself
+  /// counts as quiet: finished, paused, phone locked and forgotten is the
+  /// same open session the watch exists for, and still gets asked about.
+  bool onPausedTick(DateTime now, DateTime pausedAt) {
+    if (_pausedAt != pausedAt) {
+      _pausedAt = pausedAt;
+      if (pausedAt.isAfter(_lastActive)) {
+        _lastActive = pausedAt;
+        _lastAsk = null;
+      }
+    }
+    return _ask(now);
   }
 
   /// The nudge actually reached the shade — stop asking, permanently. Only a
