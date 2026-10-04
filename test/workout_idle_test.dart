@@ -104,5 +104,20 @@ void main() {
       // to the old ask's backoff clock.
       expect(w.onTick(at(45), hr: null, gate: 100), isTrue);
     });
+
+    test('a pause restarts the stretch, and a forgotten pause still asks', () {
+      final w = watch();
+      // Paused at 15 quiet minutes: the stretch restarts at the pause.
+      expect(w.onPausedTick(at(15), at(15)), isFalse);
+      expect(w.onPausedTick(at(34), at(15)), isFalse);
+      // Left paused past the threshold: finished, paused, forgotten.
+      expect(w.onPausedTick(at(35), at(15)), isTrue);
+      expect(w.onPausedTick(at(36), at(15)), isFalse,
+          reason: 'the pause keeps the retry backoff');
+      // Resuming restarts the stretch at the resume itself.
+      expect(w.onTick(at(40), hr: null, gate: 100), isFalse);
+      expect(w.onTick(at(59), hr: null, gate: 100), isFalse);
+      expect(w.onTick(at(60), hr: null, gate: 100), isTrue);
+    });
   });
 }

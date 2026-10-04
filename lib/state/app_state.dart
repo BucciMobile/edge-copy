@@ -63,6 +63,7 @@ import 'alarm_schedule.dart';
 import 'smart_wake.dart';
 import 'prefs.dart';
 import '../ble/adapters/signals.dart' show InputSignal;
+import '../ui2/activity/live.dart' show LiveDraft;
 import '../ui2/profile/devices.dart' show liveSources, rankSources;
 import '../data/db.dart';
 import '../ecg/ble_ecg_transport.dart';
@@ -6349,6 +6350,10 @@ class AppState extends ChangeNotifier {
     String type = 'other',
   }) {
     if (activeWorkout != null) return;
+    // A new session owns no draft yet. One left in Prefs belongs to a session
+    // that ended without clearing it (finalized as stale on relaunch), and its
+    // pause would hold this session's clock. Setup opens the fresh one after.
+    LiveDraft.clear();
     final start = DateTime.now();
     final id = workoutId ?? 'w${start.millisecondsSinceEpoch}';
     _workoutRawBase = _liveRaw;
@@ -6785,6 +6790,9 @@ class AppState extends ChangeNotifier {
     ScreenWake.releaseOwner('workout');
     _deriveScheduler.setWorkoutActive(false);
     final w = activeWorkout!;
+    // Off the clock, not the last tick: a session finished while still paused
+    // after a relaunch has never ticked, and its elapsed is still zero.
+    w.elapsed = _sessionClock(w, DateTime.now());
     // Nullable for the same reason `steps` below is: an unanchored profile
     // means this session was never costed, and a 0 in the column reads as
     // "burned nothing" rather than "not measured".
@@ -6866,6 +6874,10 @@ class AppState extends ChangeNotifier {
       unawaited(_healthExport.exportWorkout(sessionRow));
     }
     activeWorkout = null;
+    // The draft (and its pause) belongs to this session. Ended from the Live
+    // Activity or a double-tap, a paused draft used to outlive it and freeze
+    // the next session's tick.
+    LiveDraft.clear();
     _workoutRawBase = null;
     _workoutSawSamples = false;
     _workoutMinuteSteps.clear();
@@ -6918,6 +6930,7 @@ class AppState extends ChangeNotifier {
     ScreenWake.releaseOwner('workout');
     _deriveScheduler.setWorkoutActive(false);
     activeWorkout = null;
+    LiveDraft.clear();
     _nudgeLive(); // the workout's stream ownership ends with it
     _workoutRawBase = null;
     _workoutSawSamples = false;
@@ -6935,11 +6948,19 @@ class AppState extends ChangeNotifier {
   /// "Run live" until a manual refresh/restart; and deleting a workout that
   /// was GENUINELY still live would have left its timer/route tracker/Live
   /// Activity running against a deleted id.
+  ///
+  /// Teardown runs BEFORE the delete: stopping the route tracker flushes its
+  /// tail under this id, which would otherwise land after the delete.
   Future<void> deleteWorkout(String id) async {
-    await repo?.deleteWorkout(id);
-    if (activeWorkout?.workoutId == id) {
-      await _cancelActiveWorkoutTeardown();
-      notifyListeners();
+    final live = activeWorkout?.workoutId == id;
+    if (live) await _cancelActiveWorkoutTeardown();
+    // The live session is already gone either way: a failed delete leaves its
+    // row `status='live'`, which the relaunch reconcile finalizes. The UI still
+    // has to hear that nothing is live any more.
+    try {
+      await repo?.deleteWorkout(id);
+    } finally {
+      if (live) notifyListeners();
     }
   }
 
@@ -7083,11 +7104,36 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Wall time since start minus every pause, the in-progress one included —
+  /// the same clock the live screen's draft shows.
+  Duration _sessionClock(LiveWorkoutState w, DateTime now) {
+    final d = LiveDraft.current;
+    final inPause = d?.pausedAt == null ? 0 : now.difference(d!.pausedAt!).inSeconds;
+    final v = now.difference(w.startTime) -
+        Duration(seconds: (d?.pausedSec ?? 0) + inPause);
+    return v.isNegative ? Duration.zero : v;
+  }
+
   void _tickWorkout() {
     final w = activeWorkout;
     if (w == null) return;
 
-    w.elapsed = DateTime.now().difference(w.startTime);
+    // Pause is held by the live screen's draft. While paused the clock and
+    // every tally (zones, strain, calories, the idle watch) hold too, so the
+    // saved duration_min and the history row match the summary's clock.
+    // The clock is set BEFORE the pause return: a session that comes back
+    // paused after a relaunch starts at elapsed 0 and would otherwise keep it.
+    final now = DateTime.now();
+    w.elapsed = _sessionClock(w, now);
+    final pausedAt = LiveDraft.current?.pausedAt;
+    if (pausedAt != null) {
+      // The quiet stretch restarts at the pause and again at resume, but a
+      // pause left running is still a forgotten session: it gets asked about.
+      if (w.idleWatch.onPausedTick(now, pausedAt)) {
+        unawaited(_nudgeIdleWorkout(w));
+      }
+      return;
+    }
     // [liveHr], not `device.liveHr`: a reading that is stale or arriving from a
     // band that has dropped is NOT a measurement of this second, and billing it
     // into the peak, the per-zone seconds and (through accrueHr) strain and
