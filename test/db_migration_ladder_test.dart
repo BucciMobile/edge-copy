@@ -1081,7 +1081,7 @@ void main() {
       // `rec_ts INTEGER PRIMARY KEY` written with REPLACE and `decoded_rr` was
       // cleared by an unscoped `DELETE ... WHERE rec_ts = ?`, so the second
       // device did not merge with the first — it DELETED it, row and beats, and
-      // raw_archive prunes at 3 days.
+      // raw_archive prunes at `rawRetentionDays`.
       const name = 'v47_two_devices_test.db';
       created.add(name);
       await _seedOldDb(name, 46, [..._preDeviceKeyDecodedDdl, ..._v5DerivedDdl],

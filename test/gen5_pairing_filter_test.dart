@@ -272,5 +272,20 @@ void main() {
       expect(swift, contains('self.retryInFlight = true'));
       expect(swift, contains('self.retryInFlight = false'));
     });
+
+    test(
+        'the pick is held at .accessoryAdded and reported only once the '
+        'sheet dismisses', () {
+      final added = swift.indexOf('case .accessoryAdded:');
+      final dismissed = swift.indexOf('case .pickerDidDismiss:', added);
+      expect(added, greaterThanOrEqualTo(0));
+      expect(dismissed, greaterThan(added));
+      final addedBody = swift.substring(added, dismissed);
+      expect(addedBody, contains('awaitingAddedId ='));
+      expect(addedBody, isNot(contains('cb(')),
+          reason: 'resolving at .accessoryAdded hands Dart the id while the '
+              'sheet is still up');
+      expect(swift, contains('let id = awaitingAddedId ??'));
+    });
   });
 }

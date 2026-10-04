@@ -66,7 +66,52 @@ class AccessorySetup {
     return id;
   }
 
-  /// Deprovision all ASK accessories (called on unpair). Best-effort.
+  /// Show the ASK picker for ONE sensor, filtered to [services], and return its
+  /// CoreBluetooth UUID — the `remoteId` the sensor's pairing step connects to.
+  /// Throws on cancel / error, like [showPicker].
+  ///
+  /// For `kAskPickerSensors` only: with `NSAccessorySetupKitSupports` declared
+  /// the app has no standard Bluetooth authorization, so a sensor the user has
+  /// not approved here cannot be found by a scan at all (#371/#372). Each
+  /// service must be declared under `OSAskSensorServices`; the native side
+  /// refuses anything else. An already-approved sensor comes back with no sheet.
+  static Future<String> showSensorPicker(List<String> services) async {
+    final id = await _ch.invokeMethod<String>('showPicker', <String, Object>{
+      'services': [for (final s in services) s.toUpperCase()],
+    });
+    if (id == null || id.isEmpty) {
+      throw Exception('Pairing cancelled.');
+    }
+    return id;
+  }
+
+  /// Drop the ASK approval of sensor [id], so pairing that kind of sensor again
+  /// opens the sheet instead of handing back this id. The native side only ever
+  /// removes a sensor, never a band. Best-effort; a no-op where there is no ASK.
+  ///
+  /// NO CALLER, AND THAT IS THE CONCLUSION, not an oversight. Both call sites
+  /// it was written for have been taken out again:
+  ///   * before the sensor picker, reverted by `2068fd4b`;
+  ///   * on an explicit forget, taken out here — see the comment in
+  ///     `HrsLink.forgetDevice`.
+  ///
+  /// The reason is the same both times and is not about the trigger.
+  /// `ASAccessorySession.removeAccessory` removes the accessory "from the system
+  /// and for all apps … this call will always remove it from the system", bond
+  /// included, so calling it unpairs the device from the PHONE: the vendor app
+  /// loses it too, nothing here can put it back, and until the user re-pairs
+  /// with that app the device does not advertise at all — which surfaces as a
+  /// silent, timeout-less connect that names nothing. See #520.
+  ///
+  /// So before wiring this up anywhere, be sure the user asked to unpair the
+  /// device from their phone, and not merely to remove it from this app.
+  static Future<void> removeSensor(String id) async {
+    try {
+      await _ch.invokeMethod('removeSensor', id.toUpperCase());
+    } catch (_) {}
+  }
+
+  /// Deprovision every ASK band, sensors kept (called on unpair). Best-effort.
   static Future<void> removeAll() async {
     if (!Platform.isIOS) return;
     try {

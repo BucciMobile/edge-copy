@@ -208,6 +208,9 @@
   "pairSensorPairAnother": "एक और पेयर करें",
   "pairSensorExplainer": "एक सेंसर केवल वर्कआउट चलने के दौरान उपयोग होता है, और केवल हृदय गति और बीट टाइमिंग के लिए। यह आपके बैंड की जगह नहीं लेता, इसे कभी रात भर उपयोग नहीं किया जाता, और यह जो रिकॉर्ड करता है वह अभी किसी स्कोर में योगदान नहीं देता — इसकी रीडिंग संग्रहीत और दिखाई जाती हैं, बस इतना ही।",
   "pairSensorSearchWouldHideSheet": "खोजने से सिस्टम पेयरिंग शीट छिप जाएगी",
+  "pairSensorKeyTitle": "पहले से कहीं और सेट अप है?",
+  "pairSensorKeyBody": "अगर आपके पास वह कुंजी है जो यह डिवाइस पहले से इस्तेमाल करता है, तो उसे यहाँ चिपकाएँ — फ़ैक्टरी रीसेट के बिना जोड़ी बन जाएगी और डिवाइस पर कुछ नहीं लिखा जाता। एक पंक्ति में एक कुंजी रखकर कई कुंजियाँ दी जा सकती हैं; उन्हें एक-एक करके आज़माया जाता है जब तक कोई स्वीकार न हो जाए, जो तब काम आता है जब आपके पास कई कुंजियाँ हों और पता न हो कि कौन सी इस डिवाइस की है। सामान्य तरीके से जोड़ने के लिए इसे खाली छोड़ दें।",
+  "pairSensorKeyHint": "32 हेक्स अंक या base64 — हर पंक्ति में एक कुंजी",
   "pairSensorSearchAnyway": "फिर भी खोजें",
   "pairSensorSearching": "खोज रहा है…",
   "pairSensorSearchForSensors": "सेंसर खोजें",
@@ -902,6 +905,7 @@
   "investigateWhichSensorCounted": "किस सेंसर ने गिनती की",
   "investigateStrapPedometer": "बैंड · 100 Hz पेडोमीटर",
   "investigateStrapOnChipCounter": "बैंड · ऑन-चिप काउंटर",
+  "investigateStrapCounterFactor": "ऑन-चिप काउंटर · फ़ोन फ़ैक्टर",
   "investigatePhonePedometer": "फ़ोन · पेडोमीटर",
   "investigateDayTotal": "दिन का कुल",
   "investigateStrapChipReported": "बैंड चिप द्वारा दर्ज",
@@ -2403,5 +2407,45 @@
   "ecgProgress": "{pct}% पूर्ण",
   "ecgWaveformEmpty": "इस रीडिंग के साथ कोई तरंग सहेजी नहीं गई।",
   "ecgWaveformLabel": "स्वीकृत तरंग, माइक्रोवोल्ट में जैसा बैंड ने भेजा। रिक्त स्थान अनुपलब्ध सेकंड हैं।",
-  "ecgSampleNote": "{rate} Hz पर {count} सैंपल, फ़िल्टर्ड, इनपुट-संदर्भित µV। कोई लीड या ध्रुवता का दावा नहीं।"
+  "ecgSampleNote": "{rate} Hz पर {count} सैंपल, फ़िल्टर्ड, इनपुट-संदर्भित µV। कोई लीड या ध्रुवता का दावा नहीं।",
+  "devicesWornOn": "पहना है",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "बैंड कहाँ है। इसका उपयोग कदमों को कैलिब्रेट करने में होता है।",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "कलाई",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "ऊपरी बांह",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "कहीं और",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "आप इसे कहाँ पहनते हैं?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "डिफ़ॉल्ट। बैंड जो सबसे अच्छी कदम सटीकता दे सकता है।",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "कदम कम गिनता है — बांह कलाई से कम घूमती है।",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "अज्ञात",
+  "@devicesWornUnknown": {
+    "description": "डिवाइस विवरण: सहेजी गई पहनने की जगह इस बिल्ड को ज्ञात नहीं है"
+  },
+  "devicesWornOtherSub": "जेब या बैग। बैंड वहाँ चाल अच्छे से नहीं देख सकता।",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }
