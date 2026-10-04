@@ -13,7 +13,9 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_edge/ble/ble_engine.dart';
+import 'package:openstrap_edge/compute/hr_max.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
@@ -500,6 +502,97 @@ void main() {
       active.debugTickWorkout();
       expect(w2.idleWatch.lastAskAt, isNull,
           reason: 'a real reading (no gate → any reading) is activity');
+    });
+
+    test('a zone-1 reading below the calorie gate is not "resting" (#466)', () {
+      // RHR 60 / max 190: the calorie gate is 112 bpm, zone 1 starts at 95.
+      // A steady 100 bpm session reads ZONE 1 on the live bar, so it must not
+      // be asked "nothing above resting effort".
+      LiveWorkoutState session(String id) => LiveWorkoutState(
+            startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+            targetKcal: 300,
+            workoutId: id,
+            type: 'strength',
+            hrMax: 190,
+            restingHr: 60,
+            zoneSet: ana.HeartRateZones.zonesFromMaxHr(190),
+          );
+      final app = connected(100);
+      addTearDown(app.dispose);
+      final w = session('z1');
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNull);
+
+      final rest = connected(70);
+      addTearDown(rest.dispose);
+      final w2 = session('rest');
+      rest.activeWorkout = w2;
+      rest.debugTickWorkout();
+      expect(w2.idleWatch.lastAskAt, isNotNull,
+          reason: 'below zone 1 is still quiet');
+    });
+
+    test('a high resting HR still lets the zone-1 edge win (#466)', () {
+      // RHR 72 / max 173: calorie gate 112.4, zone 1 starts at 86.5. Halfway
+      // to the gate (92.2) sat above zone 1, so 89 bpm showed ZONE 1 and was
+      // still asked "nothing above resting effort".
+      final app = connected(89);
+      addTearDown(app.dispose);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'high-rhr',
+        type: 'strength',
+        hrMax: 173,
+        restingHr: 72,
+        zoneSet: ana.HeartRateZones.zonesFromMaxHr(173),
+      );
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNull);
+    });
+
+    test('a manual zone-1 edge below resting HR does not mute the watch', () {
+      // Manual bounds only need zone 1 >= 30 bpm. With zone 1 at 50 and RHR
+      // 58, capping the gate at zone 1 made a session left open overnight at
+      // 60 bpm read active every tick, so it was never asked about.
+      final app = connected(60);
+      addTearDown(app.dispose);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'manual-z1',
+        type: 'strength',
+        hrMax: 190,
+        restingHr: 58,
+        zoneSet: trainingZones(manualZoneLowerBpm: [50, 100, 130, 150, 170]),
+      );
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNotNull,
+          reason: 'resting HR is quiet whatever zone 1 says');
+    });
+
+    test('a zone-1 edge just above resting HR does not mute the watch', () {
+      // Resting HR is the night's lowest 30-min mean, so sleeping HR sits a
+      // few bpm above it. Zone 1 at 50 with RHR 49 must not turn 52 bpm of
+      // sleep into activity.
+      final app = connected(52);
+      addTearDown(app.dispose);
+      final w = LiveWorkoutState(
+        startTime: DateTime.now().subtract(const Duration(minutes: 30)),
+        targetKcal: 300,
+        workoutId: 'manual-z1-near',
+        type: 'strength',
+        hrMax: 190,
+        restingHr: 49,
+        zoneSet: trainingZones(manualZoneLowerBpm: [50, 100, 130, 150, 170]),
+      );
+      app.activeWorkout = w;
+      app.debugTickWorkout();
+      expect(w.idleWatch.lastAskAt, isNotNull,
+          reason: 'sleeping HR just above RHR is quiet');
     });
   });
 
