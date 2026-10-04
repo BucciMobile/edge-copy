@@ -129,13 +129,15 @@ List<int>? _unhex(String s) {
 /// started. A connect issued inside that window throws "bluetooth must be
 /// turned on (CBManagerStateUnknown)" on a phone whose Bluetooth is on. Traced
 /// on iOS 27: the ring's first connect straight after the ASK picker, the first
-/// Bluetooth call this app made in the process. Bounded, so a phone whose
-/// Bluetooth really is off still fails the connect, which names it.
-Future<void> _awaitAdapterOn() async {
-  await FlutterBluePlus.adapterState
+/// Bluetooth call this app made in the process. Bounded; returns false when the
+/// adapter never reported ON, so pairing can say Bluetooth is off instead of a
+/// generic connect failure.
+Future<bool> _awaitAdapterOn() async {
+  final s = await FlutterBluePlus.adapterState
       .firstWhere((s) => s == BluetoothAdapterState.on)
       .timeout(const Duration(seconds: 10),
           onTimeout: () => BluetoothAdapterState.unknown);
+  return s == BluetoothAdapterState.on;
 }
 
 /// The live link to a paired Oura ring. One instance; a second concurrent ring
@@ -651,7 +653,9 @@ Future<String?> pairOuraRing(BluetoothDevice device) async {
           'now. Try pairing again in a moment.',
       () async {
     try {
-    await _awaitAdapterOn();
+    if (!await _awaitAdapterOn()) {
+      return 'Bluetooth is off. Turn it on and try again.';
+    }
     await device.connect(timeout: const Duration(seconds: 20));
     final services = await device.discoverServices();
     final localLink = GattBandLink(
