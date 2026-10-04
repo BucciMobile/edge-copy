@@ -85,6 +85,32 @@ class AccessorySetup {
     return id;
   }
 
+  /// Drop the ASK approval of sensor [id], so pairing that kind of sensor again
+  /// opens the sheet instead of handing back this id. The native side only ever
+  /// removes a sensor, never a band. Best-effort; a no-op where there is no ASK.
+  ///
+  /// NO CALLER, AND THAT IS THE CONCLUSION, not an oversight. Both call sites
+  /// it was written for have been taken out again:
+  ///   * before the sensor picker, reverted by `2068fd4b`;
+  ///   * on an explicit forget, taken out here — see the comment in
+  ///     `HrsLink.forgetDevice`.
+  ///
+  /// The reason is the same both times and is not about the trigger.
+  /// `ASAccessorySession.removeAccessory` removes the accessory "from the system
+  /// and for all apps … this call will always remove it from the system", bond
+  /// included, so calling it unpairs the device from the PHONE: the vendor app
+  /// loses it too, nothing here can put it back, and until the user re-pairs
+  /// with that app the device does not advertise at all — which surfaces as a
+  /// silent, timeout-less connect that names nothing. See #520.
+  ///
+  /// So before wiring this up anywhere, be sure the user asked to unpair the
+  /// device from their phone, and not merely to remove it from this app.
+  static Future<void> removeSensor(String id) async {
+    try {
+      await _ch.invokeMethod('removeSensor', id.toUpperCase());
+    } catch (_) {}
+  }
+
   /// Deprovision every ASK band, sensors kept (called on unpair). Best-effort.
   static Future<void> removeAll() async {
     if (!Platform.isIOS) return;

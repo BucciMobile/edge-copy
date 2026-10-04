@@ -115,6 +115,13 @@ enum AccessorySetup {
           result(nil)
         }
 
+      case "removeSensor":
+        if #available(iOS 18.0, *), let id = call.arguments as? String {
+          Impl.shared.removeSensor(id: id) { result(nil) }
+        } else {
+          result(nil)
+        }
+
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -453,12 +460,26 @@ private final class Impl {
   /// Deprovisions every BAND. Sensors are kept: the WHOOP's unpair must not take the
   /// ring's ASK approval with it, or the ring's row stays and its sync can never reach it.
   func removeAll(_ completion: @escaping () -> Void) {
-    ensureActivated()
     let sensors = sensorServices
-    let accessories = session.accessories.filter { a in
-      guard let svc = service(of: a) else { return true }
-      return !sensors.contains(svc)
-    }
+    remove({ a in !(self.service(of: a).map(sensors.contains) ?? false) }, completion)
+  }
+
+  /// Deprovisions the SENSOR with CoreBluetooth id [id] (called when it is forgotten), so
+  /// the next `showSensorPicker` opens a sheet instead of handing back the forgotten one.
+  /// Never removes a band.
+  func removeSensor(id: String, _ completion: @escaping () -> Void) {
+    let sensors = sensorServices
+    let wanted = id.uppercased()
+    remove({ a in
+      a.bluetoothIdentifier?.uuidString.uppercased() == wanted
+        && (self.service(of: a).map(sensors.contains) ?? false)
+    }, completion)
+  }
+
+  private func remove(_ match: (ASAccessory) -> Bool,
+                      _ completion: @escaping () -> Void) {
+    ensureActivated()
+    let accessories = session.accessories.filter(match)
     guard !accessories.isEmpty else { completion(); return }
     let group = DispatchGroup()
     for acc in accessories {

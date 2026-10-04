@@ -1,6 +1,6 @@
 // One-shot backfill of stored strain onto the recalibrated 0–21 scale.
 //
-// Raw 1 Hz substrate is pruned `rawRetentionDays` (3) behind the data edge, so
+// Raw 1 Hz substrate is pruned `rawRetentionDays` behind the data edge, so
 // history CANNOT be re-derived from raw — the engine logs "no substrate (raw
 // pruned) — kept" and keeps the old row. It does not need raw: strain is a pure
 // function of (TRIMP, wake minutes, sex). `metric_series` stores `trimp`, and

@@ -1963,9 +1963,10 @@ class LocalRepositoryImpl extends LocalRepository {
       // with four nights of wear, not like a flat line.
       //
       // `worn_min` is a live metric_series key present every day, so this is the
-      // same scan again, not a new store. Wear OLDER than the 3-day substrate
-      // window is knowable ONLY through this derived key — nothing here
-      // reconstructs it, and a day with no `worn_min` row is simply absent.
+      // same scan again, not a new store. Wear OLDER than the
+      // `rawRetentionDays` substrate window is knowable ONLY through this
+      // derived key — nothing here reconstructs it, and a day with no
+      // `worn_min` row is simply absent.
       'wear': [
         for (final r in await LocalDb.metricSeries('worn_min'))
           {'t': _dateToEpoch(r['date'] as String), 'v': r['value']},
@@ -1973,10 +1974,10 @@ class LocalRepositoryImpl extends LocalRepository {
       // L13 — WHERE THE MATHS CHANGED. The dates at which the algo version
       // behind these values differs from the day before it. This does NOT make
       // the values on either side comparable; nothing can (days lock ~48 h
-      // after wake, and the substrate to re-derive them is gone at 3 days). It
-      // makes the seam visible, so a change-point search refuses to run across
-      // one instead of reporting the day of a version bump as a finding about
-      // the user.
+      // after wake, and the substrate to re-derive them is gone at
+      // `rawRetentionDays`). It makes the seam visible, so a change-point
+      // search refuses to run across one instead of reporting the day of a
+      // version bump as a finding about the user.
       'algo_breaks': _algoBreaks(versions),
       'coverage_devices': coverageDevices,
       // WHAT WAS RECORDING, for the middle row of §6.2's readout. Queried ONLY
@@ -2122,10 +2123,10 @@ class LocalRepositoryImpl extends LocalRepository {
       'steps': (r['steps'] as num?)?.toInt(),
       'max_hr': (r['max_hr'] as num?)?.toInt(),
       // Mean HR over the whole session window, banked at score time so it
-      // outlives the 3-day raw retention. `getWorkouts`/`getWorkout` still
-      // recompute from the substrate while it exists and overwrite this; every
-      // other caller (getSessions, getDayTimeline) now gets a REAL average
-      // instead of nothing.
+      // outlives the `rawRetentionDays` raw retention.
+      // `getWorkouts`/`getWorkout` still recompute from the substrate while it
+      // exists and overwrite this; every other caller (getSessions,
+      // getDayTimeline) now gets a REAL average instead of nothing.
       'avg_hr': (r['avg_hr'] as num?)?.toInt(),
       // Heart-rate recovery (bpm drop in 60 s) backfilled during derivation.
       'hrr60': (r['hrr_bpm'] as num?)?.round(),
@@ -3045,8 +3046,9 @@ class LocalRepositoryImpl extends LocalRepository {
       );
       // CV-01 / TS-07 — freeze the per-km splits on the SAME improvement pass
       // as the trace, and for the same reason: `avg_hr` per split is a join
-      // against `decoded_onehz`, which is gone at ~3 days, so a split not
-      // written inside that window can never be written at all. Forward-only.
+      // against `decoded_onehz`, which is gone at `rawRetentionDays`, so a
+      // split not written inside that window can never be written at all.
+      // Forward-only.
       if (needsTrace) await _persistKmSplits(id, hrRows);
       // VO2max — backfill-only, like `avg_hr`: computed once from a completed
       // km split (a real known distance held over a real known duration) and
@@ -3193,10 +3195,10 @@ class LocalRepositoryImpl extends LocalRepository {
   /// Freeze this session's per-KILOMETRE splits (CV-01 / TS-07).
   ///
   /// THE WHOLE FEATURE IS THIS WRITE. A split's `avg_hr` is a join against
-  /// `decoded_onehz`, which the retention window prunes at ~3 days, so there is
-  /// no retroactive index and never can be: this is forward-only and produces
-  /// its first honest "same pace, fewer beats?" chart 8-12 weeks after it
-  /// ships. Nothing reads `workout_split` yet, and that is expected.
+  /// `decoded_onehz`, which the retention window prunes at `rawRetentionDays`,
+  /// so there is no retroactive index and never can be: this is forward-only
+  /// and produces its first honest "same pace, fewer beats?" chart 8-12 weeks
+  /// after it ships. Nothing reads `workout_split` yet, and that is expected.
   ///
   /// [hrRows] is the session's 1 Hz HR the caller has already read — reused
   /// rather than re-queried, and the reason this hangs off the re-score pass.
@@ -4089,12 +4091,12 @@ class LocalRepositoryImpl extends LocalRepository {
     final recent = await LocalDb.sessionsInRange(nowSec - 28 * 86400, nowSec);
     // The strap these edges belong to — from the most recent session that
     // carries one, then from the day's own 1 Hz rows while they still exist.
-    // Sessions outlive the 3-day raw retention, so this still answers for a
-    // user who has not synced in a week.
-    // The strap these edges belong to. Sessions outlive the ~3-day raw
-    // retention and derived days outlive everything, so this still answers for
-    // a user who has not synced in a week. Unknown stays unknown — it is never
-    // filled in with gen4.
+    // Sessions outlive the `rawRetentionDays` raw retention, so this still
+    // answers for a user who has not synced in a week.
+    // The strap these edges belong to. Sessions outlive the `rawRetentionDays`
+    // raw retention and derived days outlive everything, so this still answers
+    // for a user who has not synced in a week. Unknown stays unknown — it is
+    // never filled in with gen4.
     final todayBundle = await _bundleForDate(todayLabel());
     final family = _familyOfSessions(recent) ??
         await LocalDb.latestSessionDeviceFamily() ??

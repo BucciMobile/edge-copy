@@ -448,8 +448,8 @@ void main() {
     }
 
     /// A derived day carrying nothing but its strap stamp — the provenance the
-    /// zone edges are named after. `decoded_onehz` is pruned at ~3 days, so the
-    /// derived day is where it survives.
+    /// zone edges are named after. `decoded_onehz` is pruned at
+    /// `rawRetentionDays`, so the derived day is where it survives.
     Future<void> seedStampedDay({Map<String, dynamic> extra = const {}}) =>
         LocalDb.putDayResult(
           dayId: todayLabel(),

@@ -195,7 +195,7 @@ abstract class LocalRepository {
   /// point list with the reason it is empty.
   ///
   /// RETENTION-BOUNDED AND SAYS SO. This reads `decoded_onehz`, which prunes at
-  /// `rawRetentionDays = 3` (held to `_maxRawHoldDays = 14` for a day that has
+  /// `rawRetentionDays` (held to `_maxRawHoldDays = 14` for a day that has
   /// not produced a complete result). Outside that window there is nothing to
   /// read and the honest answer is `bounded: true` with `oldest` naming the
   /// edge — never an empty chart with no explanation, and never a per-device
@@ -239,8 +239,8 @@ abstract class LocalRepository {
   /// The default MUST match the implementation's: Dart resolves an omitted
   /// optional from the STATIC receiver type, and every caller holds this
   /// interface — so a different default here is the one that actually runs.
-  /// Three days is the raw-retention horizon; nothing older has substrate left
-  /// to re-score from.
+  /// Three days sits inside `rawRetentionDays`; nothing past the retention
+  /// edge has substrate left to re-score from.
   Future<int> rescoreRecentSessions({int sinceDays = 3}) =>
       throw UnimplementedError('re-layer: rescoreRecentSessions');
   Future<Map<String, dynamic>> startWorkout(String type, {String? title}) =>

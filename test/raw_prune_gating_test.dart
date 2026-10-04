@@ -1,4 +1,4 @@
-// The 3-day raw retention only ever ran behind `if (scope.fullHistory)` — i.e.
+// The raw retention policy only ever ran behind `if (scope.fullHistory)` — i.e.
 // only on a manual "Re-analyze data". An ordinary install never pruned, and
 // `decoded_onehz` + `decoded_rr` grew ~12 MB/day forever. On top of that the
 // guard was all-or-nothing: one day stuck `partial` (which `dayResultIds`
@@ -29,6 +29,23 @@ int _midnightOf(int sec) {
 
 void main() {
   group('rawPruneCutoffSec', () {
+    // A day stays recomputable until 48 h after its end; the prune must not
+    // have reached its derive window (from the previous noon) by the time it
+    // finalizes.
+    test('a day that has just finalized still has its raw', () {
+      final start = _dayStart('2026-05-10');
+      final end = _dayStart('2026-05-11');
+      final dataNow = end + 48 * 3600 + 1;
+      final cutoff = DerivationEngine.rawPruneCutoffSec(
+        dataNowSec: dataNow,
+        rawDayIds: const ['2026-05-10'],
+        finalizedDayIds: const {'2026-05-10'},
+      )!;
+      expect(cutoff, lessThanOrEqualTo(start));
+      expect(DerivationEngine.windowTruncatedByPrune('2026-05-10', cutoff),
+          isFalse);
+    });
+
     // A settled install: everything with raw is finalized, so the plain
     // retention window applies.
     test('prunes at the retention edge when every raw day is finalized', () {
@@ -51,9 +68,10 @@ void main() {
         rawDayIds: const ['2026-05-16', '2026-05-17', '2026-05-20'],
         finalizedDayIds: const {'2026-05-16', '2026-05-17', '2026-05-20'},
       );
-      // The retention edge falls mid-morning; that day survives whole.
-      expect(cutoff, _midnightOf(dataNow - rawRetentionDays * 86400));
-      expect(cutoff, isNot(dataNow - rawRetentionDays * 86400));
+      // The raw retention edge falls at 09:47; that day survives whole.
+      final edge = dataNow - rawRetentionDays * 86400;
+      expect(cutoff, _midnightOf(edge));
+      expect(cutoff, isNot(edge));
     });
 
     test('an unfinalized day holds the cutoff, not off', () {
