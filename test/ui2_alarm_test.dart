@@ -29,6 +29,28 @@ void main() {
     });
   });
 
+  group('a fired alarm', () {
+    setUp(() => ClockFormatController.seed(ClockFormat.h24));
+    tearDown(ClockFormatController.debugReset);
+
+    Future<void> pump(WidgetTester t, DateTime now) => t.pumpWidget(
+        MaterialApp(
+            home: AlarmScreenView(
+                firedAt: DateTime(2026, 8, 22, 6, 30), now: now)));
+
+    testWidgets('says it fired for the rest of that day', (t) async {
+      // the next alarm is armed the moment this one fires, so without this
+      // the row just swaps times and a real fire reads like a fault
+      await pump(t, DateTime(2026, 8, 22, 9));
+      expect(find.text('Fired at 06:30'), findsOneWidget);
+    });
+
+    testWidgets('and not the day after', (t) async {
+      await pump(t, DateTime(2026, 8, 23, 9));
+      expect(find.textContaining('Fired at'), findsNothing);
+    });
+  });
+
   group('the home door', () {
     // The time follows the user's clock format; pin the 24-hour one.
     setUp(() => ClockFormatController.seed(ClockFormat.h24));

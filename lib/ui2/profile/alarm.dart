@@ -101,6 +101,7 @@ class AlarmScreen extends StatelessWidget {
     return AlarmScreenView(
       armedAt: armedAt,
       state: state,
+      firedAt: app.alarmFiredAt,
       connected: app.isConnected,
       schedule: app.alarmSchedule,
       onToggleDay: (weekday, enabled) =>
@@ -119,6 +120,9 @@ class AlarmScreenView extends StatelessWidget {
   final DateTime? armedAt;
   final AlarmArmState state;
   final bool connected;
+
+  /// When the band last fired the alarm, shown for the rest of that day.
+  final DateTime? firedAt;
 
   /// Injectable clock. "Tomorrow" vs "Later today" is relative, so a golden of
   /// this screen is otherwise a function of when the suite happens to run.
@@ -143,6 +147,7 @@ class AlarmScreenView extends StatelessWidget {
     this.armedAt,
     this.state = AlarmArmState.none,
     this.connected = false,
+    this.firedAt,
     this.now,
     this.schedule = const [],
     this.onToggleDay,
@@ -157,6 +162,7 @@ class AlarmScreenView extends StatelessWidget {
     final p = P.of(c);
     final l = AppLocalizations.of(c);
     final at = armedAt;
+    final fired = firedAt;
     final anyDayEnabled = schedule.any((d) => d.enabled);
     return Scaffold(
       backgroundColor: p.bg,
@@ -171,6 +177,17 @@ class AlarmScreenView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(S.x4, 0, S.x4, S.x10),
               children: [
+                if (fired != null &&
+                    calendarDaysBetween(fired, now ?? DateTime.now()) == 0) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Pill(
+                        l?.alarmFiredAt(_hhmm(fired)) ??
+                            'Fired at ${_hhmm(fired)}', C.green,
+                        icon: LucideIcons.alarmClockCheck),
+                  ),
+                  const SizedBox(height: S.x3),
+                ],
                 if (at != null) ...[
                   Surface(
                     child: Column(

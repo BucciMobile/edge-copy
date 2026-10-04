@@ -59,6 +59,7 @@
   "profileSetupOptional": "OPTIONAL",
   "profileSetupPickOneToContinue": "Wähle oben eine Option, um fortzufahren.",
   "alarmNavTitle": "Wecker",
+  "alarmFiredAt": "Ausgelöst um {time}",
   "alarmNavSub": "Weckt dich über das Band, nicht über dein Smartphone",
   "alarmArmedFor": "GESTELLT AUF",
   "alarmNextLabel": "NÄCHSTER",

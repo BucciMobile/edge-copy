@@ -59,6 +59,7 @@
   "profileSetupOptional": "वैकल्पिक",
   "profileSetupPickOneToContinue": "जारी रखने के लिए ऊपर एक विकल्प चुनें।",
   "alarmNavTitle": "अलार्म",
+  "alarmFiredAt": "{time} पर बजा",
   "alarmNavSub": "फ़ोन नहीं, बैंड पर आपको जगाता है",
   "alarmArmedFor": "इसके लिए सेट",
   "alarmNotConnectedTitle": "बैंड कनेक्ट नहीं है",
