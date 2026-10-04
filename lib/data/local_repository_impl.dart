@@ -747,6 +747,10 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, dynamic>> getDayHeart(String date) async {
     final b = await _bundleForDate(date);
     if (b == null) return const {};
+    // The baseline window ends at the day actually served: Today falls back
+    // to the latest complete day, and that night must not sit in its own
+    // baseline (same as getToday).
+    final served = (b['date'] as String?) ?? date;
     final hrCurve = (_sub(b, 'series')?['hr_curve'] as List?) ?? const [];
     final rmssd = _scalar(b, 'rmssd');
     final cd = await _crossDay();
@@ -759,7 +763,7 @@ class LocalRepositoryImpl extends LocalRepository {
       'hrv': {
         if (rmssd != null) 'rmssd': rmssd.round(),
         'sdnn': _scalar(b, 'sdnn')?.round(),
-        'baseline': (await _seriesMean('rmssd', before: date))?.round(),
+        'baseline': (await _seriesMean('rmssd', before: served))?.round(),
         // HRV stability (CV %) + LF/HF — both now computed.
         'cv': _sub(b, 'clinical')?['cv'],
         // Rounded to 2dp for display — the raw clinical metric is round6()'d
@@ -784,7 +788,7 @@ class LocalRepositoryImpl extends LocalRepository {
       'daytime_hrv': b['daytime_hrv'],
       'nocturnal': _nocturnal(
         b,
-        baselineRhr: await _seriesMean('rhr', before: date),
+        baselineRhr: await _seriesMean('rhr', before: served),
       ),
       'resp': _respObj(b),
       // 'spo2' (oxygen dips) moved to _daySleep()/getDaySleep — it's an
@@ -801,12 +805,14 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, dynamic>> getDayHrv(String date) async {
     final b = await _bundleForDate(date);
     if (b == null) return const {};
+    // Baseline window ends at the served day, see getDayHeart.
+    final served = (b['date'] as String?) ?? date;
     return {
       'timeline': (_sub(b, 'series')?['hrv_timeline'] as List?) ?? const [],
       'rmssd': _scalar(b, 'rmssd'),
       'sdnn': _scalar(b, 'sdnn'),
       'ln_rmssd': _scalar(b, 'ln_rmssd'),
-      'baseline': await _seriesMean('rmssd', before: date),
+      'baseline': await _seriesMean('rmssd', before: served),
       'hrv_time': _sub(b, 'clinical.hrv_time'),
       'hrv_freq': _sub(b, 'clinical.hrv_freq'),
       'prsa_dc': _sub(b, 'clinical.prsa_dc'),
@@ -885,6 +891,8 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, dynamic>> _daySleep(String date) async {
     final b = await _bundleForDate(date);
     if (b == null) return const {};
+    // Baseline window ends at the served day, see getDayHeart.
+    final served = (b['date'] as String?) ?? date;
     // Each is a Metric envelope — read the inner `.value` where the fields live.
     final acct = _sub(b, 'sleep.accounting.value');
     final win = _sub(b, 'sleep.window.value');
@@ -990,7 +998,7 @@ class LocalRepositoryImpl extends LocalRepository {
       'charging': b['sleep_charging'],
       'nocturnal': _nocturnal(
         b,
-        baselineRhr: await _seriesMean('rhr', before: date),
+        baselineRhr: await _seriesMean('rhr', before: served),
       ),
       'resp': _respObj(b),
       // Oxygen dips (SpO2/ODI) — moved here from getDayHeart's payload: an

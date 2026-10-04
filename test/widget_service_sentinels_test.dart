@@ -181,6 +181,49 @@ void main() {
       expect(noct['vs_baseline_bpm'], 4.0);
       expect(noct['elevated'], isTrue);
     });
+
+    test('day screens for today, before today derives, leave the served '
+        'night out of its own baseline', () async {
+      final db = await LocalDb.instance;
+      await db.delete('metric_series');
+      await db.delete('day_result');
+      String label(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
+          '${d.month.toString().padLeft(2, '0')}-'
+          '${d.day.toString().padLeft(2, '0')}';
+      final today = DateTime.parse(todayLabel());
+      for (var i = 2; i <= 28; i++) {
+        final day = label(today.subtract(Duration(days: i)));
+        await db.insert(
+            'metric_series', {'date': day, 'key': 'rmssd', 'value': 50.0});
+        await db.insert(
+            'metric_series', {'date': day, 'key': 'rhr', 'value': 55.0});
+      }
+      // No row for today yet, so today's screens serve last night's bundle.
+      final lastNight = label(today.subtract(const Duration(days: 1)));
+      await LocalDb.putDayResult(
+        dayId: lastNight,
+        algoVersion: kAlgoVersion,
+        payloadJson: jsonEncode({
+          'date': lastNight,
+          'scalars': {'readiness': 74.0, 'rhr': 59.0, 'rmssd': 30.0},
+          'clinical': {'resting_hr': {'value': 59.0}},
+          'sleep': {
+            'accounting': {
+              'value': {'tst_sec': 437 * 60, 'efficiency_pct': 91.0},
+            },
+          },
+        }),
+        windowJson: '{}',
+        series: {'rmssd': 30.0, 'rhr': 59.0},
+      );
+
+      final heart = await repo.getDayHeart(todayLabel());
+      expect((heart['hrv'] as Map)['baseline'], 50);
+      expect((heart['nocturnal'] as Map)['vs_baseline_bpm'], 4.0);
+      expect((await repo.getDayHrv(todayLabel()))['baseline'], 50.0);
+      final sleep = await repo.getDaySleep(todayLabel());
+      expect((sleep['nocturnal'] as Map)['vs_baseline_bpm'], 4.0);
+    });
   });
 
   // `readinessBand` is the ONLY copy of the readiness cut-offs. The widget, the
