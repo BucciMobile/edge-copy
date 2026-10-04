@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:health/health.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -17,7 +18,9 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_workout_import.dart';
 
-HealthDataPoint _w(String uuid) => HealthDataPoint(
+HealthDataPoint _w(String uuid,
+        {String sourceId = 'src', String sourceName = 'Strava'}) =>
+    HealthDataPoint(
       uuid: uuid,
       value: WorkoutHealthValue(
         workoutActivityType: HealthWorkoutActivityType.RUNNING,
@@ -26,10 +29,10 @@ HealthDataPoint _w(String uuid) => HealthDataPoint(
       unit: HealthDataUnit.NO_UNIT,
       dateFrom: DateTime(2026, 8, 1, 9),
       dateTo: DateTime(2026, 8, 1, 10),
-      sourceId: 'src',
+      sourceId: sourceId,
       sourcePlatform: HealthPlatformType.appleHealth,
       sourceDeviceId: 'dev',
-      sourceName: 'Strava',
+      sourceName: sourceName,
     );
 
 /// Stubs the platform channel calls sync() makes so it never leaves Dart:
@@ -132,5 +135,38 @@ void main() {
 
     expect(sent, [false, true],
         reason: 'the auto path calls sync() bare and must never prompt');
+  });
+
+  test('copies of our own exports stored before the filter get cleaned up',
+      () async {
+    PackageInfo.setMockInitialValues(
+      appName: 'Edge',
+      packageName: 'site.openstrap.edge',
+      version: '1',
+      buildNumber: '1',
+      buildSignature: '',
+    );
+    await LocalDb.putImportedWorkouts([
+      for (final u in ['old1', 'old2'])
+        ImportedWorkoutRow(
+          uuid: u,
+          startTs: 1,
+          endTs: 2,
+          kind: 'running',
+          source: 'Edge',
+        ).toRow(),
+    ]);
+    final importer = HealthWorkoutImporter(
+      health: _FakeHealth([
+        _w('ours', sourceId: 'site.openstrap.edge', sourceName: 'Edge'),
+        _w('theirs'),
+      ]),
+      isApple: false,
+    );
+
+    await importer.sync();
+
+    final stored = await LocalDb.importedWorkouts();
+    expect(stored.map((r) => r['uuid']), ['theirs']);
   });
 }

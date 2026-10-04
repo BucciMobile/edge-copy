@@ -2512,6 +2512,27 @@ class LocalDb {
     );
   }
 
+  /// Drop every imported workout whose source is one of [sources], AND its
+  /// route, like [deleteImportedWorkout].
+  static Future<void> deleteImportedWorkoutsFrom(Set<String> sources) async {
+    if (sources.isEmpty) return;
+    final db = await instance;
+    final marks = List.filled(sources.length, '?').join(',');
+    await db.transaction((txn) async {
+      await txn.delete(
+        'workout_route',
+        where: 'session_id IN (SELECT uuid FROM imported_workout '
+            'WHERE source IN ($marks))',
+        whereArgs: [...sources],
+      );
+      await txn.delete(
+        'imported_workout',
+        where: 'source IN ($marks)',
+        whereArgs: [...sources],
+      );
+    });
+  }
+
   // ── EXTERNAL HEART-RATE SENSOR (0x180D) ─────────────────────────────────────
   /// What a standard Bluetooth heart-rate sensor delivered during ONE workout.
   ///
