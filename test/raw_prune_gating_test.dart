@@ -30,7 +30,8 @@ int _midnightOf(int sec) {
 void main() {
   group('rawPruneCutoffSec', () {
     // A day stays recomputable until 48 h after its end; the prune must not
-    // have reached its first rows by the time it finalizes.
+    // have reached its derive window (from the previous noon) by the time it
+    // finalizes.
     test('a day that has just finalized still has its raw', () {
       final start = _dayStart('2026-05-10');
       final end = _dayStart('2026-05-11');
@@ -41,6 +42,8 @@ void main() {
         derivedDayIds: const {'2026-05-10'},
       )!;
       expect(cutoff, lessThanOrEqualTo(start));
+      expect(DerivationEngine.windowTruncatedByPrune('2026-05-10', cutoff),
+          isFalse);
     });
 
     // A settled install: everything with raw is derived, so the plain
@@ -65,8 +68,10 @@ void main() {
         rawDayIds: const ['2026-05-16', '2026-05-17', '2026-05-20'],
         derivedDayIds: const {'2026-05-16', '2026-05-17', '2026-05-20'},
       );
-      // 05-17 09:47 is the raw retention edge; 05-17 survives whole.
-      expect(cutoff, _dayStart('2026-05-17'));
+      // The raw retention edge falls at 09:47; that day survives whole.
+      final edge = dataNow - rawRetentionDays * 86400;
+      expect(cutoff, _midnightOf(edge));
+      expect(cutoff, isNot(edge));
     });
 
     test('an un-derived day holds the cutoff at ITS OWN start, not off', () {
