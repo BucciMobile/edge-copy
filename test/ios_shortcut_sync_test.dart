@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'dart:io';
 
+// ignore: depend_on_referenced_packages
+import 'package:flutter_blue_plus_platform_interface/flutter_blue_plus_platform_interface.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/state/prefs.dart';
 import 'package:openstrap_edge/sync/background_sync.dart';
@@ -13,6 +16,38 @@ import 'package:openstrap_edge/sync/reset_gate.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+base class _AdapterOn extends FlutterBluePlusPlatform {
+  @override
+  Future<BmBluetoothAdapterState> getAdapterState(
+    BmBluetoothAdapterStateRequest request,
+  ) async => BmBluetoothAdapterState(adapterState: BmAdapterStateEnum.on);
+}
+
+// Stuck turning on until told otherwise. FBP caches the adapter state it reads
+// and keeps it fed from the first platform it saw, so the test using this runs
+// before the one installing _AdapterOn and settles the cache to on when done.
+base class _AdapterTurningOn extends FlutterBluePlusPlatform {
+  final changes = StreamController<BmBluetoothAdapterState>.broadcast();
+
+  @override
+  Future<BmBluetoothAdapterState> getAdapterState(
+    BmBluetoothAdapterStateRequest request,
+  ) async => BmBluetoothAdapterState(adapterState: BmAdapterStateEnum.turningOn);
+
+  @override
+  Stream<BmBluetoothAdapterState> get onAdapterStateChanged => changes.stream;
+}
+
+class _LiveEngine extends BleEngine {
+  _LiveEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
+
+  @override
+  bool get isConnected => true;
+
+  @override
+  Map<String, dynamic> get offloadSnapshot => {'batches_acked': 0};
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -170,4 +205,113 @@ void main() {
       );
     },
   );
+
+  test(
+    'an adapter that never settles is bluetoothUnavailable, not alreadyRunning',
+    () async {
+      final platform = _AdapterTurningOn();
+      FlutterBluePlusPlatform.instance = platform;
+      addTearDown(() async {
+        platform.changes.add(
+          BmBluetoothAdapterState(adapterState: BmAdapterStateEnum.on),
+        );
+        await pumpEventQueue();
+      });
+      await PairedDevice.save(
+        '00000000-0000-0000-0000-000000000001',
+        'test',
+        generation: 'gen4',
+      );
+      final result = await IosShortcutSync.run(
+        'adapter',
+        const Duration(seconds: 10),
+      );
+      expect(result.status, 'bluetoothUnavailable');
+      expect(HeadlessSyncGate.timedOutRuns, 0);
+      expect(HeadlessSyncGate.busy, isFalse);
+    },
+  );
+
+  test(
+    'a Shortcut past its deadline releases the gate while the app burst runs on',
+    () async {
+      FlutterBluePlusPlatform.instance = _AdapterOn();
+      await PairedDevice.save(
+        '00000000-0000-0000-0000-000000000001',
+        'test',
+        generation: 'gen4',
+      );
+      final burst = Completer<SyncReport>();
+      IosShortcutSync.foregroundEngine = _LiveEngine.new;
+      IosShortcutSync.foregroundSync = (_) => burst.future;
+      addTearDown(() {
+        IosShortcutSync.foregroundEngine = null;
+        IosShortcutSync.foregroundSync = null;
+        if (!burst.isCompleted) burst.complete(SyncReport(0, 0, true));
+      });
+      final result = await IosShortcutSync.run(
+        'deadline',
+        const Duration(milliseconds: 300),
+      );
+      expect(result.status, 'partial');
+      await pumpEventQueue();
+      expect(HeadlessSyncGate.busy, isFalse);
+      expect(
+        (await HeadlessSyncGate.tryRun('bg_task', () async => true)),
+        isTrue,
+      );
+    },
+  );
+
+  test('a Shortcut stopped mid-burst still reports committed records', () async {
+    FlutterBluePlusPlatform.instance = _AdapterOn();
+    await PairedDevice.save(
+      '00000000-0000-0000-0000-000000000001',
+      'test',
+      generation: 'gen4',
+    );
+    final burst = Completer<SyncReport>();
+    IosShortcutSync.foregroundEngine = _LiveEngine.new;
+    IosShortcutSync.foregroundSync = (task) {
+      task.update('syncing');
+      IosShortcutSync.foregroundCommitted(42);
+      return burst.future;
+    };
+    addTearDown(() {
+      IosShortcutSync.foregroundEngine = null;
+      IosShortcutSync.foregroundSync = null;
+      if (!burst.isCompleted) burst.complete(SyncReport(0, 0, true));
+    });
+    final result = await IosShortcutSync.run(
+      'committed',
+      const Duration(milliseconds: 300),
+    );
+    expect(result.status, 'partial');
+    expect(result.records, 42);
+  });
+
+  test('a joined app burst reports only what the Shortcut saw commit', () async {
+    FlutterBluePlusPlatform.instance = _AdapterOn();
+    await PairedDevice.save(
+      '00000000-0000-0000-0000-000000000001',
+      'test',
+      generation: 'gen4',
+    );
+    IosShortcutSync.foregroundEngine = _LiveEngine.new;
+    IosShortcutSync.foregroundSync = (task) async {
+      IosShortcutSync.foregroundCommitted(3);
+      // The burst's own total includes what landed before the Shortcut joined.
+      return SyncReport(10, 2, false);
+    };
+    addTearDown(() {
+      IosShortcutSync.foregroundEngine = null;
+      IosShortcutSync.foregroundSync = null;
+    });
+    final result = await IosShortcutSync.run(
+      'joined',
+      const Duration(seconds: 5),
+    );
+    expect(result.status, 'partial');
+    expect(result.records, 3);
+  });
 }

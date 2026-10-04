@@ -25,7 +25,11 @@ class IosShortcutSync {
   static ShortcutSyncTask? _active;
   static void Function()? _onForegroundCommitFailure;
 
+  static void Function(int records)? _onForegroundCommitted;
+
   static void foregroundCommitFailed() => _onForegroundCommitFailure?.call();
+  static void foregroundCommitted(int records) =>
+      _onForegroundCommitted?.call(records);
 
   static Future<SyncReport> Function(ShortcutSyncTask)? foregroundSync;
   static BleEngine? Function()? foregroundEngine;
@@ -121,13 +125,20 @@ class IosShortcutSync {
     }
     if (task.stopped) return task.expired;
 
-    final adapter = await FlutterBluePlus.adapterState
-        .firstWhere(
-          (s) =>
-              s != BluetoothAdapterState.unknown &&
-              s != BluetoothAdapterState.turningOn,
-        )
-        .timeout(const Duration(seconds: 3));
+    // Caught here: a TimeoutException escaping the body reads as the gate's
+    // own run ceiling, which reports 'alreadyRunning' for a sync that never ran.
+    final BluetoothAdapterState adapter;
+    try {
+      adapter = await FlutterBluePlus.adapterState
+          .firstWhere(
+            (s) =>
+                s != BluetoothAdapterState.unknown &&
+                s != BluetoothAdapterState.turningOn,
+          )
+          .timeout(const Duration(seconds: 3));
+    } on TimeoutException {
+      return const ShortcutSyncResult('bluetoothUnavailable');
+    }
     final blocked = _blockerResult(
       classifyBleBlocker(adapterState: adapter.name),
     );
@@ -139,6 +150,10 @@ class IosShortcutSync {
     final liveEngine = foregroundEngine?.call();
     if (liveSync != null && liveEngine != null) {
       _onForegroundCommitFailure = () => task.stop('failed');
+      // Counted as each batch commits, so a Shortcut stopped mid-burst still
+      // reports what was saved.
+      _onForegroundCommitted = (count) =>
+          task.update(task.phase, records: task.records + count);
       task.update(liveEngine.isConnected ? 'syncing' : 'connecting');
       var radioConnected = liveEngine.isConnected;
       final radio = BluetoothDevice.fromId(paired.remoteId).connectionState
@@ -166,28 +181,33 @@ class IosShortcutSync {
       task.onStop = progress.cancel;
       try {
         // A cancelled Shortcut must not tear down the app's own live session.
-        final report = await liveSync(task);
+        // The app's burst can outlive the deadline; stop waiting (and release
+        // the gate) when the task stops instead of when the burst ends.
+        final report = await Future.any([
+          liveSync(task),
+          task.whenStopped.then((_) => SyncReport(0, 0, false)),
+        ]);
         if (task.stopped) return task.expired;
         final blocker = _blockerResult(liveEngine.bluetoothBlocker);
         if (blocker != null) return blocker;
-        if (!liveEngine.isConnected && report.records == 0) {
+        if (!liveEngine.isConnected && task.records == 0) {
           return ShortcutSyncResult(
             radioConnected ? 'failed' : 'bandUnreachable',
           );
         }
-        task.records = report.records;
         if (!report.complete || await _backlogRemains(liveEngine)) {
-          return ShortcutSyncResult('partial', records: report.records);
+          return ShortcutSyncResult('partial', records: task.records);
         }
         // A resumed app's DeriveScheduler derives and refreshes the UI; a second
         // pass here would take DerivationEngine's lock and turn its job into a no-op.
         if (WidgetsBinding.instance.lifecycleState ==
             AppLifecycleState.resumed) {
-          return ShortcutSyncResult('complete', records: report.records);
+          return ShortcutSyncResult('complete', records: task.records);
         }
         return await _derive(task);
       } finally {
         _onForegroundCommitFailure = null;
+        _onForegroundCommitted = null;
         task.onStop = null;
         progress.cancel();
         await radio.cancel();
