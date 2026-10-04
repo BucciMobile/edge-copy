@@ -41,7 +41,11 @@ void main() {
     addTearDown(() => DerivationEngine.debugRunning = false);
 
     var done = false;
-    final edit = app.reanalyzeForNapEdit().then((_) => done = true);
+    // A sleep edit; nap edits go through the durable review jobs instead.
+    final edit = app
+        .setSleepOverride(todayLabel(), DateTime(2026, 9, 30, 0, 30),
+            DateTime(2026, 9, 30, 7))
+        .then((_) => done = true);
     await Future<void>.delayed(const Duration(milliseconds: 700));
     expect(done, isFalse,
         reason: 'run() would have returned 0 and the edit was lost');

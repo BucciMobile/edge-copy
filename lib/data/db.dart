@@ -10415,8 +10415,11 @@ class LocalDb {
       // serving it showed a partial night and its readiness as this morning's.
       // A row with no window is held too: mid-drain the edge can still sit
       // before sleep onset, and that read as a settled 'no sleep' night.
-      final offsetMs = (((decoded['sleep'] as Map?)?['window'] as Map?)?['value']
-          as Map?)?['offset_ms'];
+      // A no-sleep window's `value` is the string '—', not a Map.
+      final sleepMap = decoded['sleep'];
+      final windowMap = sleepMap is Map ? sleepMap['window'] : null;
+      final windowVal = windowMap is Map ? windowMap['value'] : null;
+      final offsetMs = windowVal is Map ? windowVal['offset_ms'] : null;
       final wakeSec = offsetMs is num ? offsetMs ~/ 1000 : null;
       if (dayId == today &&
           !overnightSettled(
