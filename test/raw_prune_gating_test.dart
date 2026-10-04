@@ -1,4 +1,4 @@
-// The 3-day raw retention only ever ran behind `if (scope.fullHistory)` — i.e.
+// The raw retention policy only ever ran behind `if (scope.fullHistory)` — i.e.
 // only on a manual "Re-analyze data". An ordinary install never pruned, and
 // `decoded_onehz` + `decoded_rr` grew ~12 MB/day forever. On top of that the
 // guard was all-or-nothing: one day stuck `partial` (which `dayResultIds`
@@ -23,6 +23,10 @@ int _dayStart(String label) {
 
 void main() {
   group('rawPruneCutoffSec', () {
+    test('keeps five days of raw substrate', () {
+      expect(rawRetentionDays, 5);
+    });
+
     // A settled install: everything with raw is derived, so the plain
     // retention window applies.
     test('prunes at the retention edge when every raw day is derived', () {
