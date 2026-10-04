@@ -2440,6 +2440,18 @@ class AppState extends ChangeNotifier {
     if (_savedAlarm != null) {
       _alarm.set(_savedAlarm!, DateTime.now().millisecondsSinceEpoch);
       _alarm.confirmed = alarmPrefs.getBool('alarm_epoch_confirmed') ?? false;
+      // Resume the not-confirmed alert a killed process was still holding.
+      final saved = _savedAlarm!;
+      final resume = alarmLatchAlertResumeDelay(
+          alarmPrefs.getStringList('alarm_latch_alert'),
+          savedEpoch: saved,
+          confirmed: _alarm.confirmed,
+          nowMs: DateTime.now().millisecondsSinceEpoch);
+      if (resume != null) {
+        _alarmGraceTimer = Timer(resume, () {
+          if (!_disposed) unawaited(_notifyAlarmLatchFailed(saved));
+        });
+      }
     }
     await _loadAlarmSchedule();
     await _seedAlarmScheduleFromLegacyIfNeeded();
@@ -4607,7 +4619,7 @@ class AppState extends ChangeNotifier {
   /// edited schedule or a just-fired alarm re-arms with no manual step, and a
   /// fired one-shot (which clears `_savedAlarm`) picks up its next occurrence
   /// on the very next connect.
-  Future<void> _armNextAlarmOccurrence() async {
+  Future<void> _armNextAlarmOccurrence({int? firedEpoch}) async {
     if (!isConnected) return;
     try {
       // A headless re-arm (background_sync.dart) can have rewritten
@@ -4619,17 +4631,23 @@ class AppState extends ChangeNotifier {
       final onDisk = prefs.getInt('alarm_epoch');
       if (onDisk != _savedAlarm) {
         _savedAlarm = onDisk;
+        // The optimistic in-session epoch is older than what headless armed,
+        // and it wins in [alarmEpoch]; drop it so Home and the alarm screen
+        // show the arm that's actually on the strap.
+        device.alarmEpoch = null;
         if (onDisk != null) {
           _alarm.set(onDisk, DateTime.now().millisecondsSinceEpoch);
           _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
         } else {
           _alarm.disable();
         }
+        notifyListeners();
       }
       final result = await armNextScheduledOccurrence(
         engine: engine,
         schedule: _schedule,
         currentArmedEpoch: _savedAlarm ?? device.alarmEpoch,
+        now: alarmRearmFrom(DateTime.now(), firedEpoch),
       );
       if (result.disabled) {
         // Every weekday got disabled since the last arm — the strap doesn't
@@ -4784,6 +4802,12 @@ class AppState extends ChangeNotifier {
     await prefs.setInt('alarm_epoch', epoch);
     // Not confirmed yet — event 56 (below, in _handleAlarmEvent) flips this.
     await prefs.setBool('alarm_epoch_confirmed', false);
+    // The alert timers below live in memory only; this lets a relaunch
+    // still send the critical alert if the process dies before it goes out.
+    await prefs.setStringList('alarm_latch_alert', [
+      '$epoch',
+      '${alarmLatchAlertAtMs(DateTime.now().millisecondsSinceEpoch, _alarm.graceMs)}',
+    ]);
     // Nudge the UI once the grace window elapses so an unconfirmed alarm flips to
     // its soft warning even if no event ever arrives.
     _armAlarmGraceTimer(when);
@@ -4795,9 +4819,21 @@ class AppState extends ChangeNotifier {
   void _armAlarmGraceTimer(DateTime when) {
     _alarmGraceTimer?.cancel();
     _alarmGraceTimer = Timer(
-      Duration(milliseconds: _alarm.graceMs + 250),
+      alarmGraceTimerDelay(_alarm.graceMs, retryLeft: !_alarmAutoRetried),
       () => unawaited(_onAlarmGraceElapsed(when)),
     );
+  }
+
+  /// Every retry is spent and 56 still hasn't come. While connected a slow
+  /// strap can still confirm, so the critical alert waits; [_handleAlarmEvent]
+  /// cancels this timer when 56 lands, and the alert re-checks confirmation.
+  void _escalateAlarmLatchFailed(int epoch) {
+    // A retry that resumes after a newer arm must not cancel that arm's timer.
+    if (_savedAlarm != epoch) return;
+    _alarmGraceTimer?.cancel();
+    _alarmGraceTimer = Timer(alarmLatchAlertDelay(connected: isConnected), () {
+      if (!_disposed) unawaited(_notifyAlarmLatchFailed(epoch));
+    });
   }
 
   /// Grace window elapsed with no event 56. Before showing the soft warning,
@@ -4811,11 +4847,17 @@ class AppState extends ChangeNotifier {
     // confirmation machine now; retrying the stale time would clobber it.
     if (_savedAlarm != epoch) return;
     if (_alarmAutoRetried || !isConnected) {
+      // Offline, the first window is also the last, but its timer fired just
+      // before it closes; end it so this rebuild lands on the warning.
+      _alarm.setAtMs = null;
       notifyListeners();
-      unawaited(_notifyAlarmLatchFailed(epoch));
+      _escalateAlarmLatchFailed(epoch);
       return;
     }
     _alarmAutoRetried = true;
+    // Keep showing "waiting" while the re-send is in flight instead of
+    // flashing the warning between the two windows.
+    _alarm.set(epoch, DateTime.now().millisecondsSinceEpoch);
     var rearmed = false;
     try {
       // gen5 made setAlarm return the armed instant (null = the write never
@@ -4827,7 +4869,11 @@ class AppState extends ChangeNotifier {
     }
     // The write itself never landed, so the one retry was not actually spent —
     // give it back rather than latching this alarm out of any future retry.
-    if (!rearmed) _alarmAutoRetried = false;
+    if (!rearmed) {
+      _alarmAutoRetried = false;
+      // End the window opened above so the warning shows now.
+      if (_savedAlarm == epoch && !_alarm.confirmed) _alarm.setAtMs = null;
+    }
     // dispose() ran while the write was in flight — do NOT create a timer it
     // no longer has any chance to cancel (it would keep poking a torn-down
     // engine on every fire).
@@ -4839,7 +4885,7 @@ class AppState extends ChangeNotifier {
       return;
     }
     notifyListeners();
-    unawaited(_notifyAlarmLatchFailed(epoch));
+    _escalateAlarmLatchFailed(epoch);
   }
 
   /// The "alarm not confirmed" safety notification (Feature 2.1): fires once
@@ -4917,7 +4963,7 @@ class AppState extends ChangeNotifier {
   /// [disableAlarm] (the DISABLE_ALARM opcode).
   Future<void> clearAlarm() => disableAlarm();
 
-  /// Strap alarm-lifecycle events (56 set / 57–58 fired / 59 disabled). This is
+  /// Strap alarm-lifecycle events (56 set / 57 fired / 58 buzz / 59 disabled). This is
   /// the authoritative confirmation the SET write actually took. The edge DOES see
   /// the protocol EventId names (strapDrivenAlarmSet == 56, …); the pure state
   /// machine matches the raw ids so it stays dependency-free.
@@ -4948,7 +4994,17 @@ class AppState extends ChangeNotifier {
         // row went on advertising e.g. "06:30 (7/25)" as the CURRENT alarm
         // indefinitely — with live "Test buzz"/"Clear" affordances for an alarm
         // that is no longer armed. Clear state AND the persisted epoch.
+        final firedEpoch = _savedAlarm ?? device.alarmEpoch;
         _clearArmedAlarmState();
+        // ...and arm the schedule's next occurrence now. Otherwise nothing
+        // re-arms until the next reconnect, so a link that stays up all day
+        // leaves tomorrow unarmed and Home saying "Set an alarm". Computed
+        // past the slot that just fired (see [alarmRearmFrom]) so a strap
+        // running slightly fast doesn't re-arm the spent slot.
+        unawaited(_armNextAlarmOccurrence(firedEpoch: firedEpoch));
+        break;
+      case AlarmEffect.buzzed:
+        _log('[alarm] RUN_ALARM buzz (event $id), armed slot unchanged.');
         break;
       case AlarmEffect.cleared:
         // Same persistence gap on the strap-driven clear (event 59): state was
