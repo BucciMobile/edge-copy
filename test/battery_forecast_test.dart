@@ -144,6 +144,20 @@ void main() {
       expect(r.predictedEmptyAt!.difference(now).inMinutes, closeTo(300, 45));
     });
 
+    test('a stale last reading counts down from when it was read', () {
+      // Run ended at 20:00 on 20% (4%/h), band out of range since; asked at
+      // 23:00 it has ~2 h left, not the 5 h it had when last seen.
+      final later = now.add(const Duration(hours: 3));
+      final r = f.forecast(
+        samples: run(endPct: 20, ratePctPerHour: 4),
+        now: later,
+        wakeAt: wake,
+      );
+      expect(r.predictedEmptyAt!.difference(later).inMinutes, closeTo(120, 45));
+      // 20 − 4×11 from 20:00, the same whether asked at 20:00 or 23:00.
+      expect(r.predictedPctAtWake, closeTo(-24, 3));
+    });
+
     test('a single stuck reading does not drag the estimate (Theil–Sen)', () {
       final clean = run(endPct: 30, ratePctPerHour: 3);
       final withOutlier = [...clean];

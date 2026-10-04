@@ -2201,6 +2201,14 @@ class LocalRepositoryImpl extends LocalRepository {
     final fromTs = _rangeFromSec(range, now);
     final rows = await LocalDb.sessionsInRange(fromTs, nowSec);
     final workouts = [for (final r in rows) _workoutOf(r)];
+    // Seconds each session's banked trace was scored from. A substrate window
+    // thinner than that is the tail the prune cutoff left behind, not the
+    // session, so it must not replace the banked full-window avg/peak.
+    final banked = {
+      for (final r in rows)
+        if (r['trace_samples'] is num)
+          r['id']: (r['trace_samples'] as num).toInt(),
+    };
 
     // Per-session HR aggregates from the 1 Hz substrate (one indexed join).
     // Sessions have no avg_hr column — without this every workout looked like
@@ -2223,6 +2231,8 @@ class LocalRepositoryImpl extends LocalRepository {
       for (final w in workouts) {
         final s = stats[w['id']];
         final raw = rawBySession[w['id']];
+        final b = banked[w['id']];
+        if (b != null && (s?['n'] ?? 0) < b) continue;
         if (s != null && (s['n'] ?? 0) != 0) {
           w['avg_hr'] = (s['avg_hr'] as num).round();
         }
@@ -2325,7 +2335,12 @@ class LocalRepositoryImpl extends LocalRepository {
       // rather than scanning it a second time on every detail open.
       final hrRows =
           rescored.hrRows ?? await LocalDb.hrSamplesInRange(startTs, endTs);
-      if (hrRows.isNotEmpty) {
+      // Fewer seconds than the banked trace was built from = the prune cutoff
+      // has cut into this window and only its tail is left. Redrawing from that
+      // would swap the full session for its cooldown, so serve the banked trace
+      // until the substrate is at least as complete as it.
+      final banked = (rescored.row['trace_samples'] as num?)?.toInt();
+      if (hrRows.isNotEmpty && (banked == null || hrRows.length >= banked)) {
         final ts = [for (final e in hrRows) (e['rec_ts'] as num).toInt()];
         final hr = [for (final e in hrRows) (e['hr'] as num).toInt()];
         w.addAll(_sessionTrace(ts, hr, startTs, endTs,
@@ -2337,13 +2352,13 @@ class LocalRepositoryImpl extends LocalRepository {
           if (curve.isNotEmpty) w['recovery_curve'] = curve;
         }
       } else {
-        // THE SUBSTRATE IS GONE (pruned at `rawRetentionDays`), so serve the
-        // trace frozen at score time. Without this, every session's chart half
-        // — curve, zones, drift, time-to-peak, recovery — went blank on its
-        // fourth day and stayed blank forever, while the summary scalars in
-        // their own columns kept rendering. Nothing new is claimed here: these
-        // are the numbers the app showed for the same session when it was two
-        // days old.
+        // THE SUBSTRATE IS GONE (pruned at `rawRetentionDays`), or only its
+        // tail is left, so serve the trace frozen at score time. Without this,
+        // every session's chart half — curve, zones, drift, time-to-peak,
+        // recovery — went blank on its fourth day and stayed blank forever,
+        // while the summary scalars in their own columns kept rendering.
+        // Nothing new is claimed here: these are the numbers the app showed
+        // for the same session when it was two days old.
         w.addAll(_frozenTrace(rescored.row));
       }
     } catch (_) {
