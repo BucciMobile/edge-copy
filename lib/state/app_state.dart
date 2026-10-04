@@ -2287,7 +2287,9 @@ class AppState extends ChangeNotifier {
   Timer? _activityReviewRetry;
   int _activityReviewAttempts = 0;
   Future<void> refreshActivityReviews({bool retry = false}) async {
-    if (_disposed) return;
+    // Backgrounded retries would run the cross-day rollup the derive
+    // scheduler defers; the resume hook picks the durable jobs back up.
+    if (_disposed || (retry && _background)) return;
     _activityReviewRetry?.cancel();
     if (!retry) {
       _activityReviewAttempts = 0;
@@ -2302,10 +2304,13 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       _log('[activity-review] refresh deferred: $e');
     }
-    if (!_disposed) {
-      // A long derive holds the engine; back off 2s → 30s instead of polling.
-      final delay = Duration(seconds: math.min(30, 2 << _activityReviewAttempts));
-      if (_activityReviewAttempts < 4) _activityReviewAttempts++;
+    // A long derive holds the engine; back off 2s → 30s instead of polling,
+    // and stop after a few minutes so a rollup that keeps failing is left to
+    // the next resume or review change rather than looping all day.
+    if (!_disposed && !_background && _activityReviewAttempts < 10) {
+      final delay = Duration(
+          seconds: math.min(30, 2 << math.min(_activityReviewAttempts, 4)));
+      _activityReviewAttempts++;
       _activityReviewRetry = Timer(delay, () => unawaited(refreshActivityReviews(retry: true)));
     }
   }
