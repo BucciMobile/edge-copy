@@ -2071,7 +2071,7 @@ Future<_WorkoutData> _loadWorkoutData(AppState app) async {
     }
 
     final weekStart = DateTime(end.year, end.month, end.day - (end.weekday - 1));
-    final thisWeek = [for (final w in past) if (w.start.isAfter(weekStart)) w];
+    final thisWeek = [for (final w in past) if (!w.start.isBefore(weekStart)) w];
 
     int? tracked;
     try {
