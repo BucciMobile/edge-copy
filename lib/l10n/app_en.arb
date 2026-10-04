@@ -983,6 +983,18 @@
   "@pairSensorSearchWouldHideSheet": {
     "description": "iOS-gate status card title."
   },
+  "pairSensorKeyTitle": "Already set up elsewhere?",
+  "@pairSensorKeyTitle": {
+    "description": "Section title for pairing with an existing device key."
+  },
+  "pairSensorKeyBody": "If you have the key this device already uses, paste it here and it pairs without a factory reset — nothing is written to the device. Leave it empty to pair the usual way.",
+  "@pairSensorKeyBody": {
+    "description": "Explainer under the existing-key section title."
+  },
+  "pairSensorKeyHint": "32 hex digits or base64",
+  "@pairSensorKeyHint": {
+    "description": "Hint text in the existing-key field."
+  },
   "pairSensorSearchAnyway": "Search anyway",
   "@pairSensorSearchAnyway": {
     "description": "iOS-gate status card fix."
