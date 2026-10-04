@@ -127,6 +127,18 @@ void main() {
       expect(attempt.refusal, contains('factory reset'));
       expect(ring.held, _appKey);
     });
+
+    test('reports the install only once the ring acked it', () async {
+      var taken = 0;
+      await ouraPairHandshake(_Ring(null), List.filled(16, 7),
+          install: true, replyWindow: _window, onKeyInstalled: () => taken++);
+      await ouraPairHandshake(_Ring(List.of(_appKey)), List.filled(16, 7),
+          install: true, replyWindow: _window, onKeyInstalled: () => taken++);
+      await ouraPairHandshake(_Ring(List.of(_appKey)), _appKey,
+          install: false, replyWindow: _window, onKeyInstalled: () => taken++);
+      expect(taken, 1,
+          reason: 'a re-pair keeps the new key only if the ring took it');
+    });
   });
 
   group('parseOuraKey', () {
