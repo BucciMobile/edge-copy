@@ -8368,7 +8368,12 @@ class DrainController {
 
   int records = 0; // total this connection
   int recordsThisOffload = 0; // since the last HISTORY_COMPLETE / rearm
-  int batches = 0;
+  int batches = 0; // total this connection
+  // Since the last [startFreshTask] — what [awaitComplete]'s report carries.
+  // The connection totals above never reset, so a long-lived link that once
+  // ACKed a batch would report progress for every later pull that got nothing.
+  int _recordsThisTask = 0;
+  int _batchesThisTask = 0;
   DateTime _lastProgressAt = DateTime.now();
   bool _complete = false;
   bool _linkDown = false;
@@ -8390,6 +8395,7 @@ class DrainController {
     }
     records++;
     recordsThisOffload++;
+    _recordsThisTask++;
     if (!_burstTallyClosed) {
       burstStats.onHistoricalData(
         PacketType.historicalData,
@@ -8465,6 +8471,7 @@ class DrainController {
   void onHistoricalRecord(RawRecord raw, Sample? sample, int revision) {
     records++;
     recordsThisOffload++;
+    _recordsThisTask++;
     _lastProgressAt = DateTime.now();
     // The tally covers the marker-to-marker window only ([closeBurstTally]) —
     // the record itself is still banked either way.
@@ -8508,6 +8515,7 @@ class DrainController {
     if (a.reason != kGateDroppedReason) {
       records++;
       recordsThisOffload++;
+      _recordsThisTask++;
       // The band's expected count tallies every type-47 frame it TRANSMITTED,
       // decodable or not. The gen5
       // deep buffers (v20/v21/v26/v22) and any future firmware's revisions all
@@ -8544,7 +8552,10 @@ class DrainController {
     }
   }
 
-  void noteBatchAcked() => batches++;
+  void noteBatchAcked() {
+    batches++;
+    _batchesThisTask++;
+  }
 
   void onBurstEvent() {
     if (!_burstTallyClosed) burstStats.onEvent();
@@ -8610,13 +8621,14 @@ class DrainController {
   /// it waited on is still the live one before acting on the outcome.
   int get taskGeneration => _taskGeneration;
 
-  /// Outcome of each superseded task, by its generation: true when it had
-  /// reached HISTORY_COMPLETE when the next claim took over (the immediate
-  /// auto-continue case), false when it ended in a terminal or simply never
-  /// completed. Without this a successful offload superseded before the
-  /// waiter's next tick was reported as `complete=false`. Pruned to the last
+  /// Outcome of each superseded task, by its generation: its own record and
+  /// batch counts, and complete=true when it had reached HISTORY_COMPLETE when
+  /// the next claim took over (the immediate auto-continue case), false when
+  /// it ended in a terminal or simply never completed. Without this a
+  /// successful offload superseded before the waiter's next tick was reported
+  /// as `complete=false`. Pruned to the last
   /// few generations — a waiter outlives its task by at most one tick.
-  final Map<int, bool> _supersededTaskComplete = <int, bool>{};
+  final Map<int, SyncReport> _supersededTaskReport = <int, SyncReport>{};
 
   /// Re-arm for a fresh offload over the same connection (clears the COMPLETE flag
   /// so a new awaitComplete() blocks until the next HISTORY_COMPLETE).
@@ -8680,8 +8692,11 @@ class DrainController {
   /// call is the whole claim, so no caller can order the outcome snapshot
   /// after the state it snapshots has been wiped.
   void startFreshTask() {
-    _supersededTaskComplete[_taskGeneration] = _complete && !_taskTerminal;
-    _supersededTaskComplete.removeWhere((g, _) => g + 8 < _taskGeneration);
+    _supersededTaskReport[_taskGeneration] = SyncReport(
+        _recordsThisTask, _batchesThisTask, _complete && !_taskTerminal);
+    _supersededTaskReport.removeWhere((g, _) => g + 8 < _taskGeneration);
+    _recordsThisTask = 0;
+    _batchesThisTask = 0;
     consecutiveValidationFailures = 0;
     _taskTerminal = false;
     _taskGeneration++;
@@ -8844,6 +8859,11 @@ class DrainController {
     final start = DateTime.now();
     final waiterGen = _taskGeneration;
     final done = Completer<SyncReport>();
+    // A claim can land while flush() is awaiting the commit; the counters
+    // then belong to the replacement task, so report the recorded outcome.
+    SyncReport reportAfterFlush(bool complete) => _taskGeneration != waiterGen
+        ? _supersededTaskReport[waiterGen] ?? SyncReport(0, 0, false)
+        : SyncReport(_recordsThisTask, _batchesThisTask, complete);
     Timer.periodic(const Duration(seconds: 1), (t) async {
       if (done.isCompleted) {
         t.cancel();
@@ -8855,8 +8875,12 @@ class DrainController {
       // reports the outcome it actually reached — a COMPLETE immediately
       // followed by an auto-continue claim is a SUCCESS, not a failure.
       if (_taskTerminal || _taskGeneration != waiterGen) {
-        final complete = _taskGeneration != waiterGen &&
-            (_supersededTaskComplete[waiterGen] ?? false);
+        // A superseded waiter reports ITS task's counts, never the
+        // replacement's.
+        final report = _taskGeneration != waiterGen
+            ? _supersededTaskReport[waiterGen] ?? SyncReport(0, 0, false)
+            : SyncReport(_recordsThisTask, _batchesThisTask, false);
+        final complete = report.complete;
         t.cancel();
         // Deliberately NO flush here. A superseded waiter's task is over and
         // the REPLACEMENT task owns this controller's buffer: a tokenless
@@ -8870,7 +8894,7 @@ class DrainController {
             ' — this offload ended ${complete ? 'complete (a new task claimed '
             'immediately after HISTORY_COMPLETE)' : 'without completing (abort '
             'boundary)'}.');
-        done.complete(SyncReport(records, batches, complete));
+        done.complete(report);
         return;
       }
       if (!isLinkUp()) _linkDown = true;
@@ -8887,13 +8911,13 @@ class DrainController {
         t.cancel();
         await flush();
         log('[SYNC] idle timeout — no offload progress for 60s.');
-        done.complete(SyncReport(records, batches, false));
+        done.complete(reportAfterFlush(false));
         return;
       }
       t.cancel();
       await flush();
       log('[SYNC] await stop=$stop.');
-      done.complete(SyncReport(records, batches, stop == DrainStop.complete));
+      done.complete(reportAfterFlush(stop == DrainStop.complete));
     });
     return done.future;
   }
