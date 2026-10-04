@@ -38,7 +38,8 @@
 // (#371/#372). Its "search" opens the ASK picker filtered to its own service
 // instead, and the id that comes back goes to the same [onPicked] step a
 // scanned row would. No scan runs first, so no `CBCentralManager` exists to
-// make that picker fail either.
+// make that picker fail either — but the pairing connect after it creates one,
+// so the iOS gate's warning still shows.
 
 import 'dart:async' show unawaited;
 
@@ -143,9 +144,9 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
     }
     final viaPicker = kAskPickerSensors.any((e) => e.id == widget.entry.id) &&
         await AccessorySetup.isSupported();
-    // No scan runs on the picker path, so the scan's iOS gate has nothing to
-    // warn about there.
-    final held = viaPicker ? null : await HrsLink.scanHeldBackReason();
+    // Kept on the picker path too: no scan runs there, but pairing the ring
+    // connects through flutter_blue_plus, which creates the same central.
+    final held = await HrsLink.scanHeldBackReason();
     if (!mounted) return;
     setState(() {
       _viaPicker = viaPicker;
@@ -196,6 +197,7 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
     setState(() {
       _scanning = true;
       _problem = null;
+      _heldBack = null;
       _found = const [];
     });
     final l = AppLocalizations.of(context);
