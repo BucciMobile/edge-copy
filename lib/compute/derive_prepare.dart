@@ -234,10 +234,10 @@ class SleepSessionCandidate {
     // `endSec` is what the engine anchors FINALIZATION on
     // (`endSec + 48 h < dataNowSec` ⇒ lock). An empty substrate used to yield
     // endSec = 0, which makes that comparison unconditionally true — so a day
-    // whose raw has been pruned (retention is 3 days) derived an all-absent
-    // bundle and wrote it FINALIZED over the good historical row, permanently.
-    // With no data, fall back to the day's real calendar end so an empty
-    // result is aged exactly like a real one.
+    // whose raw has been pruned (retention is `rawRetentionDays`) derived an
+    // all-absent bundle and wrote it FINALIZED over the good historical row,
+    // permanently. With no data, fall back to the day's real calendar end so an
+    // empty result is aged exactly like a real one.
     endSec: daySub.lastTs != null
         ? daySub.lastTs! + 1
         : localNextMidnightSecForDayLabel(dayId),

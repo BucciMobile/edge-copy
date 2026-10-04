@@ -1,8 +1,8 @@
 // Regression tests for the two ways a derivation pass could DESTROY a good
 // day_result — both of which are permanent, because `putDayResult` is
 // ConflictAlgorithm.replace on BOTH `day_result` AND `metric_series` (so every
-// scalar for the date is NULLed), raw is pruned after 3 days (so there is
-// nothing left to re-derive from), and a finalized row is never revisited.
+// scalar for the date is NULLed), raw is pruned at `rawRetentionDays` (so there
+// is nothing left to re-derive from), and a finalized row is never revisited.
 //
 //  1. "Re-analyze" over a day older than raw retention. `LocalDb.dataHistoryDays`
 //     lists derived days with `raw_count == 0`; Advanced data → Select all →

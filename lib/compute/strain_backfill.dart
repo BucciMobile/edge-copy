@@ -8,7 +8,7 @@
 // trends, v_daily/coach SQL and the day-detail screen would show a step change
 // at the fix date rather than a real one in the user's training.
 //
-// WHY NOT JUST RE-DERIVE: raw 1 Hz substrate is pruned `rawRetentionDays` (3)
+// WHY NOT JUST RE-DERIVE: raw 1 Hz substrate is pruned `rawRetentionDays`
 // behind the DATA EDGE. For anything older there is no substrate — the engine
 // logs "no substrate (raw pruned) — kept" and keeps the old row — so a
 // kAlgoVersion bump alone can only ever fix the last few days.
