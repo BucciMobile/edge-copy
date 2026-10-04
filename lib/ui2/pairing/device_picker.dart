@@ -152,6 +152,9 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
     final sensor =
         kPairableSensors.where((s) => s.entry.id == cand.entryId).firstOrNull;
     if (sensor == null) return; // Framed entries never reach this list.
+    // Only the ring's own screen asks for the key it may already hold; a
+    // direct pair here would install a new one and steer the user to a reset.
+    if (sensor.entry.id == kOura.id) return _openEntry(sensor.entry);
     setState(() {
       _busy = cand.device.remoteId.str;
       _problem = null;
