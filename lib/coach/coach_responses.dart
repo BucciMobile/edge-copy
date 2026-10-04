@@ -1,0 +1,226 @@
+import 'dart:convert';
+
+import 'coach_config.dart';
+
+/// Converts the Coach's canonical chat history to OpenAI Responses and back.
+/// HTTP, tool execution, and persistence remain owned by CoachEngine.
+/// https://developers.openai.com/api/docs/guides/migrate-to-responses
+/// https://developers.openai.com/api/docs/guides/reasoning
+class CoachResponses {
+  static bool usesResponses(String apiBase, String model) {
+    if (coachEndpointOrigin(apiBase) != 'https://api.openai.com') return false;
+    // These legacy o1 models support only Chat Completions, including their
+    // dated snapshots. Newer o-series models support Responses.
+    // https://developers.openai.com/api/docs/models/o1-mini
+    // https://developers.openai.com/api/docs/models/o1-preview
+    if (RegExp(r'^o1-(?:mini|preview)(?:-|$)').hasMatch(model)) return false;
+    final gpt = RegExp(r'^gpt-(\d+)(?:[.-]|$)').firstMatch(model);
+    return (gpt != null && int.parse(gpt.group(1)!) >= 5) ||
+        RegExp(r'^o\d+(?:-|$)').hasMatch(model);
+  }
+
+  /// Internal response items are local history metadata, never Chat fields.
+  static Map<String, dynamic> chatRequest(Map<String, dynamic> body) => {
+    ...body,
+    'messages': [
+      for (final message in _maps(body['messages']))
+        Map<String, dynamic>.from(message)
+          ..remove('_responses_output')
+          ..remove('_responses_model'),
+    ],
+  };
+
+  static Map<String, dynamic> request(Map<String, dynamic> body) {
+    final model = body['model'] as String? ?? '';
+    final input = <Map<String, dynamic>>[];
+    for (final message in _maps(body['messages'])) {
+      final role = message['role'];
+      if (role == 'assistant' &&
+          message['_responses_model'] == model &&
+          message['_responses_output'] is List) {
+        // Replay the full output in order, including opaque reasoning and
+        // assistant phase. Reconstructing only text/calls loses reasoning.
+        input.addAll(
+          _maps(
+            message['_responses_output'],
+          ).map((item) => Map<String, dynamic>.from(item)),
+        );
+        continue;
+      }
+      if (role == 'tool') {
+        input.add({
+          'type': 'function_call_output',
+          'call_id': message['tool_call_id'],
+          'output': message['content'] ?? '',
+        });
+        continue;
+      }
+      if (role != 'user' &&
+          role != 'assistant' &&
+          role != 'system' &&
+          role != 'developer') {
+        throw const FormatException('Unsupported conversation role.');
+      }
+      final content = message['content'];
+      if (role != 'assistant' ||
+          (content is String && content.isNotEmpty) ||
+          content is List) {
+        input.add({'role': role, 'content': content ?? ''});
+      }
+      for (final call in _maps(message['tool_calls'] ?? const [])) {
+        final function = call['function'];
+        if (function is! Map) {
+          throw const FormatException('Invalid function call in history.');
+        }
+        input.add({
+          'type': 'function_call',
+          'call_id': call['id'],
+          'name': function['name'],
+          'arguments': function['arguments'] is String
+              ? function['arguments']
+              : jsonEncode(function['arguments'] ?? {}),
+        });
+      }
+    }
+    final result = <String, dynamic>{...body, 'input': input, 'store': false};
+    for (final key in [
+      'messages',
+      'temperature',
+      'top_p',
+      'top_k',
+      'logprobs',
+      'top_logprobs',
+      'reasoning_effort',
+      'max_tokens',
+      'max_completion_tokens',
+    ]) {
+      result.remove(key);
+    }
+    // Preserve each model's default effort instead of guessing capabilities
+    // (Sol 6.1/Astra reject none; pro variants can require higher efforts).
+    if (body['reasoning_effort'] != null) {
+      result['reasoning'] = {
+        if (body['reasoning'] is Map) ...body['reasoning'] as Map,
+        'effort': body['reasoning_effort'],
+      };
+    }
+    final maxTokens = body['max_completion_tokens'] ?? body['max_tokens'];
+    if (maxTokens != null) result['max_output_tokens'] = maxTokens;
+    result['include'] = {
+      ...((body['include'] as List?) ?? const []),
+      'reasoning.encrypted_content',
+    }.toList();
+    if (body['tools'] != null) {
+      result['tools'] = [
+        for (final tool in _maps(body['tools'])) _functionTool(tool),
+      ];
+    }
+    final choice = body['tool_choice'];
+    if (choice is Map && choice['type'] == 'function') {
+      result['tool_choice'] = {
+        'type': 'function',
+        'name': (choice['function'] as Map?)?['name'],
+      };
+    }
+    return result;
+  }
+
+  static Map<String, dynamic> _functionTool(Map tool) {
+    final function = tool['function'];
+    if (tool['type'] != 'function' || function is! Map) {
+      throw const FormatException('Only function tools are supported.');
+    }
+    return {
+      'type': 'function',
+      ...function.cast<String, dynamic>(),
+      // Chat functions are non-strict. Keep optional fields and render's
+      // open payload usable rather than normalizing them into strict schemas.
+      'strict': function['strict'] ?? false,
+    };
+  }
+
+  static Map<String, dynamic> reply(
+    Map<String, dynamic> response,
+    String model,
+  ) {
+    final status = response['status'];
+    if ((status != null && status != 'completed') ||
+        response['error'] != null) {
+      throw const FormatException('Provider did not complete the response.');
+    }
+    final output = _maps(response['output']).toList();
+    final text = <String>[];
+    final refusals = <String>[];
+    final calls = <Map<String, dynamic>>[];
+    for (final item in output) {
+      switch (item['type']) {
+        case 'reasoning':
+          break; // Opaque state is replayed, never rendered as an answer.
+        case 'message':
+          if (item['status'] != null && item['status'] != 'completed') {
+            throw const FormatException(
+              'Provider returned an incomplete message.',
+            );
+          }
+          for (final content in _maps(item['content'])) {
+            if (content['type'] == 'output_text' && content['text'] is String) {
+              text.add(content['text'] as String);
+            } else if (content['type'] == 'refusal' &&
+                content['refusal'] is String) {
+              refusals.add(content['refusal'] as String);
+              text.add(content['refusal'] as String);
+            } else {
+              throw const FormatException(
+                'Provider returned invalid message content.',
+              );
+            }
+          }
+          break;
+        case 'function_call':
+          if (item['call_id'] is! String ||
+              (item['call_id'] as String).isEmpty ||
+              item['name'] is! String ||
+              (item['name'] as String).isEmpty ||
+              item['arguments'] is! String ||
+              (item['status'] != null && item['status'] != 'completed')) {
+            throw const FormatException(
+              'Provider returned an invalid function call.',
+            );
+          }
+          calls.add({
+            'id': item['call_id'],
+            'type': 'function',
+            'function': {'name': item['name'], 'arguments': item['arguments']},
+          });
+          break;
+        default:
+          throw const FormatException(
+            'Provider returned an unsupported output item.',
+          );
+      }
+    }
+    if (text.every((part) => part.trim().isEmpty) && calls.isEmpty) {
+      throw const FormatException('Empty response from provider.');
+    }
+    return {
+      'role': 'assistant',
+      'content': text.join('\n'),
+      if (calls.isNotEmpty) 'tool_calls': calls,
+      if (refusals.isNotEmpty) 'refusal': refusals.join('\n'),
+      '_responses_output': output,
+      '_responses_model': model,
+    };
+  }
+
+  static Iterable<Map> _maps(Object? value) sync* {
+    if (value is! List) {
+      throw const FormatException('Provider returned an invalid list.');
+    }
+    for (final item in value) {
+      if (item is! Map) {
+        throw const FormatException('Provider returned an invalid item.');
+      }
+      yield item;
+    }
+  }
+}

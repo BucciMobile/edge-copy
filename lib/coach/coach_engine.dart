@@ -25,6 +25,7 @@ import 'coach_actions.dart';
 import 'coach_config.dart';
 import 'coach_db.dart';
 import 'coach_prompt.dart';
+import 'coach_responses.dart';
 
 // ── value types ──────────────────────────────────────────────────────────────
 
@@ -278,6 +279,21 @@ class CoachEngine {
   /// end so a `tool` message never outlives the assistant turn whose
   /// `tool_calls` it answers (providers 400 on an orphaned tool message).
   void _trimHistory() {
+    if (_history.any((message) => message.containsKey('_responses_output'))) {
+      // Responses reasoning and function calls form one ordered continuation.
+      // Keep the current user turn intact, including opaque reasoning items.
+      while (_historyChars() > kMaxHistoryChars) {
+        final nextTurn = _history.indexWhere((m) => m['role'] == 'user', 1);
+        if (nextTurn < 0) {
+          throw CoachException(
+            'This turn exceeded the conversation size limit. '
+            'Start a new chat or ask a narrower question.',
+          );
+        }
+        _history.removeRange(0, nextTurn);
+      }
+      return;
+    }
     while (_historyChars() > kMaxHistoryChars && _history.length > 1) {
       _history.removeAt(0);
       while (_history.length > 1 && _history.first['role'] != 'user') {
@@ -367,7 +383,15 @@ class CoachEngine {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (_createdAt == 0) _createdAt = now;
     if (_title.isEmpty) _title = _deriveTitle();
-    if (_history.length > 60) _history.removeRange(0, _history.length - 60);
+    if (_history.length > 60) {
+      // A message-count cut can orphan function results or reasoning state.
+      // Advance to a complete user turn; keep an oversized current turn intact.
+      final cut = _history.indexWhere(
+        (m) => m['role'] == 'user',
+        _history.length - 60,
+      );
+      if (cut > 0) _history.removeRange(0, cut);
+    }
     try {
       final f = await _sessionFile(_sessionId);
       await f.writeAsString(jsonEncode({
@@ -520,17 +544,23 @@ class CoachEngine {
       final reply = await _chat(messages);
       final toolCalls = (reply['tool_calls'] as List?) ?? const [];
       final content = (reply['content'] as String?)?.trim();
+      final responseState = <String, dynamic>{
+        if (reply['_responses_output'] is List)
+          '_responses_output': reply['_responses_output'],
+        if (reply['_responses_model'] is String)
+          '_responses_model': reply['_responses_model'],
+      };
 
       if (toolCalls.isEmpty) {
         if (content != null && content.isNotEmpty) _emitAssistantText(content, emit);
-        _history.add({'role': 'assistant', 'content': content ?? ''});
+        _history.add({'role': 'assistant', 'content': content ?? '', ...responseState});
         onStatus(null);
         return;
       }
 
       // Assistant turn that requested tools (echo any interim text).
       if (content != null && content.isNotEmpty) _emitAssistantText(content, emit);
-      _history.add({'role': 'assistant', 'content': content ?? '', 'tool_calls': toolCalls});
+      _history.add({'role': 'assistant', 'content': content ?? '', 'tool_calls': toolCalls, ...responseState});
 
       for (final tcRaw in toolCalls) {
         final tc = tcRaw as Map;
@@ -638,54 +668,51 @@ class CoachEngine {
     return major >= 5; // sonnet, haiku
   }
 
-  /// THE one OpenAI-compatible chat-completions POST. Every LLM call in the app
+  /// THE one provider POST. Every LLM call in the app
   /// (the coach tool loop, the daily briefings, the journal chat) goes through
   /// here so there is exactly ONE provider client + error contract. Returns the
-  /// first choice's `message` map. Throws [CoachException] on any provider error.
+  /// normalized assistant message. Modern official OpenAI models use Responses;
+  /// other providers keep Chat Completions. Throws [CoachException] on errors.
   static Future<Map<String, dynamic>> postChat(
     CoachConfig config,
     Map<String, dynamic> body, {
     http.Client? client,
   }) async {
     final c = client ?? http.Client();
-    // Terra and Luna 6 default to medium reasoning, but Chat Completions
-    // requires none for function tools and for the sampling params our text
-    // callers also send. Keep this policy on the shared path for every turn.
-    // Only the official OpenAI origin and these known models (or dated
-    // snapshots) opt in; compatible providers and other models are unchanged.
-    // https://developers.openai.com/api/docs/guides/migrate-to-responses
-    // https://developers.openai.com/api/docs/models/gpt-6-luna
     final model = body['model'] as String? ?? '';
-    final modelFamily = model.replaceFirst(RegExp(r'-\d{4}-\d{2}-\d{2}$'), '');
-    if (coachEndpointOrigin(config.apiBase) == 'https://api.openai.com' &&
-        const {'gpt-5.6-terra', 'gpt-6-luna'}.contains(modelFamily)) {
-      body = {...body, 'reasoning_effort': 'none'};
-    }
-    // Recent Claude models reject sampling params with a 400, on Anthropic's
-    // own endpoint and through any pass-through provider alike. Strip them for
-    // exactly those model versions; older Claude models and every other
-    // provider keep their sampling params untouched.
-    if (claudeRejectsSampling(body['model'] as String? ?? '')) {
-      body = {...body}
-        ..remove('temperature')
-        ..remove('top_p')
-        ..remove('top_k');
-    }
-    // FAIL-CLOSED size ceiling. Nothing leaves the device until this passes —
-    // the request is never truncated and silently sent, it is refused, so a
-    // runaway tool loop cannot ship the health database to a third party.
-    final payload = jsonEncode(body);
-    if (payload.length > kMaxRequestBytes) {
-      throw CoachException(
-          'That request grew to ${payload.length ~/ 1024} KB, over the '
+    final responses = CoachResponses.usesResponses(config.apiBase, model);
+    try {
+      body = responses
+          ? CoachResponses.request(body)
+          : CoachResponses.chatRequest(body);
+      // Recent Claude models reject sampling params with a 400, on Anthropic's
+      // own endpoint and through any pass-through provider alike. Strip them for
+      // exactly those model versions; older Claude models and every other
+      // provider keep their sampling params untouched.
+      if (claudeRejectsSampling(body['model'] as String? ?? '')) {
+        body = {...body}
+          ..remove('temperature')
+          ..remove('top_p')
+          ..remove('top_k');
+      }
+      // FAIL-CLOSED size ceiling. Nothing leaves the device until this passes —
+      // the request is never truncated and silently sent, it is refused, so a
+      // runaway tool loop cannot ship the health database to a third party.
+      final payload = jsonEncode(body);
+      final payloadBytes = utf8.encode(payload).length;
+      if (payloadBytes > kMaxRequestBytes) {
+        throw CoachException(
+          'That request grew to ${payloadBytes ~/ 1024} KB, over the '
           '${kMaxRequestBytes ~/ 1024} KB safety limit for data leaving this '
           'device. Start a new chat or ask a narrower question (aggregate with '
-          'AVG/MIN/MAX/COUNT instead of selecting every row).');
-    }
-    try {
+          'AVG/MIN/MAX/COUNT instead of selecting every row).',
+        );
+      }
       final resp = await c
           .post(
-            Uri.parse('${config.apiBase}/chat/completions'),
+            Uri.parse(
+              '${config.apiBase}/${responses ? 'responses' : 'chat/completions'}',
+            ),
             headers: {
               if (config.hasKey) 'Authorization': 'Bearer ${config.apiKey}',
               'content-type': 'application/json',
@@ -695,19 +722,26 @@ class CoachEngine {
           .timeout(config.requestTimeout);
       if (resp.statusCode != 200) {
         throw CoachException(
-            'Provider error (${resp.statusCode}): ${_briefErr(resp.body)}');
+          'Provider error (${resp.statusCode}): ${_briefErr(resp.body)}',
+        );
       }
       final Object? j;
       try {
         j = jsonDecode(utf8.decode(resp.bodyBytes));
       } catch (_) {
         throw CoachException(
-            'Provider returned a non-JSON response. Check the API base URL — '
-            'it must point at an OpenAI-compatible /chat/completions endpoint.');
+          'Provider returned a non-JSON response. Check the API base URL — '
+          'it must point at a compatible API base.',
+        );
       }
       if (j is! Map) throw CoachException('Unexpected response from provider.');
+      if (responses) {
+        return CoachResponses.reply(j.cast<String, dynamic>(), model);
+      }
       final choices = (j['choices'] as List?) ?? const [];
-      if (choices.isEmpty) throw CoachException('Empty response from provider.');
+      if (choices.isEmpty) {
+        throw CoachException('Empty response from provider.');
+      }
       // Every shape below is a REAL thing OpenAI-compatible proxies return:
       // a streaming chunk (`delta` instead of `message`), the legacy
       // completions shape (`text`), or a bare string. Reaching for
@@ -716,15 +750,23 @@ class CoachEngine {
       // dynamic>'") instead of the documented CoachException, so the UI showed
       // a Dart type name to the user rather than an actionable message.
       final first = choices.first;
-      if (first is! Map) throw CoachException('Unexpected response from provider.');
+      if (first is! Map) {
+        throw CoachException('Unexpected response from provider.');
+      }
       final msg = first['message'] ?? first['delta'];
       if (msg is Map) return msg.cast<String, dynamic>();
       final text = first['text'];
       if (text is String) return <String, dynamic>{'content': text};
       throw CoachException(
-          'Provider returned an unsupported response shape (no message/delta). '
-          'Streaming-only endpoints are not supported — use a standard '
-          'OpenAI-compatible /chat/completions endpoint.');
+        'Provider returned an unsupported response shape (no message/delta). '
+        'Streaming-only endpoints are not supported — use a standard '
+        'OpenAI-compatible /chat/completions endpoint.',
+      );
+    } on FormatException {
+      throw CoachException(
+        'Provider returned an invalid or incomplete response, '
+        'or the conversation could not be converted. Try again or start a new chat.',
+      );
     } finally {
       if (client == null) c.close();
     }

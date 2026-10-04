@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:openstrap_edge/coach/coach_config.dart';
 import 'package:openstrap_edge/coach/coach_engine.dart';
+import 'package:openstrap_edge/coach/coach_responses.dart';
 
 Map<String, dynamic> _body(String model, {bool tools = true}) => {
   'model': model,
@@ -20,6 +21,7 @@ Map<String, dynamic> _body(String model, {bool tools = true}) => {
         'type': 'function',
         'function': {
           'name': 'lookup',
+          'description': 'Read a value',
           'parameters': {'type': 'object', 'properties': {}},
         },
       },
@@ -28,25 +30,50 @@ Map<String, dynamic> _body(String model, {bool tools = true}) => {
   },
 };
 
-/// Inspect the serialized HTTP request rather than an internal policy helper.
+Map<String, dynamic> _responsesReply() => {
+  'id': 'resp_hello',
+  'object': 'response',
+  'status': 'completed',
+  'output': [
+    {
+      'id': 'msg_hello',
+      'type': 'message',
+      'status': 'completed',
+      'role': 'assistant',
+      'content': [
+        {'type': 'output_text', 'text': 'Hello back', 'annotations': []},
+      ],
+    },
+  ],
+};
+
+/// Inspect the serialized HTTP request, endpoint, and normalized reply.
 Future<Map<String, dynamic>> _capture(
   CoachConfig config,
-  Map<String, dynamic> body,
-) async {
+  Map<String, dynamic> body, {
+  required bool responses,
+}) async {
   Map<String, dynamic>? sent;
   final client = MockClient((request) async {
     expect(request.method, 'POST');
-    expect(request.url.toString(), '${config.apiBase}/chat/completions');
+    expect(
+      request.url.toString(),
+      '${config.apiBase}/${responses ? 'responses' : 'chat/completions'}',
+    );
     expect(request.headers.containsKey('authorization'), isFalse);
     sent = jsonDecode(request.body) as Map<String, dynamic>;
     return http.Response(
-      jsonEncode({
-        'choices': [
-          {
-            'message': {'role': 'assistant', 'content': 'Hello back'},
-          },
-        ],
-      }),
+      jsonEncode(
+        responses
+            ? _responsesReply()
+            : {
+                'choices': [
+                  {
+                    'message': {'role': 'assistant', 'content': 'Hello back'},
+                  },
+                ],
+              },
+      ),
       200,
       headers: {'content-type': 'application/json'},
     );
@@ -54,6 +81,10 @@ Future<Map<String, dynamic>> _capture(
   try {
     final reply = await CoachEngine.postChat(config, body, client: client);
     expect(reply['content'], 'Hello back');
+    if (responses) {
+      expect(reply['_responses_output'], _responsesReply()['output']);
+      expect(reply['_responses_model'], body['model']);
+    }
     return sent!;
   } finally {
     client.close();
@@ -64,70 +95,192 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  group('official OpenAI compatibility requests', () {
+  group('official OpenAI reasoning-model requests', () {
     for (final model in [
-      'gpt-6-luna',
-      'gpt-6-luna-2026-10-03',
+      'gpt-5',
+      'gpt-5-mini',
+      'gpt-5.3',
       'gpt-5.6-terra',
       'gpt-5.6-terra-2026-08-11',
+      'gpt-5.6-sol',
+      'gpt-6-luna',
+      'gpt-6-luna-2026-10-03',
+      'gpt-6-astra',
+      'gpt-6.1-sol',
+      'gpt-7',
+      'o1',
+      'o3-mini',
+      'o4-mini',
     ]) {
       for (final tools in [true, false]) {
         test(
-          '$model sends none ${tools ? 'with tools' : 'for text only'}',
+          '$model uses Responses ${tools ? 'with tools' : 'for text only'}',
           () async {
             final body = _body(model, tools: tools);
-            final sent = await _capture(CoachConfig(), body);
-            expect(sent, {...body, 'reasoning_effort': 'none'});
+            final sent = await _capture(CoachConfig(), body, responses: true);
+            expect(sent['model'], model);
+            expect(sent['input'], body['messages']);
+            expect(sent['store'], isFalse);
+            expect(sent['include'], contains('reasoning.encrypted_content'));
+            expect(sent, isNot(contains('messages')));
+            expect(sent, isNot(contains('temperature')));
+            expect(sent, isNot(contains('reasoning_effort')));
+            expect(sent, isNot(contains('reasoning')));
+            if (tools) {
+              expect(sent['tool_choice'], 'auto');
+              expect(sent['tools'], [
+                {
+                  'type': 'function',
+                  'name': 'lookup',
+                  'description': 'Read a value',
+                  'parameters': {'type': 'object', 'properties': {}},
+                  'strict': false,
+                },
+              ]);
+            } else {
+              expect(sent, isNot(contains('tools')));
+            }
           },
         );
       }
     }
 
     test(
-      'overrides incompatible effort without mutating caller input',
+      'preserves requested reasoning without mutating caller input',
       () async {
-        final body = _body('gpt-6-luna')..['reasoning_effort'] = 'medium';
+        final body = _body('gpt-6.1-sol')
+          ..['reasoning_effort'] = 'high'
+          ..['top_p'] = 0.9
+          ..['top_k'] = 10
+          ..['logprobs'] = true
+          ..['top_logprobs'] = 3;
         final original = jsonDecode(jsonEncode(body));
-        final sent = await _capture(CoachConfig(), body);
-        expect(sent['reasoning_effort'], 'none');
+        final sent = await _capture(CoachConfig(), body, responses: true);
+        expect(sent['reasoning'], {'effort': 'high'});
+        for (final key in [
+          'reasoning_effort',
+          'temperature',
+          'top_p',
+          'top_k',
+          'logprobs',
+          'top_logprobs',
+        ]) {
+          expect(sent, isNot(contains(key)));
+        }
         expect(body, original);
       },
     );
 
     test('normalizes a trailing slash on the official API base', () async {
       final config = CoachConfig();
+      addTearDown(config.dispose);
       await config.save(baseUrl: 'https://api.openai.com/v1/');
-      final sent = await _capture(config, _body('gpt-6-luna'));
-      expect(sent['reasoning_effort'], 'none');
+      final sent = await _capture(
+        config,
+        _body('gpt-6.1-sol'),
+        responses: true,
+      );
+      expect(sent['store'], isFalse);
     });
-  });
 
-  group('unaffected OpenAI model requests', () {
-    for (final model in [
-      'gpt-4o-mini',
-      'gpt-5.3',
-      'gpt-5.6-sol',
-      'gpt-6-astra',
-      'gpt-6.1-sol',
-      'gpt-6-luna-pro',
-      'gpt-6-luna-custom',
-      'gpt-6-luna-2026-10-03-preview',
-      'gpt-6-luna-20261003',
-      'gpt-5.6-terra-pro',
-    ]) {
-      test('$model retains the original request', () async {
-        final body = _body(model);
-        expect(await _capture(CoachConfig(), body), body);
-      });
-    }
+    test('Responses errors use the existing CoachException contract', () async {
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'status': 'incomplete',
+            'incomplete_details': {'reason': 'max_output_tokens'},
+            'output': _responsesReply()['output'],
+          }),
+          200,
+        ),
+      );
+      addTearDown(client.close);
+      await expectLater(
+        CoachEngine.postChat(
+          CoachConfig(),
+          _body('gpt-6.1-sol'),
+          client: client,
+        ),
+        throwsA(isA<CoachException>()),
+      );
+    });
 
     test(
-      'retains caller-provided effort outside the supported model scope',
+      'refuses oversized encrypted history before contacting OpenAI',
       () async {
-        final body = _body('gpt-6-astra')..['reasoning_effort'] = 'high';
-        expect(await _capture(CoachConfig(), body), body);
+        var contacted = false;
+        final client = MockClient((_) async {
+          contacted = true;
+          return http.Response(jsonEncode(_responsesReply()), 200);
+        });
+        addTearDown(client.close);
+        final assistant = CoachResponses.reply({
+          'status': 'completed',
+          'output': [
+            {
+              'id': 'rs_large',
+              'type': 'reasoning',
+              'summary': <dynamic>[],
+              'encrypted_content': 'x' * (CoachEngine.kMaxRequestBytes + 1024),
+            },
+            ...(_responsesReply()['output'] as List),
+          ],
+        }, 'gpt-6.1-sol');
+        await expectLater(
+          CoachEngine.postChat(CoachConfig(), {
+            'model': 'gpt-6.1-sol',
+            'messages': [
+              assistant,
+              {'role': 'user', 'content': 'Continue'},
+            ],
+          }, client: client),
+          throwsA(isA<CoachException>()),
+        );
+        expect(contacted, isFalse);
       },
     );
+  });
+
+  test('request ceiling counts outgoing UTF-8 bytes', () async {
+    var contacted = false;
+    final client = MockClient((_) async {
+      contacted = true;
+      return http.Response(jsonEncode(_responsesReply()), 200);
+    });
+    addTearDown(client.close);
+    final body = _body('gpt-6.1-sol', tools: false);
+    body['messages'] = [
+      {
+        'role': 'user',
+        'content': 'é' * (CoachEngine.kMaxRequestBytes ~/ 2 + 1024),
+      },
+    ];
+    expect(jsonEncode(body).length, lessThan(CoachEngine.kMaxRequestBytes));
+    await expectLater(
+      CoachEngine.postChat(CoachConfig(), body, client: client),
+      throwsA(isA<CoachException>()),
+    );
+    expect(contacted, isFalse);
+  });
+
+  group('unaffected OpenAI legacy or unrecognized model requests', () {
+    for (final model in [
+      'gpt-3.5-turbo',
+      'gpt-4o-mini',
+      'gpt-4.1',
+      'gpt-4-turbo',
+      'o1-mini',
+      'o1-mini-2024-09-12',
+      'o1-preview',
+      'o1-preview-2024-09-12',
+      'custom-model',
+      'openai/gpt-6.1-sol',
+    ]) {
+      test('$model retains Chat Completions and sampling', () async {
+        final body = _body(model);
+        expect(await _capture(CoachConfig(), body, responses: false), body);
+      });
+    }
   });
 
   group('unaffected provider requests', () {
@@ -141,20 +294,55 @@ void main() {
       'http://api.openai.com/v1',
       'https://api.openai.com:8443/v1',
     ]) {
-      test('$base retains Luna and Terra requests', () async {
+      test('$base retains reasoning-model Chat Completions requests', () async {
         final config = CoachConfig();
+        addTearDown(config.dispose);
         await config.save(baseUrl: base);
-        for (final model in ['gpt-6-luna', 'gpt-5.6-terra']) {
+        for (final model in ['gpt-6-luna', 'gpt-5.6-terra', 'gpt-6.1-sol']) {
           final body = _body(model)..['reasoning_effort'] = 'medium';
-          expect(await _capture(config, body), body);
+          expect(await _capture(config, body, responses: false), body);
         }
       });
     }
 
+    for (final base in [
+      'https://openrouter.ai/api/v1',
+      'https://api.openai.com/v1',
+    ]) {
+      test(
+        '$base strips private Responses metadata from Chat history',
+        () async {
+          final config = CoachConfig();
+          addTearDown(config.dispose);
+          await config.save(baseUrl: base);
+          final assistant = CoachResponses.reply(
+            _responsesReply(),
+            'gpt-6.1-sol',
+          );
+          final body = {
+            'model': 'gpt-4o-mini',
+            'messages': [
+              assistant,
+              {'role': 'user', 'content': 'Continue'},
+            ],
+            'temperature': 0.3,
+          };
+          final before = jsonDecode(jsonEncode(body));
+          final sent = await _capture(config, body, responses: false);
+          expect(sent['messages'], [
+            {'role': 'assistant', 'content': 'Hello back'},
+            {'role': 'user', 'content': 'Continue'},
+          ]);
+          expect(body, before);
+        },
+      );
+    }
+
     test(
-      'existing Claude sampling removal still reaches the HTTP request',
+      'existing Claude sampling removal still reaches the request',
       () async {
         final config = CoachConfig();
+        addTearDown(config.dispose);
         await config.save(baseUrl: 'https://openrouter.ai/api/v1');
         final body = _body('anthropic/claude-opus-4.8')
           ..['top_p'] = 0.9
@@ -163,7 +351,7 @@ void main() {
           ..remove('temperature')
           ..remove('top_p')
           ..remove('top_k');
-        expect(await _capture(config, body), expected);
+        expect(await _capture(config, body, responses: false), expected);
         expect(body['temperature'], 0.3);
         expect(body['top_p'], 0.9);
         expect(body['top_k'], 10);
