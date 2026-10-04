@@ -946,7 +946,8 @@ class HealthExporter {
               debugPrint(
                 '[health] day $date export incomplete (attempt $nextAttempts/$_kMaxExportAttempts)',
               );
-              if (nextAttempts >= _kMaxExportAttempts) {
+              // Only a finalized day is ever given up; the tail just retries.
+              if (finalized && nextAttempts >= _kMaxExportAttempts) {
                 debugPrint(
                   '[health] day $date exceeded $_kMaxExportAttempts export attempts — giving up, will stop blocking newer days',
                 );
