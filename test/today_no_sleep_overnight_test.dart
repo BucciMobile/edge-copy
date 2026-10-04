@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:openstrap_edge/compute/derivation_engine.dart';
+import 'package:openstrap_edge/compute/profile.dart';
 import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/local_repository_impl.dart';
@@ -185,5 +186,38 @@ void main() {
     expect(status['overnight_day'], yesterday);
     final readiness = (t['daily'] as Map)['readiness'];
     expect(readiness is Map ? readiness['value'] : readiness, 77);
+  });
+
+  test('an import restamps the night getToday reads', () async {
+    final today = todayLabel();
+    final now = DateTime.now();
+    final yesterday =
+        todayLabel(DateTime(now.year, now.month, now.day - 1, 12));
+    Map<String, dynamic> night(int readiness) => {
+          'scalars': {'readiness': readiness},
+          'sleep': {
+            'accounting': {
+              'value': {'tst_sec': 25200},
+            },
+          },
+        };
+    await LocalDb.putDayResult(
+      dayId: yesterday,
+      algoVersion: kAlgoVersion,
+      payloadJson: jsonEncode(night(77)),
+      windowJson: '{}',
+    );
+    await LocalDb.refreshComputeFreshness();
+    // Today's night lands outside the foreground derive (import, background).
+    await LocalDb.putDayResult(
+      dayId: today,
+      algoVersion: kAlgoVersion,
+      payloadJson: jsonEncode(night(64)),
+      windowJson: '{}',
+    );
+    await DerivationEngine().finalizeImport(const Profile());
+
+    final t = await LocalRepositoryImpl(getProfileMap: () => {}).getToday();
+    expect((t['status'] as Map)['overnight_day'], today);
   });
 }

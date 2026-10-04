@@ -2817,6 +2817,15 @@ class DerivationEngine {
       } catch (e) {
         _log('[derive] strain rescale failed (kept old values): $e');
       }
+      // Restamp Today's freshness here, not in each caller: the iOS
+      // background pass has no caller to do it, and getToday reads the
+      // night from `overnight_day`, so a night settled in the background
+      // kept serving the previous one.
+      try {
+        await LocalDb.refreshComputeFreshness();
+      } catch (e) {
+        _log('[derive] freshness refresh failed: $e');
+      }
       _running = false;
       final finishedAt = DateTime.now().millisecondsSinceEpoch;
       _diag
@@ -3985,6 +3994,7 @@ class DerivationEngine {
       await _runNotifications();
       // Store the new signature so the next tick is a cheap no-op until it moves.
       await LocalDb.setCursor('baseline_sig', await _baselineSignature());
+      await LocalDb.refreshComputeFreshness();
       return done;
     } catch (e, st) {
       _log('rescan ERROR: $e\n$st');
@@ -4121,6 +4131,7 @@ class DerivationEngine {
     await _refreshBaselines();
     await _runCrossDay(profile);
     await _runNotifications();
+    await LocalDb.refreshComputeFreshness();
   }
 
   // ── derive one day ──────────────────────────────────────────────────────────

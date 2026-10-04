@@ -1728,7 +1728,6 @@ class AppState extends ChangeNotifier {
       } catch (e) {
         _log('[derive] session rescore failed: $e');
       }
-      await LocalDb.refreshComputeFreshness();
       bumpInsights();
       notifyListeners(); // screens re-fetch from the derived store
       // Same signal, for the surfaces that can't listen: home/lock-screen
