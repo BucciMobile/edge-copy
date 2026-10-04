@@ -59,6 +59,7 @@
   "profileSetupOptional": "可选",
   "profileSetupPickOneToContinue": "请选择上方的一个选项以继续。",
   "alarmNavTitle": "闹钟",
+  "alarmFiredAt": "已于 {time} 响铃",
   "alarmNavSub": "通过腕带而非手机唤醒您",
   "alarmArmedFor": "已设置为",
   "alarmNotConnectedTitle": "腕带未连接",
@@ -208,6 +209,9 @@
   "pairSensorPairAnother": "配对另一个",
   "pairSensorExplainer": "传感器仅在锻炼进行时使用，且仅用于心率和心跳计时。它不会取代您的腕带，从不在夜间使用，其记录的内容目前也不参与任何评分——只是存储并显示其读数，仅此而已。",
   "pairSensorSearchWouldHideSheet": "搜索会隐藏系统配对面板",
+  "pairSensorKeyTitle": "已在其他地方设置过？",
+  "pairSensorKeyBody": "如果你有这台设备已在使用的密钥，粘贴到这里即可配对，无需恢复出厂设置，也不会向设备写入任何内容。可以每行一个地粘贴多个密钥，系统会逐个尝试直到其中一个被接受——当你有好几个密钥却不确定哪个属于这台设备时很方便。留空则按常规方式配对。",
+  "pairSensorKeyHint": "32 位十六进制或 base64 —— 每行一个密钥",
   "pairSensorSearchAnyway": "仍然搜索",
   "pairSensorSearching": "搜索中…",
   "pairSensorSearchForSensors": "搜索传感器",
@@ -425,7 +429,7 @@
   "dayStepsOnDay": "{day}",
   "dayStepsNoTimesTitle": "{when}的步数没有对应的时间记录",
   "dayStepsNoStepsTitle": "{when}没有记录到步数",
-  "dayStepsStrapCounterBody": "{when}记录的 {count} 步来自设备自带的计步器，它只报告全天累计总数，没有具体时间。这里没有可以标注在时钟上的内容。",
+  "dayStepsStrapCounterBody": "{when}记录的 {count} 步来自设备自带的计步器，这一天没有保留对应的时间。这里没有可以标注在时钟上的内容。",
   "dayStepsNothingCounted": "{when}没有任何设备记录到步数。",
   "dayStepsChartTitle": "计步时间分布",
   "dayStepsUnit": "步",
@@ -902,6 +906,7 @@
   "investigateWhichSensorCounted": "哪个传感器计数",
   "investigateStrapPedometer": "腕带 · 100 Hz 计步器",
   "investigateStrapOnChipCounter": "腕带 · 芯片内置计数器",
+  "investigateStrapCounterFactor": "芯片计数器 · 手机校准系数",
   "investigatePhonePedometer": "手机 · 计步器",
   "investigateDayTotal": "当日总计",
   "investigateStrapChipReported": "腕带芯片上报值",
@@ -1315,6 +1320,10 @@
   "healthBlurbNapMin": "在主要夜间睡眠之外检测到的睡眠",
   "healthBlurbRespRate": "每分钟呼吸次数，由心跳节律推算得出",
   "healthBlurbBrv": "该频率在整夜中的波动程度",
+  "healthBlurbSpo2": "WHOOP 自己的数值，来自导入数据",
+  "@healthBlurbSpo2": {
+    "description": "Explore 目录：导入的血氧"
+  },
   "healthBlurbSteps": "由计步器实际计数，从不依赖模型估算",
   "healthBlurbActiveMin": "运动量的分钟数，而非移动距离",
   "healthBlurbCalories": "根据心率和你的个人资料计算出的活动能量",
@@ -1350,6 +1359,7 @@
   "healthDateDrawn": "抽取日期（YYYY-MM-DD）",
   "healthValueMustBeNumber": "数值必须是不带单位的纯数字。未保存任何内容。",
   "healthDateFormatError": "日期格式必须为 YYYY-MM-DD。未保存任何内容。",
+  "healthDateInFuture": "该日期晚于今天。未保存任何内容。",
   "healthCouldNotSaveIt": "无法保存：{error}",
   "homeStepSensorStrapPhone": "腕带 + 手机",
   "homeStepSensorStrap": "腕带",
@@ -2000,8 +2010,21 @@
   "activitySummaryTabOverview": "概览",
   "activitySummaryTabSplits": "分段",
   "activitySummaryTabGraphs": "图表",
+  "activityExercisePickerChooseTitle": "选择动作",
+  "activityExercisePickerChangeTitle": "更换动作",
+  "activityExercisePickerSearchLabel": "搜索动作",
+  "activityExercisePickerSearchHint": "搜索 {count} 个动作",
+  "activityExercisePickerCommonFilter": "常用",
+  "activityExercisePickerAllFilter": "全部",
+  "activityExercisePickerNoMatch": "没有匹配的动作",
+  "activityExercisePickerWgerCredit": "动作目录来自 wger",
+  "activityExercisePickerSourceLabel": "查看 {exercise} 的来源和许可",
   "activityLiveAddALap": "增加一趟",
   "activityLiveAddExerciseTitle": "添加动作",
+  "activityLiveChooseExerciseBody": "记录一组前，请先选择第一个动作。",
+  "activityLiveChangeExercise": "更换动作",
+  "activityExerciseCategory": "{category, select, Abs{腹部} Arms{手臂} Back{背部} Calves{小腿} Chest{胸部} Legs{腿部} Shoulders{肩部} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{杠铃} Bench{训练凳} Cablemachine{绳索器械} Dumbbell{哑铃} Gymmat{训练垫} Inclinebench{上斜凳} Kettlebell{壶铃} nonebodyweightexercise{自重} Pullupbar{单杠} SZBar{曲杠} other{{name}}}",
   "activityLiveAllowLocation": "允许定位",
   "activityLiveBestLabel": "最佳",
   "activityLiveBodyweightExcludedNote": "自重 — 不计入训练量",
@@ -2147,6 +2170,10 @@
   "settingsGroupPreferences": "偏好设置",
   "settingsUnitsRowTitle": "单位",
   "settingsAppearanceRowTitle": "外观",
+  "settingsClockFormatRowTitle": "时间格式",
+  "settingsClockFormatSystem": "跟随系统",
+  "settingsClockFormat24h": "24 小时制",
+  "settingsClockFormat12h": "12 小时制",
   "settingsCycleTrackingRowTitle": "周期追踪",
   "settingsCycleTrackingRowSub": "在“健康”中添加“周期”标签页。关闭后会隐藏该标签页，但已记录的内容仍会保留",
   "settingsGroupYourData": "你的数据",
@@ -2381,5 +2408,45 @@
   "ecgProgress": "已完成 {pct}%",
   "ecgWaveformEmpty": "此读数未保存波形。",
   "ecgWaveformLabel": "接受的波形，单位为手环发送的微伏。空隙为缺失的秒。",
-  "ecgSampleNote": "{rate} Hz 下 {count} 个样本，已滤波，输入参考 µV。不声明导联或极性。"
+  "ecgSampleNote": "{rate} Hz 下 {count} 个样本，已滤波，输入参考 µV。不声明导联或极性。",
+  "devicesWornOn": "佩戴位置",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "手环戴在哪里。用于校准步数。",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "手腕",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "上臂",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "其他位置",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "你戴在哪里？",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "默认位置。手环能给出的最佳步数精度。",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "步数会偏少——上臂摆动比手腕少。",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "未知",
+  "@devicesWornUnknown": {
+    "description": "设备详情：此版本无法识别已保存的佩戴位置"
+  },
+  "devicesWornOtherSub": "口袋或包里。手环在那里很难看清步伐。",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }

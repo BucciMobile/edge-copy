@@ -93,8 +93,8 @@ class DayStepsData {
   final int total, strap, phone;
 
   /// What the day actually published, and off which sensor. Usually [total] —
-  /// but a day whose only counter was the strap's on-chip one publishes a
-  /// whole-day figure with no times behind it, and therefore no spans.
+  /// but a day whose only counter was the strap's on-chip one, derived before
+  /// its hourly spans were stored, publishes a figure with no spans behind it.
   final int? dayTotal;
   final String? daySource;
 
@@ -248,6 +248,9 @@ class _DayStepsDetailState extends State<DayStepsDetail> {
   DayStepsData? _d;
   bool _loading = true;
   String? _day;
+  // A quick second tap on the day stepper starts a second load; the first
+  // can finish last and must not paint the old day under the new label.
+  int _loadToken = 0;
 
   @override
   void initState() {
@@ -262,6 +265,7 @@ class _DayStepsDetailState extends State<DayStepsDetail> {
   }
 
   Future<void> _load() async {
+    final token = ++_loadToken;
     final repo = repoOf(context);
     if (repo == null) {
       if (mounted) setState(() => _loading = false);
@@ -270,9 +274,11 @@ class _DayStepsDetailState extends State<DayStepsDetail> {
     try {
       final d = await DayStepsData.load(repo,
           bandLabel: bandLabel(context), want: _day);
-      if (mounted) setState(() => (_d = d, _loading = false));
+      if (mounted && token == _loadToken) {
+        setState(() => (_d = d, _loading = false));
+      }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && token == _loadToken) setState(() => _loading = false);
     }
   }
 
@@ -309,11 +315,10 @@ class _DayStepsDetailState extends State<DayStepsDetail> {
   // ── nothing to place on a clock ────────────────────────────────────────────
   Widget _absent(BuildContext c, DayStepsData d) {
     final l = AppLocalizations.of(c);
-    // A day CAN carry a step count with no spans behind it: with no windowed
-    // source at all, the day falls back to the strap's on-chip counter, which
-    // is a running total with no times of its own. Saying "no steps" over the
-    // tile's 6,000 would be false, so the absence this card names is the one
-    // that is real — the times.
+    // A day CAN carry a step count with no spans behind it: a strap-counter
+    // day derived before the counter's hourly spans were stored kept only the
+    // total. Saying "no steps" over the tile's 6,000 would be false, so the
+    // absence this card names is the one that is real — the times.
     final chip = d.daySource == 'strap_counter' && (d.dayTotal ?? 0) > 0;
     // The day this card is about, named. It used to say "today" on a screen
     // that could only ever be today; now it can be any day on disk.

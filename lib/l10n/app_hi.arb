@@ -59,6 +59,7 @@
   "profileSetupOptional": "वैकल्पिक",
   "profileSetupPickOneToContinue": "जारी रखने के लिए ऊपर एक विकल्प चुनें।",
   "alarmNavTitle": "अलार्म",
+  "alarmFiredAt": "{time} पर बजा",
   "alarmNavSub": "फ़ोन नहीं, बैंड पर आपको जगाता है",
   "alarmArmedFor": "इसके लिए सेट",
   "alarmNotConnectedTitle": "बैंड कनेक्ट नहीं है",
@@ -208,6 +209,9 @@
   "pairSensorPairAnother": "एक और पेयर करें",
   "pairSensorExplainer": "एक सेंसर केवल वर्कआउट चलने के दौरान उपयोग होता है, और केवल हृदय गति और बीट टाइमिंग के लिए। यह आपके बैंड की जगह नहीं लेता, इसे कभी रात भर उपयोग नहीं किया जाता, और यह जो रिकॉर्ड करता है वह अभी किसी स्कोर में योगदान नहीं देता — इसकी रीडिंग संग्रहीत और दिखाई जाती हैं, बस इतना ही।",
   "pairSensorSearchWouldHideSheet": "खोजने से सिस्टम पेयरिंग शीट छिप जाएगी",
+  "pairSensorKeyTitle": "पहले से कहीं और सेट अप है?",
+  "pairSensorKeyBody": "अगर आपके पास वह कुंजी है जो यह डिवाइस पहले से इस्तेमाल करता है, तो उसे यहाँ चिपकाएँ — फ़ैक्टरी रीसेट के बिना जोड़ी बन जाएगी और डिवाइस पर कुछ नहीं लिखा जाता। एक पंक्ति में एक कुंजी रखकर कई कुंजियाँ दी जा सकती हैं; उन्हें एक-एक करके आज़माया जाता है जब तक कोई स्वीकार न हो जाए, जो तब काम आता है जब आपके पास कई कुंजियाँ हों और पता न हो कि कौन सी इस डिवाइस की है। सामान्य तरीके से जोड़ने के लिए इसे खाली छोड़ दें।",
+  "pairSensorKeyHint": "32 हेक्स अंक या base64 — हर पंक्ति में एक कुंजी",
   "pairSensorSearchAnyway": "फिर भी खोजें",
   "pairSensorSearching": "खोज रहा है…",
   "pairSensorSearchForSensors": "सेंसर खोजें",
@@ -425,7 +429,7 @@
   "dayStepsOnDay": "{day} को",
   "dayStepsNoTimesTitle": "{when} की गिनती के पीछे कोई समय दर्ज नहीं",
   "dayStepsNoStepsTitle": "{when} कोई कदम नहीं गिने गए",
-  "dayStepsStrapCounterBody": "{when} गिने गए {count} कदम बैंड के अपने स्टेप काउंटर से आए हैं, जो पूरे दिन का कुल तो बताता है पर कोई समय नहीं। यहाँ घड़ी पर दिखाने लायक कुछ नहीं है।",
+  "dayStepsStrapCounterBody": "{when} गिने गए {count} कदम बैंड के अपने स्टेप काउंटर से आए हैं, पर इस दिन के उनके समय सहेजे नहीं गए। यहाँ घड़ी पर दिखाने लायक कुछ नहीं है।",
   "dayStepsNothingCounted": "{when} कदम गिनने वाला कोई भी उपकरण सक्रिय नहीं था।",
   "dayStepsChartTitle": "कब गिने गए",
   "dayStepsUnit": "कदम",
@@ -902,6 +906,7 @@
   "investigateWhichSensorCounted": "किस सेंसर ने गिनती की",
   "investigateStrapPedometer": "बैंड · 100 Hz पेडोमीटर",
   "investigateStrapOnChipCounter": "बैंड · ऑन-चिप काउंटर",
+  "investigateStrapCounterFactor": "ऑन-चिप काउंटर · फ़ोन फ़ैक्टर",
   "investigatePhonePedometer": "फ़ोन · पेडोमीटर",
   "investigateDayTotal": "दिन का कुल",
   "investigateStrapChipReported": "बैंड चिप द्वारा दर्ज",
@@ -1315,6 +1320,10 @@
   "healthBlurbNapMin": "मुख्य रात के अलावा मिली नींद",
   "healthBlurbRespRate": "प्रति मिनट साँसें, धड़कन-समय से निकाली गई",
   "healthBlurbBrv": "यह दर पूरी रात में कितनी बदलती है",
+  "healthBlurbSpo2": "WHOOP का अपना मान, आयात से लिया गया",
+  "@healthBlurbSpo2": {
+    "description": "Explore सूची: आयातित रक्त ऑक्सीजन"
+  },
   "healthBlurbSteps": "पेडोमीटर से गिने गए, कभी अनुमानित नहीं",
   "healthBlurbActiveMin": "गति की मात्रा के मिनट, चलना-फिरना नहीं",
   "healthBlurbCalories": "हृदय गति और आपकी प्रोफ़ाइल से निकाली गई सक्रिय ऊर्जा",
@@ -1350,6 +1359,7 @@
   "healthDateDrawn": "लिए जाने की तारीख़ (YYYY-MM-DD)",
   "healthValueMustBeNumber": "मान केवल एक संख्या होना चाहिए, इकाई के बिना। कुछ भी सहेजा नहीं गया।",
   "healthDateFormatError": "तारीख़ YYYY-MM-DD प्रारूप में होनी चाहिए। कुछ भी सहेजा नहीं गया।",
+  "healthDateInFuture": "यह तारीख़ आज के बाद की है। कुछ भी सहेजा नहीं गया।",
   "healthCouldNotSaveIt": "सहेजा नहीं जा सका: {error}",
   "homeStepSensorStrapPhone": "स्ट्रैप + फ़ोन",
   "homeStepSensorStrap": "स्ट्रैप",
@@ -2000,8 +2010,21 @@
   "activitySummaryTabOverview": "अवलोकन",
   "activitySummaryTabSplits": "स्प्लिट",
   "activitySummaryTabGraphs": "ग्राफ़",
+  "activityExercisePickerChooseTitle": "व्यायाम चुनें",
+  "activityExercisePickerChangeTitle": "व्यायाम बदलें",
+  "activityExercisePickerSearchLabel": "व्यायाम खोजें",
+  "activityExercisePickerSearchHint": "{count} व्यायाम खोजें",
+  "activityExercisePickerCommonFilter": "सामान्य",
+  "activityExercisePickerAllFilter": "सभी",
+  "activityExercisePickerNoMatch": "कोई मेल खाता व्यायाम नहीं",
+  "activityExercisePickerWgerCredit": "wger का व्यायाम कैटलॉग",
+  "activityExercisePickerSourceLabel": "{exercise} का स्रोत और लाइसेंस देखें",
   "activityLiveAddALap": "एक चक्कर जोड़ें",
   "activityLiveAddExerciseTitle": "व्यायाम जोड़ें",
+  "activityLiveChooseExerciseBody": "सेट दर्ज करने से पहले पहला व्यायाम चुनें।",
+  "activityLiveChangeExercise": "व्यायाम बदलें",
+  "activityExerciseCategory": "{category, select, Abs{पेट} Arms{बाहें} Back{पीठ} Calves{पिंडलियाँ} Chest{छाती} Legs{पैर} Shoulders{कंधे} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{बारबेल} Bench{बेंच} Cablemachine{केबल मशीन} Dumbbell{डम्बल} Gymmat{मैट} Inclinebench{इनक्लाइन बेंच} Kettlebell{केटलबेल} nonebodyweightexercise{बॉडीवेट} Pullupbar{पुल-अप बार} SZBar{EZ बार} other{{name}}}",
   "activityLiveAllowLocation": "लोकेशन की अनुमति दें",
   "activityLiveBestLabel": "सर्वश्रेष्ठ",
   "activityLiveBodyweightExcludedNote": "बॉडीवेट — वॉल्यूम में शामिल नहीं",
@@ -2147,6 +2170,10 @@
   "settingsGroupPreferences": "प्राथमिकताएं",
   "settingsUnitsRowTitle": "इकाइयां",
   "settingsAppearanceRowTitle": "रूप",
+  "settingsClockFormatRowTitle": "समय प्रारूप",
+  "settingsClockFormatSystem": "सिस्टम",
+  "settingsClockFormat24h": "24 घंटे",
+  "settingsClockFormat12h": "12 घंटे",
   "settingsCycleTrackingRowTitle": "चक्र ट्रैकिंग",
   "settingsCycleTrackingRowSub": "वेलनेस में साइकिल टैब जोड़ता है। बंद करने पर यह छिप जाता है और पहले से लॉग किया गया सब कुछ बना रहता है",
   "settingsGroupYourData": "आपका डेटा",
@@ -2381,5 +2408,45 @@
   "ecgProgress": "{pct}% पूर्ण",
   "ecgWaveformEmpty": "इस रीडिंग के साथ कोई तरंग सहेजी नहीं गई।",
   "ecgWaveformLabel": "स्वीकृत तरंग, माइक्रोवोल्ट में जैसा बैंड ने भेजा। रिक्त स्थान अनुपलब्ध सेकंड हैं।",
-  "ecgSampleNote": "{rate} Hz पर {count} सैंपल, फ़िल्टर्ड, इनपुट-संदर्भित µV। कोई लीड या ध्रुवता का दावा नहीं।"
+  "ecgSampleNote": "{rate} Hz पर {count} सैंपल, फ़िल्टर्ड, इनपुट-संदर्भित µV। कोई लीड या ध्रुवता का दावा नहीं।",
+  "devicesWornOn": "पहना है",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "बैंड कहाँ है। इसका उपयोग कदमों को कैलिब्रेट करने में होता है।",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "कलाई",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "ऊपरी बांह",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "कहीं और",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "आप इसे कहाँ पहनते हैं?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "डिफ़ॉल्ट। बैंड जो सबसे अच्छी कदम सटीकता दे सकता है।",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "कदम कम गिनता है — बांह कलाई से कम घूमती है।",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "अज्ञात",
+  "@devicesWornUnknown": {
+    "description": "डिवाइस विवरण: सहेजी गई पहनने की जगह इस बिल्ड को ज्ञात नहीं है"
+  },
+  "devicesWornOtherSub": "जेब या बैग। बैंड वहाँ चाल अच्छे से नहीं देख सकता।",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }

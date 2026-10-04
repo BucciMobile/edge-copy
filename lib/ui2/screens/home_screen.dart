@@ -35,21 +35,26 @@ import 'package:provider/provider.dart';
 import '../../ai/briefing.dart'
     show Briefing, BriefingPeriod, BriefingStore, currentBriefingPeriod, resolveBriefingToShow;
 import '../../data/day_label.dart' show todayLabel, calendarDaysBetween;
-import '../../data/db.dart' show DbRebuild;
+import '../../compute/onehz_pipeline.dart'
+    show readinessInputShortfallNote, readinessUnstableBaselineNote;
+import '../../data/db.dart' show DbRebuild, LocalDb;
 import '../../data/journal_fields.dart' show formatMinuteOfDay;
 import '../../data/local_repository.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart';
 import '../../notify/notification_prefs.dart' show NotificationPrefs;
 import '../../state/app_state.dart';
+import '../../state/clock_format.dart' show formatClockOf;
 import '../../state/units_controller.dart';
 import '../../theme/theme_switcher.dart' show themedRoute;
 import '../activity/day_strain.dart' show DayStrainDetail;
+import '../profile/alarm.dart' show AlarmArmState, alarmArmOf, alarmDoor;
 import '../profile/devices.dart' show formatDayTime;
 import '../profile/profile.dart';
 import '../ui2.dart';
 import 'ai_briefing.dart' show AiBriefingScreen;
 import 'coach.dart';
+import 'detected_activities.dart';
 import 'day_timeline.dart' show DayTimelineScreen;
 import 'metric_detail.dart';
 import 'readiness_detail.dart';
@@ -123,6 +128,16 @@ DbRebuild? dbRebuildOf(BuildContext c) {
   }
 }
 
+/// The armed alarm and its state, or null when there is no AppState above us
+/// (every golden). Read-only: Home never arms or re-arms anything.
+(DateTime?, AlarmArmState)? alarmArmOfContext(BuildContext c) {
+  try {
+    return c.select<AppState, (DateTime?, AlarmArmState)>(alarmArmOf);
+  } catch (_) {
+    return null;
+  }
+}
+
 /// Whether a live workout is open, or false in a golden. `select`, not
 /// `watch`: AppState ticks at ~1 Hz while a session is live, and this screen
 /// only cares about the bool flipping. The bare-day card branches on it — see
@@ -178,9 +193,9 @@ DateTime? lastDataAtOf(BuildContext c) {
 /// directly above it, whatever the hour. Null (no day on screen yet) ⇒ always
 /// dated, which is the honest answer when we do not know what "today" is.
 ///
-/// Bare `HH:mm` for the day on screen, the full "Fri 4 Sep, 07:12" otherwise —
-/// a lone "07:12" against a strap not worn since Friday is the most misleading
-/// thing this line could say.
+/// Bare clock time for the day on screen, the full "Fri 4 Sep, 07:12"
+/// otherwise — a lone "07:12" against a strap not worn since Friday is the
+/// most misleading thing this line could say.
 String syncedThroughLabel(DateTime? at, String? todayId,
     [AppLocalizations? l]) {
   if (at == null) return l?.homeSyncedNever ?? 'No band data yet';
@@ -189,10 +204,7 @@ String syncedThroughLabel(DateTime? at, String? todayId,
       at.year == today.year &&
       at.month == today.month &&
       at.day == today.day;
-  final when = isToday
-      ? '${at.hour.toString().padLeft(2, '0')}:'
-          '${at.minute.toString().padLeft(2, '0')}'
-      : formatDayTime(at, l);
+  final when = isToday ? formatClockOf(at) : formatDayTime(at, l);
   return l?.homeSyncedThrough(when) ?? 'Synced through $when';
 }
 
@@ -596,17 +608,15 @@ String unitBeside(String unit) => unit == 'min' ? '' : unit;
 /// ONE clock format in the app. This used to render 24-hour while Wellness
 /// rendered the same field 12-hour, so a target bedtime read `22:40` on Home
 /// and `10:40 PM` two screens away. Both now go through the journal layer's
-/// [formatMinuteOfDay], which is the format the rest of the app already uses
-/// and the one that already has a test.
+/// [formatMinuteOfDay], which follows the user's 12/24-hour choice
+/// (`state/clock_format.dart`).
 String clock(num? minOfDay) =>
     minOfDay == null ? '' : formatMinuteOfDay(minOfDay.round());
 
-/// Epoch seconds → "11:08 PM" in the device zone.
+/// Epoch seconds → "11:08 PM" / "23:08" in the device zone.
 String clockOfTs(num? ts) {
   if (ts == null) return '';
-  final d = DateTime.fromMillisecondsSinceEpoch(ts.round() * 1000);
-  final h = d.hour % 12 == 0 ? 12 : d.hour % 12;
-  return '$h:${d.minute.toString().padLeft(2, '0')} ${d.hour < 12 ? 'AM' : 'PM'}';
+  return formatClockOf(DateTime.fromMillisecondsSinceEpoch(ts.round() * 1000));
 }
 
 const _months = [
@@ -930,7 +940,23 @@ _RingState _ringOf(HomeRingKind k, HomeData d, AppLocalizations? l) {
       final band = readinessBand(v, l);
       return v == null
           ? _gap(k, l?.homeRingRecovery ?? 'Recovery', LucideIcons.batteryCharging,
-              C.green, d.readiness, l?.homeReadinessNotScored ?? 'Not scored', l)
+              C.green, d.readiness, l?.homeReadinessNotScored ?? 'Not scored', l,
+              // The same shortfall sentence the Readiness detail screen's
+              // banner shows, off the SAME stored diagnostic — _gap's own
+              // whyFromNote(m.note) doesn't recognise the need_inputs:
+              // convention this composite uses (only need_baseline:), so
+              // without this it fell through to the generic "nothing
+              // recorded says why" even with a real, known reason on hand.
+              // metricName: 'recovery' — this ring is labelled "Recovery",
+              // not "Readiness", and the sentence should say what the ring
+              // itself says. The second translator covers the z-cap absence
+              // shape readinessInputShortfallNote alone doesn't (PR #510).
+              fallbackWhy: readinessInputShortfallNote(d.absentDiag,
+                      metricName: 'recovery') ??
+                  readinessUnstableBaselineNote(
+                      d.absentDiag?['note']?.toString(),
+                      metricName: 'recovery') ??
+                  '')
           : _RingState(k, l?.homeRingRecovery ?? 'Recovery',
               LucideIcons.batteryCharging, band.color,
               value: '${v.round()}', sub: band.label, frac: v / 100);
@@ -1191,6 +1217,12 @@ class HomeData {
   final String? illnessDay;
   final double? illnessZ;
 
+  /// `LocalDb.readinessAbsentDiag` off today's bundle — null unless
+  /// [readiness] is absent. See `readiness_detail.dart`'s own copy of this
+  /// field for why: this card's "not scored" explanation has to be built
+  /// from the SAME diagnostic that screen's does, or the two can disagree.
+  final Map<String, dynamic>? absentDiag;
+
   const HomeData({
     this.name,
     this.dayId,
@@ -1211,6 +1243,7 @@ class HomeData {
     this.illnessDay,
     this.illnessZ,
     this.insightsStale,
+    this.absentDiag,
   });
 
   /// The three illness fields, replaced together. Test-facing sugar, and they
@@ -1236,6 +1269,7 @@ class HomeData {
         illnessDay: day,
         illnessZ: z,
         insightsStale: insightsStale,
+        absentDiag: absentDiag,
       );
 
   /// A day OTHER than today, for the Home day switcher.
@@ -1254,10 +1288,18 @@ class HomeData {
     final overview = await repo.getDayOverview(date);
     final strain = await repo.getDayStrain(date);
     final sleep = await repo.getDaySleepV2(date);
+    final readiness = metricOf(overview['readiness']);
+    // Same lookup [load] does for today, for the same reason: the ring's
+    // shortfall explanation needs the stored diagnostic, and a day the
+    // switcher stepped onto can be absent too, not just today (PR #510).
+    final absentDiag = readiness.value != null
+        ? null
+        : await LocalDb.readinessAbsentDiag(date);
     return HomeData(
       name: profile['name']?.toString(),
       dayId: date,
-      readiness: metricOf(overview['readiness']),
+      readiness: readiness,
+      absentDiag: absentDiag,
       rhr: metricOf(overview['resting_hr']),
       strain: metricOf(strain['strain']),
       steps: metricOf(strain['steps']),
@@ -1295,6 +1337,16 @@ class HomeData {
     // here may imply a second signal.
     final illness = today['illness'];
 
+    // The three that come off the OVERNIGHT block. Gated, so a night that is
+    // not today's cannot arrive wearing today's clothes — see
+    // [overnightMetric]. Steps, active energy and strain are today's own and
+    // are read straight.
+    final readiness = overnightMetric(today, d('readiness'), l);
+    final absentDiag = readiness.value != null
+        ? null
+        : await LocalDb.readinessAbsentDiag(
+            (today['status'] as Map?)?['today_day']?.toString());
+
     return HomeData(
       name: profile['name']?.toString(),
       dayId: (today['status'] as Map?)?['today_day']?.toString(),
@@ -1302,11 +1354,8 @@ class HomeData {
       illnessState: illness is Map ? illness['state']?.toString() : null,
       illnessDay: illness is Map ? illness['date']?.toString() : null,
       illnessZ: illness is Map ? (illness['z'] as num?)?.toDouble() : null,
-      // The three that come off the OVERNIGHT block. Gated, so a night that
-      // is not today's cannot arrive wearing today's clothes — see
-      // [overnightMetric]. Steps, active energy and strain are today's own and
-      // are read straight.
-      readiness: overnightMetric(today, d('readiness'), l),
+      readiness: readiness,
+      absentDiag: absentDiag,
       drivers: [
         for (final e in (gbDrivers is List ? gbDrivers : const []))
           if (e is Map) e.cast<String, dynamic>(),
@@ -1581,6 +1630,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           Align(alignment: Alignment.centerLeft, child: battery),
         ],
         const SizedBox(height: S.x3),
+        const DetectedActivitiesCard(),
+        const SizedBox(height: S.x3),
         if (_loading)
           const Center(child: CircularProgressIndicator())
         else if (_failed)
@@ -1609,6 +1660,12 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
               onFix: sync == null ? null : () => _tapSync(sync),
             );
           }),
+        // The alarm lives on AppState too, so a load failure must not hide it.
+        if (_day == null || _day == todayLabel())
+          if (alarmArmOfContext(c) case final (DateTime?, AlarmArmState) a) ...[
+            const SizedBox(height: S.x3),
+            alarmDoor(c, a.$1, a.$2),
+          ],
       ]));
     }
 
@@ -1726,6 +1783,10 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         ]),
       ),
 
+      if (bare) ...[
+        const DetectedActivitiesCard(),
+        const SizedBox(height: S.x3),
+      ],
       ...dayNavRow(_day ?? d.dayId, _days, _goDay),
 
       if (bare)
@@ -1762,6 +1823,17 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         else
           Builder(builder: (c) {
             final need = needMessageFromNote(d.readiness.note);
+            // readinessInputShortfallNote/readinessUnstableBaselineNote off
+            // d.absentDiag are the SAME functions and the SAME stored
+            // diagnostic readiness_detail.dart's banner uses — not a second,
+            // independently-worded explanation — so this card and the detail
+            // screen can never say two different things about the same
+            // absence.
+            final shortfall = need == null
+                ? readinessInputShortfallNote(d.absentDiag) ??
+                    readinessUnstableBaselineNote(
+                        d.absentDiag?['note']?.toString())
+                : null;
             return StatusCard(
               l?.homeReadinessNotScoredTitle ?? 'Readiness is not scored today',
               need != null
@@ -1771,7 +1843,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
                   // history to compare it to" — a cause, stated for every
                   // absence the note convention did not cover. The door below
                   // is what actually answers it.
-                  : whyFromNote(d.readiness.note) ??
+                  : shortfall ??
+                      whyFromNote(d.readiness.note) ??
                       (l?.homeReadinessNoReason ?? 'Nothing recorded says why.'),
               fix: l?.homeSeeWhatWasMissing ?? 'See what was missing',
               icon: LucideIcons.batteryCharging,
@@ -1779,8 +1852,9 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
             );
           }),
 
-        // Right under the rings, above everything else — the one spot on
-        // this screen nobody scrolls past without seeing.
+        const SizedBox(height: S.x3),
+        const DetectedActivitiesCard(),
+        const SizedBox(height: S.x3),
         const CommunityNudge(),
 
         // ── the rollup was withheld, not absent ──
@@ -1808,6 +1882,13 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
             l?.homeBreakdownSubtitle ?? 'Hour by hour',
             () => go(c, const DayTimelineScreen())),
       ],
+
+      // ── the next alarm: a door, same as the one above ──
+      if (isToday)
+        if (alarmArmOfContext(c) case final (DateTime?, AlarmArmState) a) ...[
+          const SizedBox(height: S.x3),
+          alarmDoor(c, a.$1, a.$2),
+        ],
     ]));
   }
 

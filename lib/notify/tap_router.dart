@@ -24,6 +24,10 @@ const String kRouteWater = '/water';
 /// Carries the bout it is about as `?id=<workout_suggestions.id>` — see
 /// [workoutSuggestionRoute]. The bare path still resolves (older payloads, and
 /// anything that just wants the review screen).
+const String kRouteDetectedActivities = '/activities/review';
+String activitySuggestionRoute(String id, String kind) => Uri(
+  path: kRouteDetectedActivities, queryParameters: {'id': id, 'kind': kind}).toString();
+
 const String kRouteWorkoutSuggestion = '/workouts/suggestion';
 
 /// The sedentary/movement nudges ("time to move", the desk-posture check).
@@ -104,8 +108,9 @@ const String kRouteProfile = '/profile';
 const String kRouteRecap = '/recap';
 
 /// Emitted by the two alarm safety notifications (latch-failure, the 7pm
-/// no-alarm-tonight check-in). Lands on the Alarm screen itself, the one place
-/// either can actually be fixed — see `screenForRoute` in app.dart.
+/// no-alarm-tonight check-in) and the alarm-fired note. Lands on the Alarm
+/// screen itself, the one place any of them can be acted on — see
+/// `screenForRoute` in app.dart.
 const String kRouteAlarm = '/alarm';
 
 class TapTarget {
@@ -134,8 +139,8 @@ const Map<String, int> _tabRoutes = {
 };
 
 // Sub-screen routes → the shell tab they sit on top of. Most briefing/journal
-// deep links live over Today (0); the detected-workout review sits over the
-// Workouts tab (4) so the tab underneath is the natural place to land on close.
+// deep links live over Today (0), and so do the detected-workout and
+// detected-activity reviews: Home is where they are surfaced and land on close.
 //
 // /profile and /recap were BOTH being emitted with neither table knowing them,
 // so resolveTapRoute fell through to Today and every band-battery alert landed
@@ -152,7 +157,8 @@ const Map<String, int> _screenRoutes = {
   // still has to exist: a route absent from this table produces no screen
   // request at all, and the shell then falls back to the tab index.
   kRouteMeds: 0,
-  kRouteWorkoutSuggestion: 4,
+  kRouteWorkoutSuggestion: 0,
+  kRouteDetectedActivities: 0,
   kRouteProfile: 0,
   kRouteRecap: 1, // 1|2|3 all fold into Health — see domainForTab
   kRouteAlarm: 0,

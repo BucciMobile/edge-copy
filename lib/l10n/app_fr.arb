@@ -59,6 +59,7 @@
   "profileSetupOptional": "FACULTATIF",
   "profileSetupPickOneToContinue": "Choisissez une option ci-dessus pour continuer.",
   "alarmNavTitle": "Alarme",
+  "alarmFiredAt": "Déclenchée à {time}",
   "alarmNavSub": "Vous réveille via le bracelet, pas le téléphone",
   "alarmArmedFor": "ARMÉE POUR",
   "alarmNotConnectedTitle": "Le bracelet n’est pas connecté",
@@ -208,6 +209,9 @@
   "pairSensorPairAnother": "Jumeler un autre",
   "pairSensorExplainer": "Un capteur n’est utilisé que pendant un entraînement, et uniquement pour la fréquence cardiaque et le rythme des battements. Il ne remplace pas votre bracelet, n’est jamais utilisé la nuit, et rien de ce qu’il enregistre n’alimente encore un score — ses relevés sont stockés et affichés, et c’est tout.",
   "pairSensorSearchWouldHideSheet": "La recherche masquerait la feuille de jumelage du système",
+  "pairSensorKeyTitle": "Déjà configuré ailleurs ?",
+  "pairSensorKeyBody": "Si vous avez la clé que cet appareil utilise déjà, collez-la ici : il se jumelle sans réinitialisation d'usine et rien n'est écrit sur l'appareil. Plusieurs clés, une par ligne, sont essayées à tour de rôle jusqu'à ce que l'une soit acceptée — pratique si vous en avez plusieurs sans savoir laquelle correspond à cet appareil. Laissez vide pour jumeler comme d'habitude.",
+  "pairSensorKeyHint": "32 chiffres hexadécimaux ou base64 — une clé par ligne",
   "pairSensorSearchAnyway": "Rechercher quand même",
   "pairSensorSearching": "Recherche…",
   "pairSensorSearchForSensors": "Rechercher des capteurs",
@@ -425,7 +429,7 @@
   "dayStepsOnDay": "le {day}",
   "dayStepsNoTimesTitle": "Aucun horaire derrière ce total {when}",
   "dayStepsNoStepsTitle": "Aucun pas compté {when}",
-  "dayStepsStrapCounterBody": "Les {count} pas comptés {when} proviennent du compteur de pas propre au bracelet, qui indique un total journalier sans horaires. Il n'y a rien à placer sur une horloge.",
+  "dayStepsStrapCounterBody": "Les {count} pas comptés {when} proviennent du compteur de pas propre au bracelet, et leurs horaires n'ont pas été conservés pour ce jour. Il n'y a rien à placer sur une horloge.",
   "dayStepsNothingCounted": "Rien de capable de compter les pas n'a enregistré de données {when}.",
   "dayStepsChartTitle": "QUAND ILS ONT ÉTÉ COMPTÉS",
   "dayStepsUnit": "pas",
@@ -902,6 +906,7 @@
   "investigateWhichSensorCounted": "Quel capteur a compté",
   "investigateStrapPedometer": "bracelet · podomètre 100 Hz",
   "investigateStrapOnChipCounter": "bracelet · compteur intégré",
+  "investigateStrapCounterFactor": "compteur intégré · facteur du téléphone",
   "investigatePhonePedometer": "téléphone · podomètre",
   "investigateDayTotal": "total du jour",
   "investigateStrapChipReported": "puce du bracelet a indiqué",
@@ -1315,6 +1320,10 @@
   "healthBlurbNapMin": "Sommeil détecté en dehors de la nuit principale",
   "healthBlurbRespRate": "Respirations par minute, déduites du rythme cardiaque",
   "healthBlurbBrv": "À quel point ce rythme varie au cours de la nuit",
+  "healthBlurbSpo2": "Valeur propre de WHOOP, reprise d'une importation",
+  "@healthBlurbSpo2": {
+    "description": "Description du catalogue Explore : oxygène sanguin importé"
+  },
   "healthBlurbSteps": "Comptés par un podomètre, jamais modélisés",
   "healthBlurbActiveMin": "Minutes de volume de mouvement, pas de déplacement",
   "healthBlurbCalories": "Énergie active calculée à partir de la fréquence cardiaque et de votre profil",
@@ -1350,6 +1359,7 @@
   "healthDateDrawn": "Date du prélèvement (AAAA-MM-JJ)",
   "healthValueMustBeNumber": "La valeur doit être un nombre seul, sans l'unité. Rien n'a été enregistré.",
   "healthDateFormatError": "La date doit être au format AAAA-MM-JJ. Rien n'a été enregistré.",
+  "healthDateInFuture": "Cette date est postérieure à aujourd'hui. Rien n'a été enregistré.",
   "healthCouldNotSaveIt": "Impossible d'enregistrer : {error}",
   "homeStepSensorStrapPhone": "Bracelet + téléphone",
   "homeStepSensorStrap": "Bracelet",
@@ -2000,8 +2010,21 @@
   "activitySummaryTabOverview": "Aperçu",
   "activitySummaryTabSplits": "Temps intermédiaires",
   "activitySummaryTabGraphs": "Graphiques",
+  "activityExercisePickerChooseTitle": "Choisir un exercice",
+  "activityExercisePickerChangeTitle": "Changer d’exercice",
+  "activityExercisePickerSearchLabel": "Rechercher des exercices",
+  "activityExercisePickerSearchHint": "Rechercher parmi {count} exercices",
+  "activityExercisePickerCommonFilter": "Courants",
+  "activityExercisePickerAllFilter": "Tous",
+  "activityExercisePickerNoMatch": "Aucun exercice correspondant",
+  "activityExercisePickerWgerCredit": "Catalogue d’exercices de wger",
+  "activityExercisePickerSourceLabel": "Voir la source et les licences de {exercise}",
   "activityLiveAddALap": "Ajouter une longueur",
   "activityLiveAddExerciseTitle": "Ajouter un exercice",
+  "activityLiveChooseExerciseBody": "Choisissez le premier exercice avant d’enregistrer une série.",
+  "activityLiveChangeExercise": "Changer d’exercice",
+  "activityExerciseCategory": "{category, select, Abs{Abdos} Arms{Bras} Back{Dos} Calves{Mollets} Chest{Pectoraux} Legs{Jambes} Shoulders{Épaules} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{Barre} Bench{Banc} Cablemachine{Poulie} Dumbbell{Haltère} Gymmat{Tapis} Inclinebench{Banc incliné} Kettlebell{Kettlebell} nonebodyweightexercise{Poids du corps} Pullupbar{Barre de traction} SZBar{Barre EZ} other{{name}}}",
   "activityLiveAllowLocation": "Autoriser la localisation",
   "activityLiveBestLabel": "Meilleur",
   "activityLiveBodyweightExcludedNote": "Poids du corps — exclu du volume",
@@ -2147,6 +2170,10 @@
   "settingsGroupPreferences": "Préférences",
   "settingsUnitsRowTitle": "Unités",
   "settingsAppearanceRowTitle": "Apparence",
+  "settingsClockFormatRowTitle": "Format de l’heure",
+  "settingsClockFormatSystem": "Système",
+  "settingsClockFormat24h": "24 heures",
+  "settingsClockFormat12h": "12 heures",
   "settingsCycleTrackingRowTitle": "Suivi du cycle",
   "settingsCycleTrackingRowSub": "Ajoute l’onglet Cycle à Bien-être. Désactivé le masque et conserve tout ce qui est déjà enregistré",
   "settingsGroupYourData": "Vos données",
@@ -2381,5 +2408,45 @@
   "ecgProgress": "{pct} % terminé",
   "ecgWaveformEmpty": "Aucun tracé n’a été enregistré avec cette lecture.",
   "ecgWaveformLabel": "Tracé accepté en microvolts tel qu’envoyé par le bracelet. Les trous sont des secondes manquantes.",
-  "ecgSampleNote": "{count} échantillons à {rate} Hz, filtrés, µV rapportés à l’entrée. Aucune dérivation ni polarité n’est revendiquée."
+  "ecgSampleNote": "{count} échantillons à {rate} Hz, filtrés, µV rapportés à l’entrée. Aucune dérivation ni polarité n’est revendiquée.",
+  "devicesWornOn": "Porté au",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "Où se trouve le bracelet. Sert à calibrer les pas.",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "Poignet",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "Haut du bras",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "Ailleurs",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "Où le portez-vous ?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "Par défaut. La meilleure précision de pas que le bracelet puisse offrir.",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "Sous-compte les pas — le bras balance moins que le poignet.",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "Inconnu",
+  "@devicesWornUnknown": {
+    "description": "Détail de l'appareil : l'emplacement enregistré n'est pas connu par cette version"
+  },
+  "devicesWornOtherSub": "Une poche ou un sac. Le bracelet y voit mal la marche.",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }

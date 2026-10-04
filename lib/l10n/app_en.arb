@@ -236,6 +236,15 @@
   "@alarmNavTitle": {
     "description": "Alarm screen title."
   },
+  "alarmFiredAt": "Fired at {time}",
+  "@alarmFiredAt": {
+    "description": "Alarm screen pill after the band fired the alarm today.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "alarmNavSub": "Wakes you on the band, not the phone",
   "@alarmNavSub": {
     "description": "Alarm screen subtitle."
@@ -982,6 +991,18 @@
   "pairSensorSearchWouldHideSheet": "Searching would hide the system pairing sheet",
   "@pairSensorSearchWouldHideSheet": {
     "description": "iOS-gate status card title."
+  },
+  "pairSensorKeyTitle": "Already set up elsewhere?",
+  "@pairSensorKeyTitle": {
+    "description": "Section title for pairing with an existing device key."
+  },
+  "pairSensorKeyBody": "If you have the key this device already uses, paste it here and it pairs without a factory reset — nothing is written to the device. Several keys, one per line, are tried in turn until one is accepted, which is handy when you have a few and do not know which belongs to this device. Leave it empty to pair the usual way.",
+  "@pairSensorKeyBody": {
+    "description": "Explainer under the existing-key section title."
+  },
+  "pairSensorKeyHint": "32 hex digits or base64 — one key per line",
+  "@pairSensorKeyHint": {
+    "description": "Hint text in the existing-key field."
   },
   "pairSensorSearchAnyway": "Search anyway",
   "@pairSensorSearchAnyway": {
@@ -2108,6 +2129,10 @@
       }
     }
   },
+  "readinessDetailBreakdownNoScoreNote": "These are a separate, looser-gated view of the same four inputs — they do not add up to today's score, which is absent above for the reason already given.",
+  "@readinessDetailBreakdownNoScoreNote": {
+    "description": "Shown above the breakdown rows only when readiness itself is absent, clarifying that this glass-box percentile view is a different calculation than the headline composite and does not explain or contradict its absence."
+  },
   "readinessDetailNoBreakdownTitle": "No breakdown yet",
   "@readinessDetailNoBreakdownTitle": {
     "description": "Status card title when readiness scored but no breakdown exists yet."
@@ -2171,6 +2196,18 @@
     "description": "Row value in the absence diagnostic stating how many of the user's own nights back the baseline.",
     "placeholders": {
       "n": {
+        "type": "int"
+      }
+    }
+  },
+  "readinessDetailNightsOfTarget": "{have} of {need} nights",
+  "@readinessDetailNightsOfTarget": {
+    "description": "Row value in the absence diagnostic: how many of the user's own nights back this input against the floor every input needs before it can be used.",
+    "placeholders": {
+      "have": {
+        "type": "int"
+      },
+      "need": {
         "type": "int"
       }
     }
@@ -2252,7 +2289,7 @@
       }
     }
   },
-  "dayStepsStrapCounterBody": "The {count} steps counted {when} came from the strap's own step counter, which reports a running day total and no times. There is nothing to place on a clock.",
+  "dayStepsStrapCounterBody": "The {count} steps counted {when} came from the strap's own step counter, and the times behind them weren't kept for this day. There is nothing to place on a clock.",
   "@dayStepsStrapCounterBody": {
     "description": "Empty-state body explaining the strap's own running counter has no times.",
     "placeholders": {
@@ -4590,6 +4627,10 @@
   "@investigateStrapOnChipCounter": {
     "description": "Step source row: strap's on-chip step counter"
   },
+  "investigateStrapCounterFactor": "on-chip counter · phone factor",
+  "@investigateStrapCounterFactor": {
+    "description": "Step source row: factor learned against the phone that scaled the on-chip counter"
+  },
   "investigatePhonePedometer": "phone · pedometer",
   "@investigatePhonePedometer": {
     "description": "Step source row: phone pedometer"
@@ -6744,6 +6785,10 @@
   "@healthBlurbBrv": {
     "description": "Explore catalogue one-line description for breathing rate variability"
   },
+  "healthBlurbSpo2": "WHOOP's own derived value, carried from an import",
+  "@healthBlurbSpo2": {
+    "description": "Explore catalogue one-line description for imported blood oxygen"
+  },
   "healthBlurbSteps": "Counted by a pedometer, never modelled",
   "@healthBlurbSteps": {
     "description": "Explore catalogue one-line description for steps"
@@ -6983,6 +7028,10 @@
   "healthDateFormatError": "The date needs to be YYYY-MM-DD. Nothing was saved.",
   "@healthDateFormatError": {
     "description": "Add-result dialog validation error: date format"
+  },
+  "healthDateInFuture": "That date is after today. Nothing was saved.",
+  "@healthDateInFuture": {
+    "description": "Add-result dialog validation error: draw date after today"
   },
   "healthCouldNotSaveIt": "Could not save it: {error}",
   "@healthCouldNotSaveIt": {
@@ -9426,13 +9475,13 @@
   "@activitySetupCaloriesNeedWeight": {
     "description": "Shown instead of a calorie estimate when the user has no weight on file"
   },
-  "activitySetupNoMetEstimate": "No estimate up front: no published MET applies to a session that names no activity. Calories come from your heart rate instead — when your age, weight and sex are set, and your resting and maximum rates are measured rather than assumed.",
+  "activitySetupNoMetEstimate": "No estimate up front: no published MET covers this activity. Calories come from your heart rate instead — when your age, weight and sex are set, and your resting and maximum rates are measured rather than assumed.",
   "@activitySetupNoMetEstimate": {
-    "description": "Shown instead of a calorie estimate when the activity has no published MET (e.g. General workout)"
+    "description": "Shown instead of a calorie estimate when the activity has no published MET (e.g. General workout, Padel)"
   },
-  "activitySummaryCalorieNoMet": "Estimated from your heart rate and your weight. No MET is in this figure: the session named no activity for one to apply to.",
+  "activitySummaryCalorieNoMet": "Estimated from your heart rate and your weight. No MET is in this figure: none is published for this activity.",
   "@activitySummaryCalorieNoMet": {
-    "description": "Calorie basis line on the summary screen for a session whose activity has no published MET (e.g. General workout)"
+    "description": "Calorie basis line on the summary screen for a session whose activity has no published MET (e.g. General workout, Padel)"
   },
   "activitySetupCalorieEstimate": "About {est} kcal per {minutes} min, from {met} MET and your weight.",
   "@activitySetupCalorieEstimate": {
@@ -10463,6 +10512,52 @@
   "@activitySummaryTabGraphs": {
     "description": "Sub-tab label for the Graphs tab on the activity summary screen"
   },
+  "activityExercisePickerChooseTitle": "Choose exercise",
+  "@activityExercisePickerChooseTitle": {
+    "description": "Title of the strength exercise picker when selecting a new exercise."
+  },
+  "activityExercisePickerChangeTitle": "Change exercise",
+  "@activityExercisePickerChangeTitle": {
+    "description": "Title of the strength exercise picker when replacing or switching from the current exercise."
+  },
+  "activityExercisePickerSearchLabel": "Search exercises",
+  "@activityExercisePickerSearchLabel": {
+    "description": "Accessibility label for the strength exercise search field."
+  },
+  "activityExercisePickerSearchHint": "Search {count} exercises",
+  "@activityExercisePickerSearchHint": {
+    "description": "Placeholder in the strength exercise search field.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "activityExercisePickerCommonFilter": "Common",
+  "@activityExercisePickerCommonFilter": {
+    "description": "Filter showing Edge's short common-exercise list."
+  },
+  "activityExercisePickerAllFilter": "All",
+  "@activityExercisePickerAllFilter": {
+    "description": "Filter showing the whole strength exercise catalogue."
+  },
+  "activityExercisePickerNoMatch": "No exercises match that",
+  "@activityExercisePickerNoMatch": {
+    "description": "Empty result shown for an exercise search or category filter."
+  },
+  "activityExercisePickerWgerCredit": "Exercise catalogue from wger",
+  "@activityExercisePickerWgerCredit": {
+    "description": "Attribution under the strength exercise picker."
+  },
+  "activityExercisePickerSourceLabel": "View source and credits for {exercise}",
+  "@activityExercisePickerSourceLabel": {
+    "description": "Accessibility label and tooltip for a wger exercise's exact source record.",
+    "placeholders": {
+      "exercise": {
+        "type": "String"
+      }
+    }
+  },
   "activityLiveAddALap": "Add a lap",
   "@activityLiveAddALap": {
     "description": "Live swim screen: accessibility label for the tap-a-lap button."
@@ -10470,6 +10565,35 @@
   "activityLiveAddExerciseTitle": "Add exercise",
   "@activityLiveAddExerciseTitle": {
     "description": "Live strength screen: title of the sheet for adding another exercise."
+  },
+  "activityLiveChooseExerciseBody": "Pick the first exercise before logging a set.",
+  "@activityLiveChooseExerciseBody": {
+    "description": "Empty live-strength state before an exercise has been selected."
+  },
+  "activityLiveChangeExercise": "Change exercise",
+  "@activityLiveChangeExercise": {
+    "description": "Accessibility label for changing the current strength exercise."
+  },
+  "activityExerciseCategory": "{category, select, Abs{Abs} Arms{Arms} Back{Back} Calves{Calves} Chest{Chest} Legs{Legs} Shoulders{Shoulders} other{{category}}}",
+  "@activityExerciseCategory": {
+    "description": "Strength exercise category name, used as a picker filter and row detail.",
+    "placeholders": {
+      "category": {
+        "type": "String"
+      }
+    }
+  },
+  "activityExerciseEquipment": "{key, select, Barbell{Barbell} Bench{Bench} Cablemachine{Cable machine} Dumbbell{Dumbbell} Gymmat{Gym mat} Inclinebench{Incline bench} Kettlebell{Kettlebell} nonebodyweightexercise{Bodyweight} Pullupbar{Pull-up bar} SZBar{SZ-Bar} other{{name}}}",
+  "@activityExerciseEquipment": {
+    "description": "Strength exercise equipment name in the picker row detail. key is the English name with non-letters removed; name is the English name, shown when there is no translation.",
+    "placeholders": {
+      "key": {
+        "type": "String"
+      },
+      "name": {
+        "type": "String"
+      }
+    }
   },
   "activityLiveAllowLocation": "Allow location",
   "@activityLiveAllowLocation": {
@@ -11252,6 +11376,22 @@
   "settingsAppearanceRowTitle": "Appearance",
   "@settingsAppearanceRowTitle": {
     "description": "Settings row title cycling the app theme"
+  },
+  "settingsClockFormatRowTitle": "Time format",
+  "@settingsClockFormatRowTitle": {
+    "description": "Settings row title cycling the 12/24-hour clock format"
+  },
+  "settingsClockFormatSystem": "System",
+  "@settingsClockFormatSystem": {
+    "description": "Clock format value: follow the operating system setting"
+  },
+  "settingsClockFormat24h": "24-hour",
+  "@settingsClockFormat24h": {
+    "description": "Clock format value: 24-hour clock (e.g. 19:30)"
+  },
+  "settingsClockFormat12h": "12-hour",
+  "@settingsClockFormat12h": {
+    "description": "Clock format value: 12-hour clock with AM/PM (e.g. 7:30 PM)"
   },
   "settingsCycleTrackingRowTitle": "Cycle tracking",
   "@settingsCycleTrackingRowTitle": {
@@ -12441,5 +12581,82 @@
         "type": "int"
       }
     }
+  },
+  "activityReviewTitle": "Detected activities",
+  "activityPossibleNap": "Possible nap",
+  "activityPossibleWorkout": "Possible workout",
+  "activityConfirm": "Confirm",
+  "activityEdit": "Edit",
+  "activityDiscard": "Discard",
+  "activitySaveConfirm": "Save and confirm",
+  "activityNothing": "Nothing to review",
+  "activityEmptyBody": "Possible naps and workouts will appear here.",
+  "activityLoadFailed": "Could not load activities. Try again.",
+  "activityReviewProblem": "Could not finish",
+  "activityReview": "Review",
+  "activityLoading": "Loading…",
+  "activityPending": "{count} to review",
+  "@activityPending": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "activityLengthMinutes": "{minutes} min",
+  "@activityLengthMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "activityStart": "Start",
+  "activityEnd": "End",
+  "activityCheckTimes": "Check the times",
+  "activityNapWindow": "Choose a past window between 5 minutes and 6 hours.",
+  "activityEditNap": "Edit nap",
+  "activityEditWorkout": "Edit workout",
+  "activityNapAlerts": "Detected naps",
+  "activityPushHint": "Push alerts only. Suggestions remain in Detected activities.",
+  "devicesWornOn": "Worn on",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "Where the band sits. Used to calibrate steps.",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "Wrist",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "Upper arm",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "Somewhere else",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "Where do you wear it?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "The default. Best step accuracy the band can give.",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "Under-counts steps — the arm swings less than the wrist.",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "Unknown",
+  "@devicesWornUnknown": {
+    "description": "Device detail: the stored wearing code is not one this build knows"
+  },
+  "devicesWornOtherSub": "A pocket or bag. The band cannot see gait well there.",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
   }
 }

@@ -41,6 +41,7 @@ import '../../ble/band_status_l10n.dart' show localizedBandStatus;
 import '../../ble/ble_state.dart'
     show BleUnavailableException, bandStatusFor, classifyBleBlocker;
 import '../../ble/hrs_link.dart';
+import '../../ble/oura_link.dart' show pairOuraRingWithTypedKey;
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
 import '../onboarding/pairing.dart' show PairingScreen;
@@ -151,6 +152,9 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
     final sensor =
         kPairableSensors.where((s) => s.entry.id == cand.entryId).firstOrNull;
     if (sensor == null) return; // Framed entries never reach this list.
+    // Only the ring's own screen asks for the key it may already hold; a
+    // direct pair here would install a new one and steer the user to a reset.
+    if (sensor.entry.id == kOura.id) return _openEntry(sensor.entry);
     setState(() {
       _busy = cand.device.remoteId.str;
       _problem = null;
@@ -208,7 +212,14 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
       return;
     }
     await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => PairSensorScreen(entry: sensor.entry, onPicked: sensor.pick),
+      builder: (_) => PairSensorScreen(
+        entry: sensor.entry,
+        onPicked: sensor.pick,
+        // The ring alone can be paired with the key its own app installed —
+        // see `pairOuraRingWithKey`.
+        onPickedWithKey:
+            sensor.entry.id == kOura.id ? pairOuraRingWithTypedKey : null,
+      ),
     ));
     if (mounted) await _afterPair();
   }
@@ -598,6 +609,9 @@ class _NearbySection extends StatelessWidget {
     final l = AppLocalizations.of(c);
     final id = cand.device.remoteId.str;
     final tail = id.length <= 5 ? id : id.substring(id.length - 5);
+    final signal = cand.rssi == null
+        ? (l?.devicesConnected ?? 'Connected')
+        : '${cand.rssi} dBm';
     return SetRow(
       sensorIcon(cand.entryId),
       C.green,
@@ -605,8 +619,8 @@ class _NearbySection extends StatelessWidget {
       sub: busyRemoteId == id
           ? (l?.pairSensorPairing ?? 'Pairing…')
           : cand.label == null
-              ? '…$tail · ${cand.rssi} dBm'
-              : '${cand.rssi} dBm',
+              ? '…$tail · $signal'
+              : signal,
       chevron: !busy,
       onTap: busy || onTap == null ? null : () => onTap!(cand),
     );

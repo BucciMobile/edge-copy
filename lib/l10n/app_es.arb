@@ -59,6 +59,7 @@
   "profileSetupOptional": "OPCIONAL",
   "profileSetupPickOneToContinue": "Elige una opción arriba para continuar.",
   "alarmNavTitle": "Alarma",
+  "alarmFiredAt": "Sonó a las {time}",
   "alarmNavSub": "Te despierta con la banda, no con el teléfono",
   "alarmArmedFor": "ARMADA PARA",
   "alarmNotConnectedTitle": "La banda no está conectada",
@@ -208,6 +209,9 @@
   "pairSensorPairAnother": "Emparejar otro",
   "pairSensorExplainer": "Un sensor solo se usa mientras un entrenamiento está en curso, y solo para la frecuencia cardíaca y el tiempo entre latidos. No reemplaza tu banda, nunca se usa durante la noche, y nada de lo que registra alimenta una puntuación todavía: sus lecturas se guardan y se muestran, y eso es todo.",
   "pairSensorSearchWouldHideSheet": "Buscar ocultaría la hoja de emparejamiento del sistema",
+  "pairSensorKeyTitle": "¿Ya configurado en otro sitio?",
+  "pairSensorKeyBody": "Si tienes la clave que este dispositivo ya usa, pégala aquí: se emparejará sin restablecer los valores de fábrica y no se escribe nada en el dispositivo. Si pones varias claves, una por línea, se probarán por turno hasta que una sea aceptada, lo que resulta útil cuando tienes varias y no sabes cuál corresponde a este dispositivo. Déjalo vacío para emparejar de la forma habitual.",
+  "pairSensorKeyHint": "32 dígitos hexadecimales o base64 — una clave por línea",
   "pairSensorSearchAnyway": "Buscar de todos modos",
   "pairSensorSearching": "Buscando…",
   "pairSensorSearchForSensors": "Buscar sensores",
@@ -425,7 +429,7 @@
   "dayStepsOnDay": "el {day}",
   "dayStepsNoTimesTitle": "Sin horarios detrás del total {when}",
   "dayStepsNoStepsTitle": "No se contaron pasos {when}",
-  "dayStepsStrapCounterBody": "Los {count} pasos contados {when} provienen del contador de pasos propio de la correa, que informa un total del día sin horarios. No hay nada que ubicar en un reloj.",
+  "dayStepsStrapCounterBody": "Los {count} pasos contados {when} provienen del contador de pasos propio de la correa, y sus horarios no se guardaron para este día. No hay nada que ubicar en un reloj.",
   "dayStepsNothingCounted": "Nada capaz de contar pasos registró datos {when}.",
   "dayStepsChartTitle": "CUÁNDO SE CONTARON",
   "dayStepsUnit": "pasos",
@@ -902,6 +906,7 @@
   "investigateWhichSensorCounted": "Qué sensor contó",
   "investigateStrapPedometer": "banda · podómetro de 100 Hz",
   "investigateStrapOnChipCounter": "banda · contador integrado",
+  "investigateStrapCounterFactor": "contador integrado · factor del teléfono",
   "investigatePhonePedometer": "teléfono · podómetro",
   "investigateDayTotal": "total del día",
   "investigateStrapChipReported": "chip de la banda reportó",
@@ -1315,6 +1320,10 @@
   "healthBlurbNapMin": "Sueño detectado fuera de la noche principal",
   "healthBlurbRespRate": "Respiraciones por minuto, obtenidas del ritmo cardíaco",
   "healthBlurbBrv": "Cuánto varía ese ritmo a lo largo de la noche",
+  "healthBlurbSpo2": "Valor propio de WHOOP, tomado de una importación",
+  "@healthBlurbSpo2": {
+    "description": "Descripción del catálogo Explore: oxígeno en sangre importado"
+  },
   "healthBlurbSteps": "Contados por un podómetro, nunca estimados",
   "healthBlurbActiveMin": "Minutos de volumen de movimiento, no de desplazamiento",
   "healthBlurbCalories": "Energía activa calculada a partir de la frecuencia cardíaca y tu perfil",
@@ -1350,6 +1359,7 @@
   "healthDateDrawn": "Fecha de extracción (AAAA-MM-DD)",
   "healthValueMustBeNumber": "El valor debe ser un número por sí solo, sin la unidad. No se guardó nada.",
   "healthDateFormatError": "La fecha debe tener el formato AAAA-MM-DD. No se guardó nada.",
+  "healthDateInFuture": "Esa fecha es posterior a hoy. No se guardó nada.",
   "healthCouldNotSaveIt": "No se pudo guardar: {error}",
   "homeStepSensorStrapPhone": "Correa + teléfono",
   "homeStepSensorStrap": "Correa",
@@ -1819,8 +1829,8 @@
   "activitySetupPrivateLabel": "Sesión privada",
   "activitySetupPrivateDetail": "Oculta en resúmenes y exportaciones",
   "activitySetupCaloriesNeedWeight": "Las calorías necesitan tu peso.",
-  "activitySetupNoMetEstimate": "Sin estimación previa: ningún MET publicado se aplica a una sesión que no nombra una actividad. Las calorías salen de tu frecuencia cardíaca — siempre que tu edad, peso y sexo estén configurados, y que tu frecuencia cardíaca en reposo y tu frecuencia cardíaca máxima estén medidas y no supuestas.",
-  "activitySummaryCalorieNoMet": "Estimado a partir de tu frecuencia cardíaca y tu peso. En esta cifra no hay ningún MET: la sesión no nombró ninguna actividad a la que aplicarlo.",
+  "activitySetupNoMetEstimate": "Sin estimación previa: ningún MET publicado cubre esta actividad. Las calorías salen de tu frecuencia cardíaca — siempre que tu edad, peso y sexo estén configurados, y que tu frecuencia cardíaca en reposo y tu frecuencia cardíaca máxima estén medidas y no supuestas.",
+  "activitySummaryCalorieNoMet": "Estimado a partir de tu frecuencia cardíaca y tu peso. En esta cifra no hay ningún MET: no hay ninguno publicado para esta actividad.",
   "activitySetupCalorieEstimate": "Unas {est} kcal cada {minutes} min, a partir de {met} MET y tu peso.",
   "activitySetupTrackSets": "Series, repeticiones y carga: registradas por ti",
   "activitySetupTrackDistanceGps": "Distancia, ritmo y frecuencia cardíaca",
@@ -2012,8 +2022,21 @@
   "activitySummaryTabOverview": "Resumen",
   "activitySummaryTabSplits": "Parciales",
   "activitySummaryTabGraphs": "Gráficos",
+  "activityExercisePickerChooseTitle": "Elegir ejercicio",
+  "activityExercisePickerChangeTitle": "Cambiar ejercicio",
+  "activityExercisePickerSearchLabel": "Buscar ejercicios",
+  "activityExercisePickerSearchHint": "Buscar entre {count} ejercicios",
+  "activityExercisePickerCommonFilter": "Comunes",
+  "activityExercisePickerAllFilter": "Todos",
+  "activityExercisePickerNoMatch": "No hay ejercicios coincidentes",
+  "activityExercisePickerWgerCredit": "Catálogo de ejercicios de wger",
+  "activityExercisePickerSourceLabel": "Ver la fuente y las licencias de {exercise}",
   "activityLiveAddALap": "Añadir un largo",
   "activityLiveAddExerciseTitle": "Añadir ejercicio",
+  "activityLiveChooseExerciseBody": "Elige el primer ejercicio antes de registrar una serie.",
+  "activityLiveChangeExercise": "Cambiar ejercicio",
+  "activityExerciseCategory": "{category, select, Abs{Abdominales} Arms{Brazos} Back{Espalda} Calves{Pantorrillas} Chest{Pecho} Legs{Piernas} Shoulders{Hombros} other{{category}}}",
+  "activityExerciseEquipment": "{key, select, Barbell{Barra} Bench{Banco} Cablemachine{Polea} Dumbbell{Mancuerna} Gymmat{Esterilla} Inclinebench{Banco inclinado} Kettlebell{Pesa rusa} nonebodyweightexercise{Peso corporal} Pullupbar{Barra de dominadas} SZBar{Barra Z} other{{name}}}",
   "activityLiveAllowLocation": "Permitir ubicación",
   "activityLiveBestLabel": "Mejor",
   "activityLiveBodyweightExcludedNote": "Peso corporal — excluido del volumen",
@@ -2159,6 +2182,10 @@
   "settingsGroupPreferences": "Preferencias",
   "settingsUnitsRowTitle": "Unidades",
   "settingsAppearanceRowTitle": "Apariencia",
+  "settingsClockFormatRowTitle": "Formato de hora",
+  "settingsClockFormatSystem": "Sistema",
+  "settingsClockFormat24h": "24 horas",
+  "settingsClockFormat12h": "12 horas",
   "settingsCycleTrackingRowTitle": "Seguimiento del ciclo",
   "settingsCycleTrackingRowSub": "Agrega la pestaña Ciclo a Bienestar. Desactivado la oculta y conserva todo lo ya registrado",
   "settingsGroupYourData": "Tus datos",
@@ -2410,5 +2437,45 @@
   "ecgProgress": "{pct}% completado",
   "ecgWaveformEmpty": "No se guardó ninguna onda con esta lectura.",
   "ecgWaveformLabel": "Onda aceptada en microvoltios tal como la envió la banda. Los huecos son segundos faltantes.",
-  "ecgSampleNote": "{count} muestras a {rate} Hz, filtradas, µV referidos a la entrada. No se afirma derivación ni polaridad."
+  "ecgSampleNote": "{count} muestras a {rate} Hz, filtradas, µV referidos a la entrada. No se afirma derivación ni polaridad.",
+  "devicesWornOn": "Lo llevas en",
+  "@devicesWornOn": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOnSub": "Dónde está la banda. Se usa para calibrar los pasos.",
+  "@devicesWornOnSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWrist": "Muñeca",
+  "@devicesWornWrist": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicep": "Parte superior del brazo",
+  "@devicesWornBicep": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornOther": "Otro sitio",
+  "@devicesWornOther": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornSheetTitle": "¿Dónde lo llevas?",
+  "@devicesWornSheetTitle": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornWristSub": "El valor por defecto. La mejor precisión de pasos que la banda puede dar.",
+  "@devicesWornWristSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornBicepSub": "Cuenta menos pasos: el brazo se balancea menos que la muñeca.",
+  "@devicesWornBicepSub": {
+    "description": "Step calibration wearing-location setting"
+  },
+  "devicesWornUnknown": "Desconocido",
+  "@devicesWornUnknown": {
+    "description": "Detalle del dispositivo: la ubicación guardada no es conocida por esta versión"
+  },
+  "devicesWornOtherSub": "Un bolsillo o bolso. La banda no ve bien la marcha ahí.",
+  "@devicesWornOtherSub": {
+    "description": "Step calibration wearing-location setting"
+  }
 }

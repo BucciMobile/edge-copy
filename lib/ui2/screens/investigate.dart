@@ -227,6 +227,9 @@ class _InvestigateState extends State<Investigate> {
   InvestigateData? _d;
   bool _loading = true;
   String? _day;
+  // A quick second tap on the day stepper starts a second load; the first
+  // can finish last and must not paint the old day under the new label.
+  int _loadToken = 0;
 
   @override
   void initState() {
@@ -241,6 +244,7 @@ class _InvestigateState extends State<Investigate> {
   }
 
   Future<void> _load() async {
+    final token = ++_loadToken;
     final repo = repoOf(context);
     if (repo == null) {
       if (mounted) setState(() => _loading = false);
@@ -249,9 +253,11 @@ class _InvestigateState extends State<Investigate> {
     try {
       final d =
           await InvestigateData.load(repo, widget.metricKey, want: _day);
-      if (mounted) setState(() => (_d = d, _loading = false));
+      if (mounted && token == _loadToken) {
+        setState(() => (_d = d, _loading = false));
+      }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && token == _loadToken) setState(() => _loading = false);
     }
   }
 
@@ -345,6 +351,9 @@ class _InvestigateState extends State<Investigate> {
             n(split['strap'])),
         (l?.investigateStrapOnChipCounter ?? 'strap · on-chip counter',
             n(split['strap_counter'])),
+        if (d.steps['counter_calibration'] case {'factor': final num f})
+          (l?.investigateStrapCounterFactor ?? 'on-chip counter · phone factor',
+              '× ${f.toStringAsFixed(2)}'),
         (l?.investigatePhonePedometer ?? 'phone · pedometer', n(split['phone'])),
         (l?.investigateDayTotal ?? 'day total', n(d.steps['value'])),
         (l?.investigateStrapChipReported ?? 'strap chip reported',

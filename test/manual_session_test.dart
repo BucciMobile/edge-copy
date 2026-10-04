@@ -7,8 +7,9 @@
 // what gets written, without a DB or a clock in the way.
 //
 // The load-bearing guarantee is the honesty contract: a window with no 1 Hz HR
-// behind it (pruned past the ~3-day `decoded_onehz` retention, or band off)
-// must produce NULL strain/calories — never a figure inferred from duration.
+// behind it (pruned past the `rawRetentionDays` `decoded_onehz` retention, or
+// band off) must produce NULL strain/calories — never a figure inferred from
+// duration.
 
 import 'dart:convert';
 
