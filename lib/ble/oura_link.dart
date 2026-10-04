@@ -711,13 +711,15 @@ String _exhausted(
   required int skipped,
   required int overflow,
 }) {
-  if (tried == 1) return lastRefusal;
   final aside = <String>[
     if (overflow > 0)
       '$overflow further key(s) went untried — this tries at most '
           '$kOuraMaxCandidateKeys',
     if (skipped > 0) '$skipped line(s) were not a key and were skipped',
   ];
+  if (tried == 1) {
+    return aside.isEmpty ? lastRefusal : '$lastRefusal (${aside.join('; ')}.)';
+  }
   return 'The ring turned down all $tried keys, so it holds a different one — '
       'or this is a different ring.'
       '${aside.isEmpty ? '' : ' (${aside.join('; ')}.)'}';
@@ -847,7 +849,8 @@ class OuraPairAttempt {
   /// The ring answered, and the answer was no. A verdict on this key.
   const OuraPairAttempt.rejected(String this.refusal) : keyRejected = true;
 
-  /// The attempt did not get far enough to be a verdict on anything.
+  /// The attempt did not get far enough to be a verdict on this key alone, or
+  /// got an answer that holds for every key, so a multi-key trial stops here.
   const OuraPairAttempt.failed(String this.refusal) : keyRejected = false;
 
   /// The sentence to show the user, or null when the ring let us in.
@@ -948,10 +951,16 @@ Future<OuraPairAttempt> ouraPairHandshake(
     // existing-key path a reset is the one thing NOT to suggest.
     final result = ouraAuthResult(replyFrame);
     if (result == 0) return const OuraPairAttempt.accepted();
-    // EVERY branch below is `rejected`, not `failed`: the ring answered the
-    // challenge, so each one is a verdict on this key and a multi-key trial may
-    // move on to the next candidate.
-    if (!install) return OuraPairAttempt.rejected(_existingKeyRefusal(result));
+    // On the install path every branch below is `rejected`: the ring answered
+    // the challenge, so it is a verdict on this key. On the existing-key path
+    // only a wrong key is; "holds no key" and "matched but not onboarded" are
+    // the same answer for every remaining candidate, so they end the trial
+    // (`failed`) and are reported as themselves.
+    if (!install) {
+      return result == kOuraAuthWrongKey
+          ? OuraPairAttempt.rejected(_existingKeyRefusal(result))
+          : OuraPairAttempt.failed(_existingKeyRefusal(result));
+    }
     if (result == kOuraAuthFactoryReset) {
       return const OuraPairAttempt.rejected(
           'The ring took the key but is still waiting for one, which '

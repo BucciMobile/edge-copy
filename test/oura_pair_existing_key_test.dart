@@ -101,7 +101,9 @@ void main() {
       final attempt = await ouraPairHandshake(ring, _appKey,
           install: false, replyWindow: _window);
       expect(attempt.refusal, contains('holds no key yet'));
-      expect(attempt.keyRejected, isTrue);
+      expect(attempt.keyRejected, isFalse,
+          reason: 'every other candidate gets the same answer, so a multi-key '
+              'trial stops here instead of reporting all keys as wrong');
       expect(ring.sentKeyInstall, isFalse);
     });
   });
