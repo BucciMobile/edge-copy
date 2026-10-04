@@ -312,19 +312,30 @@ class HealthConnectSleepSessionExporter {
 
   final HealthConnectSleepSessionWriter writer;
 
-  Future<bool> replace(Map<String, dynamic> bundle, {DateTime? dayStart}) async {
+  Future<bool> replace(
+    Map<String, dynamic> bundle, {
+    DateTime? dayStart,
+    DateTime? previousWake,
+  }) async {
     final session = normalizeHealthSleepSession(bundle);
     // No sleep window at all — nothing to write, and that is not a failure.
     // But a night exported earlier (since rejected, or gone on re-derive) is
     // still in the store, and nothing else deletes Health Connect sleep. A
     // range delete matches records by START time and most nights start the
     // evening before, so clear the same noon-to-noon window a replace does.
+    //
+    // Except the day before's night when it woke after noon ([previousWake]):
+    // it belongs to that day but starts inside this window, and once that day
+    // is behind the export cursor nothing writes it back. Start after it.
     if (session == null) {
       if (dayStart == null) return true;
-      return writer.clear(
-        DateTime(dayStart.year, dayStart.month, dayStart.day - 1, 12),
-        DateTime(dayStart.year, dayStart.month, dayStart.day, 12),
-      );
+      var from = DateTime(dayStart.year, dayStart.month, dayStart.day - 1, 12);
+      final to = DateTime(dayStart.year, dayStart.month, dayStart.day, 12);
+      if (previousWake != null && !previousWake.isBefore(from)) {
+        from = previousWake.add(const Duration(seconds: 1));
+      }
+      if (!from.isBefore(to)) return true;
+      return writer.clear(from, to);
     }
     // A window WITH NO STAGES is the same kind of "nothing to write", and has
     // to report the same way. It used to return false, and the caller treats

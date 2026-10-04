@@ -955,7 +955,21 @@ class HealthExporter {
     // on both stores (Health Connect SleepSessionRecord; HealthKit inBed+Core).
     if (Platform.isAndroid && !androidSleepAlreadyWritten) {
       try {
-        if (!await _androidSleep.replace(b, dayStart: dayStart)) {
+        // No night today means a clear, which must stop short of yesterday's
+        // night if that one woke after noon.
+        DateTime? previousWake;
+        if (normalizeHealthSleepSession(b) == null) {
+          final prev = DateTime(dayStart.year, dayStart.month, dayStart.day - 1);
+          final pb = _decode(
+            (await LocalDb.dayResult(dayLabelOf(prev)))?['payload_json'],
+          );
+          if (pb != null) previousWake = normalizeHealthSleepSession(pb)?.end;
+        }
+        if (!await _androidSleep.replace(
+          b,
+          dayStart: dayStart,
+          previousWake: previousWake,
+        )) {
           debugPrint('[health] write Android sleep session returned false');
           success = false;
         }

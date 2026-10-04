@@ -635,6 +635,36 @@ void main() {
     );
 
     test(
+      'the clear stops short of yesterday\'s night when it woke after noon',
+      () async {
+        final cleared = <(DateTime, DateTime)>[];
+        final exporter = HealthConnectSleepSessionExporter(
+          writer: _RecordingClearWriter(cleared),
+        );
+        final noWindow = _overnightBundle()..remove('sleep');
+
+        // Yesterday's sleep ran 14:00-22:00: its record starts inside today's
+        // noon-to-noon window but belongs to yesterday.
+        await exporter.replace(
+          noWindow,
+          dayStart: DateTime(2026, 8, 5),
+          previousWake: DateTime(2026, 8, 4, 22),
+        );
+        expect(cleared.single.$1, DateTime(2026, 8, 4, 22, 0, 1));
+        expect(cleared.single.$2, DateTime(2026, 8, 5, 12));
+
+        // A morning wake is behind the window already: unchanged.
+        cleared.clear();
+        await exporter.replace(
+          noWindow,
+          dayStart: DateTime(2026, 8, 5),
+          previousWake: DateTime(2026, 8, 4, 7),
+        );
+        expect(cleared.single.$1, DateTime(2026, 8, 4, 12));
+      },
+    );
+
+    test(
       're-export uses the replace operation and a false result propagates',
       () async {
         const channel = MethodChannel('openstrap/test_health_connect_replace');
@@ -943,4 +973,19 @@ void main() {
       expect(healthExportCursorBefore('', '2026-09-28'), isNull);
     });
   });
+}
+
+class _RecordingClearWriter implements HealthConnectSleepSessionWriter {
+  _RecordingClearWriter(this.cleared);
+
+  final List<(DateTime, DateTime)> cleared;
+
+  @override
+  Future<bool> replace(HealthSleepSession session) async => true;
+
+  @override
+  Future<bool> clear(DateTime start, DateTime end) async {
+    cleared.add((start, end));
+    return true;
+  }
 }
