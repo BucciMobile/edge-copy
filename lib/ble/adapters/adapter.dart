@@ -37,6 +37,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../../compute/vendor_sleep.dart' show VendorEpoch;
 import '../../data/observation.dart' show Observation;
 import '_registry.dart';
 import 'signals.dart';
@@ -258,6 +259,17 @@ class VendorScalars extends BandEvent {
   /// `vendorKey` for a proprietary composite — the split is the rule that
   /// stops "readiness" meaning three algorithms.
   final List<Observation> rows;
+}
+
+/// The band's OWN hypnogram, already in our `stages4` words. Banked in
+/// `vendor_sleep_epoch`, not `observation`, and read only by the main-sleep
+/// window's `vendor_staged` rung after a plausibility gate.
+class VendorHypnogram extends BandEvent {
+  const VendorHypnogram(this.source, this.epochs);
+
+  /// Lowercase vendor id, e.g. 'oura'.
+  final String source;
+  final List<VendorEpoch> epochs;
 }
 
 /// One band, driven.

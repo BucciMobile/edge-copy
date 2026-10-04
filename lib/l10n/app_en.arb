@@ -8456,6 +8456,10 @@
   "@sleepDetailWindowFallback": {
     "description": "Label when the sleep window was inferred from heart rate as a fallback."
   },
+  "sleepDetailStagedByRing": "Staged by your ring",
+  "@sleepDetailStagedByRing": {
+    "description": "Chip on a night whose window and stages came from the user's ring rather than our own detection."
+  },
   "sleepDetailWindowAuto": "This window was staged from the signals",
   "@sleepDetailWindowAuto": {
     "description": "Label when the sleep window was auto-staged from the signals."

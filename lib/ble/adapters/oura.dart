@@ -45,6 +45,7 @@ import 'package:pointycastle/export.dart' show AESEngine, ECBBlockCipher, KeyPar
 
 import '../../data/observation.dart'
     show Observation, ObservationSource;
+import '../../compute/vendor_sleep.dart' show VendorEpoch;
 import '_registry.dart';
 import 'adapter.dart';
 import 'signals.dart';
@@ -181,11 +182,11 @@ class OuraAdapter extends BandAdapter {
   /// every [SampleBatch], so nothing is lost that was not already banked.
   final List<(int ds, double tempC)> _held = [];
 
-  /// Per-stage epoch counts waiting for an origin, keyed by the event that
-  /// carried them. Same lifecycle as [_held]. Keyed so a re-read decisecond
-  /// overwrites its own entry instead of counting the same event twice.
-  final Map<(int ds, int tag, int header), Map<OuraSleepPhase, int>>
-      _heldStages = {};
+  /// Hypnogram events waiting for an origin, keyed by the event that carried
+  /// them. Same lifecycle as [_held]. Keyed so a re-read decisecond overwrites
+  /// its own entry instead of counting the same event twice.
+  final Map<(int ds, int tag, int header), List<OuraSleepPhase>> _heldStages =
+      {};
 
   /// The Unix second [ds] falls on, or null when no origin is known.
   int? _anchorUnixFor(int ds) {
@@ -453,15 +454,11 @@ class OuraAdapter extends BandAdapter {
         case kOuraEvtSleepPhaseDetails:
         case kOuraEvtSleepPhaseData:
           // The ring's own staging, kept per event (no night boundary is
-          // known) as stage-minute totals under `vendorKey`: their algorithm,
-          // not our `stages4`. The epoch series stays in `raw_archive`.
+          // known) as stage-minute totals under `vendorKey`, and the `data`
+          // pages also as an epoch series (see [_emit]'s VendorHypnogram).
           final hyp = decodeSleepPhases(e);
           if (hyp == null) break;
-          final epochs = <OuraSleepPhase, int>{};
-          for (final phase in hyp.phases) {
-            epochs.update(phase, (n) => n + 1, ifAbsent: () => 1);
-          }
-          _heldStages[(e.tsDs, e.tag, hyp.header)] = epochs;
+          _heldStages[(e.tsDs, e.tag, hyp.header)] = hyp.phases;
       }
     }
     // Stamp everything an origin can now reach — this batch's readings and any
@@ -483,16 +480,34 @@ class OuraAdapter extends BandAdapter {
     // one decisecond are summed: the row key is (ts_ms, vendorKey), so two
     // events on one stamp would otherwise REPLACE each other's minutes.
     final stageEpochs = <(int ms, OuraSleepPhase), int>{};
+    final hypnogram = <VendorEpoch>[];
     final a = _anchor;
     if (a != null) {
       for (final MapEntry(:key, :value) in _heldStages.entries) {
         final ms = a.$2 * 1000 + (key.$1 - a.$1) * 100;
-        for (final MapEntry(key: stage, value: n) in value.entries) {
-          stageEpochs.update((ms, stage), (m) => m + n, ifAbsent: () => n);
+        for (final stage in value) {
+          stageEpochs.update((ms, stage), (m) => m + 1, ifAbsent: () => 1);
+        }
+        // Only the numbered `data` pages become an epoch series. A page is
+        // taken to END at its own stamp; that is unverified, which is why the
+        // night is gated for contiguity and for edges that agree with our own
+        // window (`vendorNightRejection`) before anything reads it. A shift of
+        // one page passes both. One code we
+        // have no stage for and the page is dropped — the hole then fails
+        // that gate for the whole night instead of a guessed stage passing it.
+        if (key.$2 != kOuraEvtSleepPhaseData) continue;
+        final stages = [for (final p in value) ouraStage4(p.index)];
+        if (stages.contains(null)) continue;
+        final endSec = ms ~/ 1000;
+        final startSec = endSec - stages.length * 30;
+        for (var i = 0; i < stages.length; i++) {
+          hypnogram.add(VendorEpoch(
+              startSec + i * 30, startSec + (i + 1) * 30, stages[i]!));
         }
       }
       _heldStages.clear();
     }
+    if (hypnogram.isNotEmpty) yield VendorHypnogram('oura', hypnogram);
     final stageRows = [
       for (final MapEntry(:key, :value) in stageEpochs.entries)
         Observation(
@@ -581,3 +596,13 @@ class _Inbox {
     return null;
   }
 }
+
+/// The ring's 2-bit stage code in our `stages4` words, or null for a code we
+/// have no stage for. The one place a ring code becomes one of ours.
+String? ouraStage4(int code) => switch (code) {
+      0 => 'deep',
+      1 => 'light',
+      2 => 'rem',
+      3 => 'wake',
+      _ => null,
+    };

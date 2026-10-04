@@ -566,6 +566,36 @@ void main() {
     expect(at.millisecondsSinceEpoch ~/ 1000, 1782043215 + 20);
   });
 
+  test('a data page also becomes an epoch series in stages4, ending at its '
+      'stamp; the information carrier does not', () async {
+    final (events, _) = await _drive(
+      OuraAdapter(
+        key: _kKey,
+        anchor: (1000, 1782043215),
+        confirmTimeout: _kFast,
+        replyTimeout: _kFast,
+      ),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtSleepPhaseInformation, 1100, hypnogramBody()),
+            _event(kOuraEvtSleepPhaseData, 1200, hypnogramBody()),
+            _summary(2, 0),
+          ];
+        }
+        return const [];
+      },
+    );
+    final hyp = events.whereType<VendorHypnogram>().single;
+    expect(hyp.source, 'oura');
+    expect(hyp.epochs.map((e) => e.stage),
+        [for (final s in ['deep', 'light', 'rem', 'wake']) ...List.filled(4, s)]);
+    expect(hyp.epochs.last.endSec, 1782043215 + 20);
+    expect(hyp.epochs.first.startSec, 1782043215 + 20 - 16 * 30);
+  });
+
   test('a hypnogram decoded before any origin is held, then stamped by the '
       'sync that finally carries one', () async {
     // Two batches in ONE session: the hold is adapter state, and a sync in

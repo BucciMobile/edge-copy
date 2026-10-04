@@ -671,6 +671,7 @@ class _SleepDetailState extends State<SleepDetail> {
     final source = (n['sleep_source'] as String?) ?? 'auto';
     final mine = source == 'manual' || source == 'confirmed';
     final fallback = source == 'auto_fallback';
+    final vendor = source == 'vendor_staged';
 
     final busy = _saving;
     return [
@@ -688,6 +689,8 @@ class _SleepDetailState extends State<SleepDetail> {
                     : fallback
                         ? (l?.sleepDetailWindowFallback ??
                             'This window was inferred from heart rate')
+                        : vendor
+                        ? (l?.sleepDetailStagedByRing ?? 'Staged by your ring')
                         : (l?.sleepDetailWindowAuto ??
                             'This window was staged from the signals'),
                 style: F.body.copyWith(color: p.ink),
@@ -877,6 +880,11 @@ class _SleepDetailState extends State<SleepDetail> {
           ],
           child: _hypnogram(c, p, stages, n),
         ),
+        // Not our staging: say whose it is, wherever it is drawn.
+        if (n['sleep_source'] == 'vendor_staged') ...[
+          const SizedBox(height: S.x2),
+          Pill(l?.sleepDetailStagedByRing ?? 'Staged by your ring', C.n500),
+        ],
         const SizedBox(height: S.x2),
         Text(
           cycles > 0

@@ -1630,6 +1630,7 @@
   "sleepDetailWatchedExplain": "Nous avons observé {watched} sur vos {inBed} passées au lit ; le reste n'est pas une mesure. Le sommeil, ainsi que les parts de phases ci-dessous, sont calculés sur le temps observé.",
   "sleepDetailWindowMine": "Vous avez défini cette fenêtre",
   "sleepDetailWindowFallback": "Cette fenêtre a été déduite de la fréquence cardiaque",
+  "sleepDetailStagedByRing": "Phases fournies par votre bague",
   "sleepDetailWindowAuto": "Cette fenêtre a été estimée à partir des signaux",
   "sleepDetailWindowFallbackBody": "L'analyse n'a pas pu trouver les limites, donc ces horaires sont une estimation.",
   "sleepDetailWindowSol": "Du début de votre fenêtre jusqu'à l'endormissement : {band}.",
