@@ -500,7 +500,7 @@ dependencies:
       #      grep -n 'varTot == 0\|diffN == 0'`
       # analytics main @ 4fc2b12: adds #80 (band-state night end) plus #81-#85.
       # analytics main @ c0effea: adds #79 (catalog) and #86 (rmssd gate).
-      ref: c0effea9a7f3113009ebec902f456ace56b774ca
+      ref: 27b0ba486234900084ed791cfb95e71738645d98
 
   # BLE — flutter_blue_plus is the maintained cross-platform GATT client.
   flutter_blue_plus: ^1.36.8
