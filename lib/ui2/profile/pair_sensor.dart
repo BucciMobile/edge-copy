@@ -287,6 +287,9 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
       // pair of a device that is now the paired one.
       if (failure == null) _found = const [];
     });
+    // The key belonged to the device just paired; a second pair from this
+    // screen must not silently reuse it.
+    if (failure == null) _key.clear();
     if (failure == null) await _load();
   }
 
@@ -470,14 +473,16 @@ class PairSensorView extends StatelessWidget {
   /// so: an empty field is the ordinary pairing.
   Widget _keySection(BuildContext c, TextEditingController ctl, bool locked) {
     final p = P.of(c);
+    final l = AppLocalizations.of(c);
     return Section(
-      'Already set up elsewhere?',
+      l?.pairSensorKeyTitle ?? 'Already set up elsewhere?',
       Surface(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(
-            'If you have the key this device already uses, paste it here and '
-            'it pairs without a factory reset — nothing is written to the '
-            'device. Leave it empty to pair the usual way.',
+            l?.pairSensorKeyBody ??
+                'If you have the key this device already uses, paste it here '
+                    'and it pairs without a factory reset — nothing is written '
+                    'to the device. Leave it empty to pair the usual way.',
             style: F.cap.copyWith(color: p.ink3, height: 1.5),
           ),
           TextField(
@@ -487,7 +492,7 @@ class PairSensorView extends StatelessWidget {
             enableSuggestions: false,
             style: F.head.copyWith(color: p.ink),
             decoration: InputDecoration(
-              hintText: '32 hex digits or base64',
+              hintText: l?.pairSensorKeyHint ?? '32 hex digits or base64',
               hintStyle: F.head.copyWith(color: p.ink3),
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: S.x3),
