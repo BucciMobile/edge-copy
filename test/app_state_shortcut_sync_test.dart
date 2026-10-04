@@ -1,10 +1,11 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/ble/ble_engine.dart';
 import 'package:openstrap_edge/data/db.dart';
-import 'package:openstrap_edge/sync/paired_device.dart';
 import 'package:openstrap_edge/state/app_state.dart';
+import 'package:openstrap_edge/sync/paired_device.dart';
 import 'package:openstrap_edge/sync/reset_gate.dart';
 import 'package:openstrap_edge/sync/shortcut_sync_task.dart';
 import 'package:path/path.dart' as p;
@@ -89,6 +90,41 @@ void main() {
   });
 
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  // openSession needs the plugin stack and an iOS host to reach the restore
+  // bridge, so this pins the source instead. A background Shortcut whose
+  // connect fails must hand the band back to the restore path, or
+  // foregroundActive stays true with no link and every restore wake and
+  // BG-task sync skips until the user next opens the app.
+  test('a failed background openSession re-arms iOS recovery', () {
+    final src = File('lib/state/app_state.dart').readAsStringSync();
+    final start = src.indexOf('Future<void> openSession(');
+    expect(start, isNot(-1));
+    final body = src.substring(start, src.indexOf('\n  }\n', start));
+    final fin = body.lastIndexOf('} finally {');
+    expect(fin, isNot(-1));
+    const rearm =
+        'if (_keepAlive && _background && !engine.isConnected) {\n'
+        '        await _armRecovery();';
+    expect(body.substring(fin).contains(rearm), isTrue);
+  });
+
+  // A background Shortcut connect holds `busy`; opening the app mid-connect
+  // bounces off it. The foreground flip must still land, or the visible app
+  // runs in background mode (derive deferred, live HR off) until the next
+  // pause/resume.
+  test('opening the app during a background session still foregrounds', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)..initialized = true;
+    addTearDown(app.dispose);
+    await app.pauseForBackground();
+    expect(app.debugLiveOwners.foreground, isFalse);
+    app
+      ..paired = PairedDevice('band', null)
+      ..busy = true;
+    await app.openSession();
+    expect(app.debugLiveOwners.foreground, isTrue);
+  });
 
   test(
     'a data reset prevents a Shortcut from touching the app-owned band',
@@ -177,6 +213,25 @@ void main() {
       expect(engine.disconnects, 0);
     },
   );
+
+  test('joining the burst after waiting reports syncing, not waiting', () async {
+    final engine = _ConnectedEngine();
+    final app = AppState.forTesting(engine: engine)
+      ..initialized = true
+      ..busy = true;
+    addTearDown(app.dispose);
+    final task = ShortcutSyncTask('join', const Duration(seconds: 5));
+    final work = app.syncForShortcut(task);
+    expect(task.phase, 'waiting');
+    app.busy = false;
+    while (engine.runs == 0) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    }
+    expect(task.phase, 'syncing');
+    expect(task.expired.status, 'partial');
+    engine.reply.complete(SyncReport(0, 0, true));
+    await work;
+  });
 
   test('cancelling a waiter preserves the app-owned transfer', () async {
     final engine = _ConnectedEngine();

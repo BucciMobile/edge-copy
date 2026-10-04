@@ -748,6 +748,25 @@ class HrsLink {
     final row = (await LocalDb.deviceRows())
         .where((r) => r['id'] == id)
         .firstOrNull;
+    // THE ASK APPROVAL IS DELIBERATELY LEFT ALONE — do not "fix" this by
+    // dropping it here.
+    //
+    // An ASK-paired sensor keeps its approval after its row goes, and the
+    // sensor picker will keep handing that id back, which is annoying. Revoking
+    // it is worse. `ASAccessorySession.removeAccessory` does not just withdraw
+    // this app's grant: Apple's answer is that it removes the accessory "from
+    // the system and for all apps … this call will always remove it from the
+    // system", bond included. So forgetting a ring HERE would unpair it from
+    // the phone entirely — the Oura app loses it too, nothing in this app can
+    // put it back, and until the user re-pairs with the vendor app the ring
+    // does not even advertise, which presents as a silent, timeout-less connect
+    // that names nothing.
+    //
+    // "Forget this device in OpenStrap" cannot reasonably mean "unpair it from
+    // your phone for every app". The same reasoning already reverted the same
+    // call on the picker path (`2068fd4b`) and closed #520; it applies to an
+    // explicit forget just as much, because the collateral is identical and the
+    // user asked for neither.
     if (row?['adapter_id'] == kOura.id) {
       await OuraLink.forgetRing(id);
       return;

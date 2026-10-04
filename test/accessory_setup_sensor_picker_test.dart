@@ -54,4 +54,10 @@ void main() {
       throwsA(isA<Exception>()),
     );
   });
+
+  test('forgetting a sensor drops its approval by uppercased id', () async {
+    await AccessorySetup.removeSensor('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
+    expect(calls.single.method, 'removeSensor');
+    expect(calls.single.arguments, 'AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE');
+  });
 }

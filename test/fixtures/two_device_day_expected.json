@@ -31,9 +31,9 @@
       },
       "irregular_24h": {
         "value": {
-          "sd1_ms": 14.140826,
-          "sd2_ms": 14.14279,
-          "sd1_sd2": 0.999861,
+          "sd1_ms": 14.139024,
+          "sd2_ms": 14.144592,
+          "sd1_sd2": 0.999606,
           "pnn_pct": 0.0,
           "n_beats": 21598,
           "flag": false
@@ -294,6 +294,7 @@
         ]
       },
       "absence_reason": null,
+      "band_offset_trim_sec": null,
       "stager": {
         "value": {
           "wake_pct": 0.0,

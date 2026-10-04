@@ -169,6 +169,80 @@ List<int>? parseOuraKey(String raw) {
   }
 }
 
+/// The most candidate keys one pairing run will try.
+///
+/// A cap rather than "as many as you paste", because every candidate costs its
+/// own connect + handshake against the ring (see [pairOuraRingWithKeys] for why
+/// they cannot share a link): twenty pasted lines would be a pairing screen
+/// that sits there for minutes. Five covers the case this exists for — a user
+/// who pulled several keys out of a previous setup and does not know which ring
+/// each belongs to.
+const int kOuraMaxCandidateKeys = 5;
+
+/// One parse of the pairing screen's key field.
+///
+/// It reports what it DROPPED as well as what it found, because the field is
+/// free text and a silent drop is how a user retries the same typo twice. The
+/// counts are surfaced in the exhausted-trial message, not just logged.
+class OuraKeyDraft {
+  const OuraKeyDraft({
+    required this.keys,
+    required this.malformed,
+    required this.overflow,
+  });
+
+  /// The valid 16-byte keys, in the order they were written, de-duplicated.
+  final List<List<int>> keys;
+
+  /// Non-empty lines that are not a key at all. Not blocking: the valid lines
+  /// are still tried, and this is what lets the screen say so honestly.
+  final int malformed;
+
+  /// Valid keys beyond [kOuraMaxCandidateKeys], which are NOT tried.
+  final int overflow;
+
+  bool get isEmpty => keys.isEmpty;
+}
+
+/// Parse the key field into candidate keys — one per line, or comma-separated.
+///
+/// THE WHOLE FIELD IS TRIED AS ONE KEY FIRST, and that order is the compatible
+/// one, not a shortcut. [parseOuraKey] strips spaces, colons and hyphens from
+/// everything it is given, so `a0:a1:a2:a3 a4-a5-a6-a7` — and even that spread
+/// over two lines — has always been one valid key. Splitting first would turn
+/// every such field into a pile of malformed fragments. So: if the field parses
+/// as a single key, it IS a single key; only then is it split.
+///
+/// SPLIT ON LINES, COMMAS AND SEMICOLONS, never on spaces, for the same reason:
+/// a space inside one key is a grouping separator that already works.
+OuraKeyDraft parseOuraKeys(String raw) {
+  final whole = parseOuraKey(raw);
+  if (whole != null) {
+    return OuraKeyDraft(keys: [whole], malformed: 0, overflow: 0);
+  }
+  final keys = <List<int>>[];
+  final seen = <String>{};
+  var malformed = 0;
+  var overflow = 0;
+  for (final token in raw.split(RegExp(r'[\n\r,;]'))) {
+    if (token.trim().isEmpty) continue;
+    final key = parseOuraKey(token);
+    if (key == null) {
+      malformed++;
+      continue;
+    }
+    // De-duplicated on the BYTES, so the same key written once as hex and once
+    // as base64 is still one candidate and does not burn two connections.
+    if (!seen.add(_hex(key))) continue;
+    if (keys.length >= kOuraMaxCandidateKeys) {
+      overflow++;
+      continue;
+    }
+    keys.add(List<int>.unmodifiable(key));
+  }
+  return OuraKeyDraft(keys: keys, malformed: malformed, overflow: overflow);
+}
+
 /// The live link to a paired Oura ring. One instance; a second concurrent ring
 /// is not a thing anyone asked for.
 class OuraLink {
@@ -648,9 +722,57 @@ class OuraLink {
   }
 }
 
+/// The `device_id` a pairing should REUSE for [priorRow], or null to mint one.
+///
+/// One physical ring must keep one id across re-pairings: the id is the storage
+/// key for `decoded_onehz`, `raw_archive` and every `sync_cursor` item, so a
+/// fresh one forks the ring into N identities and orphans everything the last
+/// pairing banked. [OuraLink.pairedRingRow] is the same single-ring lookup
+/// `sync()` resolves against, which is what makes reuse reconcile rather than
+/// fork.
+///
+/// Null for a row claiming [LocalDb.kPrimaryDeviceId]: `sync()` refuses such a
+/// row and tells the user to re-pair with a minted id, so carrying it forward
+/// would re-create the exact state that message asks them to escape.
+@visibleForTesting
+String? ouraReusableDeviceId(Map<String, Object?>? priorRow) {
+  final id = priorRow?['id'] as String?;
+  return (id == null || id == LocalDb.kPrimaryDeviceId) ? null : id;
+}
+
 /// What to tell a user whose OWN key the ring refused, by result code. Not
 /// [_kResetFirst]: that sentence tells them to reset the ring, which is exactly
 /// what pairing with an existing key exists to avoid.
+/// The message when the ring turned down every candidate.
+///
+/// ONE CANDIDATE KEEPS THE RING'S OWN REFUSAL, verbatim. That sentence names
+/// what the ring actually said and what to do about it; wrapping it in "none of
+/// your 1 keys worked" would be worse English carrying less information.
+///
+/// SEVERAL ADMIT TO WHAT WAS NOT TRIED. A user who pasted six lines and is told
+/// "none of your 5 keys matched" has been told something false about their
+/// sixth, and a line that was silently unparseable is the likeliest thing they
+/// would want to fix first.
+String _exhausted(
+  int tried,
+  String lastRefusal, {
+  required int skipped,
+  required int overflow,
+}) {
+  final aside = <String>[
+    if (overflow > 0)
+      '$overflow further key(s) went untried — this tries at most '
+          '$kOuraMaxCandidateKeys',
+    if (skipped > 0) '$skipped line(s) were not a key and were skipped',
+  ];
+  if (tried == 1) {
+    return aside.isEmpty ? lastRefusal : '$lastRefusal (${aside.join('; ')}.)';
+  }
+  return 'The ring turned down all $tried keys, so it holds a different one — '
+      'or this is a different ring.'
+      '${aside.isEmpty ? '' : ' (${aside.join('; ')}.)'}';
+}
+
 String _existingKeyRefusal(int? result) => switch (result) {
       kOuraAuthWrongKey => 'The ring refused that key. Check that it is this '
           'ring\'s key and that all of it was copied.',
@@ -684,7 +806,7 @@ String _existingKeyRefusal(int? result) => switch (result) {
 ///
 /// STILL HARDWARE-UNVERIFIED, like everything else on this path (R6).
 Future<String?> pairOuraRing(BluetoothDevice device) =>
-    _pairOuraRing(device, existingKey: null);
+    _pairOuraRing(device, existingKeys: null);
 
 /// Pair [device] with the 16-byte key the ring ALREADY holds — no factory
 /// reset, nothing written to the ring. Null on success, or a sentence the user
@@ -704,15 +826,89 @@ Future<String?> pairOuraRing(BluetoothDevice device) =>
 ///
 /// [key] is the vendor app's key, which is a credential for the user's own
 /// ring: it is kept in the keychain like ours and never leaves the phone.
-Future<String?> pairOuraRingWithKey(BluetoothDevice device, List<int> key) {
-  if (key.length != 16) {
-    return Future.value('That is not a ring key: it must be exactly 16 bytes.');
+Future<String?> pairOuraRingWithKey(BluetoothDevice device, List<int> key) =>
+    pairOuraRingWithKeys(device, [key]);
+
+/// [pairOuraRingWithKey] for up to [kOuraMaxCandidateKeys] candidates: try each
+/// in the order given and keep the first the ring accepts. Null on success, or
+/// a sentence the user can act on.
+///
+/// WHY SEVERAL. A user who extracted keys from a previous setup often has a
+/// handful and no way to tell which belongs to which ring — the key is not
+/// labelled with a serial anywhere. Trying them one at a time by hand means
+/// re-running the whole pairing flow per guess.
+///
+/// ONE KEY PER CONNECTION, and this is the part not to "optimise". Each
+/// candidate gets its own connect and its own handshake: a ring that has just
+/// refused an authentication does not hand out a second nonce on the same link,
+/// so a loop that re-challenged over one connection would report every
+/// candidate after the first as wrong whatever it was. NOT verified here on
+/// hardware (R6).
+///
+/// STILL READ-ONLY ON THE RING. The key-install command is never sent on this
+/// path, whatever the candidate count — so a wrong key costs a refusal and
+/// nothing else, five times over.
+///
+/// NOTHING IS STORED UNTIL ONE WINS. The install path writes its key to the
+/// keychain BEFORE sending it, because a crash in between would leave the ring
+/// holding a key the phone lost; that cannot happen here, since nothing is
+/// written to the ring, so the winner's key is stored only once the ring has
+/// accepted it. Five candidates therefore leave at most one secret behind, not
+/// five.
+Future<String?> pairOuraRingWithKeys(
+  BluetoothDevice device,
+  List<List<int>> keys,
+) {
+  final draft = <List<int>>[];
+  final seen = <String>{};
+  for (final k in keys) {
+    if (k.length != 16) {
+      return Future.value(
+          'That is not a ring key: it must be exactly 16 bytes.');
+    }
+    if (seen.add(_hex(k)) && draft.length < kOuraMaxCandidateKeys) {
+      draft.add(List<int>.unmodifiable(k));
+    }
   }
-  return _pairOuraRing(device, existingKey: List<int>.unmodifiable(key));
+  if (draft.isEmpty) {
+    return Future.value('No key to try.');
+  }
+  return _pairOuraRing(device, existingKeys: draft);
+}
+
+/// What one candidate key's handshake came to.
+///
+/// THE DISTINCTION IS THE WHOLE POINT, and it is a §4.1 one. A ring that
+/// REJECTED the key has delivered a verdict on that key; a ring that stopped
+/// answering, or would not take a command, has delivered a verdict on nothing.
+/// A multi-key trial may only advance to the next candidate on the first kind,
+/// and may only tell the user "none of these keys is the right one" when every
+/// attempt produced one. Collapsing the two is how a flat battery or a ring on
+/// the far side of the room gets reported as five wrong keys.
+class OuraPairAttempt {
+  /// The ring let us in.
+  const OuraPairAttempt.accepted()
+      : refusal = null,
+        keyRejected = false;
+
+  /// The ring answered, and the answer was no. A verdict on this key.
+  const OuraPairAttempt.rejected(String this.refusal) : keyRejected = true;
+
+  /// The attempt did not get far enough to be a verdict on this key alone, or
+  /// got an answer that holds for every key, so a multi-key trial stops here.
+  const OuraPairAttempt.failed(String this.refusal) : keyRejected = false;
+
+  /// The sentence to show the user, or null when the ring let us in.
+  final String? refusal;
+
+  /// True only when the ring itself turned this key down.
+  final bool keyRejected;
+
+  bool get ok => refusal == null;
 }
 
 /// The pairing handshake over an open [link]: install [key] when [install],
-/// then prove it. Null when the ring let us in, or the sentence to show.
+/// then prove it.
 ///
 /// Split out of [_pairOuraRing] so the bytes it puts on the wire can be pinned
 /// without a radio — in particular that the key-install command is NEVER sent
@@ -721,11 +917,12 @@ Future<String?> pairOuraRingWithKey(BluetoothDevice device, List<int> key) {
 ///
 /// Over the real wire builders and nothing else.
 @visibleForTesting
-Future<String?> ouraPairHandshake(
+Future<OuraPairAttempt> ouraPairHandshake(
   BandLink link,
   List<int> key, {
   required bool install,
   Duration replyWindow = const Duration(seconds: 10),
+  void Function()? onKeyInstalled,
 }) async {
   // ONE subscription and a growing list, rather than a `firstWhere` per
   // reply: `BandLink.notify` is single-subscription, so the second
@@ -757,8 +954,9 @@ Future<String?> ouraPairHandshake(
     // needs nothing but the proof below.
     if (install) {
       if (!await link.write(kOuraCommandChar, ouraCmdSetAuthKey(key))) {
-        return 'The ring would not accept a command. Try again with it on '
-            'the charger and next to the phone.';
+        return const OuraPairAttempt.failed(
+            'The ring would not accept a command. Try again with it on '
+            'the charger and next to the phone.');
       }
       final installed = await waitFor((f) => ouraSetAuthKeyResult(f) != null);
       // SILENCE IS A REFUSAL, NOT CONSENT. A ring that already holds a key is
@@ -766,26 +964,31 @@ Future<String?> ouraPairHandshake(
       // and carrying on to mint a `device` row on the strength of a quiet ring
       // is how a user spends a factory reset and ends up with nothing working.
       if (installed == null || ouraSetAuthKeyResult(installed) != 0) {
-        return _kResetFirst;
+        return const OuraPairAttempt.rejected(_kResetFirst);
       }
+      onKeyInstalled?.call();
     }
     if (!await link.write(kOuraCommandChar, ouraCmdAuthNonce())) {
-      return 'The ring would not accept a command. Try again with it on '
-          'the charger and next to the phone.';
+      return const OuraPairAttempt.failed(
+          'The ring would not accept a command. Try again with it on '
+          'the charger and next to the phone.');
     }
     final challenge = await waitFor((f) => ouraAuthNonce(f) != null);
     if (challenge == null) {
-      return 'The ring stopped answering part-way through pairing. Put it on '
-          'the charger, keep it next to the phone, and try again.';
+      return const OuraPairAttempt.failed(
+          'The ring stopped answering part-way through pairing. Put it on '
+          'the charger, keep it next to the phone, and try again.');
     }
     final answer = ouraAuthResponse(key, ouraAuthNonce(challenge)!);
     if (!await link.write(kOuraCommandChar, ouraCmdAuthenticate(answer))) {
-      return 'The ring would not accept the pairing answer.';
+      return const OuraPairAttempt.failed(
+          'The ring would not accept the pairing answer.');
     }
     final replyFrame = await waitFor((f) => ouraAuthResult(f) != null);
     if (replyFrame == null) {
-      return 'The ring stopped answering part-way through pairing. Put it on '
-          'the charger, keep it next to the phone, and try again.';
+      return const OuraPairAttempt.failed(
+          'The ring stopped answering part-way through pairing. Put it on '
+          'the charger, keep it next to the phone, and try again.');
     }
     // THE CODES CARRY DIFFERENT REMEDIES, so they are not collapsed into one
     // sentence. On the install path, `factoryReset` here means the install did
@@ -794,13 +997,23 @@ Future<String?> ouraPairHandshake(
     // belongs to something else, and only a reset frees it. On the
     // existing-key path a reset is the one thing NOT to suggest.
     final result = ouraAuthResult(replyFrame);
-    if (result == 0) return null;
-    if (!install) return _existingKeyRefusal(result);
-    if (result == kOuraAuthFactoryReset) {
-      return 'The ring took the key but is still waiting for one, which '
-          'should not happen. Try pairing again.';
+    if (result == 0) return const OuraPairAttempt.accepted();
+    // On the install path every branch below is `rejected`: the ring answered
+    // the challenge, so it is a verdict on this key. On the existing-key path
+    // only a wrong key is; "holds no key" and "matched but not onboarded" are
+    // the same answer for every remaining candidate, so they end the trial
+    // (`failed`) and are reported as themselves.
+    if (!install) {
+      return result == kOuraAuthWrongKey
+          ? OuraPairAttempt.rejected(_existingKeyRefusal(result))
+          : OuraPairAttempt.failed(_existingKeyRefusal(result));
     }
-    return _kResetFirst;
+    if (result == kOuraAuthFactoryReset) {
+      return const OuraPairAttempt.rejected(
+          'The ring took the key but is still waiting for one, which '
+          'should not happen. Try pairing again.');
+    }
+    return const OuraPairAttempt.rejected(_kResetFirst);
   } finally {
     await sub.cancel();
   }
@@ -809,30 +1022,111 @@ Future<String?> ouraPairHandshake(
 /// [pairOuraRingWithKey] for a key as the user typed or pasted it — the shape
 /// a pairing screen's text field hands over. See [parseOuraKey].
 Future<String?> pairOuraRingWithTypedKey(BluetoothDevice device, String raw) {
-  final key = parseOuraKey(raw);
-  if (key == null) {
-    return Future.value('That is not a ring key. Paste 32 hex digits, or the '
-        '24-character base64 form, with nothing else around it.');
+  final draft = parseOuraKeys(raw);
+  if (draft.isEmpty) {
+    // Counts, never the characters. A key that fails to parse is refused before
+    // any radio work, so saying so here is what distinguishes it from a key the
+    // ring rejected.
+    debugPrint('[oura pair] nothing in the key field parsed — '
+        '${draft.malformed} line(s) of ${raw.trim().length} character(s), '
+        'need 32 hex or 24 base64 each');
+    return Future.value(draft.malformed > 1
+        ? 'None of those lines is a ring key. Each one needs to be 32 hex '
+            'digits, or the 24-character base64 form, on its own line.'
+        : 'That is not a ring key. Paste 32 hex digits, or the '
+            '24-character base64 form, with nothing else around it.');
   }
-  return pairOuraRingWithKey(device, key);
+  debugPrint('[oura pair] key field parsed to ${draft.keys.length} '
+      'candidate key(s) of 16 bytes'
+      '${draft.malformed > 0 ? ", ${draft.malformed} unparseable line(s) "
+          "skipped" : ""}'
+      '${draft.overflow > 0 ? ", ${draft.overflow} beyond the "
+          "$kOuraMaxCandidateKeys-key limit not tried" : ""}');
+  return _pairOuraRing(
+    device,
+    existingKeys: draft.keys,
+    skipped: draft.malformed,
+    overflow: draft.overflow,
+  );
 }
 
+/// [existingKeys] null = the install path with one freshly minted key;
+/// otherwise the candidates to try, in order, one connection each.
+///
+/// [skipped] and [overflow] are what the field parse threw away, carried here
+/// only so the exhausted message can admit to them — a user told "none of your
+/// 2 keys matched" when they pasted 4 lines is being told something false.
 Future<String?> _pairOuraRing(
   BluetoothDevice device, {
-  required List<int>? existingKey,
+  required List<List<int>>? existingKeys,
+  int skipped = 0,
+  int overflow = 0,
 }) async {
   final rnd = Random.secure();
-  final key =
-      existingKey ?? List<int>.generate(16, (_) => rnd.nextInt(256));
-  final deviceId =
+  final install = existingKeys == null;
+  final keys = existingKeys ??
+      [List<int>.unmodifiable(List<int>.generate(16, (_) => rnd.nextInt(256)))];
+  // Which of the two pairings this is, said out loud at the top. They have
+  // opposite preconditions on the ring and opposite remedies when they fail,
+  // and every failure below reads the same either way.
+  debugPrint(install
+      ? '[oura pair] INSTALL path: minting a fresh 16-byte key. Needs a '
+          'factory-reset ring.'
+      : '[oura pair] EXISTING-KEY path: trying ${keys.length} key(s) supplied '
+          'by the user, one connection each. No key is written to the ring.');
+  // REUSE THE RING ROW'S ID, and mint only when there is no row to reuse. A
+  // device_id is the storage key for `decoded_onehz`, `raw_archive` and every
+  // `sync_cursor` item (`oura_cursor_ds:`, `oura_anchor:`, `counter_hw:`,
+  // `rec_ts_hw:`), so minting a fresh one on every pairing forks one physical
+  // ring into N identities: the re-paired ring drains from a zero cursor and
+  // everything the previous pairing banked is orphaned under an id nothing
+  // reads. [OuraLink.pairedRingRow] is the SAME single-ring lookup `sync()`
+  // resolves against, so reusing its id is precisely what makes a re-pair
+  // reconcile with the earlier data instead of starting beside it.
+  //
+  // NOT the BLE remote id, deliberately — see `HrsLink.pairedSensorRow`'s
+  // header: a remote id is a per-app CBPeripheral UUID on iOS and a rotating
+  // RPA on Android, which is the fragmentation this minted id exists to avoid.
+  // `remote_id` is the column allowed to change under a stable row.
+  final priorRow = await OuraLink.pairedRingRow();
+  final reusedId = ouraReusableDeviceId(priorRow);
+  final deviceId = reusedId ??
       'oura-${_hex(List<int>.generate(4, (_) => rnd.nextInt(256)))}';
-  GattBandLink? link;
+  // A different remote id may be a different ring. The id is still reused (one
+  // ring slot), but its ring-clock bookmark and anchor are not carried over —
+  // see `_cursorItem`'s doc.
+  final sameRing = priorRow?['remote_id'] == device.remoteId.str;
+  // What the keychain held for [deviceId] before this attempt touched it. Only
+  // meaningful when an id is being reused: the key is stored BEFORE the ring
+  // has proved it (see the write below), so a failed re-pair would otherwise
+  // leave this attempt's unproven key sitting where the working one was — a
+  // pairing broken past recovery by anything short of another factory reset.
+  // NOT `_readKey`: that swallows a locked keychain as "no key", and a read
+  // that failed must stop here, before the write below overwrites a key this
+  // run could not see.
+  List<int>? priorKey;
+  if (reusedId != null) {
+    try {
+      final hex = await _secure.read(
+        key: _keyItem(reusedId),
+        iOptions: _kApple,
+        mOptions: _kMacos,
+      );
+      priorKey = hex == null ? null : _unhex(hex);
+    } catch (e) {
+      debugPrint('[oura pair] the keychain was unavailable: $e');
+      return 'The phone’s keychain is locked. Unlock the phone and try again.';
+    }
+  }
+  // Set once the ring acknowledged the new key. From then on the ring holds
+  // it and not the old one, so the old key is worth nothing to restore.
+  var keyInstalled = false;
   // Set true only on the one path that writes the `device` row. Every OTHER
   // exit — a refused command, a silent ring, a caught exception, even the
   // early `missingCharacteristics` return before the key is written at all —
-  // leaves this false, and the `finally` below drops whatever key the phone
-  // has stored for [deviceId] so a failed pairing never outlives itself as an
-  // orphaned secret with no row pointing at it.
+  // leaves this false, and the `finally` below restores the keychain to what
+  // it held before, so a failed pairing never outlives itself as an orphaned
+  // secret with no row pointing at it.
   var paired = false;
   try {
     // A cap on concurrent SECONDARY links (never the band's own connect —
@@ -851,79 +1145,177 @@ Future<String?> _pairOuraRing(
     // run for minutes), so an unbounded wait here is a pairing screen that
     // never answers. 30 s is longer than a connect+discovery and shorter than
     // anyone's patience.
+    // THE SLOT IS HELD ACROSS THE WHOLE TRIAL, not re-queued per candidate. A
+    // key trial is one pairing operation from the user's side; releasing the
+    // slot between candidates would let another sensor's link in and put the
+    // next candidate back at the end of a FIFO queue, so a five-key trial could
+    // wait out the 30 s timeout four more times and report a key verdict it
+    // never actually obtained.
     return await withSecondaryLinkSlot<String?>(
       timeout: const Duration(seconds: 30),
       onTimeout: () => 'Another sensor is using this phone’s Bluetooth right '
           'now. Try pairing again in a moment.',
       () async {
-    try {
-    if (!await _awaitAdapterOn()) {
-      return 'Bluetooth is off. Turn it on and try again.';
-    }
-    await device.connect(timeout: const Duration(seconds: 20));
-    final services = await device.discoverServices();
-    final localLink = GattBandLink(
-      entry: kOura,
-      services: services,
-      onLog: (m) => debugPrint('[oura pair] $m'),
-    );
-    link = localLink; // captured var, so the outer `finally` can still close it
-    final missing = localLink.missingCharacteristics(kOura.requiredCharacteristics);
-    if (missing.isNotEmpty) {
-      return 'That device does not expose the ring service this app speaks.';
-    }
+        for (var i = 0; i < keys.length; i++) {
+          final key = keys[i];
+          if (keys.length > 1) {
+            debugPrint('[oura pair] candidate ${i + 1} of ${keys.length}');
+          }
+          // Per candidate, so the teardown below cannot close the NEXT
+          // candidate's link.
+          GattBandLink? link;
+          // ONE CONNECTION PER CANDIDATE — see pairOuraRingWithKeys. The
+          // teardown is inside the loop, not an outer `finally`: the next
+          // candidate's connect must not start while this link is still
+          // closing, which is the same ordering the slot comment below cares
+          // about one level up.
+          try {
+            // NOT a key verdict: Bluetooth being off says nothing about any
+            // candidate, so it ends the trial and is reported as itself rather
+            // than being retried against the remaining keys.
+            if (!await _awaitAdapterOn()) {
+              return 'Bluetooth is off. Turn it on and try again.';
+            }
+            await device.connect(timeout: const Duration(seconds: 20));
+            final services = await device.discoverServices();
+            final localLink = GattBandLink(
+              entry: kOura,
+              services: services,
+              onLog: (m) => debugPrint('[oura pair] $m'),
+            );
+            // Captured var, so this candidate's `finally` can still close it
+            // when the handshake below throws.
+            link = localLink;
+            final missing = localLink
+                .missingCharacteristics(kOura.requiredCharacteristics);
+            if (missing.isNotEmpty) {
+              // Not a key verdict and not worth four more connections: the
+              // device is the wrong device whatever key comes next.
+              return 'That device does not expose the ring service this app '
+                  'speaks.';
+            }
 
-    // THE KEY IS STORED BEFORE IT IS SENT, and the order is deliberate. A
-    // crash between the write and the store leaves the ring holding a key this
-    // phone does not have — unrecoverable except by another factory reset,
-    // which is the one cost in this flow the user cannot undo. A stored key
-    // with no ring behind it costs nothing: `sync()` never looks at it,
-    // because there is no `device` row pointing to it yet.
-    await _secure.write(
-      key: _keyItem(deviceId),
-      value: _hex(key),
-      iOptions: _kApple,
-      mOptions: _kMacos,
-    );
-    final refusal = await ouraPairHandshake(
-      localLink,
-      key,
-      install: existingKey == null,
-    );
-    if (refusal != null) return refusal;
+            // THE KEY IS STORED BEFORE IT IS SENT, on the INSTALL path only,
+            // and the order is deliberate there. A crash between the write and
+            // the store leaves the ring holding a key this phone does not have
+            // — unrecoverable except by another factory reset, the one cost in
+            // this flow the user cannot undo. A stored key with no ring behind
+            // it costs nothing: `sync()` never looks at it, because there is no
+            // `device` row pointing to it yet.
+            //
+            // THAT REASONING DOES NOT APPLY TO A CANDIDATE. Nothing is written
+            // to the ring on this path, so the ring can never end up holding a
+            // key the phone lost, and storing each candidate before trying it
+            // would put up to five secrets in the keychain to prove one. The
+            // winner is stored below instead.
+            if (install) {
+              await _secure.write(
+                key: _keyItem(deviceId),
+                value: _hex(key),
+                iOptions: _kApple,
+                mOptions: _kMacos,
+              );
+            }
+            final attempt = await ouraPairHandshake(
+              localLink,
+              key,
+              install: install,
+              onKeyInstalled: () => keyInstalled = true,
+            );
+            if (!attempt.ok) {
+              // A ring that stopped answering is not a verdict on this key, so
+              // it ends the trial and is reported as itself. Burying it under
+              // the remaining candidates would turn a flat battery into "none
+              // of your keys is right".
+              if (!attempt.keyRejected) return attempt.refusal;
+              if (i + 1 < keys.length) continue;
+              return _exhausted(keys.length, attempt.refusal!,
+                  skipped: skipped, overflow: overflow);
+            }
 
-    // The `device` row LAST, because it is what makes the ring reachable: a row
-    // that exists is a ring `sync()` will try to drain, so it is only written
-    // once the key is stored AND the ring has proved it accepts it.
-    await LocalDb.upsertDevice(
-      id: deviceId,
-      adapterId: kOura.id,
-      remoteId: device.remoteId.str,
-      // Same filter the notify-class pairing path runs the advertised name
-      // through — the device list renders this column assuming it was
-      // cleaned here, and an unfiltered ring name would be the one row that
-      // was not.
-      label: cleanDeviceLabel(device.platformName) ?? kOura.label,
-      // `tier` is left unset on purpose. It means MEASUREMENT QUALITY and it is
-      // what decides precedence between two sources — and this ring supplies no
-      // signal at all today (`OuraAdapter.signals` is `const {}`), so there is
-      // no quality to rank. NULL is a refusal, not a default.
-    );
-    paired = true;
-    return null;
-    } finally {
-      link?.close();
-      try {
-        await device.disconnect();
-      } catch (_) {/* already gone */}
-    }
-    },
+            if (!install) {
+              // The winner, and only now — see the note above.
+              await _secure.write(
+                key: _keyItem(deviceId),
+                value: _hex(key),
+                iOptions: _kApple,
+                mOptions: _kMacos,
+              );
+            }
+            if (keys.length > 1) {
+              debugPrint('[oura pair] candidate ${i + 1} of ${keys.length} was '
+                  'accepted; it is the one stored');
+            }
+            // The `device` row LAST, because it is what makes the ring
+            // reachable: a row that exists is a ring `sync()` will try to
+            // drain, so it is only written once the key is stored AND the ring
+            // has proved it accepts it.
+            //
+            // A reused id on what may be a different ring drops the old ring's
+            // decisecond bookmark and anchor first: another ring's counter is
+            // not this one's, and a stale origin would stamp its seconds wrong.
+            // Same reset the stranded path runs; costs one full re-read.
+            if (reusedId != null && !sameRing) {
+              await LocalDb.deleteCursor(_anchorItem(deviceId));
+              await LocalDb.deleteCursor(_cursorItem(deviceId));
+            }
+            await LocalDb.upsertDevice(
+              id: deviceId,
+              adapterId: kOura.id,
+              remoteId: device.remoteId.str,
+              // Same filter the notify-class pairing path runs the advertised
+              // name through — the device list renders this column assuming it
+              // was cleaned here, and an unfiltered ring name would be the one
+              // row that was not.
+              label: cleanDeviceLabel(device.platformName) ?? kOura.label,
+              // `tier` is left unset on purpose. It means MEASUREMENT QUALITY
+              // and it is what decides precedence between two sources — and
+              // this ring supplies no signal at all today
+              // (`OuraAdapter.signals` is `const {}`), so there is no quality
+              // to rank. NULL is a refusal, not a default.
+            );
+            paired = true;
+            return null;
+          } finally {
+            link?.close();
+            try {
+              await device.disconnect();
+            } catch (_) {/* already gone */}
+          }
+        }
+        // Unreachable: the loop returns on every path, and `keys` is non-empty
+        // by construction in both callers.
+        return 'No key to try.';
+      },
     );
   } catch (e) {
     debugPrint('[oura pair] failed: $e');
     return 'Could not connect to that ring.';
   } finally {
     // Touches no radio, so it stays outside the slot.
-    if (!paired) await OuraLink._dropKey(deviceId);
+    //
+    // A FRESHLY MINTED id's key is an orphan once pairing failed — nothing
+    // points at it and nothing ever will, so it goes. A REUSED id's key is the
+    // one the working pairing still depends on, and this attempt overwrote it
+    // before the ring proved anything, so it is put back (or dropped, when
+    // there was none to put back). Once the ring acknowledged the new key, a
+    // reused id keeps it: the ring answers to nothing else now, and the row
+    // already points here.
+    if (!paired && !(reusedId != null && keyInstalled)) {
+      if (priorKey == null) {
+        await OuraLink._dropKey(deviceId);
+      } else {
+        try {
+          await _secure.write(
+            key: _keyItem(deviceId),
+            value: _hex(priorKey),
+            iOptions: _kApple,
+            mOptions: _kMacos,
+          );
+        } catch (e) {
+          debugPrint('[oura pair] could not restore the prior key: $e');
+        }
+      }
+    }
   }
 }

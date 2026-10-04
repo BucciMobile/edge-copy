@@ -611,7 +611,9 @@ class AppState extends ChangeNotifier {
     final counts = await LocalDb.importFromDbFile(path);
     // Imported rows include derived day_result/metric_series → refresh rollups.
     try {
+      await refreshActivityReviews();
       await _derive.finalizeImport(_profile);
+      await LocalDb.refreshComputeFreshness();
     } catch (e) {
       importRollupError = '$e';
     }
@@ -1406,6 +1408,7 @@ class AppState extends ChangeNotifier {
           IosShortcutSync.foregroundCommitFailed();
           rethrow;
         }
+        IosShortcutSync.foregroundCommitted(samples.length);
       },
       // Pre-setup fallback only: the drain path archives inside commitSyncBatch.
       onArchiveRecord: (raw) async {
@@ -1467,6 +1470,7 @@ class AppState extends ChangeNotifier {
     repo = LocalRepositoryImpl(
       getProfileMap: () => user,
       saveProfileFields: updateProfile,
+      onActivitiesChanged: refreshActivityReviews,
     );
     // iOS BGProcessing/BGAppRefresh wakes while the FOREGROUND app owns the band
     // skip the headless BLE path (it would fight FBP for the peripheral) — route
@@ -1585,6 +1589,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _activityReviewRetry?.cancel();
     if (IosShortcutSync.foregroundSync == syncForShortcut) {
       IosShortcutSync.foregroundSync = null;
       IosShortcutSync.foregroundEngine = null;
@@ -2322,11 +2327,42 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Timer? _activityReviewRetry;
+  int _activityReviewAttempts = 0;
+  Future<void> refreshActivityReviews({bool retry = false}) async {
+    // Backgrounded retries would run the cross-day rollup the derive
+    // scheduler defers; the resume hook picks the durable jobs back up.
+    if (_disposed || (retry && _background)) return;
+    _activityReviewRetry?.cancel();
+    if (!retry) {
+      _activityReviewAttempts = 0;
+      bumpInsights();
+    }
+    try {
+      if (await _derive.refreshActivityReviews(_profile)) {
+        _activityReviewAttempts = 0;
+        bumpInsights();
+        return;
+      }
+    } catch (e) {
+      _log('[activity-review] refresh deferred: $e');
+    }
+    // A long derive holds the engine; back off 2s → 30s instead of polling,
+    // and stop after a few minutes so a rollup that keeps failing is left to
+    // the next resume or review change rather than looping all day.
+    if (!_disposed && !_background && _activityReviewAttempts < 10) {
+      final delay = Duration(
+          seconds: math.min(30, 2 << math.min(_activityReviewAttempts, 4)));
+      _activityReviewAttempts++;
+      _activityReviewRetry = Timer(delay, () => unawaited(refreshActivityReviews(retry: true)));
+    }
+  }
+
   /// Re-derive after a nap edit. Same machinery as a sleep-override change —
   /// nap minutes feed sleep need and sleep debt, so an edit is a recompute
   /// rather than a redraw, and the engine force-includes nap-edit days even
   /// when they are finalized.
-  Future<void> reanalyzeForNapEdit() => _reanalyzeForOverride();
+  Future<void> reanalyzeForNapEdit() => refreshActivityReviews();
 
   Future<List<Map<String, dynamic>>> dataHistoryDays() =>
       LocalDb.dataHistoryDays();
@@ -2454,6 +2490,8 @@ class AppState extends ChangeNotifier {
     await _loadProfile();
     await _refreshNightlyRhr();
     await _deriveScheduler.init();
+    // Headless wakes don't roll up; openSession picks pending reviews up.
+    if (!_background) unawaited(refreshActivityReviews());
     lastSynced = await LocalDb.latestSample();
     // The true data-edge frontier is the `rec_ts_hw` sync cursor, NOT
     // lastDecodedRecTs() (MAX(rec_ts) FROM decoded_onehz). decoded_onehz only
@@ -5168,6 +5206,9 @@ class AppState extends ChangeNotifier {
     if (foreground && phoneStepsEnabled) {
       unawaited(syncPhoneSteps());
     }
+    // Fresh backoff budget per resume, so a chain that gave up earlier retries.
+    _activityReviewAttempts = 0;
+    unawaited(refreshActivityReviews(retry: true));
     if (foreground && wasBackground && engine.isConnected) {
       IosBleRestore.foregroundActive = true;
       await IosBleRestore.setOwnsBand(true);
@@ -5307,6 +5348,16 @@ class AppState extends ChangeNotifier {
         BandOwnership.markForegroundIntent(false);
         _log('[OWNERSHIP] foreground intent off (${BandOwnership.debugState})');
         _releaseForegroundLease();
+      }
+      // A background connect that failed (a Shortcut while the band is out of
+      // range) left foregroundActive true with no link, and no later
+      // background transition will clear it: every restore wake and BG-task
+      // sync would skip until the user next opens the app. Hand the band back
+      // to the restore path, same as the background cold-launch does.
+      // Not after unpair/endSession dropped keep-alive mid-connect: that would
+      // re-arm a pending connect for a session nobody wants.
+      if (_keepAlive && _background && !engine.isConnected) {
+        await _armRecovery();
       }
       _setBusy(false);
     }
@@ -5602,10 +5653,7 @@ class AppState extends ChangeNotifier {
     if (!engine.isConnected) {
       task.update('connecting');
       // A background Shortcut must not enable the UI's high-rate live streams.
-      final background = _background;
-      await openSession(foreground: !background);
-      // openSession left foregroundActive set; re-arm or restore wakes stay ignored.
-      if (background && !engine.isConnected) await _armRecovery();
+      await openSession(foreground: !_background);
     }
     if (task.stopped || !engine.isConnected) return SyncReport(0, 0, false);
     // The waits above left 'starting'/'waiting', which a deadline reads as

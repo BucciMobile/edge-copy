@@ -987,11 +987,11 @@
   "@pairSensorKeyTitle": {
     "description": "Section title for pairing with an existing device key."
   },
-  "pairSensorKeyBody": "If you have the key this device already uses, paste it here and it pairs without a factory reset — nothing is written to the device. Leave it empty to pair the usual way.",
+  "pairSensorKeyBody": "If you have the key this device already uses, paste it here and it pairs without a factory reset — nothing is written to the device. Several keys, one per line, are tried in turn until one is accepted, which is handy when you have a few and do not know which belongs to this device. Leave it empty to pair the usual way.",
   "@pairSensorKeyBody": {
     "description": "Explainer under the existing-key section title."
   },
-  "pairSensorKeyHint": "32 hex digits or base64",
+  "pairSensorKeyHint": "32 hex digits or base64 — one key per line",
   "@pairSensorKeyHint": {
     "description": "Hint text in the existing-key field."
   },
@@ -12573,6 +12573,43 @@
       }
     }
   },
+  "activityReviewTitle": "Detected activities",
+  "activityPossibleNap": "Possible nap",
+  "activityPossibleWorkout": "Possible workout",
+  "activityConfirm": "Confirm",
+  "activityEdit": "Edit",
+  "activityDiscard": "Discard",
+  "activitySaveConfirm": "Save and confirm",
+  "activityNothing": "Nothing to review",
+  "activityEmptyBody": "Possible naps and workouts will appear here.",
+  "activityLoadFailed": "Could not load activities. Try again.",
+  "activityReviewProblem": "Could not finish",
+  "activityReview": "Review",
+  "activityLoading": "Loading…",
+  "activityPending": "{count} to review",
+  "@activityPending": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "activityLengthMinutes": "{minutes} min",
+  "@activityLengthMinutes": {
+    "placeholders": {
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "activityStart": "Start",
+  "activityEnd": "End",
+  "activityCheckTimes": "Check the times",
+  "activityNapWindow": "Choose a past window between 5 minutes and 6 hours.",
+  "activityEditNap": "Edit nap",
+  "activityEditWorkout": "Edit workout",
+  "activityNapAlerts": "Detected naps",
+  "activityPushHint": "Push alerts only. Suggestions remain in Detected activities.",
   "devicesWornOn": "Worn on",
   "@devicesWornOn": {
     "description": "Step calibration wearing-location setting"

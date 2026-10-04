@@ -19,6 +19,8 @@
 // rolling baseline artifact instead of recomputing the signature ad hoc from
 // metric_series each time.
 
+import '../data/activity_store.dart';
+import '../models/activity_suggestion.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -42,7 +44,7 @@ import '../data/series_codec.dart';
 import '../notify/fired_keys.dart';
 import '../notify/notification_center.dart';
 import '../notify/notification_event.dart';
-import '../notify/tap_router.dart' show workoutSuggestionRoute;
+import '../notify/tap_router.dart' show activitySuggestionRoute;
 import '../telemetry/firebase_bridge.dart';
 import '../telemetry/telemetry_service.dart';
 import 'crossday_pipeline.dart';
@@ -785,11 +787,12 @@ import 'substrate.dart';
 //      tested and never called from edge. They now run in the cross-day rollup
 //      over a new per-day field, `hourly_hr` — 24 local-hour HR means projected
 //      from the stored `series.hr_curve`. HR, not accelerometry, because the
-//      1 Hz substrate is pruned at 3 days and `day_result` is not: no multi-day
-//      accel exists to analyse. Only runs of calendar-CONSECUTIVE days whose 24
-//      bins are ALL covered are admitted (no imputation — a filled hour is
-//      exactly the smooth signal IS rewards), and each family abstains with the
-//      standard `need_baseline:have=H,need=N` note below its own minimum (7 days
+//      1 Hz substrate is pruned at `rawRetentionDays` and `day_result` is
+//      not: no multi-day accel exists to analyse. Only runs of
+//      calendar-CONSECUTIVE days whose 24 bins are ALL covered are admitted
+//      (no imputation — a filled hour is exactly the smooth signal IS
+//      rewards), and each family abstains with the standard
+//      `need_baseline:have=H,need=N` note below its own minimum (7 days
 //      nonparametric, 3 cosinor). New bundle keys: `circadian_rhythm`,
 //      `circadian_cosinor`, `circadian_coverage`.
 //
@@ -1006,8 +1009,9 @@ import 'substrate.dart';
 //   3. TWO NEW `metric_series` KEYS: `midsleep_sec` and `sleep_onset_sec` —
 //      signed seconds either side of 04:00 LOCAL, tz-corrected per instant and
 //      unwrapped. Not a second-of-day, not an epoch. FORWARD-ONLY: midsleep was
-//      never persisted, the 1 Hz substrate they come from is pruned at 3 days
-//      and a day locks ~48 h after wake, so no past night can be given one.
+//      never persisted, the 1 Hz substrate they come from is pruned at
+//      `rawRetentionDays` and a day locks ~48 h after wake, so no past night
+//      can be given one.
 //
 //   4. `day_result` stamps `source: 'band'`. An importer's day is a different
 //      vendor's derived score and must carry its own tag; a day whose
@@ -1744,10 +1748,26 @@ import 'substrate.dart';
 // exist), the steps bundle gains `counter_wearing` / `counter_calibration` /
 // `counter_coverage`, and strap_counter confidence is 0.9..0.98 by evidence.
 // `band_measured` stays the raw ticks. gen4 has no counter. Edge-only.
-// 102 → 103 (gen5 on-chip step counter spans, issue #475): a strap_counter
+// 102 → 103 (band-state night END, gen5/MG): an AUTO night now ENDS at the
+// band's own last SLEEP second when the band's continuously observed tail
+// after it is ≥ 10 min awake (UP/WAKE, no re-settling) — the lie-in is no
+// longer counted as sleep, so in-bed/TST/efficiency and the wake time move
+// earlier on those mornings (`sleep.band_offset_trim_sec` records the seconds
+// removed). Naps cannot reclaim that tail: the nap main-sleep exclusion runs
+// to the UNTRIMMED end (`_DayBlocksInput.napExcludeEndSec`). A band-corrected
+// night replaces a banked longer one with the same onset, bounded to the
+// corroborated tail (`isRicherSleep`). The morning readiness pin, which fires
+// at `sleepOffsetSec + 1 h`, now freezes earlier on those mornings. UNCHANGED:
+// onset, stages, which day owns the night (decided on the untrimmed end),
+// gen4 (no band envelope), manual/confirmed overrides and the HR-led
+// fallback. Analytics change: OpenStrap/analytics PR #80; kAnalyticsPin
+// repinned to analytics main @ 4fc2b12, which also carries #81-#85.
+// 103 → 104: detected naps require review; only accepted naps receive sleep credit.
+// Detector methods and sibling pins are unchanged.
+// 104 → 105 (gen5 on-chip step counter spans, issue #475): a strap_counter
 // day also stores hourly `steps.spans` off the counter's per-record times,
 // scaled to the calibrated `value`, so the day screen can place them. Edge-only.
-const int kAlgoVersion = 103;
+const int kAlgoVersion = 105;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1923,7 +1943,11 @@ const int kAlgoVersion = 103;
 // skin-temp window (see pubspec.yaml's comment beside the `ref:` for the
 // verification command). kAlgoVersion bumped 96 -> 97, see the changelog
 // entry above.
-const String kAnalyticsPin = '0441ef9e6fc6d5681c309ce6341911285e829f20';
+// REPIN @ 9fc1d6a — analytics PR #80 (band-state night end:
+// bandTrimmedOffsetSec, segmentSleep(bandSleepState:),
+// SleepSegmentation.bandOffsetTrimSec), on OpenStrap/analytics main, for v100
+// above.
+const String kAnalyticsPin = '4fc2b1229ab916d2d94c4dd3b7565f96a4c6e093';
 // Repinned to analytics main's tip, which carries BOTH PR #72 (hrv_freq
 // Welch gap guard) and PR #73 (overreachingConjunction rhr quantum guard) —
 // the two independent kAlgoVersion bumps above (93 and 94). Verified both
@@ -1966,8 +1990,11 @@ const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 // all live in SleepProfilePolicy (pure, unit-tested) — see
 // lib/compute/sleep_profile_policy.dart for the evidence behind each rule.
 
-/// Raw is kept this many days past derivation, then pruned (derived stays).
-const int rawRetentionDays = 3;
+/// Raw is kept this many days behind the data edge, then pruned at a local
+/// midnight (derived stays). A day stays recomputable until 48 h past its last
+/// record, so its derive window (from the previous noon) keeps at least 48 h
+/// of substrate past finalization; the day's own rows last a day longer.
+const int rawRetentionDays = 5;
 
 /// A day stays recomputable until the data edge is this far past the day's
 /// LAST record (`endSec`, ≈ the end of the calendar day), then FINALIZES
@@ -4219,8 +4246,29 @@ class DerivationEngine {
   /// and the artifact is version/day stamped), so they are safe to interleave.
   Future<void> finalizeImport(Profile profile) async {
     await _refreshBaselines();
-    await _runCrossDay(profile);
+    // A false here is a failed rollup or a newer review revision racing it; the
+    // imported rows have landed either way and queued review jobs retry on
+    // their own, so the import must not report failure.
+    if (!await _runCrossDay(profile)) _log('import: crossday rollup deferred');
     await _runNotifications();
+  }
+
+  /// Durable review jobs outlive a busy derive or a terminated process.
+  Future<bool> refreshActivityReviews(Profile profile) async {
+    if (_running) return false;
+    _running = true;
+    try {
+      final revisions = await LocalDb.applyPendingActivityReviews();
+      if (revisions.isEmpty) return true;
+      // Rebuild from the accepted day rows, including when an input artifact
+      // was already cached today. A failed rollup must leave the work durable.
+      if (!await _runCrossDay(profile)) return false;
+      await LocalDb.refreshComputeFreshness();
+      await LocalDb.finishActivityReviews(revisions);
+      return (await (await LocalDb.instance).query('activity_review_days', limit: 1)).isEmpty;
+    } finally {
+      _running = false;
+    }
   }
 
   // ── derive one day ──────────────────────────────────────────────────────────
@@ -4436,15 +4484,16 @@ class DerivationEngine {
     final scMap = (bundle['scalars'] as Map?)?.cast<String, dynamic>();
 
     // ── NEVER WRITE NOTHING OVER SOMETHING ───────────────────────────────────
-    // Raw retention is 3 days, but derived history is forever — so a day older
-    // than retention has a good `day_result` and NO raw. Re-deriving it (which
-    // "Advanced data → Select all → Re-analyze" does for EVERY listed day, via
-    // runDays(force: true) → _prepareTargetDay, whose empty substrate yields an
-    // all-absent bundle) used to overwrite that good row: `putDayResult` is
-    // ConflictAlgorithm.replace on BOTH `day_result` and `metric_series`, so
-    // every scalar for the date was NULLed — and, because an empty bundle's
-    // endSec was 0, the blank was written FINALIZED and could never re-derive.
-    // Only `run()` had a pruned-raw guard, and only for user-override days.
+    // Raw retention is `rawRetentionDays`, but derived history is forever — so
+    // a day older than retention has a good `day_result` and NO raw.
+    // Re-deriving it (which "Advanced data → Select all → Re-analyze" does for
+    // EVERY listed day, via runDays(force: true) → _prepareTargetDay, whose
+    // empty substrate yields an all-absent bundle) used to overwrite that good
+    // row: `putDayResult` is ConflictAlgorithm.replace on BOTH `day_result` and
+    // `metric_series`, so every scalar for the date was NULLed — and, because
+    // an empty bundle's endSec was 0, the blank was written FINALIZED and could
+    // never re-derive. Only `run()` had a pruned-raw guard, and only for
+    // user-override days.
     //
     // Detect it BEFORE the offloaded second half so its own writes
     // (wake_day_features) can't clobber the early-read path either. With no day
@@ -4646,17 +4695,13 @@ class DerivationEngine {
       // Built on THIS isolate so the Isolate.run closure captures only this plain
       // sendable object (never `this`, `day`, or `bundle`).
       // Read HERE, on the main isolate — the worker has no database.
-      final napEdits = [
-        for (final row in await LocalDb.napEdits(day.date))
-          NapEdit(
-            kind: row['source'] == 'rejected'
-                ? NapEditKind.rejected
-                : NapEditKind.added,
-            startSec: (row['start_ts'] as num).toInt(),
-            endSec: (row['end_ts'] as num).toInt(),
-          ),
-      ];
-
+      final reviewDb = await LocalDb.instance;
+      final previousDay = await LocalDb.dayResult(day.date);
+      if (previousDay != null) {
+        await reviewDb.transaction((tx) => ActivityStore.preserveLegacyNaps(tx, day.date,
+          Map<String, dynamic>.from(jsonDecode(previousDay['payload_json'] as String) as Map)));
+      }
+      final napEdits = await ActivityStore.napEdits(reviewDb, day.date);
       final blocksInput = _DayBlocksInput(
         daySub: daySub,
         napSub: day.napSub,
@@ -4665,6 +4710,8 @@ class DerivationEngine {
         profile: profile,
         onsetSec: day.sleepOnsetSec,
         offsetSec: day.sleepOffsetSec,
+        napExcludeEndSec: day.sleepOffsetSec +
+            ((day.sleepJson['band_offset_trim_sec'] as num?)?.toInt() ?? 0),
         // NOCTURNAL-ONLY. `scalars.rhr` is allowed to fall back to daytime HR
         // for the resting-HR card; feeding that into TRIMP charged a day
         // against an awake reference and published a strain the pure pipeline
@@ -4780,52 +4827,26 @@ class DerivationEngine {
       for (final w in blocks.sessionHrrWrites) {
         await LocalDb.setSessionHrr(w.$1, w.$2);
       }
-      for (final sug in blocks.suggestionsToPersist) {
-        await LocalDb.putWorkoutSuggestion({
-          ...sug,
-          'created_at': DateTime.now().millisecondsSinceEpoch,
-        });
-      }
-      final nb = blocks.notifBout;
-      // Only for a bout that is STILL waiting on an answer. The detector is
-      // pure and re-derives the same bouts every pass; dismissing one, logging
-      // it, or logging any session that covers its window retires the row
-      // (`supersededSuggestionIds`), and none of that reaches the detector. So
-      // the live table is what decides, not the detection — a notification
-      // about a workout already in the log is how someone turns all of them
-      // off. `putWorkoutSuggestion` ran a few lines up, so the row is there.
-      final live = nb == null
-          ? false
-          : (await LocalDb.activeWorkoutSuggestions())
-              .any((r) => r['id'] == nb.id);
-      if (nb != null && live) {
-        await NotificationCenter.instance.emit(
-          NotificationEvent(
-            // Per-bout, not per-day — a per-day key silently swallowed the
-            // notification for a second real workout later the same day
-            // (fire-once-per-key by design). The suggestion id is stable across
-            // re-derive passes re-detecting the SAME bout, so that case still
-            // dedupes, and it is date-prefixed so the fired-key store prunes it.
-            dedupeKey: '${nb.id}:auto_workout',
-            // NOT `recovery`. That channel is where "your recovery is ready"
-            // lived and `classOf` drops everything on it, so this notification
-            // has never once reached anybody: the suggestion row was written,
-            // the user was never told. This is a prompt about something that
-            // happened — reminders channel, NotifClass.prompt, and it respects
-            // quiet hours like every prompt should.
-            category: NotifCategory.reminders,
-            priority: NotifPriority.normal,
-            title: 'Did you work out?',
-            body: 'We spotted ~${nb.durationMin} min of elevated activity. '
-                'Tap to log it.',
-            date: day.date,
-            route: workoutSuggestionRoute(nb.id),
-          ),
-          // This runs from headless background derivation too — never prompt
-          // for permission from a background context (violates the OS
-          // background contract and can incorrectly cache permission=denied).
-          allowPermissionPrompt: false,
-        );
+      final activityStore = ActivityStore(await LocalDb.instance);
+      final newSuggestions = [
+        ...await activityStore.reconcile(ActivityKind.workout, blocks.suggestionsToPersist),
+        ...await activityStore.reconcile(ActivityKind.nap, blocks.napSuggestions),
+      ];
+      for (final suggestion in newSuggestions) {
+        // The rows are already banked; a failed prompt must not mark the day partial.
+        try {
+          if (forceFinalize || !await activityStore.mayNotifyNew(suggestion)) continue;
+          final nap = suggestion.kind == ActivityKind.nap;
+          await NotificationCenter.instance.emit(NotificationEvent(
+            dedupeKey: '${day.date}:activity:${suggestion.id}',
+            category: NotifCategory.reminders, priority: NotifPriority.normal,
+            title: nap ? 'Did you nap?' : 'Did you work out?',
+            body: 'A possible ${nap ? 'nap' : 'workout'} is ready to review.',
+            date: day.date, route: activitySuggestionRoute(suggestion.id, suggestion.kind.name),
+          ), allowPermissionPrompt: false);
+        } catch (e) {
+          _log('activity prompt failed for ${suggestion.id}: $e');
+        }
       }
 
       await _persistWakeDayFeatures(dayId: day.date, wake: blocks.wake);
@@ -5004,8 +5025,8 @@ class DerivationEngine {
         // onehz_pipeline's sleepClockOffsetSec). Written so a schedule-shift
         // segmentation has a series to run on in six months. FORWARD-ONLY:
         // mid-sleep was never persisted, the 1 Hz substrate it comes from is
-        // gone at 3 days, and days lock ~48 h after wake — so every night
-        // before this shipped has no value and cannot be given one.
+        // gone at `rawRetentionDays`, and days lock ~48 h after wake — so every
+        // night before this shipped has no value and cannot be given one.
         'midsleep_sec': sc('midsleep_sec'),
         'sleep_onset_sec': sc('sleep_onset_sec'),
         // TS-03 — this day's observed HR ceiling (bpm), or NULL on the ordinary
@@ -5243,6 +5264,12 @@ class DerivationEngine {
   /// A candidate with no night at all is never richer than one that has one, and
   /// EQUAL is not richer — a pass that reproduces the same night writes, so an
   /// otherwise-identical candidate still refreshes.
+  ///
+  /// One bounded exception: a candidate whose end the band corroborated
+  /// (`band_offset_trim_sec` set), with the same onset (±60 s), whose UNTRIMMED
+  /// end covers the banked end, and whose TST loss does not exceed what was
+  /// removed from the banked window (+60 s), replaces the banked night — that is
+  /// a corrected wake time, not less substrate.
   @visibleForTesting
   static bool isRicherSleep(
     SleepSessionCandidate prev,
@@ -5251,7 +5278,30 @@ class DerivationEngine {
     final p = _tstSec(prev);
     if (p == null) return false;
     final n = _tstSec(next);
-    return n == null || p > n;
+    if (n == null) return true;
+    int? trimOf(SleepSessionCandidate c) =>
+        (c.sleepJson['band_offset_trim_sec'] as num?)?.toInt();
+    final sameOnset = (next.sleepOnsetSec - prev.sleepOnsetSec).abs() <= 60;
+    final nextTrim = trimOf(next);
+    // A band END correction is not "less substrate" — but only for the part of
+    // the banked night that lies inside the tail the band corroborated as
+    // awake: the banked end must fall WITHIN (next end, next untrimmed end],
+    // and the TST lost may not exceed what was removed from the banked window.
+    // "Within", not "equal to", because the morning record GROWS: an early
+    // pass banks a night whose awake tail is still < 10 min; a later pass trims.
+    if (sameOnset &&
+        nextTrim != null &&
+        next.sleepOffsetSec < prev.sleepOffsetSec &&
+        prev.sleepOffsetSec <= next.sleepOffsetSec + nextTrim + 60 &&
+        p - n <= (prev.sleepOffsetSec - next.sleepOffsetSec) + 60) {
+      return false;
+    }
+    // NO mirror rule (deliberately — review round 3): the trim is a
+    // deterministic function of the stored rows, and rows are only added or
+    // replaced by the same record, so a later pass with no trim means the band
+    // now shows SLEEP later (e.g. a backfilled gap) — new evidence, which must
+    // be allowed to win through the ordinary comparison.
+    return p > n;
   }
 
   /// How a day should be filed after its second half failed and the previous
@@ -5301,13 +5351,13 @@ class DerivationEngine {
   /// A SKIP MARKER MUST NEVER OVERWRITE A REAL RESULT. `putDayResult` is
   /// ConflictAlgorithm.replace on both `day_result` AND `metric_series`, so this
   /// used to blank a good day's every scalar on a single [_perDayTimeout]
-  /// overrun — and, once the day sat >48 h behind the data edge, wrote the blank
-  /// FINALIZED, making it permanent (raw is pruned 3 days later, so there is
-  /// nothing left to re-derive from). It hit TODAY too: a good 08:00 result
-  /// replaced by a skip marker after one transient 09:00 timeout on a loaded
-  /// phone. `rescanRecent` explicitly refuses to do this for exactly this
-  /// reason; `run()` did it anyway. Now: write the marker only when there is no
-  /// good row to lose, and never lock a transient failure.
+  /// overrun — and, once the day sat >48 h behind the data edge, wrote the
+  /// blank FINALIZED, making it permanent (raw is pruned at `rawRetentionDays`,
+  /// so there is nothing left to re-derive from). It hit TODAY too: a good
+  /// 08:00 result replaced by a skip marker after one transient 09:00 timeout
+  /// on a loaded phone. `rescanRecent` explicitly refuses to do this for
+  /// exactly this reason; `run()` did it anyway. Now: write the marker only
+  /// when there is no good row to lose, and never lock a transient failure.
   Future<void> _markDaySkipped(
     String dayId,
     int dayEndSec,
@@ -5408,12 +5458,13 @@ class DerivationEngine {
     return builtFor is String && builtFor.isNotEmpty && builtFor == today;
   }
 
-  Future<void> _runCrossDay(Profile profile) async {
+  Future<bool> _runCrossDay(Profile profile) async {
     try {
+      final reviewRevision = await LocalDb.activityReviewRevision();
       final days = await _crossDayInputDays();
       if (days.length < 3) {
         _log('crossday: only ${days.length} usable day(s) — skip');
-        return;
+        return true;
       }
       final profileMap = profile.toMap();
       // Her own logged cycle starts. Read on the DB-owning isolate (sqflite),
@@ -5464,7 +5515,10 @@ class DerivationEngine {
         _crossDayTimeout,
         label: 'crossday',
       );
-      await LocalDb.putBaseline('crossday', bundleJson);
+      if (!await LocalDb.putReviewedBaseline('crossday', bundleJson, reviewRevision)) {
+        _log('crossday: newer activity review; leaving its refresh queued');
+        return false;
+      }
       if (dropped.isNotEmpty) {
         // Loud, not debug-only: a dropped field is a metric the user will see
         // as absent, and the reason lives here and nowhere else.
@@ -5472,6 +5526,7 @@ class DerivationEngine {
             'JSON-encodable and were stored as absent: ${dropped.join(", ")}');
       }
       _log('crossday: stored over ${days.length} day(s)');
+      return true;
     } catch (e, st) {
       // NOT a debug line. A failure here means the stored bundle is now STALE
       // — the reader's version/day stamp will reject it and the whole
@@ -5480,6 +5535,7 @@ class DerivationEngine {
       debugPrint('[derive] crossday BUNDLE DROPPED — the stored artifact is '
           'now stale and every cross-day metric will read absent: $e\n$st');
       _log('crossday FAILED/skipped: $e');
+      return false;
     }
   }
 
@@ -5521,6 +5577,7 @@ class DerivationEngine {
   }
 
   Future<List<Map<String, dynamic>>> _crossDayInputDays() async {
+    final reviewRevision = await LocalDb.activityReviewRevision();
     final artifact = await LocalDb.baseline('crossday_input');
     final raw = artifact?['payload_json'];
     if (raw is String && raw.isNotEmpty) {
@@ -5530,8 +5587,9 @@ class DerivationEngine {
         // fact about the day the artifact was BUILT on; serving them on a later
         // day makes `_todayNum` read yesterday's strain and nap minutes as
         // today's (§3.3). See [crossDayArtifactUsableToday].
-        if (crossDayArtifactUsableToday(decoded, LocalDb.localDayLabelNow())) {
-          final rows = (decoded as Map)['days'] as List;
+        if (crossDayArtifactUsableToday(decoded, LocalDb.localDayLabelNow()) &&
+            (decoded as Map)['review_revision'] == reviewRevision) {
+          final rows = decoded['days'] as List;
           return [
             for (final row in rows)
               if (row is Map) row.cast<String, dynamic>(),
@@ -5552,6 +5610,7 @@ class DerivationEngine {
     // hang (Crashlytics jank_watchdog), since _refreshBaselines calls this
     // unconditionally on every heavy pass. _decodeBundle/_crossDayRecord are
     // both static, so this whole transform+encode step is isolate-safe.
+    final reviewRevision = await LocalDb.activityReviewRevision();
     final rows = await LocalDb.recentDayResults(_crossDayWindow);
     final today = LocalDb.localDayLabelNow();
     final imported = await LocalDb.importedDates();
@@ -5577,11 +5636,12 @@ class DerivationEngine {
         jsonEncode({
           'algo_version': kAlgoVersion,
           'built_for_day': today,
+          'review_revision': reviewRevision,
           'days': days,
         })
       );
     }, _crossDayTimeout, label: 'crossday-input');
-    await LocalDb.putBaseline('crossday_input', json);
+    await LocalDb.putReviewedBaseline('crossday_input', json, reviewRevision);
     return days;
   }
 
@@ -5881,10 +5941,11 @@ class DerivationEngine {
       'hypnogram': series?['hypnogram'],
       // 24 local-hour means of this day's HR curve — the ONLY intraday series
       // that survives long enough to support cross-day circadian analysis.
-      // `day_result` is never pruned; the 1 Hz substrate is gone after 3 days,
-      // so accelerometry (the textbook ENMO input) simply does not exist far
-      // enough back. `circadianNonparametric` documents HR as an accepted
-      // input alongside activity. 24 numbers a day, so the artifact stays small.
+      // `day_result` is never pruned; the 1 Hz substrate is gone at
+      // `rawRetentionDays`, so accelerometry (the textbook ENMO input) simply
+      // does not exist far enough back. `circadianNonparametric` documents HR
+      // as an accepted input alongside activity. 24 numbers a day, so the
+      // artifact stays small.
       'hourly_hr': hourlyHrProfile(series?['hr_curve']),
     };
   }
@@ -8023,6 +8084,7 @@ class DerivationEngine {
       'tier': ana.Tier.auth,
       'inputs_used': const ['user'],
       'note': '$note — showing what you logged',
+      'assessment_complete': false,
     };
     scMap?['nap_min'] = napMinutes(merged).toDouble();
     return [
@@ -8051,6 +8113,7 @@ class DerivationEngine {
       'tier': 'ESTIMATE',
       'inputs_used': const <String>[],
       'note': note,
+      'assessment_complete': false,
     };
   }
 
@@ -8067,6 +8130,12 @@ class DerivationEngine {
     // Read on the main isolate and carried in, like every other DB-sourced
     // input here — this runs inside the compute worker, which has no database.
     List<NapEdit> napEdits = const [],
+    List<Map<String, dynamic>>? candidates,
+    // Where the main-sleep exclusion ENDS — the night's UNTRIMMED end when the
+    // band cut the auto window short (`sleep.band_offset_trim_sec`), so the
+    // lie-in the band rule removed from the night cannot be reclaimed as a
+    // nap. Null = [offsetSec].
+    int? napExcludeEndSec,
   }) {
     try {
       final n = s.length;
@@ -8086,11 +8155,12 @@ class DerivationEngine {
       final hr = [for (final h in s.hr) h.toDouble()];
       // Map the main-sleep epoch-second window to indices into the day arrays.
       ana.SleepWindowSpan? main;
-      if (offsetSec > onsetSec) {
+      final excludeEndSec = napExcludeEndSec ?? offsetSec;
+      if (excludeEndSec > onsetSec) {
         var lo = -1, hi = -1;
         for (var i = 0; i < n; i++) {
           if (lo < 0 && s.tsSec[i] >= onsetSec) lo = i;
-          if (s.tsSec[i] < offsetSec) hi = i + 1;
+          if (s.tsSec[i] < excludeEndSec) hi = i + 1;
         }
         if (lo >= 0 && hi > lo) main = ana.SleepWindowSpan(lo, hi);
       }
@@ -8164,7 +8234,9 @@ class DerivationEngine {
             'confidence': nap.confidence,
           },
       ];
-      final merged = applyNapEdits(detected, napEdits);
+      candidates?.addAll(detected.where((n) => !napEdits.any((e) =>
+        e.overlaps(n['start'] as int, n['end'] as int))));
+      final merged = applyNapEdits(const [], napEdits);
 
       bundle['naps'] = <String, dynamic>{
         'value': merged,
@@ -8173,6 +8245,7 @@ class DerivationEngine {
         'tier': m.tier,
         'inputs_used': m.inputs_used,
         'note': napEdits.isEmpty ? m.note : '${m.note} (edited)',
+        'assessment_complete': true,
       };
 
       // TST, never TIB. Crediting in-bed minutes against sleep need
@@ -8423,6 +8496,7 @@ class DerivationEngine {
     // at/after dayEndSec to avoid double-counting.
     // Naps FIRST — `_sleepPeriods` lists exactly these, so the Timeline bands
     // and the Sleep-periods cards can never disagree again.
+    final napSuggestions = <Map<String, dynamic>>[];
     final napPeriods = _attachNaps(
       bundlePatch,
       scMap,
@@ -8434,6 +8508,8 @@ class DerivationEngine {
       wristOff: inp.wristOffSpans,
       charging: inp.chargingSpans,
       napEdits: inp.napEdits,
+      candidates: napSuggestions,
+      napExcludeEndSec: inp.napExcludeEndSec ?? offset,
     );
     bundlePatch['sleep_periods'] = _sleepPeriods(
       onset,
@@ -8530,8 +8606,8 @@ class DerivationEngine {
       scalarPatch: scMap,
       wake: wake,
       suggestionsToPersist: wc.suggestionsToPersist,
+      napSuggestions: napSuggestions,
       sessionHrrWrites: wc.sessionHrrWrites,
-      notifBout: wc.notifBout,
     );
   }
 
@@ -8654,16 +8730,13 @@ class DerivationEngine {
           : double.parse(
               (taus.reduce((a, c) => a + c) / taus.length).toStringAsFixed(1));
 
-      // Persist + notify only for RECENT days (≤ ~36 h old) so imports/re-analyze
-      // don't resurface 90 days of prompts.
-      final recent = (dataNowSec - dayEndSec) < 36 * 3600;
+      // The DB-owning layer applies the activation cutoff and alert policy.
       final toPersist = <Map<String, dynamic>>[];
-      ({String id, int durationMin})? notif;
       // ONE definition of the row id. The notification checks the table by it
       // and opens the screen on it, so a second copy of the format here would
       // drift into a prompt that silently never fires again.
       String sugId(int startSec) => '$date:$startSec';
-      if (recent && bouts.isNotEmpty) {
+      if (bouts.isNotEmpty) {
         for (final b in bouts) {
           toPersist.add({
             'id': sugId(b.startSec),
@@ -8677,18 +8750,7 @@ class DerivationEngine {
             'dismissed': 0,
           });
         }
-        // Notify ONLY for a bout that ended in the last ~2 h (a near-real-time
-        // detection). Draining a backlog (e.g. an overnight gap) re-derives a whole
-        // day at once; without this every hours-old bout would fire a "did you work
-        // out?" prompt → a wall of notifications. Suggestions are still persisted
-        // above so they surface in the Workouts screen; we just don't ping for them.
-        final newest = bouts.reduce((a, b) => a.endSec >= b.endSec ? a : b);
-        if ((dataNowSec - newest.endSec) < 2 * 3600) {
-          notif = (
-            id: sugId(newest.startSec),
-            durationMin: newest.durationMin,
-          );
-        }
+
       }
       return _WorkoutCompute(
         boutJson: boutJson,
@@ -8696,7 +8758,6 @@ class DerivationEngine {
         hrrTauS: hrrTauS,
         sessionHrrWrites: sessionHrr,
         suggestionsToPersist: toPersist,
-        notifBout: notif,
       );
     } catch (e) {
       if (kDebugMode) debugPrint('[derive] auto-workout/HRR FAILED/skipped: $e');
@@ -9050,6 +9111,8 @@ class DerivationEngine {
     List<List<int>> wristOff = const [],
     List<List<int>> charging = const [],
     List<NapEdit> napEdits = const [],
+    List<Map<String, dynamic>>? candidates,
+    int? napExcludeEndSec,
   }) =>
       _attachNaps(
         bundle,
@@ -9062,6 +9125,8 @@ class DerivationEngine {
         wristOff: wristOff,
         charging: charging,
         napEdits: napEdits,
+        candidates: candidates,
+        napExcludeEndSec: napExcludeEndSec,
       );
 
   void _log(String m) {
@@ -9100,6 +9165,12 @@ class _DayBlocksInput {
   final Profile profile;
   final int onsetSec;
   final int offsetSec;
+
+  /// Where nap detection's main-sleep exclusion ends: [offsetSec] plus the
+  /// band trim (`sleep.band_offset_trim_sec`), i.e. the UNTRIMMED auto end, so
+  /// a lie-in the band rule cut off the night is not reclaimed as a nap. Null
+  /// = [offsetSec].
+  final int? napExcludeEndSec;
 
   /// NOCTURNAL resting HR for this day (`scalars.rhr_nocturnal`) — null unless a
   /// sleep session was detected. NOT `scalars.rhr`, which is allowed to fall
@@ -9171,6 +9242,7 @@ class _DayBlocksInput {
     required this.profile,
     required this.onsetSec,
     required this.offsetSec,
+    this.napExcludeEndSec,
     required this.rhr,
     required this.maxHrUsed,
     required this.liveStepsReal,
@@ -9195,24 +9267,24 @@ class _DayBlocksInput {
 
 /// Sendable output of [DerivationEngine._computeDayBlocks]. [bundlePatch] /
 /// [seriesPatch] / [scalarPatch] are merged into the isolate-1 bundle on the main
-/// isolate; [wake] is persisted; [suggestionsToPersist] / [sessionHrrWrites] /
-/// [notifBout] are the DB writes + notification the caller applies.
+/// isolate; [wake] is persisted; candidates are reconciled and session HRR
+/// writes are applied by the database-owning caller.
 class _DayBlocksOutput {
+  final List<Map<String, dynamic>> napSuggestions;
   final Map<String, dynamic> bundlePatch;
   final Map<String, dynamic> seriesPatch;
   final Map<String, dynamic> scalarPatch;
   final Map<String, dynamic> wake;
   final List<Map<String, dynamic>> suggestionsToPersist;
   final List<(String, double)> sessionHrrWrites;
-  final ({String id, int durationMin})? notifBout;
   const _DayBlocksOutput({
     required this.bundlePatch,
+    this.napSuggestions = const [],
     required this.seriesPatch,
     required this.scalarPatch,
     required this.wake,
     required this.suggestionsToPersist,
     required this.sessionHrrWrites,
-    required this.notifBout,
   });
 }
 
@@ -9223,22 +9295,19 @@ class _WorkoutCompute {
   final double? hrrTauS;
   final List<(String, double)> sessionHrrWrites;
   final List<Map<String, dynamic>> suggestionsToPersist;
-  final ({String id, int durationMin})? notifBout;
   const _WorkoutCompute({
     required this.boutJson,
     required this.hrrBpm,
     required this.hrrTauS,
     required this.sessionHrrWrites,
     required this.suggestionsToPersist,
-    required this.notifBout,
   });
   const _WorkoutCompute.empty()
       : boutJson = const [],
         hrrBpm = null,
       hrrTauS = null,
         sessionHrrWrites = const [],
-        suggestionsToPersist = const [],
-        notifBout = null;
+        suggestionsToPersist = const [];
 }
 
 double? _median(List<double> xs) {
