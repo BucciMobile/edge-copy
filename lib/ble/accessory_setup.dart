@@ -85,6 +85,16 @@ class AccessorySetup {
     return id;
   }
 
+  /// Drop the ASK approval of the forgotten sensor [id], so pairing that kind of
+  /// sensor again opens the sheet instead of handing back this id. The native
+  /// side only ever removes a sensor, never a band. Best-effort; a no-op where
+  /// there is no ASK.
+  static Future<void> removeSensor(String id) async {
+    try {
+      await _ch.invokeMethod('removeSensor', id.toUpperCase());
+    } catch (_) {}
+  }
+
   /// Deprovision every ASK band, sensors kept (called on unpair). Best-effort.
   static Future<void> removeAll() async {
     if (!Platform.isIOS) return;

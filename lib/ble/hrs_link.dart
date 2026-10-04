@@ -663,6 +663,9 @@ class HrsLink {
       debugPrint('[hrs] refusing to forget the primary band from here.');
       return;
     }
+    // An ASK-paired sensor (iOS 18+) keeps its approval after its row goes, and
+    // the sensor picker would keep handing this id back.
+    await AccessorySetup.removeSensor(id);
     final row = (await LocalDb.deviceRows())
         .where((r) => r['id'] == id)
         .firstOrNull;
