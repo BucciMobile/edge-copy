@@ -278,6 +278,37 @@ void main() {
       expect(row?['end_ts'], lastTickSec);
       expect(row?['end_ts_fabricated'], 1);
     });
+
+    test('a malformed tally snapshot still finalizes the stale orphan',
+        () async {
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final startSec = nowSec - 5 * 60 * 60;
+      const id = 'stale-bad-tally';
+      await LocalDb.putSession({
+        'id': id,
+        'start_ts': startSec,
+        'end_ts': null,
+        'type': 'run',
+        'status': 'live',
+        'source': 'manual',
+        'created_at': startSec * 1000,
+      });
+      await LocalDb.saveLiveWorkoutTally({
+        'workout_id': id,
+        'updated_ts': 'garbage',
+        'per_minute_hr': '[]',
+        'zone_seconds': '[]',
+        'seconds_by_bpm': '{}',
+      });
+
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      await app.debugReconcileOrphanedLiveWorkout();
+
+      final row = await LocalDb.session(id);
+      expect(row?['status'], 'done');
+      expect(row?['end_ts'], startSec);
+    });
   });
 
   // ── 9. a fired alarm must be cleared from state AND prefs ──────────────────

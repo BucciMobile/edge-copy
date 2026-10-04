@@ -6431,12 +6431,17 @@ class AppState extends ChangeNotifier {
           final nowSec = nowMs ~/ 1000;
           final startTs = (row['start_ts'] as num?)?.toInt() ?? nowSec;
           final hadRealEnd = row['end_ts'] != null;
-          final tally = hadRealEnd
-              ? null
-              : await LocalDb.liveWorkoutTally(row['id'] as String? ?? '');
-          final lastTickSec =
-              ((tally?['updated_ts'] as num?)?.toInt() ?? startTs * 1000) ~/
-                  1000;
+          // Best-effort: a failed or malformed snapshot read falls back to
+          // startTs rather than leaving this (and later) stale rows unfinalized.
+          var lastTickSec = startTs;
+          if (!hadRealEnd) {
+            try {
+              final updatedTs = (await LocalDb.liveWorkoutTally(
+                row['id'] as String? ?? '',
+              ))?['updated_ts'];
+              if (updatedTs is num) lastTickSec = updatedTs.toInt() ~/ 1000;
+            } catch (_) {}
+          }
           final finalEndTs = (row['end_ts'] as int?) ??
               math.max(startTs, math.min(lastTickSec, nowSec));
           await LocalDb.putSession({
