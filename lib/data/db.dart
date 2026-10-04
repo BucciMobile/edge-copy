@@ -4090,7 +4090,7 @@ class LocalDb {
   /// which the UI states in as many words.
   ///
   /// Derived on read, never stored: total volume, set/rep counts, 1RM
-  /// estimates, per-muscle volume, "vs last session", PR detection.
+  /// estimates, "vs last session", PR detection.
   static Future<void> _createStrengthTables(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS strength_set (
@@ -4171,6 +4171,44 @@ class LocalDb {
       orderBy: 'at_ts DESC',
       limit: limit,
     );
+  }
+
+  /// Newest-set and heaviest-set candidates per logged exercise, in two
+  /// queries. The caller keeps the first row per key (most reps wins a tie).
+  /// No window functions: minSdk 26 can ship SQLite older than 3.25.
+  static Future<({
+    List<Map<String, Object?>> previous,
+    List<Map<String, Object?>> best,
+  })> strengthHistoryCandidates() async {
+    final db = await instance;
+    final previous = await db.rawQuery('''
+      SELECT s.*
+      FROM strength_set s
+      JOIN (
+        SELECT exercise_key, MAX(COALESCE(at_ts, 0)) AS newest_at
+        FROM strength_set
+        GROUP BY exercise_key
+      ) newest
+        ON newest.exercise_key = s.exercise_key
+       AND newest.newest_at = COALESCE(s.at_ts, 0)
+      ORDER BY s.exercise_key ASC, COALESCE(s.at_ts, 0) DESC,
+               s.session_id DESC, s.seq DESC
+    ''');
+    final best = await db.rawQuery('''
+      SELECT s.*
+      FROM strength_set s
+      JOIN (
+        SELECT exercise_key, MAX(load_kg) AS best_load
+        FROM strength_set
+        WHERE load_kg IS NOT NULL
+        GROUP BY exercise_key
+      ) heaviest
+        ON heaviest.exercise_key = s.exercise_key
+       AND heaviest.best_load = s.load_kg
+      ORDER BY s.exercise_key ASC, COALESCE(s.reps, 0) DESC,
+               COALESCE(s.at_ts, 0) DESC, s.session_id DESC, s.seq DESC
+    ''');
+    return (previous: previous, best: best);
   }
 
   // ── USER-DATA STORE (journal / cycle / workouts / notifications) ────────────
@@ -9312,7 +9350,8 @@ class LocalDb {
       out[key] =
           Sqflite.firstIntValue(
             await db.rawQuery(
-              'SELECT COUNT(*) FROM metric_series WHERE key = ? AND value IS NOT NULL',
+              'SELECT COUNT(*) FROM metric_series WHERE key = ? AND value IS NOT NULL'
+              '${_validSql(key)}',
               [key],
             ),
           ) ??
@@ -9415,13 +9454,22 @@ class LocalDb {
     final db = await instance;
     return db.query(
       'metric_series',
-      where: 'key = ? AND value IS NOT NULL'
+      where: 'key = ? AND value IS NOT NULL${_validSql(key)}'
           '${measuredOnly ? ' AND date NOT IN ($_importedDatesSql)' : ''}',
       whereArgs: [key],
       orderBy: 'date ASC',
       limit: limit,
     );
   }
+
+  /// Drops stored `spo2` rows that are not a blood oxygen percentage: WHOOP export
+  /// cells outside 70-100 banked before the importer dropped them, and the old
+  /// cloud_v2 importer's relative index, written under the same key.
+  static String _validSql(String key) => key != 'spo2'
+      ? ''
+      : ' AND value BETWEEN 70 AND 100 AND date NOT IN ('
+          'SELECT r.day_id FROM day_result r $_servedDayJoin '
+          "WHERE r.day_id IS NOT NULL AND r.payload_json LIKE '%\"source\":\"cloud_v2\"%')";
 
   /// The TRAILING [n] non-null values for [key] — the newest n days, returned
   /// oldest→newest. Unlike [metricSeries] (which is `date ASC LIMIT n`, i.e. the
