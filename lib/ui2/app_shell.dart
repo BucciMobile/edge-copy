@@ -48,7 +48,7 @@ class AppShell extends StatefulWidget {
   final ShellDomain initial;
 
   /// Notified on every tab change, including a re-tap of the current tab
-  /// (which domains conventionally use to scroll to top).
+  /// (which domains conventionally use to scroll to top) and a return via Back.
   final void Function(ShellDomain domain)? onSelect;
 
   /// Pinned between the domain and the tab bar, above every tab. This is not
@@ -72,41 +72,65 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   late ShellDomain _current = widget.initial;
   late final Set<ShellDomain> _built = {widget.initial};
+  // Tabs are kept alive, not pushed onto the Navigator. Keep their history
+  // here so Android Back can return to the previous tab. A restored tab or
+  // cold-launch deep link has Home as its way back into the app.
+  late final List<ShellDomain> _history = [
+    if (widget.initial != ShellDomain.home) ShellDomain.home,
+  ];
 
   void _select(ShellDomain d) {
     setState(() {
+      if (d != _current) _history.add(_current);
       _current = d;
       _built.add(d);
     });
     widget.onSelect?.call(d);
   }
 
+  void _back() {
+    if (_history.isEmpty) return;
+    setState(() {
+      _current = _history.removeLast();
+      _built.add(_current);
+    });
+    widget.onSelect?.call(_current);
+  }
+
   @override
   Widget build(BuildContext c) {
     final p = P.of(c);
-    return Scaffold(
-      backgroundColor: p.bg,
-      body: SafeArea(
-        bottom: false,
-        child: Column(children: [
-          Expanded(
-            child: IndexedStack(
-              index: _current.index,
-              children: [
-                // An unvisited tab is an empty box, not a built screen — the
-                // old shell built all forty screens' worth of state on launch.
-                for (final d in ShellDomain.values)
-                  if (_built.contains(d))
-                    widget.builder(c, d)
-                  else
-                    const SizedBox.shrink(),
-              ],
-            ),
+    return PopScope<Object?>(
+      canPop: _history.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _back();
+      },
+      child: Scaffold(
+        backgroundColor: p.bg,
+        body: SafeArea(
+          bottom: false,
+          child: Column(
+            children: [
+              Expanded(
+                child: IndexedStack(
+                  index: _current.index,
+                  children: [
+                    // An unvisited tab is an empty box, not a built screen — the
+                    // old shell built all forty screens' worth of state on launch.
+                    for (final d in ShellDomain.values)
+                      if (_built.contains(d))
+                        widget.builder(c, d)
+                      else
+                        const SizedBox.shrink(),
+                  ],
+                ),
+              ),
+              if (widget.banner != null) widget.banner!,
+            ],
           ),
-          if (widget.banner != null) widget.banner!,
-        ]),
+        ),
+        bottomNavigationBar: _TabBar(current: _current, onTap: _select),
       ),
-      bottomNavigationBar: _TabBar(current: _current, onTap: _select),
     );
   }
 }
@@ -169,7 +193,9 @@ class _Tab extends StatelessWidget {
             AnimatedContainer(
               duration: motion(c, Motion.base),
               padding: EdgeInsets.symmetric(
-                  horizontal: on ? S.x3 : 0, vertical: S.x1),
+                horizontal: on ? S.x3 : 0,
+                vertical: S.x1,
+              ),
               decoration: BoxDecoration(
                 color: on ? p.wash(domain.accent) : const Color(0x00000000),
                 borderRadius: R.rPill,
