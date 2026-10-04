@@ -3757,17 +3757,18 @@ class LocalRepositoryImpl extends LocalRepository {
     String? predictedNext, predictedFrom, predictedTo;
     num? daysUntilNext;
     if (predictOk && lastStart != null && medianLength != null) {
-      // Calendar-day adds, not Duration: N * 24 h across a fall-back lands at
-      // 23:00 the day before and labels the prediction a day early.
-      DateTime plusDays(DateTime d, int n) =>
-          DateTime(d.year, d.month, d.day + n);
-      final next = plusDays(lastStart, medianLength.round());
+      // Calendar days, not Duration(days:): a 25 h fall-back day inside the
+      // span lands a Duration add at 23:00 the day before.
+      DateTime plusDays(int n) =>
+          DateTime(lastStart.year, lastStart.month, lastStart.day + n);
+      final n = medianLength.round();
+      final next = plusDays(n);
       predictedNext = dayLabelOf(next);
       daysUntilNext = calendarDaysBetween(today, next);
       if (gapSpread != null) {
         final w = gapSpread.round();
-        predictedFrom = dayLabelOf(plusDays(next, -w));
-        predictedTo = dayLabelOf(plusDays(next, w));
+        predictedFrom = dayLabelOf(plusDays(n - w));
+        predictedTo = dayLabelOf(plusDays(n + w));
       }
     }
 
