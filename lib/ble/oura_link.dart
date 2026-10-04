@@ -381,6 +381,13 @@ class OuraLink {
     });
   }
 
+  /// Whether the last session's drain reached the ring's honest end (empty
+  /// up-to-date answer, or `bytesLeft` drained to zero). A session that ends on
+  /// a refused write, a timeout, an authentication failure or a host commit
+  /// failure is a session that connected and synced nothing — reported as
+  /// itself, not as "Synced.".
+  bool _drainOk = false;
+
   bool _busy = false;
 
   /// Connect to the paired ring, drain its history to the end, disconnect.
@@ -437,6 +444,22 @@ class OuraLink {
           _device = device;
           await _awaitAdapterOn();
           await device.connect(timeout: const Duration(seconds: 20));
+          // NO EXPLICIT MTU REQUEST, deliberately. `flutter_blue_plus` 1.36.8
+          // ASKS for MTU 512 right after `connect()` on Android (its
+          // `connect` defaults `mtu: 512`); iOS negotiates its own.
+          //
+          // A REQUEST IS NOT A NEGOTIATED VALUE. What the ring and the phone
+          // actually settle on is not known here, and nothing below depends
+          // on it. Whether this ring ever sends a frame too large for a
+          // default-MTU notification is an unverified hardware question —
+          // the wire format allows up to 257 bytes, but that a frame CAN be
+          // that large does not mean the ring SENDS one, and no fix may be
+          // built on that assumption without a capture. A second explicit
+          // `requestMtu` here is the one change that could make things
+          // worse: on Android 14+ later requests on the same ACL are
+          // ignored, and on older Android it could only LOWER a value the
+          // library already asked for. Read the negotiated MTU from a
+          // hardware log before drawing any conclusion from frame sizes.
           final services = await device.discoverServices();
           final link = GattBandLink(
             entry: kOura,
@@ -452,26 +475,95 @@ class OuraLink {
                 '${missing.map((u) => u.substring(0, 8)).join(", ")}.');
             return false;
           }
-          final host = _makeHost(
-            deviceId,
-            OuraAdapter(
-              key: key,
-              startCursorDs: cursor,
-              anchor: _parseAnchor(_anchor),
-              nowSeconds: _now,
-            ),
-          );
-          _host = host;
-          await host.run(link);
-          return true;
+          // `return await`, not a bare `return`: Dart runs this try's
+          // `finally` BEFORE awaiting a returned future, so a bare return
+          // tore the session down while the drain was still open. The
+          // teardown itself lives in [_runSessionAndTeardown] so the exact
+          // production order is testable without a radio.
+          return await _runSessionAndTeardown(link, deviceId,
+              key: key, cursor: cursor);
         } finally {
-          // Drop the link and DISCONNECT before the slot is released.
+          // Drop the link and DISCONNECT before the slot is released. Also
+          // covers the EARLY returns above (adapter off, no characteristics),
+          // which do not go through [_runSessionAndTeardown]; for the
+          // session path this is a second, idempotent stop.
           await stop();
         }
       });
     } catch (e) {
       debugPrint('[oura] sync failed: $e');
       return false;
+    }
+  }
+
+  /// THE POST-DISCOVERY DRAIN — the exact code `sync()` runs once a live
+  /// link exists, and the only place the session's result is decided.
+  ///
+  /// SUCCESS IS `oura_drain_ok`, the adapter's own statement that the drain
+  /// reached its honest end, and that note is emitted only AFTER the last
+  /// batch's `OffloadCheckpoint` was confirmed — which the host does only
+  /// after its durable commit landed (`BandHost._commitThenConfirm`). So a
+  /// storage failure, an unconfirmed batch, an authentication refusal, a
+  /// refused write or a silent ring all end the session WITHOUT the note and
+  /// report `false`; an honestly empty, up-to-date ring ends WITH it and
+  /// reports `true` without inventing a single measurement. A BLE link alone
+  /// is not a successful sync — that distinction is this method's whole job.
+  ///
+  /// Shared with the test replay path ([ingestForTest],
+  /// [syncResultForTest]) so the result a test drives IS the result `sync()`
+  /// returns, not a parallel construction of it.
+  Future<bool> _runSession(
+    BandLink link,
+    String deviceId, {
+    required List<int> key,
+    required int cursor,
+    Duration? replyTimeout,
+    Duration? confirmTimeout,
+  }) async {
+    _drainOk = false;
+    final host = _makeHost(
+      deviceId,
+      OuraAdapter(
+        key: key,
+        startCursorDs: cursor,
+        anchor: _parseAnchor(_anchor),
+        nowSeconds: _now,
+        replyTimeout: replyTimeout ?? const Duration(seconds: 5),
+        confirmTimeout: confirmTimeout ?? const Duration(seconds: 30),
+      ),
+    );
+    _host = host;
+    await host.run(link);
+    if (!_drainOk) {
+      debugPrint('[oura] session ended before the drain reached its '
+          'end — reporting the sync as unsuccessful.');
+    }
+    return _drainOk;
+  }
+
+  /// THE PRODUCTION OUTER ORDER, extracted so a test can drive it: the
+  /// session first, `stop()` in a `finally` after it ends — and `return await`
+  /// inside the `try`, because a bare `return _runSession(...)` runs the
+  /// `finally` before the returned future completes, i.e. teardown while the
+  /// drain is still open. `sync()` calls this; the lifecycle test drives the
+  /// same method through the replay seam, not a copy of it.
+  Future<bool> _runSessionAndTeardown(
+    BandLink link,
+    String deviceId, {
+    required List<int> key,
+    required int cursor,
+    Duration? replyTimeout,
+    Duration? confirmTimeout,
+  }) async {
+    try {
+      return await _runSession(link, deviceId,
+          key: key,
+          cursor: cursor,
+          replyTimeout: replyTimeout,
+          confirmTimeout: confirmTimeout);
+    } finally {
+      // Drop the link and DISCONNECT before the slot is released.
+      await stop();
     }
   }
 
@@ -538,6 +630,9 @@ class OuraLink {
             'dropping it so the next sync re-reads from the beginning.');
         final deviceId = _deviceId;
         if (deviceId != null) _resetCursor(deviceId);
+      case 'oura_drain_ok':
+        // The adapter's own statement that the drain reached the ring's end.
+        _drainOk = true;
       case 'battery':
         if (value is int) _batteryPct = value;
       case 'battery_mv':
@@ -674,28 +769,71 @@ class OuraLink {
     int Function()? nowSeconds,
     Duration timeouts = const Duration(seconds: 30),
   }) async {
+    await _replaySession(
+      deviceId,
+      key,
+      reply,
+      nowSeconds: nowSeconds,
+      timeouts: timeouts,
+    );
+    return _lastLink!;
+  }
+
+  /// The same replay as [ingestForTest], but returning the SESSION RESULT —
+  /// the same bool `_runSession` (and therefore `sync()`) computes — instead
+  /// of the link. The regression tests for "connected ≠ synced" assert on
+  /// THIS, not on a field, so the result path a test drives is the result
+  /// path production runs.
+  @visibleForTesting
+  Future<bool> syncResultForTest(
+    String deviceId,
+    List<int> key,
+    List<List<int>> Function(int writeIndex, List<int> value) reply, {
+    int Function()? nowSeconds,
+    Duration timeouts = const Duration(seconds: 30),
+    bool writeSucceeds = true,
+  }) async =>
+      await _replaySession(
+        deviceId,
+        key,
+        reply,
+        nowSeconds: nowSeconds,
+        timeouts: timeouts,
+        writeSucceeds: writeSucceeds,
+      );
+
+  /// One scripted ring session through the REAL result path: `_runSession`,
+  /// the same method `sync()` calls once a live link exists. The reply script
+  /// and the replay link are test-only; every line that decides whether this
+  /// session was a successful sync is production code.
+  Future<bool> _replaySession(
+    String deviceId,
+    List<int> key,
+    List<List<int>> Function(int writeIndex, List<int> value) reply, {
+    int Function()? nowSeconds,
+    required Duration timeouts,
+    bool writeSucceeds = true,
+  }) async {
     _now = nowSeconds ?? _now;
     _deviceId = deviceId;
     await _loadAnchor(deviceId);
     final cursor = await LocalDb.getCursorInt(_cursorItem(deviceId)) ?? 0;
-    final link = ReplayBandLink();
-    final host = _makeHost(
-      deviceId,
-      OuraAdapter(
-        key: key,
-        startCursorDs: cursor,
-        anchor: _parseAnchor(_anchor),
-        nowSeconds: _now,
-        replyTimeout: timeouts,
-        confirmTimeout: timeouts,
-      ),
-    );
-    _host = host;
-    // `host.run` does not resolve until the session ends, but this loop has
-    // to react to each write WHILE the session is still open — so track
-    // completion alongside it rather than awaiting it here.
+    final link = ReplayBandLink()..writeSucceeds = writeSucceeds;
+    _lastLink = link;
     var finished = false;
-    final done = host.run(link).whenComplete(() => finished = true);
+    // THE REAL RESULT PATH, including the production outer order:
+    // `_runSessionAndTeardown` is the session-then-stop pairing `sync()`
+    // runs, so a replayed session also proves teardown happens after the
+    // drain, never during it. The loop below only scripts what the ring
+    // would answer.
+    final done = _runSessionAndTeardown(
+      link,
+      deviceId,
+      key: key,
+      cursor: cursor,
+      replyTimeout: timeouts,
+      confirmTimeout: timeouts,
+    ).whenComplete(() => finished = true);
     var served = 0;
     // Bounded by wall time, not a spin count: a real sqflite commit between
     // batches can outlast any fixed number of zero-length yields.
@@ -713,12 +851,60 @@ class OuraLink {
     // Same real-commit hazard as `timeouts` above (`BandHost.stop`'s own
     // final flush is the same sqflite write), so the same generous bound.
     await done.timeout(const Duration(seconds: 30), onTimeout: () {});
-    await host.stop();
+    final host = _host;
+    if (host != null) await host.stop();
     await _cursorWrites;
     _host = null;
     _anchor = null;
     _deviceId = null;
-    return link;
+    final result = await done;
+    return result;
+  }
+
+  /// The replay link of the last [ingestForTest] or [syncResultForTest]
+  /// session, so a test can assert on BOTH the session result and the
+  /// writes the adapter actually put on the wire.
+  ReplayBandLink? _lastLink;
+
+  @visibleForTesting
+  ReplayBandLink? get lastReplayLink => _lastLink;
+
+  /// A MANUAL-DRIVE session for the lifecycle tests: starts the production
+  /// session-plus-teardown pairing ([_runSessionAndTeardown], the same
+  /// method `sync()` runs) over a replay link and returns IMMEDIATELY, with
+  /// the live link and the pending result future. The test drives the ring
+  /// itself — [onWrite] fires synchronously at the top of every write, before
+  /// the write resolves, so the test can feed replies and observe ordering
+  /// against [ReplayBandLink.closed] with completers, not sleeps.
+  ///
+  /// The session's own teardown runs INSIDE the returned future's chain, so
+  /// awaiting the result future and then checking the link is already the
+  /// production cleanup order.
+  @visibleForTesting
+  Future<(Future<bool> result, ReplayBandLink link)> startSessionForTest(
+    String deviceId,
+    List<int> key, {
+    int Function()? nowSeconds,
+    void Function(String uuid, List<int> value)? onWrite,
+  }) async {
+    _now = nowSeconds ?? _now;
+    _deviceId = deviceId;
+    _drainOk = false;
+    await _loadAnchor(deviceId);
+    final cursor = await LocalDb.getCursorInt(_cursorItem(deviceId)) ?? 0;
+    final link = ReplayBandLink()..onWrite = onWrite;
+    // Set as `_link`, exactly as `_sync` does after discovery, so the
+    // teardown's `_link?.close()` runs the same code path production runs.
+    _link = link;
+    final result = _runSessionAndTeardown(
+      link,
+      deviceId,
+      key: key,
+      cursor: cursor,
+      replyTimeout: const Duration(seconds: 30),
+      confirmTimeout: const Duration(seconds: 30),
+    );
+    return (result, link);
   }
 }
 

@@ -462,6 +462,373 @@ void main() {
     expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
   });
 
+  test('a drain that reaches the end reports the session as synced', () async {
+    // An empty, up-to-date ring is a SUCCESSFUL sync — the honest end of a
+    // drain, with no measurement invented. The expectation is on the SAME
+    // bool `sync()` returns: `_replaySession` runs `_runSession`, the
+    // production result path, so this pins the `return true` a user's
+    // "Synced." snackbar is built on.
+    final ok = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 0)];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(ok, isTrue);
+  });
+
+  test('a refused authentication reports the session as NOT synced', () async {
+    // Auth-Abbruch: the ring answers the challenge with a refusal. Nothing
+    // was fetched, so `sync()` must say so — not "Synced.".
+    final ok = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) {
+          return [_frame(0x2f, _hex('2e01'))];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(milliseconds: 50),
+    );
+    expect(ok, isFalse);
+  });
+
+  test('a drain that never gets its batch reports the session as NOT synced',
+      () async {
+    // The ring authenticates and then goes quiet: the history request is
+    // never answered. Connected, but nothing was synced — `sync()` must say
+    // so rather than report "Synced.", which is the exact symptom a user
+    // sees as "the ring connects but no data arrives".
+    final ok = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        // 0x1c (notify flags), 0x12 (time sync) and 0x10 (history) all go
+        // unanswered; the session ends on the reply window, not on data.
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(milliseconds: 50),
+    );
+    expect(ok, isFalse);
+  });
+
+  test('success then failure across two consecutive attempts', () async {
+    // The result flag must be PER SESSION, not a sticky latch: a successful
+    // first sync must not make a second, failed one report success — the
+    // §4.3 sticky-boolean pattern this repo keeps shipping.
+    final first = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 0)];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(first, isTrue);
+    final second = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(milliseconds: 50),
+    );
+    expect(second, isFalse);
+  });
+
+  test('a refused write reports the session as NOT synced', () async {
+    // Verweigerter Write: the ring refuses the nonce request (flat battery,
+    // wedged stack). The session ends on the adapter's own `return false`
+    // path — `_authenticate` refuses to carry on unauthenticated — so the
+    // result must be false, not "Synced.".
+    final ok = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) => const <List<int>>[],
+      nowSeconds: () => _nowSec,
+      writeSucceeds: false,
+    );
+    expect(ok, isFalse);
+  });
+
+  test('a failed durable commit reports the session as NOT synced', () async {
+    // Echter Commit-Fehler, nicht nur ein ausbleibendes Confirm: der Host
+    // läuft gegen die produktionsseitige Guard-Assertion in
+    // `commitSyncBatch` (neutrale Zeilen unter der primären Device-Id), die
+    // INNERHALB der echten Transaktion wirft. `BandHost._commitLocked`
+    // behandelt jede Exception als Commit-Fehler und puffert zurück, also
+    // steht diese Assertion modellhaft für jeden Transaktionsfehler.
+    //
+    // GRENZE DIESER INJEKTION: die öffentliche `sync()`-Methode verweigert
+    // die primäre Device-Id bereits VOR jeder Session (`_sync`'s guard). Der
+    // Test erreicht den tieferen In-Transaction-Fehler über die Test-Seam.
+    // Es existiert keine produktionsseitige Fault-Injection an `LocalDb`
+    // für einen Speicherfehler unter zulässiger Oura-Device-ID; ein solches
+    // Seam wäre ein Refactoring, das über diesen Test hinausginge.
+    //
+    // DAS CONFIRM IST NUR INDIREKT BEOBACHTBAR: das Protokoll hat keinen
+    // ACK-Write — `OffloadCheckpoint.confirm()` ist ein reiner interner
+    // Rückruf. Der einzige wire-sichtbare Nachweis eines BESTÄTIGTEN Batches
+    // ist der zweite History-Request, und der passiert NUR bei
+    // `bytesLeft > 0` (Adapter-Schleife). Deshalb meldet dieser Batch Bytes
+    // als verbleibend: nach einem bestätigten Commit MÜSSTE der Adapter
+    // erneut anfragen; nach einem fehlgeschlagenen Commit bleibt jeder
+    // weitere Write aus. Der Kontrollfall im nächsten Test zeigt, dass die
+    // Assertion die beiden Verläufe wirklich unterscheidet.
+    await LocalDb.setCursor(
+        'oura_anchor:${LocalDb.kPrimaryDeviceId}', '1000,1782043215');
+    final ok = await OuraLink.instance.syncResultForTest(
+      LocalDb.kPrimaryDeviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          // Ein Batch mit verbleibenden Daten: nur ein BESTÄTIGTES Confirm
+          // führt zum zweiten History-Request.
+          return [
+            _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436)),
+            _summary(1, 4096),
+          ];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(milliseconds: 50),
+    );
+    expect(ok, isFalse, reason: 'the commit failed — no durable data, no '
+        'confirm, so no success');
+    final link = OuraLink.instance.lastReplayLink!;
+    // KEIN ZWEITER HISTORY-REQUEST: das Confirm lief nie, also blieb jeder
+    // weitere Write aus. (Ein bestätigter Batch MIT bytesLeft > 0 hätte
+    // zwingend einen zweiten 0x10-Write erzeugt — siehe Kontrollfall.)
+    final writes = [for (final w in link.writes) w.$2];
+    expect(writes.where((w) => w.first == 0x10), hasLength(1),
+        reason: 'the failed commit must end the session before the loop '
+            'asks again');
+    // Cursor nie bewegt: die Cursor-Note feuert nur nach bestätigtem Batch.
+    expect(
+      await LocalDb.getCursorInt('oura_cursor_ds:${LocalDb.kPrimaryDeviceId}'),
+      isNull,
+    );
+    // Nichts aus der fehlgeschlagenen Transaktion erreichte die Tabelle.
+    final db = await LocalDb.instance;
+    expect(
+      await db.query('decoded_onehz',
+          where: 'device_id = ?', whereArgs: [LocalDb.kPrimaryDeviceId]),
+      isEmpty,
+    );
+  });
+
+  test('a confirmed batch with bytes left DOES ask again (control case)',
+      () async {
+    // KONTROLLFALL: dieselbe Ring-Antwort (1 Event, bytesLeft > 0) unter
+    // einer ZULÄSSIGEN Oura-Device-ID mit erfolgreichem Commit. Der Adapter
+    // MUSS hier den zweiten History-Request stellen — erst damit ist die
+    // Single-Request-Assertion des Fehlertests ein echter Nachweis, dass
+    // das Confirm unterblieb, und nicht nur die normale Endsequenz eines
+    // abschließenden Batches.
+    await LocalDb.setCursor('oura_anchor:$_deviceId', '1000,1782043215');
+    var batches = 0;
+    final ok = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          batches++;
+          if (batches == 1) {
+            return [
+              _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436)),
+              _summary(1, 4096),
+            ];
+          }
+          return [_summary(0, 0)];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    // Die Session endet hier erst im zweiten Durchlauf (zweiter Batch:
+    // summary(0,0) → drain ok) — Ergebnis true, und es gab mehr als einen
+    // History-Request: der Nachweis des Confirms.
+    expect(ok, isTrue);
+    final link = OuraLink.instance.lastReplayLink!;
+    final writes = [for (final w in link.writes) w.$2];
+    expect(writes.where((w) => w.first == 0x10).length, greaterThan(1),
+        reason: 'the confirmed batch advanced the loop — this is the '
+            'behaviour the failed-commit test proves was MISSING');
+    // Und der Cursor ist tatsächlich gewachsen.
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 1201);
+  });
+
+  group('session lifecycle (the production outer order)', () {
+    test('cleanup waits for a successful session, then runs', () async {
+      // VOLLE HANDSHAKE-STEUERUNG, keine Scheduler-Zufälligkeit: der
+      // Beobachter läuft von Beginn an, und jede Ring-Antwort wird erst
+      // gefüttert, NACHDEM der zugehörige Write beobachtet wurde — die
+      // Completer werden synchron in `onWrite` abgeschlossen.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final historyAsked = Completer<void>();
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          } else if (value.first == 0x10) {
+            if (!historyAsked.isCompleted) historyAsked.complete();
+          }
+        },
+      );
+      // Nonce-Anfrage beobachtet → mit der Challenge antworten.
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      // Proof-Write beobachtet → der Ring akzeptiert den Schlüssel.
+      await proofAsked.future;
+      link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
+      // History-Anfrage beobachtet → die Antwort ZURÜCKHALTEN.
+      await historyAsked.future;
+      // OFFENE SESSION: das Cleanup darf noch nicht begonnen haben.
+      // GENAU HIER FÄNGT DIESEN TEST EINE RÜCKKEHR ZUM BARE `return`: das
+      // `finally` lief dann, BEVOR die zurückgegebene Future abgeschlossen
+      // ist — `stop()` hat den Link bereits geschlossen und das Abonnement
+      // gekündigt, während der Drain noch auf seine Antwort wartet.
+      expect(link.closed, isFalse, reason: 'teardown must not have begun');
+      expect(link.isListening(kOuraNotifyChar), isTrue,
+          reason: 'the session still owns the notify subscription');
+      var settled = false;
+      result.then((_) => settled = true);
+      // Ein Mikrotask-Turn, damit sich das `.then` anhängen kann — kein
+      // Sleep; die Reihenfolge steht bereits durch die Assertionen oben.
+      await Future<void>.delayed(Duration.zero);
+      expect(settled, isFalse,
+          reason: 'the session is still open — the result is not settled');
+
+      // Die Abschlussantwort: leer und auf dem neuesten Stand.
+      link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
+      final ok = await result;
+      expect(ok, isTrue);
+      // CLEANUP GELAUFEN, nach dem Session-Ende.
+      expect(link.closed, isTrue, reason: 'stop() closed the link');
+      expect(link.isListening(kOuraNotifyChar), isFalse,
+          reason: 'the host cancelled its run subscription on the way out');
+    });
+
+    test('cleanup also runs after a failing session', () async {
+      // Derselbe äußere Ablauf für den Fehlerpfad. Der Proof-Beobachter ist
+      // dieselbe Instanz und lief VOR dem Füttern der Challenge — die
+      // Reihenfolge, die der Reviewer verlangt hat.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          }
+        },
+      );
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      await proofAsked.future;
+      expect(link.closed, isFalse,
+          reason: 'the session is still mid-handshake');
+      // Die Authentifizierung verweigern: Ergebnis 1 = falscher Schlüssel.
+      link.feed(kOuraNotifyChar, _frame(0x2f, _hex('2e01')),
+          atSec: _nowSec);
+      final ok = await result;
+      expect(ok, isFalse);
+      expect(link.closed, isTrue,
+          reason: 'stop() ran after the failed session ended');
+      expect(link.isListening(kOuraNotifyChar), isFalse);
+    });
+
+    test('the second stop() of the session path is a harmless no-op',
+        () async {
+      // `_sync` behält sein äußeres `finally { await stop(); }` für die
+      // Early-Returns (Bluetooth aus, fehlende Characteristics) und die
+      // Ausnahmepfade — deshalb läuft stop() auf dem Session-Pfad zweimal:
+      // einmal in `_runSessionAndTeardown`, einmal im äußeren finally.
+      // Dieser Test pinnt, dass der zweite Aufruf sicher ist: kein Wurf,
+      // keine Cursor-Korruption, kein Zustandsrest.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final historyAsked = Completer<void>();
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          } else if (value.first == 0x10) {
+            if (!historyAsked.isCompleted) historyAsked.complete();
+          }
+        },
+      );
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      await proofAsked.future;
+      link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
+      await historyAsked.future;
+      link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
+      expect(await result, isTrue);
+      // Der erste stop() lief im Session-Teardown; das hier ist der zweite.
+      await OuraLink.instance.stop();
+      expect(link.closed, isTrue, reason: 'still closed — no re-open');
+      expect(link.isListening(kOuraNotifyChar), isFalse);
+    });
+  });
+
+  test('a stranded bookmark reports the session as NOT synced', () async {
+    // A bookmark past the end of the ring is a recoverable fault (the next
+    // sync re-reads from zero), but THIS session synced nothing: reporting it
+    // as "Synced." would hide the fault behind a success message.
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '9391523');
+    final ok = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 4096)];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(ok, isFalse);
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
+  });
+
   test('a sleep-stage row stamped in the future is refused', () async {
     await LocalDb.setCursor('oura_anchor:$_deviceId', '0,$_nowSec');
     await _run([

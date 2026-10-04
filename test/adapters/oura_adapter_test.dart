@@ -230,6 +230,114 @@ void main() {
     );
   });
 
+  test('a drain that reaches the ring\'s end says so, exactly once', () async {
+    // The three honest ends of a drain: an empty up-to-date answer, a replay
+    // tail that stops at the cursor, and a batch with nothing left. Each must
+    // end the session with `oura_drain_ok` — the host\'s only signal that
+    // "connected" also means "synced".
+    final (empty, _) = await _drive(_adapter(), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+      if (v.first == 0x10) return [_summary(0, 0)];
+      return const [];
+    });
+    expect(
+      empty.whereType<BandNote>().where((n) => n.key == 'oura_drain_ok'),
+      hasLength(1),
+    );
+
+    // A replayed tail that stops exactly at the cursor (maxDs + 1 == cursor)
+    // with nothing left is an up-to-date ring, not a stranded one.
+    final (replayed, _) = await _drive(_adapter(startCursorDs: 5000), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+      if (v.first == 0x10) {
+        return [
+          _event(kOuraEvtTempPeriod, 4999, _hex('6c0d')),
+          _summary(1, 0),
+        ];
+      }
+      return const [];
+    });
+    expect(
+      replayed
+          .whereType<BandNote>()
+          .where((n) => n.key == 'oura_drain_ok'),
+      hasLength(1),
+    );
+    expect(
+      replayed.whereType<BandNote>().any((n) => n.key == 'oura_cursor_stranded'),
+      isFalse,
+    );
+  });
+
+  test('an unconfirmed batch never claims the drain reached its end',
+      () async {
+    // Speicherfehler-Analogon: the host never confirms the checkpoint (its
+    // durable commit failed or never landed), so the cursor stays put and
+    // the session ends WITHOUT `oura_drain_ok` — the data is not lost (the
+    // next sync re-reads), but this session must not report success.
+    final (events, link) = await _drive(
+      _adapter(),
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtTempPeriod, 100, _hex('6c0d')),
+            _summary(1, 0),
+          ];
+        }
+        return const [];
+      },
+      confirmBatches: false,
+    );
+    expect(
+      events.whereType<BandNote>().any((n) => n.key == 'oura_drain_ok'),
+      isFalse,
+      reason: 'the batch was never confirmed — no durable commit, no success',
+    );
+    // And the cursor note never moved either: partial data stays banked,
+    // the bookmark stays put.
+    expect(
+      events.whereType<BandNote>().any((n) => n.key == 'oura_cursor_ds'),
+      isFalse,
+    );
+    expect(link.writes, isNotEmpty);
+  });
+
+  test('a drain that ends early never claims it reached the end', () async {
+    // A refused notify-flags write, an unanswered history request and a
+    // refused authentication all end `run()` without `oura_drain_ok` — the
+    // host must be able to tell "synced to the end" from "connected and
+    // got nothing".
+    final link = ReplayBandLink()..writeSucceeds = false;
+    final events = <BandEvent>[];
+    final done = Completer<void>();
+    final sub = _adapter()
+        .run(link)
+        .listen(events.add, onDone: done.complete);
+    await done.future.timeout(const Duration(seconds: 2), onTimeout: () {});
+    await sub.cancel();
+    expect(
+      events.whereType<BandNote>().any((n) => n.key == 'oura_drain_ok'),
+      isFalse,
+      reason: 'every write refused — nothing was synced',
+    );
+
+    final (silent, _) = await _drive(_adapter(), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+      // 0x1c = notify-flags write: never answered, 0x10 times out.
+      return const [];
+    });
+    expect(
+      silent.whereType<BandNote>().any((n) => n.key == 'oura_drain_ok'),
+      isFalse,
+      reason: 'the history request never came back',
+    );
+  });
+
   test('battery reaches the host as a note, never as a sample', () async {
     final (events, _) = await _drive(_adapter(), ringWithOneBatch);
     final notes = events.whereType<BandNote>().toList();

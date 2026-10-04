@@ -334,6 +334,15 @@ class ReplayBandLink implements BandLink {
   /// pending when a session's own teardown starts).
   Duration writeDelay = Duration.zero;
 
+  /// Synchronous hook fired at the TOP of every [write], before the reply —
+  /// the deterministic way for a lifecycle test to observe the session is
+  /// still driving the link at a chosen point, without sleeps.
+  void Function(String characteristicUuid, List<int> value)? onWrite;
+
+  /// Whether [close] has run — the observable stand-in for "the teardown
+  /// started", since a real link's `close()` is what ends its notify streams.
+  bool closed = false;
+
   /// Single-subscription on purpose: it BUFFERS, so a fixture may be fed
   /// before the adapter has got around to subscribing and nothing is dropped.
   /// A second `notify()` of the same characteristic throws, which is correct —
@@ -363,6 +372,7 @@ class ReplayBandLink implements BandLink {
 
   @override
   Future<bool> write(String characteristicUuid, List<int> value) async {
+    onWrite?.call(characteristicUuid, value);
     writes.add((characteristicUuid, value));
     if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
     return writeSucceeds;
@@ -391,6 +401,7 @@ class ReplayBandLink implements BandLink {
   /// narrow race it was reasoning about did not hold up against the real
   /// fixture. Keep this plain.
   Future<void> close() async {
+    closed = true;
     for (final c in _channels.values) {
       await c.close();
     }

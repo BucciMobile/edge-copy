@@ -275,7 +275,10 @@ class OuraAdapter extends BandAdapter {
             link.log('oura: the ring reports ${got.summary.bytesLeft} bytes '
                 'left but answered this cursor with nothing.');
             yield const BandNote('oura_cursor_stranded');
+            return;
           }
+          // An empty, up-to-date ring: the drain reached its honest end.
+          yield const BandNote('oura_drain_ok');
           return;
         }
 
@@ -296,7 +299,13 @@ class OuraAdapter extends BandAdapter {
           // exactly that one, a rebooted ring's tail stops short of it.
           if (got.summary.bytesLeft > 0 || got.maxDs + 1 < cursor) {
             yield const BandNote('oura_cursor_stranded');
+            return;
           }
+          // Everything below the cursor was a replay of what is already
+          // banked and the ring reports nothing left (bytesLeft > 0 was
+          // the stranded branch above): the drain is at the ring's end,
+          // up to date.
+          yield const BandNote('oura_drain_ok');
           return;
         }
         final fresh = [for (final i in keep) got.events[i]];
@@ -363,7 +372,10 @@ class OuraAdapter extends BandAdapter {
         // a bounded loss beats an unbounded stall.
         cursor = reread ?? got.maxDs + 1;
         yield BandNote('oura_cursor_ds', cursor);
-        if (got.summary.bytesLeft <= 0) return;
+        if (got.summary.bytesLeft <= 0) {
+          yield const BandNote('oura_drain_ok');
+          return;
+        }
       }
     } finally {
       await sub.cancel();
