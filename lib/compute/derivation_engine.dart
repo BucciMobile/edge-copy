@@ -31,8 +31,6 @@ import 'package:flutter/foundation.dart';
 import 'findings.dart';
 import 'nap_edits.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_performance/firebase_performance.dart';
 
 import '../ble/adapters/signals.dart';
 import '../data/coverage_resolver.dart';
@@ -43,6 +41,7 @@ import '../notify/fired_keys.dart';
 import '../notify/notification_center.dart';
 import '../notify/notification_event.dart';
 import '../notify/tap_router.dart' show workoutSuggestionRoute;
+import '../telemetry/firebase_bridge.dart';
 import '../telemetry/telemetry_service.dart';
 import 'crossday_pipeline.dart';
 import 'derive_pacing.dart';
@@ -1719,7 +1718,25 @@ import 'substrate.dart';
 // withheld — a fabricated-metric bug on `circadian_lifestyle`'s stored
 // output. kAnalyticsPin repinned to analytics main's tip (one commit past
 // PR #75's merge SHA).
-const int kAlgoVersion = 97;
+// 97 → 98 (day zone bars on ONE set, edge#333): the second half recomputed
+// the day's `zones` off `estimatedMaxHr` alone and overwrote the pipeline's,
+// while `zone_timeline`/`zone_source`/`zone_max_hr` stayed on the pipeline's
+// `trainingZones` set. Anyone whose observed ceiling reached the age line got
+// age-estimate bars under a footnote naming the measured ceiling. The
+// recompute is gone; `zones` is the pipeline's, binned off the same per-minute
+// wake series and set as the timeline. Moves `zones` for those users, and
+// marginally for everyone (per-minute means instead of raw 1 Hz). The bars
+// also gate on the set, not the age estimate, so a manual or observed set with
+// no age gets bars instead of "add your age". Edge-only.
+// 98 → 99 (crossday sleep performance + SRI, edge#493): performance scored an
+// older night's TST when last night had none; SRI paired non-adjacent nights
+// across a missing day. Edge-only.
+// 99 → 100 (SRI, edge#494): 'unobserved' minutes no longer count as asleep,
+// and a gap of any length pads one grid. Edge-only.
+// 100 → 101 (crossday, edge#501): imported days' vendor scores are masked out
+// of the rollup, and today's night counts as settled once the data edge is
+// past its wake, so illness/anomaly alerts can fire the same day. Edge-only.
+const int kAlgoVersion = 101;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1929,7 +1946,10 @@ const String kAnalyticsPin = '0441ef9e6fc6d5681c309ce6341911285e829f20';
 // calls. NO kAlgoVersion bump: ECG is not a derived `day_result`/
 // `metric_series` output, it is its own store (`ecg_reading` etc., schema
 // v54) with nothing feeding the existing metrics.
-const String kProtocolPin = 'bc7d8d0df706e40a2546ffde4545263f09d0fecb';
+// REPIN: protocol oura sleep-phase decoder (#71 merge) @ f04931b, on top of bc7d8d0.
+// NO kAlgoVersion bump: the stage minutes land in `observation`, which no
+// derivation reads.
+const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 
 // Fold idempotency, the minimum-nights warm-up, and legacy-payload handling
 // all live in SleepProfilePolicy (pure, unit-tested) — see
@@ -2602,15 +2622,14 @@ class DerivationEngine {
       ..['concurrency'] = _deriveConcurrency
       ..['last_error'] = null;
       
-    Trace? runTrace;
+    FirebaseTraceHandle? runTrace;
     try {
       // Heavy/force passes only. Light passes run many times a day (including
       // all night in the background), and each trace is buffered + eventually
       // uploaded — periodic radio wakeups from a local-first app, for timings
       // the _diag map already captures locally.
-      if (Firebase.apps.isNotEmpty && (heavy || force)) {
-        runTrace = FirebasePerformance.instance.newTrace('derivation_engine_run');
-        await runTrace.start();
+      if (FirebaseBridge.isInitialized && (heavy || force)) {
+        runTrace = await FirebaseBridge.startTrace('derivation_engine_run');
         runTrace.putAttribute('mode', force ? 'force' : (heavy ? 'heavy' : 'light'));
       }
     } catch (_) {}
@@ -3922,11 +3941,11 @@ class DerivationEngine {
         _log('rescan: no data edge');
         return 0;
       }
-      final cutoffSec = dataNowSec - _rescanWindowDays * 86400;
-      final todoDays = [
-        for (final dayId in rawByDay.keys)
-          if (_localNextDayLabelToSec(dayId) >= cutoffSec) dayId,
-      ]..sort();
+      final todoDays = rescanDayIds(
+        rawDayIds: rawByDay.keys,
+        dataNowSec: dataNowSec,
+        prunedBeforeSec: await LocalDb.getCursorInt(_prunedBeforeCursor),
+      );
       if (todoDays.isEmpty) {
         _log('rescan: no recent decoded-backed days');
         await LocalDb.setCursor('baseline_sig', sig);
@@ -3979,6 +3998,42 @@ class DerivationEngine {
       _running = false;
     }
   }
+
+  /// The days [rescanRecent] re-derives: every day with substrate inside the
+  /// rescan window, minus any whose derive window ([_targetDayWindow], from the
+  /// previous noon) reaches below [prunedBeforeSec]. The prune cuts on local
+  /// midnight, so the oldest kept day has its own rows but lost the evening
+  /// half of its night; re-deriving it would REPLACE a full-night result with
+  /// a truncated one that no empty-substrate guard catches. Its stored result
+  /// was computed from the whole night, so it keeps that.
+  @visibleForTesting
+  static List<String> rescanDayIds({
+    required Iterable<String> rawDayIds,
+    required int dataNowSec,
+    int? prunedBeforeSec,
+  }) {
+    final cutoffSec = dataNowSec - _rescanWindowDays * 86400;
+    return [
+      for (final dayId in rawDayIds)
+        if (_localNextDayLabelToSec(dayId) >= cutoffSec &&
+            !windowTruncatedByPrune(dayId, prunedBeforeSec))
+          dayId,
+    ]..sort();
+  }
+
+  /// Whether [dayId]'s derive window ([_targetDayWindow], from the previous
+  /// noon) starts below [prunedBeforeSec], i.e. part of its night is gone.
+  /// A user-set sleep window ([forcedOnsetSec]) only needs its own onset kept.
+  @visibleForTesting
+  static bool windowTruncatedByPrune(
+    String dayId,
+    int? prunedBeforeSec, {
+    int? forcedOnsetSec,
+  }) =>
+      prunedBeforeSec != null &&
+      (forcedOnsetSec ??
+              _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec) <
+          prunedBeforeSec;
 
   /// A stable, cheap signature of the CURRENT rolling baseline — the same inputs
   /// the readiness/illness baselines fold over. We take the trailing
@@ -4154,6 +4209,7 @@ class DerivationEngine {
       dataNowSec,
       await _BaselineHistoryCache.load(),
       forceFinalize: forceFinalize,
+      suppliedSubstrate: true,
     );
   }
 
@@ -4163,6 +4219,7 @@ class DerivationEngine {
     int dataNowSec,
     _BaselineHistoryCache history, {
     bool forceFinalize = false,
+    bool suppliedSubstrate = false,
   }) async {
     final daySub = day.daySub;
     final sleepSub = day.sleepSub;
@@ -4345,14 +4402,29 @@ class DerivationEngine {
     // `partial` row was considered instead, but `partial` still gets written
     // to `day_result` and would still shadow the better older row for
     // day-detail reads; declining is what actually protects it.
+    //
+    // Same decline when the prune has cut into this day's window: the midnight
+    // cut keeps the oldest kept day's own rows but drops the evening half of
+    // its night, so sleepSub is non-empty and the scalars come back from a
+    // partial night. Every path (algo bump, force, override, rescan) lands here.
     if (!producedNothing &&
-        nightSubstrateRegressed(
-          sleepSubEmpty: sleepSub.isEmpty,
-          nightScalarsNull: scMap == null ||
-              (scMap['rhr'] == null &&
-                  scMap['rmssd'] == null &&
-                  scMap['readiness'] == null),
-        )) {
+        (nightSubstrateRegressed(
+              sleepSubEmpty: sleepSub.isEmpty,
+              nightScalarsNull: scMap == null ||
+                  (scMap['rhr'] == null &&
+                      scMap['rmssd'] == null &&
+                      scMap['readiness'] == null),
+            ) ||
+            // An import brings its own substrate, the prune can't have cut it.
+            (!suppliedSubstrate &&
+                windowTruncatedByPrune(
+                  day.date,
+                  await LocalDb.getCursorInt(_prunedBeforeCursor),
+                  forcedOnsetSec: day.sleepSource == 'manual' ||
+                          day.sleepSource == 'confirmed'
+                      ? day.sleepOnsetSec
+                      : null,
+                )))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
           (existingNight['rhr'] != null ||
@@ -4361,7 +4433,7 @@ class DerivationEngine {
       if (existingHadNight) {
         _log('derive ${day.date}: sleep-window substrate pruned out from '
             "under a day that already had real night scalars — kept the "
-            'existing result rather than nulling the readiness baseline '
+            'existing result rather than overwriting the readiness baseline '
             '(edge#305)');
         return;
       }
@@ -4549,13 +4621,19 @@ class DerivationEngine {
       // hrr_bpm reach the persisted series map below.
       // `addAll` REPLACES `absent_notes` wholesale, and the two halves own
       // different keys: `trimp` is only ever the pure pipeline's (nothing in the
-      // second half recomputes it), while strain/zones/calories/max_hr_used are
+      // second half recomputes it), while strain/calories/max_hr_used are
       // the recompute's. Keep the pipeline's trimp reason across the merge or
       // the Activity screen's "training load" goes absent with nothing to say.
+      // `zones` is the pipeline's too (same set as `zone_timeline`); its
+      // reason is present only when the zones are empty.
       final trimpNote = (bundle['absent_notes'] as Map?)?['trimp'] as String?;
+      final zonesNote = (bundle['absent_notes'] as Map?)?['zones'] as String?;
       bundle.addAll(blocks.bundlePatch);
       if (trimpNote != null && (bundle['scalars'] as Map?)?['trimp'] == null) {
         (bundle['absent_notes'] as Map?)?['trimp'] = trimpNote;
+      }
+      if (zonesNote != null) {
+        (bundle['absent_notes'] as Map?)?['zones'] = zonesNote;
       }
       (bundle['series'] as Map?)?.cast<String, dynamic>().addAll(
             blocks.seriesPatch,
@@ -5331,6 +5409,9 @@ class DerivationEngine {
 
   // ── notifications generator ─────────────────────────────────────────────────
 
+  @visibleForTesting
+  Future<void> runNotificationsForTest() => _runNotifications();
+
   Future<void> _runNotifications() async {
     try {
       final cdRow = await LocalDb.baseline('crossday');
@@ -5349,9 +5430,6 @@ class DerivationEngine {
       final illness = cd['illness'] is Map ? cd['illness'] as Map : null;
       final anomaly = cd['anomaly'] is Map ? cd['anomaly'] as Map : null;
       final temp = cd['temp_illness'] is Map ? cd['temp_illness'] as Map : null;
-      final gb = cd['readiness_glassbox'] is Map
-          ? cd['readiness_glassbox'] as Map
-          : null;
       date ??=
           (illness?['date'] ?? anomaly?['date'] ?? temp?['date']) as String?;
       // ANCHORED TO THE DAY THIS IS RUNNING ON, not to the newest DERIVED day.
@@ -5403,8 +5481,16 @@ class DerivationEngine {
       if (irregFlag == 1.0) {
         findings.add(Finding(FindingKind.irregularRhythm, date));
       }
-      final score = gb?['value'] is Map ? (gb!['value'] as Map)['score'] : null;
-      if (score is num && score < kLowReadiness) {
+      // The headline readiness the ring shows and the findings log reads, not
+      // the glass-box score, which is a different model and can land on the
+      // other side of the threshold. The morning pin wins for its day, same as
+      // getToday and getChart: later re-derives rewrite metric_series, so the
+      // live value can drift across the line while the ring still reads the pin.
+      final pin = await LocalDb.frozenHeadline();
+      final score = pin != null && pin.day == date
+          ? pin.value.toDouble()
+          : await LocalDb.metricValueOn(date, 'readiness');
+      if (score != null && score < kLowReadiness) {
         findings.add(Finding(FindingKind.lowReadiness, date));
       }
 
@@ -5690,6 +5776,9 @@ class DerivationEngine {
   /// the whole install, forever, at ~12 MB/day.
   static const int _maxRawHoldDays = 14;
 
+  /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
+  static const String _prunedBeforeCursor = 'decoded_pruned_before';
+
   /// The `rec_ts` below which decoded substrate may be deleted, or null when
   /// nothing may be. PURE — the decision the raw prune is, separated from the
   /// two DB calls that surround it. See [_pruneOldDecoded] for the contract.
@@ -5703,7 +5792,7 @@ class DerivationEngine {
     if (cutoffSec <= 0) return null;
     final pending = rawDayIds.where((d) => !derivedDayIds.contains(d)).toList()
       ..sort();
-    if (pending.isEmpty) return cutoffSec;
+    if (pending.isEmpty) return _localDayStartOf(cutoffSec);
     // Hold at the START of the oldest day still owed a result — its own rows
     // survive, everything before it goes — floored so a permanently stuck day
     // cannot hold the whole install (see [_maxRawHoldDays]).
@@ -5711,8 +5800,17 @@ class DerivationEngine {
       _localDayLabelToSec(pending.first),
       dataNowSec - _maxRawHoldDays * 86400,
     );
-    return barrier < cutoffSec ? barrier : cutoffSec;
+    return _localDayStartOf(barrier < cutoffSec ? barrier : cutoffSec);
   }
+
+  /// Local midnight of the day [sec] falls in. The prune deletes WHOLE days:
+  /// a cutoff mid-day left that day half-pruned, still in `decodedRecTsMaxByDay`,
+  /// so the next rescan re-derived it from the surviving afternoon and replaced
+  /// its full curve/wear with one starting wherever the cutoff happened to sit
+  /// (#450). A fully-pruned day drops out of the rescan and keeps its result.
+  static int _localDayStartOf(int sec) => _localDayLabelToSec(
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(sec * 1000)),
+      );
 
   /// Prune raw older than [rawRetentionDays] BEHIND THE DATA EDGE. Retention is
   /// measured against the last record timestamp we actually drained
@@ -5753,7 +5851,14 @@ class DerivationEngine {
       derivedDayIds: derivedIds,
     );
     if (cutoffSec == null) return;
-    final deleted = await LocalDb.pruneDecodedBeforeRecTs(cutoffSec);
+    // Highest cutoff ever applied: a held-back pass can cut lower, but rows
+    // below an earlier cut are still gone. See [rescanDayIds]. Advanced inside
+    // the delete's own transaction, so a kill can't split the two and a
+    // concurrent lower-cutoff run can't write it backwards.
+    final deleted = await LocalDb.pruneDecodedBeforeRecTs(
+      cutoffSec,
+      cursorName: _prunedBeforeCursor,
+    );
     if (deleted > 0) {
       _log('pruned $deleted decoded rows with rec_ts < $cutoffSec');
     }
@@ -5839,34 +5944,6 @@ class DerivationEngine {
       if (t >= fromSec && t < toSec) return true;
     }
     return false;
-  }
-
-  static Map<String, int> _wakeZoneMinutes(
-    Substrate s,
-    int sleepOnsetSec,
-    int sleepOffsetSec,
-    double hrMax,
-  ) {
-    final samples = <ana.HrSample>[];
-    final n = math.min(s.tsSec.length, s.hr.length);
-    for (var i = 0; i < n; i++) {
-      final ts = s.tsSec[i];
-      if (sleepOnsetSec > 0 &&
-          sleepOffsetSec > sleepOnsetSec &&
-          ts >= sleepOnsetSec &&
-          ts < sleepOffsetSec) {
-        continue;
-      }
-      samples.add(ana.HrSample(ts * 1000.0, s.hr[i].toDouble()));
-    }
-    final zoneSet = ana.HeartRateZones.zonesFromMaxHr(hrMax);
-    // Null = the stream has no cadence `sampleCadenceSeconds` will vouch for.
-    // An empty map is already this function's "no zones" answer everywhere it
-    // is read; a zero-filled one would claim the day was measured and spent at
-    // rest. See `HeartRateZones.timeInZone`.
-    return ana.HeartRateZones.timeInZone(samples, zoneSet)
-            ?.toRoundedMinuteMap() ??
-        const {};
   }
 
   /// ONE HR-flex pass, returning the day's active, basal and total figures
@@ -6186,15 +6263,14 @@ class DerivationEngine {
     // every surface reads for the figures it owns, so its reasons win. NOTE
     // `bundle` here is the isolate's PATCH map, not the pure pipeline's bundle
     // — the two are merged at the `bundle.addAll(blocks.bundlePatch)` call
-    // site, and that merge is where `trimp` (the pipeline's alone; nothing here
-    // recomputes it) is carried across.
+    // site, and that merge is where `trimp` and `zones` (the pipeline's alone;
+    // nothing here recomputes them) are carried across.
     bundle['absent_notes'] = <String, String>{
       for (final e in ((wake['absent_notes'] as Map?) ?? const {}).entries)
         e.key.toString(): e.value.toString(),
     };
     bundle['activity'] = wake['activity'];
     bundle['activity_curve'] = wake['activity_curve'];
-    bundle['zones'] = wake['zones'];
     bundle['hr_stats'] = wake['hr_stats'];
     bundle['wear'] = wake['wear'];
   }
@@ -6668,16 +6744,12 @@ class DerivationEngine {
         : profile.heightCm == null
         ? needInputNote('height_cm')
                         : null;
-    final zonesAbsent = perMin.isEmpty
-        ? needInputNote('wake_hr')
-        : ceilingAbsent;
     double? calories;
     double? steps; // stays null here — real counts only, see below
     double? movementMin;
     double? caloriesTotal;
     double? caloriesWalking;
     double? caloriesBasal;
-    Map<String, int> zones = const {};
     if (perMin.isNotEmpty && hrMax != null) {
       // TRIMP needs a resting HR that is actually RESTING — a NOCTURNAL reading
       // (`scalars.rhr_nocturnal`, sleep-window only) or one the user entered —
@@ -6718,8 +6790,10 @@ class DerivationEngine {
         // "never a guessed cause" leaves when there is no cause to name.
         strainAbsent ??= strain == null ? kUnknownAbsenceNote : null;
       }
-      // Zones are pure %HRmax bands — real as soon as HRmax is real.
-      zones = _wakeZoneMinutes(daySub, sleepOnsetSec, sleepOffsetSec, hrMax);
+      // NO ZONES HERE. The day's `zones` are the pure pipeline's, binned on
+      // the same `trainingZones` set as `zone_timeline`/`zone_source` beside
+      // them. Recomputing them here off `estimatedMaxHr` alone drew
+      // age-estimate bars under a footnote naming the measured ceiling.
       // Calories are NOT computed here any more. Active and total both come
       // from the single `wakeDayEnergy` pass below, off this same wake series —
       // scoring active separately here, without the basal netting, is exactly
@@ -6804,7 +6878,6 @@ class DerivationEngine {
       // seam attaches to the value it hands a screen — see the note there.
       'absent_notes': <String, String>{
         if (strain == null) 'strain': strainAbsent ?? kUnknownAbsenceNote,
-        if (zones.isEmpty) 'zones': zonesAbsent ?? kUnknownAbsenceNote,
         if (hrMax == null && ceilingAbsent != null)
           'max_hr_used': ceilingAbsent,
         if (calories == null) 'calories': caloriesAbsent ?? kUnknownAbsenceNote,
@@ -6839,7 +6912,6 @@ class DerivationEngine {
             'counts come only from the 100 Hz or phone pedometer',
       },
       'activity_curve': _activityCurve(daySub),
-      'zones': zones,
       'hr_stats': hrStats,
       'wear': wear,
     };
@@ -8633,7 +8705,8 @@ class DerivationEngine {
     }
   }
 
-  // static: pure day-label arithmetic, and `rawPruneCutoffSec` needs it.
+  // static: pure day-label arithmetic, and `rawPruneCutoffSec` /
+  // `rescanDayIds` need them.
   static int _localDayLabelToSec(String day) {
     final d = DateTime.tryParse(day);
     if (d == null) return 0;
@@ -8646,7 +8719,7 @@ class DerivationEngine {
   // .millisecondsSinceEpoch already respects local DST rules, so just asking
   // for the START of the NEXT day gets this right without hardcoding a
   // day length.
-  int _localNextDayLabelToSec(String day) {
+  static int _localNextDayLabelToSec(String day) {
     final d = DateTime.tryParse(day);
     if (d == null) return 0;
     return DateTime(d.year, d.month, d.day + 1).millisecondsSinceEpoch ~/ 1000;
