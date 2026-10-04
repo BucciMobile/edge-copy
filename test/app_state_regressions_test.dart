@@ -238,6 +238,45 @@ void main() {
           reason: 'without this flag the row looks like any other finished '
               'workout and _writeOneWorkout would export it on the very next '
               'periodic exportAll pass, minutes later');
+      expect(row?['end_ts'], nowSec - 7 * 60 * 60,
+          reason: 'no tally snapshot = it never ticked; stamping relaunch '
+              'time would bill 7 h of 1 Hz HR to it on re-score');
+    });
+
+    test('a stale orphan ends at its last tally snapshot, not at relaunch',
+        () async {
+      // Run started 18:00, app killed at 18:40, reopened 13.5 h later. The
+      // re-score bills whatever 1 Hz HR sits in [start_ts, end_ts], so a
+      // relaunch-time end turned the whole night into workout calories.
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final startSec = nowSec - 13 * 60 * 60 - 30 * 60;
+      final lastTickSec = startSec + 40 * 60;
+      const id = 'stale-with-tally';
+      await LocalDb.putSession({
+        'id': id,
+        'start_ts': startSec,
+        'end_ts': null,
+        'type': 'run',
+        'status': 'live',
+        'source': 'manual',
+        'created_at': startSec * 1000,
+      });
+      await LocalDb.saveLiveWorkoutTally({
+        'workout_id': id,
+        'updated_ts': lastTickSec * 1000,
+        'per_minute_hr': '[]',
+        'zone_seconds': '[]',
+        'seconds_by_bpm': '{}',
+      });
+
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      await app.debugReconcileOrphanedLiveWorkout();
+
+      final row = await LocalDb.session(id);
+      expect(row?['status'], 'done');
+      expect(row?['end_ts'], lastTickSec);
+      expect(row?['end_ts_fabricated'], 1);
     });
   });
 
