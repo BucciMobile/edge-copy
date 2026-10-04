@@ -213,16 +213,27 @@ bool shouldAttemptHealthBulkExport({
   DateTime? lastSuccess,
   Duration minRewriteInterval = Duration.zero,
   bool force = false,
-}) => shouldAttemptHealthExport(
-  attempts: attempts,
-  maxAttempts: maxAttempts,
-  now: now,
-  lastAttempt: lastAttempt,
-  backoff: backoff,
-  lastSuccess: lastSuccess,
-  minRewriteInterval: minRewriteInterval,
-  force: force || prioritySleepAlreadyWritten,
-);
+}) {
+  // A non-zero rewrite interval means the mutable recent tail (today and the
+  // not-yet-finalized days). Its failures retry on that same cadence, with no
+  // escalating backoff and no cap: it is delete-then-write anyway, and one
+  // failing write (a type the user denied, a store that errors while the phone
+  // is locked during background syncs) fails every pass, so the 2h/6h/24h
+  // tiers and then the cap froze today's minute HR in Health until the day
+  // finalized, days later. A failing tail day never moves the cursor, so there
+  // is nothing for a cap to unwedge here.
+  final tail = minRewriteInterval > Duration.zero;
+  return shouldAttemptHealthExport(
+    attempts: tail ? 0 : attempts,
+    maxAttempts: maxAttempts,
+    now: now,
+    lastAttempt: lastAttempt,
+    backoff: tail ? minRewriteInterval : backoff,
+    lastSuccess: lastSuccess,
+    minRewriteInterval: minRewriteInterval,
+    force: force || prioritySleepAlreadyWritten,
+  );
+}
 
 class PrioritySleepExportResult {
   const PrioritySleepExportResult({
@@ -966,7 +977,8 @@ class HealthExporter {
               debugPrint(
                 '[health] day $date export incomplete (attempt $nextAttempts/$_kMaxExportAttempts)',
               );
-              if (nextAttempts >= _kMaxExportAttempts) {
+              // Only a finalized day is ever given up; the tail just retries.
+              if (finalized && nextAttempts >= _kMaxExportAttempts) {
                 debugPrint(
                   '[health] day $date exceeded $_kMaxExportAttempts export attempts — giving up, will stop blocking newer days',
                 );

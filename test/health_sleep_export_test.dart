@@ -301,6 +301,23 @@ void main() {
       expect(healthSleepStageOf('unknown'), isNull);
     });
 
+    test('a failing non-finalized day retries on the rewrite cadence, never capped', () {
+      final now = DateTime(2026, 10, 4, 15);
+      bool due(int attempts, Duration sinceLast) => shouldAttemptHealthBulkExport(
+        attempts: attempts,
+        maxAttempts: 6,
+        now: now,
+        lastAttempt: now.subtract(sinceLast),
+        backoff: const Duration(hours: 24),
+        prioritySleepAlreadyWritten: false,
+        minRewriteInterval: const Duration(minutes: 30),
+      );
+      // today's minute hr must not wait out the 24h tier or stop at the cap
+      expect(due(5, const Duration(minutes: 31)), isTrue);
+      expect(due(9, const Duration(minutes: 31)), isTrue);
+      expect(due(5, const Duration(minutes: 10)), isFalse);
+    });
+
     test('manual sync bypasses retry backoff and attempt cap', () {
       final now = DateTime(2026, 8, 5, 13);
 
