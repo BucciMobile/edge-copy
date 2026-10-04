@@ -10512,12 +10512,27 @@ class LocalDb {
     await db.transaction((tx) async {
       final rows = await tx.query('sleep_nap',
         where: 'day_id = ? AND start_ts = ?', whereArgs: [dayId, startTs]);
-      String? restoreSource;
+      await ActivityStore.markDayChanged(tx, dayId);
+      String? restoreSource, restorePayload;
       if (rows.isNotEmpty && rows.single['source'] == 'rejected') {
         final payload = rows.single['payload_json'];
         if (payload is String) {
           final source = (jsonDecode(payload) as Map)['source'];
           if (source == 'confirmed' || source == 'legacy') restoreSource = source as String;
+        } else {
+          // A rejection from before activity review has no snapshot, and a
+          // detection that old is never offered for review again. Put the
+          // window back as a legacy nap so it is not lost for good; with no
+          // measured split, asleep and in-bed are the whole window.
+          final cutoff = (await tx.query('activity_review_meta')).single['activated_at'] as int;
+          if (startTs < cutoff) {
+            final min = (((rows.single['end_ts'] as int) - startTs) / 60).round();
+            restoreSource = 'legacy';
+            restorePayload = jsonEncode({
+              'duration_min': min, 'in_bed_min': min,
+              'confidence': null, 'source': 'legacy',
+            });
+          }
         }
       }
       if (restoreSource != null) {
@@ -10526,11 +10541,11 @@ class LocalDb {
         await tx.update('sleep_nap', {
           'source': restoreSource,
           'created_at': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+          'payload_json': ?restorePayload,
         }, where: 'day_id = ? AND start_ts = ?', whereArgs: [dayId, startTs]);
       } else {
         await tx.delete('sleep_nap', where: 'day_id = ? AND start_ts = ?', whereArgs: [dayId, startTs]);
       }
-      await ActivityStore.markDayChanged(tx, dayId);
     });
   }
 

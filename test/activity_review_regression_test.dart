@@ -487,6 +487,33 @@ void main() {
     });
   }
 
+  test('a pre-upgrade rejection without a snapshot can be put back', () async {
+    await result(day);
+    // Written by the build before activity review: no snapshot, and the nap it
+    // suppressed is already absent from the retained day result.
+    await db.insert('sleep_nap', {
+      'day_id': day,
+      'start_ts': start,
+      'end_ts': start + 1800,
+      'source': 'rejected',
+      'created_at': 1,
+    });
+    await db.update('activity_review_meta', {'activated_at': start + 3600});
+    await LocalDb.deleteNapEdit(day, start);
+    final jobs = await LocalDb.applyPendingActivityReviews();
+    await LocalDb.finishActivityReviews(jobs);
+    // The old detection is never offered for review again, so the restore
+    // itself has to credit it.
+    expect(await store.reconcile(ActivityKind.nap, [candidate()]), isEmpty);
+    final bundle = jsonDecode(
+      (await LocalDb.dayResult(day))!['payload_json'] as String,
+    );
+    final restored = (bundle['naps']['value'] as List).single as Map;
+    expect(restored['source'], 'legacy');
+    expect(restored['start'], start);
+    expect(bundle['scalars']['nap_min'], 30);
+  });
+
   test('deleting a manually logged nap still removes it permanently', () async {
     await result(day);
     await LocalDb.putNapEdit(
