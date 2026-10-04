@@ -788,17 +788,14 @@ Future<String?> pairOuraRingWithKey(BluetoothDevice device, List<int> key) =>
 /// WHY SEVERAL. A user who extracted keys from a previous setup often has a
 /// handful and no way to tell which belongs to which ring — the key is not
 /// labelled with a serial anywhere. Trying them one at a time by hand means
-/// re-running the whole pairing flow per guess. `../noop` has done it this way
-/// for a while and it is the convenient half of the existing-key path.
+/// re-running the whole pairing flow per guess.
 ///
 /// ONE KEY PER CONNECTION, and this is the part not to "optimise". Each
 /// candidate gets its own connect and its own handshake: a ring that has just
 /// refused an authentication does not hand out a second nonce on the same link,
 /// so a loop that re-challenged over one connection would report every
-/// candidate after the first as wrong whatever it was. `../noop` reconnects
-/// between candidates for exactly this reason (`advanceKeyTrial` →
-/// `pendingTrialReconnect`). Derived from that implementation, NOT verified
-/// here on hardware (R6).
+/// candidate after the first as wrong whatever it was. NOT verified here on
+/// hardware (R6).
 ///
 /// STILL READ-ONLY ON THE RING. The key-install command is never sent on this
 /// path, whatever the candidate count — so a wrong key costs a refusal and
