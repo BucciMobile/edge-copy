@@ -278,9 +278,8 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       await prefs.reload();
       expect(prefs.getInt('alarm_epoch'), isNull);
-      // `alarmFiredAt` had no reader in lib (alarm.dart derives its own arm
-      // state from alarmConfirmed/alarmPending), so the getter is gone and
-      // with it the only thing this line could assert on.
+      // the alarm screen shows the fire instead of silently swapping times
+      expect(app.alarmFiredAt, isNotNull);
     });
 
     test('the app-side EXECUTED id (58) is a RUN_ALARM buzz, the arm stays',

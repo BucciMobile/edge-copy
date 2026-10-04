@@ -4792,6 +4792,12 @@ class AppState extends ChangeNotifier {
   /// The strap emitted ALARM_SET (event 56) — the alarm is confirmed armed.
   bool get alarmConfirmed => _alarm.confirmed;
 
+  /// When the strap last reported firing the alarm (event 57), this run. The
+  /// fired alarm is cleared and the next one armed straight away, so without
+  /// this the screen just swaps times and a real fire reads like a fault.
+  DateTime? get alarmFiredAt => _alarmFiredAt;
+  DateTime? _alarmFiredAt;
+
   /// A SET was written but not yet confirmed, still inside the grace window —
   /// the UI shows a neutral "Setting alarm…" state.
   bool get alarmPending =>
@@ -5020,6 +5026,7 @@ class AppState extends ChangeNotifier {
         break;
       case AlarmEffect.fired:
         _log('[alarm] strap FIRED — EXECUTED (event $id) received.');
+        _alarmFiredAt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
         unawaited(_notifyAlarmFired());
         // A one-shot alarm is SPENT the moment it fires. This used to only log
         // + notify, so `alarmEpoch` kept returning the past epoch across
