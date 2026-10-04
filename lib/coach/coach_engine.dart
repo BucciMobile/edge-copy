@@ -648,6 +648,19 @@ class CoachEngine {
     http.Client? client,
   }) async {
     final c = client ?? http.Client();
+    // Terra and Luna 6 default to medium reasoning, but Chat Completions
+    // requires none for function tools and for the sampling params our text
+    // callers also send. Keep this policy on the shared path for every turn.
+    // Only the official OpenAI origin and these known models (or dated
+    // snapshots) opt in; compatible providers and other models are unchanged.
+    // https://developers.openai.com/api/docs/guides/migrate-to-responses
+    // https://developers.openai.com/api/docs/models/gpt-6-luna
+    final model = body['model'] as String? ?? '';
+    final modelFamily = model.replaceFirst(RegExp(r'-\d{4}-\d{2}-\d{2}$'), '');
+    if (coachEndpointOrigin(config.apiBase) == 'https://api.openai.com' &&
+        const {'gpt-5.6-terra', 'gpt-6-luna'}.contains(modelFamily)) {
+      body = {...body, 'reasoning_effort': 'none'};
+    }
     // Recent Claude models reject sampling params with a 400, on Anthropic's
     // own endpoint and through any pass-through provider alike. Strip them for
     // exactly those model versions; older Claude models and every other
