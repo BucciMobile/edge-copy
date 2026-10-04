@@ -1953,7 +1953,9 @@ const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 // lib/compute/sleep_profile_policy.dart for the evidence behind each rule.
 
 /// Raw is kept this many days past derivation, then pruned (derived stays).
-const int rawRetentionDays = 3;
+/// Five days leaves additional recovery time beyond the ~48 h recomputation
+/// window before source data is permanently removed.
+const int rawRetentionDays = 5;
 
 /// A day stays recomputable for this long after its wake, then FINALIZES (locks)
 /// — more flash may still drain within this buffer (ARCHITECTURE_V2: ~48 h).
