@@ -28,6 +28,15 @@ class PreparedDerivationDay {
   /// the strict [daySub] so steps/wear/activity are never double-counted.
   final Substrate napSub;
 
+  /// TONIGHT's sleep: the main sleep of the NEXT day when it began before this
+  /// day ended (bed at 22:00, the night ends tomorrow), epoch seconds, 0 when
+  /// there is none or it is not known yet. This day's own window is the night
+  /// that ended this morning, so without this the hours asleep before
+  /// midnight count as waking time (strain, daytime HRV, the HR dip) and can
+  /// be booked again as a nap.
+  final int tonightSleepOnsetSec;
+  final int tonightSleepOffsetSec;
+
   /// M5: the resolved exclusive-owner spans, one entry per anchor signal
   /// (`hr1Hz`, `rrIntervals`), over the union window `_prepareTargetDay`
   /// resolved once. Empty (never populated) on the import path — a bulk
@@ -61,6 +70,8 @@ class PreparedDerivationDay {
     required this.sleepSub,
     Substrate? napSub,
     this.sleepSource = 'auto',
+    this.tonightSleepOnsetSec = 0,
+    this.tonightSleepOffsetSec = 0,
     this.ownership = const {},
     this.priority = const {},
   }) : napSub = napSub ?? daySub;
@@ -78,6 +89,8 @@ class PreparedDerivationDay {
     'day_sub': daySub.toJson(),
     'sleep_sub': sleepSub.toJson(),
     'nap_sub': napSub.toJson(),
+    'tonight_sleep_onset_sec': tonightSleepOnsetSec,
+    'tonight_sleep_offset_sec': tonightSleepOffsetSec,
     // ponytail: `ownership` is NOT round-tripped here. Grepped for real
     // callers of PreparedDerivationDay.toJson()/fromJson() outside this file
     // — none exist (only `candidate.toPreparedDay(...)` at
@@ -102,6 +115,10 @@ class PreparedDerivationDay {
       sleepOnsetSec: (m['sleep_onset_sec'] as num?)?.toInt() ?? 0,
       sleepOffsetSec: (m['sleep_offset_sec'] as num?)?.toInt() ?? 0,
       sleepSource: m['sleep_source'] as String? ?? 'auto',
+      tonightSleepOnsetSec:
+          (m['tonight_sleep_onset_sec'] as num?)?.toInt() ?? 0,
+      tonightSleepOffsetSec:
+          (m['tonight_sleep_offset_sec'] as num?)?.toInt() ?? 0,
       daySub: daySub,
       sleepSub: Substrate.fromJson(
         ((m['sleep_sub'] as Map?) ?? const {}).cast<String, dynamic>(),
@@ -227,6 +244,8 @@ class SleepSessionCandidate {
     required Substrate daySub,
     required Substrate sleepSub,
     Substrate? napSub,
+    int tonightSleepOnsetSec = 0,
+    int tonightSleepOffsetSec = 0,
     Map<InputSignal, List<OwnedSpan>> ownership = const {},
     Map<InputSignal, List<String>> priority = const {},
   }) => PreparedDerivationDay(
@@ -234,10 +253,10 @@ class SleepSessionCandidate {
     // `endSec` is what the engine anchors FINALIZATION on
     // (`endSec + 48 h < dataNowSec` ⇒ lock). An empty substrate used to yield
     // endSec = 0, which makes that comparison unconditionally true — so a day
-    // whose raw has been pruned (retention is 3 days) derived an all-absent
-    // bundle and wrote it FINALIZED over the good historical row, permanently.
-    // With no data, fall back to the day's real calendar end so an empty
-    // result is aged exactly like a real one.
+    // whose raw has been pruned (retention is `rawRetentionDays`) derived an
+    // all-absent bundle and wrote it FINALIZED over the good historical row,
+    // permanently. With no data, fall back to the day's real calendar end so an
+    // empty result is aged exactly like a real one.
     endSec: daySub.lastTs != null
         ? daySub.lastTs! + 1
         : localNextMidnightSecForDayLabel(dayId),
@@ -251,6 +270,8 @@ class SleepSessionCandidate {
     daySub: daySub,
     napSub: napSub,
     sleepSub: sleepSub,
+    tonightSleepOnsetSec: tonightSleepOnsetSec,
+    tonightSleepOffsetSec: tonightSleepOffsetSec,
     ownership: ownership,
     priority: priority,
   );
@@ -456,6 +477,7 @@ class _PrepareAccumulator {
   /// See [Substrate.stepCount] for why the sentinel is not 0.
   final List<int> stepCount = [];
   final List<int> hrValid = [];
+  final List<int> bandSleepState = [];
 
   /// The DISTINCT non-null `device_family` stamps seen across every page fed in
   /// (see [Substrate.deviceFamily]). Exactly one ⇒ that is the substrate's
@@ -565,6 +587,9 @@ class _PrepareAccumulator {
     hrValid.addAll(sub.hrValid.length == sub.length
         ? sub.hrValid
         : List<int>.filled(sub.length, -1));
+    bandSleepState.addAll(sub.bandSleepState.length == sub.length
+        ? sub.bandSleepState
+        : List<int>.filled(sub.length, -1));
   }
 
   void addDecodedPage(
@@ -662,6 +687,11 @@ class _PrepareAccumulator {
       // `device_family == 'gen5'` check that used to sit on top of it was a
       // band id in the neutral layer (BANDAGNOSTIC C12).
       hrValid.add(_num(row?['hr_valid'])?.toInt() ?? -1);
+      // The band's own envelope (0 wake, 1 still, 2 sleep, 3 up). NULL is ABSENT
+      // (-1): gen4 has no such field, and 0 is a real "wake". On a two-device
+      // second this is the hr1Hz owner's row (composeOneHzFrames keeps base
+      // columns) — fine for one WHOOP 5.
+      bandSleepState.add(_num(row?['band_sleep_state'])?.toInt() ?? -1);
       final beats = rrByRecTs[recTs];
       if (beats == null) continue;
       for (final beat in beats) {
@@ -720,6 +750,7 @@ class _PrepareAccumulator {
       skinContact: skinContact,
       stepCount: stepCount,
       hrValid: hrValid,
+      bandSleepState: bandSleepState,
       deviceFamily: deviceFamily,
       deviceIds: _deviceIds,
     );

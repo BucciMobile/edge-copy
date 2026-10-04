@@ -10,6 +10,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:health/health.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -17,7 +18,11 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_workout_import.dart';
 
-HealthDataPoint _w(String uuid) => HealthDataPoint(
+HealthDataPoint _w(
+  String uuid, {
+  String sourceId = 'src',
+  String sourceName = 'Strava',
+}) => HealthDataPoint(
       uuid: uuid,
       value: WorkoutHealthValue(
         workoutActivityType: HealthWorkoutActivityType.RUNNING,
@@ -26,10 +31,10 @@ HealthDataPoint _w(String uuid) => HealthDataPoint(
       unit: HealthDataUnit.NO_UNIT,
       dateFrom: DateTime(2026, 8, 1, 9),
       dateTo: DateTime(2026, 8, 1, 10),
-      sourceId: 'src',
+      sourceId: sourceId,
       sourcePlatform: HealthPlatformType.appleHealth,
       sourceDeviceId: 'dev',
-      sourceName: 'Strava',
+      sourceName: sourceName,
     );
 
 /// Stubs the platform channel calls sync() makes so it never leaves Dart:
@@ -49,6 +54,30 @@ class _FakeHealth extends Health {
     List<RecordingMethod> recordingMethodsToFilter = const [],
   }) async =>
       points;
+}
+
+/// Records what the permission request asked for.
+class _PermHealth extends Health {
+  List<HealthDataType>? asked;
+
+  @override
+  Future<void> configure() async {}
+
+  @override
+  Future<bool?> hasPermissions(
+    List<HealthDataType> types, {
+    List<HealthDataAccess>? permissions,
+  }) async =>
+      false;
+
+  @override
+  Future<bool> requestAuthorization(
+    List<HealthDataType> types, {
+    List<HealthDataAccess>? permissions,
+  }) async {
+    asked = types;
+    return true;
+  }
 }
 
 void main() {
@@ -110,5 +139,111 @@ void main() {
 
     expect(res.workouts, 2);
     expect(await LocalDb.importedWorkouts(), hasLength(2));
+  });
+
+  test('our own exported workouts are not imported back', () async {
+    const app = 'wtf.openstrap.openstrap_edge';
+    PackageInfo.setMockInitialValues(
+      appName: 'OpenStrap',
+      packageName: app,
+      version: '1.0.0',
+      buildNumber: '1',
+      buildSignature: '',
+    );
+    // An earlier import already stored one of them.
+    await LocalDb.putImportedWorkouts([
+      {
+        'uuid': 'ours-ios',
+        'start_ts': 1,
+        'end_ts': 2,
+        'kind': 'RUNNING',
+        'source': 'OpenStrap',
+      },
+    ]);
+    final importer = HealthWorkoutImporter(
+      health: _FakeHealth([
+        _w('ours-ios', sourceId: app, sourceName: 'OpenStrap'),
+        _w('ours-android', sourceId: '', sourceName: app),
+        _w('strava'),
+      ]),
+      isApple: false,
+    );
+
+    final res = await importer.sync();
+
+    expect(res.workouts, 1);
+    final stored = await LocalDb.importedWorkouts();
+    expect(stored.map((r) => r['uuid']), ['strava']);
+  });
+
+  test('apple: only a prompt:true sync lets the route fetch ask', () async {
+    final sent = <Object?>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(kHealthRoutesChannel, (call) async {
+      sent.add((call.arguments as Map)['prompt']);
+      return const <Object?>[];
+    });
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(kHealthRoutesChannel, null));
+    final importer = HealthWorkoutImporter(
+      health: _FakeHealth([_w('a')]),
+      isApple: true,
+    );
+
+    await importer.sync();
+    await importer.sync(prompt: true);
+
+    expect(sent, [false, true],
+        reason: 'the auto path calls sync() bare and must never prompt');
+  });
+
+  test('copies of our own exports stored before the filter get cleaned up',
+      () async {
+    PackageInfo.setMockInitialValues(
+      appName: 'Edge',
+      packageName: 'site.openstrap.edge',
+      version: '1',
+      buildNumber: '1',
+      buildSignature: '',
+    );
+    await LocalDb.putImportedWorkouts([
+      for (final u in ['old1', 'old2'])
+        ImportedWorkoutRow(
+          uuid: u,
+          startTs: 1,
+          endTs: 2,
+          kind: 'running',
+          source: 'Edge',
+        ).toRow(),
+    ]);
+    final importer = HealthWorkoutImporter(
+      health: _FakeHealth([
+        _w('ours', sourceId: 'site.openstrap.edge', sourceName: 'Edge'),
+        _w('theirs'),
+      ]),
+      isApple: false,
+    );
+
+    await importer.sync();
+
+    final stored = await LocalDb.importedWorkouts();
+    expect(stored.map((r) => r['uuid']), ['theirs']);
+  });
+
+  test('health connect asks for the reads the workout read needs', () async {
+    // The plugin reads distance, total calories and steps per session; a
+    // missing grant on any of them empties the whole workout read.
+    final health = _PermHealth();
+    await HealthWorkoutImporter(health: health, isApple: false)
+        .requestPermission();
+    expect(
+        health.asked,
+        containsAll([
+          HealthDataType.WORKOUT,
+          HealthDataType.DISTANCE_DELTA,
+          HealthDataType.TOTAL_CALORIES_BURNED,
+          HealthDataType.STEPS,
+        ]));
   });
 }

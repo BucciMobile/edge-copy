@@ -256,9 +256,10 @@ dependencies:
       # fixes, unrelated but already an ancestor). Verified present:
       # `git show bc7d8d0:lib/src/labrador.dart | grep 'class LabradorR17'`.
       #
-      # REPIN: protocol #71 (oura `decodeSleepPhases`) @ a41b174, on top of
+      # REPIN: protocol #71 merge (oura `decodeSleepPhases`) @ f04931b, on top of
       # bc7d8d0.
-      ref: a41b174d2210a89e38efb4b74bd39c6487259923
+      # REPIN: protocol main @ ecb512b (#72-#77).
+      ref: ecb512b710fbfa5fffce999f939a64aa7c486ee0
   openstrap_analytics:
     git:
       url: https://github.com/OpenStrap/analytics.git
@@ -497,7 +498,9 @@ dependencies:
       # window, so kAlgoVersion bumped (96 -> 97). Verified:
       #   `git show 0441ef9:lib/src/onehz/wellness/temp_circadian.dart |
       #      grep -n 'varTot == 0\|diffN == 0'`
-      ref: 0441ef9e6fc6d5681c309ce6341911285e829f20
+      # analytics main @ 4fc2b12: adds #80 (band-state night end) plus #81-#85.
+      # analytics main @ c0effea: adds #79 (catalog) and #86 (rmssd gate).
+      ref: c0effea9a7f3113009ebec902f456ace56b774ca
 
   # BLE — flutter_blue_plus is the maintained cross-platform GATT client.
   flutter_blue_plus: ^1.36.8

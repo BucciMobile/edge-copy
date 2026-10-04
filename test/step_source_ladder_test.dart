@@ -18,6 +18,7 @@ import 'package:openstrap_edge/compute/derivation_engine.dart';
 import 'package:openstrap_edge/compute/profile.dart';
 import 'package:openstrap_edge/compute/substrate.dart';
 import 'package:openstrap_edge/data/live_coverage_policy.dart';
+import 'package:openstrap_edge/data/step_calibration.dart';
 import 'package:openstrap_edge/models/metric.dart';
 import 'package:openstrap_edge/ui2/screens/home_screen.dart' show stepSensorLabel;
 
@@ -70,6 +71,7 @@ Substrate _sub(List<int> counters, {int step = 600, String? family = 'gen5'}) {
   Substrate sub, {
   required int liveStepsReal,
   required int liveStepsFromStrap,
+  StepCalibrationProfile? counterProfile,
 }) {
   final bundle = <String, dynamic>{};
   final scalars = <String, dynamic>{};
@@ -87,6 +89,7 @@ Substrate _sub(List<int> counters, {int step = 600, String? family = 'gen5'}) {
     dataNowSec: sub.tsSec.last + 1,
     liveStepsReal: liveStepsReal,
     liveStepsFromStrap: liveStepsFromStrap,
+    counterProfile: counterProfile,
   );
   return ((bundle['steps'] as Map).cast<String, dynamic>(), scalars);
 }
@@ -275,6 +278,7 @@ void main() {
       // The counter is still disclosed — it is just not the answer.
       expect(steps['band_measured'], 622);
       expect(steps['by_source'], {'phone': 18856});
+      expect(steps.containsKey('spans'), isFalse);
     });
 
     test('it DOES answer when no span source covered the day at all', () {
@@ -286,6 +290,38 @@ void main() {
       expect(scalars['steps'], 622.0);
       expect(steps['source'], 'strap_counter');
       expect(steps['by_source'], {'strap_counter': 622});
+      // Issue #475: the counter's own record times place it on a clock.
+      final spans = (steps['spans'] as List).cast<Map>();
+      expect(spans, isNotEmpty);
+      expect(spans.fold<int>(0, (a, s) => a + (s['steps'] as int)), 622);
+      expect(spans.first['start_ts'], gen5.tsSec.first);
+      expect(spans.last['end_ts'], gen5.tsSec.last);
+    });
+
+    test('a learned factor scales the counter and is disclosed only when '
+        'the counter is the answer', () {
+      const bicep = StepCalibrationProfile(
+        deviceFamily: 'gen5',
+        wearing: Wearing.wrist,
+        factor: 1.5,
+        nDays: 4,
+        version: kStepCalibrationVersion,
+      );
+      final (alone, _) = _derive(gen5,
+          liveStepsReal: 0, liveStepsFromStrap: 0, counterProfile: bicep);
+      expect(alone['value'], 933);
+      expect(alone['band_measured'], 622);
+      expect(alone['counter_calibration'], {'factor': 1.5, 'n_days': 4});
+      // The chip's row says what the chip counted; the factor is separate.
+      expect(alone['by_source'], {'strap_counter': 622});
+      expect(alone['note'], contains('scaled by 1.50 from 4 days'));
+      // The hourly spans carry the same factor, so the chart sums to `value`.
+      final spans = (alone['spans'] as List).cast<Map>();
+      expect(spans.fold<int>(0, (a, s) => a + (s['steps'] as int)), 933);
+      final (withPhone, _) = _derive(gen5,
+          liveStepsReal: 18856, liveStepsFromStrap: 0, counterProfile: bicep);
+      expect(withPhone['value'], 18856);
+      expect(withPhone.containsKey('counter_calibration'), isFalse);
     });
 
     test('a mixed day names both sensors and splits them', () {

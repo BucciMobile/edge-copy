@@ -122,6 +122,10 @@ void main() {
       // No raw for this date, so nothing could ever re-derive it — finalizing
       // is correct here.
       expect(((await _row(otherDay))!['finalized'] as num).toInt(), 1);
+      // …but the lock is the importer's, not the derive gate's: band rows for
+      // that date arriving later (import, THEN pair) must still derive.
+      expect(await LocalDb.finalizedDayIds(kAlgoVersion),
+          isNot(contains(otherDay)));
     });
 
     test('does not finalize a day that still has raw to re-derive from',
@@ -232,6 +236,20 @@ void main() {
     });
   });
 
+  test('WhoopImporter: a nap row never replaces that date\'s night',
+      () async {
+    final f = File(p.join(tmp.path, 'sleeps.csv'));
+    f.writeAsStringSync(
+      'Sleep onset,Wake onset,Asleep duration (min),Nap\n'
+      '2026-06-03 23:00:00,2026-06-04 06:30:00,420,false\n'
+      '2026-06-04 14:00:00,2026-06-04 14:25:00,25,true\n',
+    );
+    final day = localDateLabel(
+        DateTime.parse('2026-06-04 06:30:00').millisecondsSinceEpoch ~/ 1000);
+    await WhoopImporter.importFiles([f.path]);
+    expect(await _metric(day, 'tst_min'), 420.0);
+  });
+
   group('WhoopImporter energy units come from the header, not the value', () {
     Future<double?> importEnergy(
         String wake, String header, String value) async {
@@ -264,6 +282,90 @@ void main() {
       expect(
           await importEnergy('2026-04-03 07:00:00', 'Energy burned', '5000'),
           isNull);
+    });
+  });
+
+  test('WHOOP absolute skin temp °C is not filed as skin_temp_z', () async {
+    const wake = '2026-04-10 07:00:00';
+    final day =
+        localDateLabel(DateTime.parse(wake).millisecondsSinceEpoch ~/ 1000);
+    final f = File(p.join(tmp.path, 'skin_temp.csv'));
+    f.writeAsStringSync(
+      'Cycle start time,Wake onset,Recovery score %,Skin temp (celsius),'
+      'Asleep duration (min)\n'
+      '$wake,$wake,50,33.4,400\n',
+    );
+    expect((await WhoopImporter.importFiles([f.path])).days, 1);
+    final payload =
+        jsonDecode((await _row(day))!['payload_json'] as String) as Map;
+    expect((payload['scalars'] as Map)['skin_temp_z'], isNull);
+  });
+
+  test('upgrading to v55 scrubs °C skin_temp_z left by older WHOOP imports',
+      () async {
+    Future<void> put(String day, Map<String, dynamic> bundle) =>
+        LocalDb.putDayResult(
+          dayId: day,
+          algoVersion: kAlgoVersion,
+          payloadJson: jsonEncode(bundle),
+          windowJson: '{}',
+        );
+    await put('2026-04-20', {
+      'date': '2026-04-20',
+      'imported': true,
+      'source': 'whoop_export',
+      'scalars': {'readiness': 50, 'skin_temp_z': 33.4},
+    });
+    await put('2026-04-21', {
+      'date': '2026-04-21',
+      'scalars': {'readiness': 60, 'skin_temp_z': 0.8},
+    });
+    // a plain reopen leaves it alone: the heal is a one-time upgrade rung
+    await LocalDb.close();
+    expect(
+        ((jsonDecode((await _row('2026-04-20'))!['payload_json'] as String)
+            as Map)['scalars'] as Map)['skin_temp_z'],
+        33.4);
+    await (await LocalDb.instance).execute('PRAGMA user_version = 54');
+    await LocalDb.close();
+
+    Future<Map> scalars(String day) async =>
+        (jsonDecode((await _row(day))!['payload_json'] as String)
+            as Map)['scalars'] as Map;
+    final imported = await scalars('2026-04-20');
+    expect(imported.containsKey('skin_temp_z'), isFalse);
+    expect(imported['readiness'], 50);
+    expect((await scalars('2026-04-21'))['skin_temp_z'], 0.8);
+  });
+
+  group('WhoopImporter sleep efficiency', () {
+    Future<double?> importEff(String wake, String header, String row) async {
+      final day =
+          localDateLabel(DateTime.parse(wake).millisecondsSinceEpoch ~/ 1000);
+      final f = File(p.join(tmp.path, 'eff_${header.hashCode}.csv'));
+      f.writeAsStringSync('Cycle start time,Wake onset,$header\n'
+          '$wake,$wake,$row\n');
+      await WhoopImporter.importFiles([f.path]);
+      return _metric(day, 'efficiency');
+    }
+
+    test('reads efficiency, not sleep performance', () async {
+      expect(
+          await importEff(
+              '2026-04-10 07:00:00',
+              'Sleep performance %,Sleep efficiency %,Asleep duration (min),'
+                  'In bed duration (min)',
+              '68,93,400,430'),
+          93.0);
+    });
+
+    test('no efficiency column falls back to asleep over in bed', () async {
+      expect(
+          await importEff(
+              '2026-04-11 07:00:00',
+              'Sleep performance %,Asleep duration (min),In bed duration (min)',
+              '68,400,500'),
+          closeTo(80.0, 1e-9));
     });
   });
 

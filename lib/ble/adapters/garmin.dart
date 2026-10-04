@@ -100,14 +100,12 @@ class GarminAdapter extends BandAdapter {
       }
       switch (f.type) {
         case kGarminMsgCurrentTimeRequest:
-          await _sendGfdi(
-            link,
-            gfdiHandle,
-            garminBuildTimeResponse(
-              nowUnixSeconds: nowSeconds(),
-              utcOffsetSeconds: utcOffsetSeconds(),
-            ),
+          final reply = garminBuildTimeResponse(
+            f,
+            nowUnixSeconds: nowSeconds(),
+            utcOffsetSeconds: utcOffsetSeconds(),
           );
+          if (reply != null) await _sendGfdi(link, gfdiHandle, reply);
         case kGarminMsgDeviceInformation:
           final info = garminParseDeviceInformation(f);
           if (info != null && !events.isClosed) {

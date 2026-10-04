@@ -46,6 +46,9 @@ class _JournalComposeState extends State<JournalCompose> {
   List<JournalFieldSpec> _specs = const [];
   Map<String, JournalMetricValue> _values = {};
   Set<String> _tags = {};
+  // What [_load] read, so [_save] writes only what the user changed here.
+  Map<String, JournalMetricValue> _loadedValues = const {};
+  Set<String> _loadedTags = const {};
   bool _loading = true;
   bool _saving = false;
 
@@ -78,7 +81,9 @@ class _JournalComposeState extends State<JournalCompose> {
     setState(() {
       _specs = specs;
       _values = {...values};
+      _loadedValues = {...values};
       _tags = {...?(today?['tags'] as List?)?.map((t) => t.toString())};
+      _loadedTags = {..._tags};
       _note.text = (today?['note'] as String?) ?? '';
       _loading = false;
     });
@@ -121,22 +126,26 @@ class _JournalComposeState extends State<JournalCompose> {
     }
     setState(() => _addingField = true);
     try {
-      await repo.postCustomJournalField(spec);
-    } catch (_) {
+      try {
+        await repo.postCustomJournalField(spec);
+      } catch (_) {
+        if (!mounted) return;
+        // A failed persist must not read as success — the field would vanish
+        // from the list while the user believes it saved.
+        final l = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+              content: Text(l?.journalComposeSaveFailed ??
+                  'Could not save it — check storage and retry.')),
+        );
+        return;
+      }
       if (!mounted) return;
-      // A failed persist must not read as success — the field would vanish
-      // from the list while the user believes it saved.
-      final l = AppLocalizations.of(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(l?.journalComposeSaveFailed ??
-                'Could not save it — check storage and retry.')),
-      );
-      return;
+      await _load();
+    } finally {
+      // Every exit, or one failed save disables the button for the session.
+      if (mounted) setState(() => _addingField = false);
     }
-    if (!mounted) return;
-    await _load();
-    if (mounted) setState(() => _addingField = false);
   }
 
   /// MT-06 — when the LAST one landed.
@@ -197,9 +206,36 @@ class _JournalComposeState extends State<JournalCompose> {
     final repo = context.read<AppState>().repo;
     if (repo == null) return;
     setState(() => _saving = true);
-    await repo.postJournalMetrics(_date, _values);
-    await repo.postJournal(_date, _tags.toList(), _note.text.trim());
-    if (mounted) Navigator.of(context).pop(true);
+    // Both writes REPLACE the day, and the strap's double-tap (a glass of
+    // water, a moment tag) writes the same day while this screen is open.
+    // Re-read and lay only this screen's own edits over it, or Save puts the
+    // snapshot from when the screen opened back and the tap is lost.
+    final metrics = {...await repo.getJournalMetrics(_date)};
+    for (final k in {..._loadedValues.keys, ..._values.keys}) {
+      final v = _values[k];
+      if (v == _loadedValues[k]) continue;
+      if (v == null) {
+        metrics.remove(k);
+      } else {
+        metrics[k] = v;
+      }
+    }
+    await repo.postJournalMetrics(_date, metrics);
+    final tags = <String>{};
+    for (final e in await repo.getJournal(range: '30d')) {
+      if (e['date'] == _date) {
+        tags.addAll(((e['tags'] as List?) ?? const []).map((t) => t.toString()));
+      }
+    }
+    tags
+      ..removeAll(_loadedTags.difference(_tags))
+      ..addAll(_tags);
+    await repo.postJournal(_date, tags.toList(), _note.text.trim());
+    if (!mounted) return;
+    // Today's "How was today?" is already armed; a rated day moves it to
+    // tomorrow, and only a re-arm does that.
+    unawaited(context.read<AppState>().refreshAiReminders());
+    Navigator.of(context).pop(true);
   }
 
   @override
@@ -884,7 +920,7 @@ class _WeightTrendState extends State<_WeightTrend> {
     // across it.
     final days = trend.keys.toList()..sort();
     final first = DateTime.parse(days.first);
-    final span = DateTime.parse(days.last).difference(first).inDays;
+    final span = calendarDaysBetween(first, DateTime.parse(days.last));
     // The controller owns every conversion; this only asks it for the number
     // rather than the sentence, because an axis cannot print "72.4 kg".
     double show(double kg) =>

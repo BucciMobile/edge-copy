@@ -12,6 +12,7 @@
 // run server-side. The screen DATA layer is therefore a clean, localized seam:
 // nothing above this file references HTTP, JWT, or a backend URL anymore.
 
+import '../models/activity_suggestion.dart';
 import '../compute/manual_session.dart' show SessionSpan;
 import '../gps/route_models.dart';
 import 'journal_fields.dart';
@@ -40,6 +41,15 @@ class RepositoryException implements Exception {
 /// The local data contract for every insights screen + the AI Coach.
 /// Return types mirror the cloud ApiClient exactly (defensive Map/List blobs).
 abstract class LocalRepository {
+  Future<int> pendingActivityCount() async => (await pendingActivities()).length;
+
+  Future<List<ActivitySuggestion>> pendingActivities() =>
+      throw UnimplementedError('pendingActivities');
+  Future<void> confirmActivity(ActivitySuggestion suggestion, {
+    int? startTs, int? endTs, String? workoutType,
+  }) => throw UnimplementedError('confirmActivity');
+  Future<void> discardActivity(ActivitySuggestion suggestion) =>
+      throw UnimplementedError('discardActivity');
   // ── profile ────────────────────────────────────────────────────────────────
   Future<Map<String, dynamic>> getProfile() =>
       throw UnimplementedError('re-layer: getProfile');
@@ -61,7 +71,10 @@ abstract class LocalRepository {
   /// double?, tier: String?}` — epoch SECONDS. A night with no detected sleep
   /// still appears, with null times; the caller decides what an absent night
   /// looks like rather than being handed a silently shorter list.
-  Future<List<Map<String, dynamic>>> sleepWindows({int days = 60}) =>
+  ///
+  /// [before] keeps only days strictly earlier than that 'YYYY-MM-DD' label.
+  Future<List<Map<String, dynamic>>> sleepWindows(
+          {int days = 60, String? before}) =>
       throw UnimplementedError('re-layer: sleepWindows');
 
   /// Saved sessions in the window, merged with unconfirmed auto-detected bouts.
@@ -150,8 +163,9 @@ abstract class LocalRepository {
   /// The spans are post-ladder (see `resolveDaySteps`), so they sum to `total`
   /// and never show the same walk twice. `day_total`/`day_source` are the
   /// number the day actually published, which is NOT always this sum: with no
-  /// span source at all a gen5 day falls back to the strap's on-chip counter,
-  /// a whole-day figure with no times behind it and therefore no spans.
+  /// span source at all a gen5 day falls back to the strap's on-chip counter.
+  /// That day's spans are the counter's own hourly ones from the derive, all
+  /// 'band'; only a bundle derived before those were stored has none.
   Future<Map<String, dynamic>> getDaySteps(String date) =>
       throw UnimplementedError('re-layer: getDaySteps');
 
@@ -182,7 +196,7 @@ abstract class LocalRepository {
   /// point list with the reason it is empty.
   ///
   /// RETENTION-BOUNDED AND SAYS SO. This reads `decoded_onehz`, which prunes at
-  /// `rawRetentionDays = 3` (held to `_maxRawHoldDays = 14` for a day that has
+  /// `rawRetentionDays` (held to `_maxRawHoldDays = 14` for a day that has
   /// not produced a complete result). Outside that window there is nothing to
   /// read and the honest answer is `bounded: true` with `oldest` naming the
   /// edge — never an empty chart with no explanation, and never a per-device
@@ -226,8 +240,8 @@ abstract class LocalRepository {
   /// The default MUST match the implementation's: Dart resolves an omitted
   /// optional from the STATIC receiver type, and every caller holds this
   /// interface — so a different default here is the one that actually runs.
-  /// Three days is the raw-retention horizon; nothing older has substrate left
-  /// to re-score from.
+  /// Three days sits inside `rawRetentionDays`; nothing past the retention
+  /// edge has substrate left to re-score from.
   Future<int> rescoreRecentSessions({int sinceDays = 3}) =>
       throw UnimplementedError('re-layer: rescoreRecentSessions');
   Future<Map<String, dynamic>> startWorkout(String type, {String? title}) =>

@@ -13,6 +13,7 @@
 
 import 'dart:math' as math;
 import 'dart:typed_data';
+import 'package:collection/collection.dart' show lowerBound;
 
 import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_protocol/openstrap_protocol.dart' as proto;
@@ -257,6 +258,12 @@ class Substrate {
   /// Same absent-marker discipline as [stepCount] and [accelPresentAt].
   final List<int> hrValid;
 
+  /// The band's own sleep envelope per second (0 wake, 1 still, 2 sleep, 3 up).
+  /// Parallel to [tsSec]. **`-1` means absent** (gen4, or a row decoded before
+  /// the column existed) — 0 is a real "wake". Corroboration only; see
+  /// analytics band_offset.dart. Read it through [bandSleepStateSlice].
+  final List<int> bandSleepState;
+
   /// WHICH STRAP MEASURED THIS SUBSTRATE — `'gen4'`, `'gen5'`, or null.
   ///
   /// Stamped at ingest into `decoded_onehz.device_family` and carried here so
@@ -318,6 +325,7 @@ class Substrate {
     required List<int> skinContact,
     List<int> stepCount = const [],
     List<int> hrValid = const [],
+    List<int> bandSleepState = const [],
     String? deviceFamily,
     Set<String> deviceIds = const {},
   }) =>
@@ -337,6 +345,7 @@ class Substrate {
         skinContact: skinContact,
         stepCount: stepCount,
         hrValid: hrValid,
+        bandSleepState: bandSleepState,
       );
 
   const Substrate._({
@@ -353,6 +362,7 @@ class Substrate {
     required this.skinContact,
     this.stepCount = const [],
     this.hrValid = const [],
+    this.bandSleepState = const [],
     this.deviceFamily,
     this.deviceIds = const {},
   });
@@ -476,6 +486,13 @@ class Substrate {
   /// [stepCount] sliced to [lo, hi), tolerating the legacy empty list.
   List<int> _stepSlice(int lo, int hi) => _perSecSlice(stepCount, lo, hi);
 
+  /// Positional band envelope for [lo, hi), -1 where absent (legacy empty
+  /// list included).
+  List<int> bandSleepStateSlice(int lo, int hi) =>
+      bandSleepState.length == length
+          ? bandSleepState.sublist(lo, hi)
+          : List<int>.filled(hi - lo, -1);
+
   /// Slice to the half-open window [startSec, endSec) by record time. Returns a
   /// new Substrate with the 1 Hz arrays sliced and the sparse RR arrays filtered
   /// to beats whose end time falls in the window.
@@ -500,6 +517,7 @@ class Substrate {
       skinContact: skinContact.sublist(lo, hi),
       stepCount: _stepSlice(lo, hi),
       hrValid: _perSecSlice(hrValid, lo, hi),
+      bandSleepState: _perSecSlice(bandSleepState, lo, hi),
       deviceFamily: deviceFamily,
       deviceIds: deviceIds,
       rrTsMs: rr.$1,
@@ -529,6 +547,7 @@ class Substrate {
       skinContact: skinContact.sublist(lo, hi),
       stepCount: _stepSlice(lo, hi),
       hrValid: _perSecSlice(hrValid, lo, hi),
+      bandSleepState: _perSecSlice(bandSleepState, lo, hi),
       deviceFamily: deviceFamily,
       deviceIds: deviceIds,
       rrTsMs: rr.$1,
@@ -595,6 +614,7 @@ class Substrate {
         'skin_contact': skinContact,
         'step_count': stepCount,
         'hr_valid': hrValid,
+        'band_sleep_state': bandSleepState,
         // Null (unknown provenance) is a real answer — emit the key regardless.
         'device_family': deviceFamily,
         'device_ids': deviceIds.toList(),
@@ -651,6 +671,11 @@ class Substrate {
       // reading — the band saying THIS second's beat is not trustworthy.
       hrValid: () {
         final l = ints(m, 'hr_valid');
+        return l.length == n ? l : List<int>.filled(n, -1);
+      }(),
+      // Same reason again: absent is -1, and 0 is a real "wake".
+      bandSleepState: () {
+        final l = ints(m, 'band_sleep_state');
         return l.length == n ? l : List<int>.filled(n, -1);
       }(),
       deviceFamily: m['device_family'] as String?,
@@ -802,6 +827,8 @@ Substrate decodeSubstrate(List<String> hexes) {
     // replay, which carries no device stamp either — so it would refuse at
     // `hrValidAt` regardless.
     hrValid: List<int>.filled(n, -1),
+    // Raw-hex replay carries no band envelope either: ABSENT.
+    bandSleepState: List<int>.filled(n, -1),
   );
 }
 
@@ -886,14 +913,156 @@ int? hardwareStepsFromCounter(
   Substrate sub, {
   required int? cumulativeCounterModulus,
   int maxStepsPerSecond = 5,
+}) =>
+    counterDeltasFromSubstrate(sub,
+            cumulativeCounterModulus: cumulativeCounterModulus,
+            maxStepsPerSecond: maxStepsPerSecond)
+        ?.total;
+
+/// [hardwareStepsFromCounter]'s walk with its coverage: the total plus how
+/// much of the day the counter did not see.
+class CounterDeltas {
+  const CounterDeltas({required this.total, required this.droppedBoundaries,
+      required this.gapSeconds, required this.sampleCount});
+  final int total;
+  /// Boundaries whose delta failed the budget (resets) and were dropped.
+  final int droppedBoundaries;
+  /// Seconds between consecutive counter records beyond the 1 s cadence.
+  final int gapSeconds;
+  /// Records that carried a counter value (always >= 1).
+  final int sampleCount;
+}
+
+CounterDeltas? counterDeltasFromSubstrate(
+  Substrate sub, {
+  required int? cumulativeCounterModulus,
+  int maxStepsPerSecond = 5,
 }) {
   final wrap = cumulativeCounterModulus;
   if (wrap == null || wrap <= 0) return null;
-  const minGapSecForBudget = 60;
-  const maxGapSecForBudget = 3600;
   int? prev;
   int? prevTs;
   var total = 0;
+  var seen = false;
+  var dropped = 0;
+  var gapSeconds = 0;
+  var sampleCount = 0;
+  for (var i = 0; i < sub.length; i++) {
+    final c = sub.stepCounterAt(i);
+    if (c == null) continue;
+    seen = true;
+    sampleCount++;
+    final ts = sub.tsSec[i];
+    if (prev != null && prevTs != null && ts > prevTs) {
+      final gap = ts - prevTs;
+      if (gap > 1) gapSeconds += gap - 1;
+      final delta = _creditedCounterDelta(prev, c, gap, wrap, maxStepsPerSecond);
+      if (delta == null) {
+        dropped++;
+      } else {
+        total += delta;
+      }
+    }
+    prev = c;
+    prevTs = ts;
+  }
+  if (!seen) return null;
+  return CounterDeltas(
+    total: total,
+    droppedBoundaries: dropped,
+    gapSeconds: gapSeconds,
+    sampleCount: sampleCount,
+  );
+}
+
+/// One record-to-record counter delta: credited in full, 0 for none, or null
+/// for a reset (over the `clamp(gap, 60 s, 3600 s) x maxStepsPerSecond`
+/// budget) that is dropped.
+int? _creditedCounterDelta(
+    int prev, int c, int gap, int wrap, int maxStepsPerSecond) {
+  final budget = gap.clamp(60, 3600) * maxStepsPerSecond;
+  var delta = c - prev;
+  if (delta < 0) delta += wrap; // wrap candidate; a reset overshoots below
+  if (delta > budget) return null;
+  return delta > 0 ? delta : 0;
+}
+
+/// Counter ticks inside each `[start, end)` window, credited like
+/// [counterDeltasFromSubstrate]. A window's entry is null when the counter did
+/// not see it end to end: no record within [maxGapSec] of an edge, or a record
+/// gap over [maxGapSec] or a dropped reset inside it. Null overall when the
+/// family has no counter.
+List<int?>? counterTicksPerWindow(
+  Substrate sub,
+  List<(int, int)> windows, {
+  required int? cumulativeCounterModulus,
+  int maxStepsPerSecond = 5,
+  int maxGapSec = 60,
+}) {
+  final wrap = cumulativeCounterModulus;
+  if (wrap == null || wrap <= 0) return null;
+  final ts = <int>[];
+  final cum = <int>[]; // credited ticks up to each record
+  final breaks = <int>[]; // coverage breaks up to each record
+  int? prev;
+  for (var i = 0; i < sub.length; i++) {
+    final c = sub.stepCounterAt(i);
+    if (c == null) continue;
+    final t = sub.tsSec[i];
+    if (ts.isEmpty) {
+      ts.add(t);
+      cum.add(0);
+      breaks.add(0);
+    } else if (t > ts.last) {
+      final gap = t - ts.last;
+      final d = _creditedCounterDelta(prev!, c, gap, wrap, maxStepsPerSecond);
+      ts.add(t);
+      cum.add(cum.last + (d ?? 0));
+      breaks.add(breaks.last + (d == null || gap > maxGapSec ? 1 : 0));
+    }
+    prev = c;
+  }
+  if (ts.isEmpty) return null;
+  return [
+    for (final (start, end) in windows)
+      () {
+        final i0 = lowerBound(ts, start + 1) - 1; // last record <= start
+        var i1 = lowerBound(ts, end); // first record >= end
+        // Data ending at `end - 1` closes the last 1 Hz second of the window.
+        if (i1 == ts.length && ts.last == end - 1) i1--;
+        if (i0 < 0 || i1 >= ts.length) return null;
+        if (start - ts[i0] > maxGapSec || ts[i1] - end > maxGapSec) return null;
+        if (breaks[i1] != breaks[i0]) return null;
+        return cum[i1] - cum[i0];
+      }(),
+  ];
+}
+
+/// The same credited deltas as [hardwareStepsFromCounter], placed on the
+/// clock: every delta happened between the two records it was read across, so
+/// the counter DOES carry times — one per record. Grouped into one span per
+/// LOCAL clock hour (by the delta's closing record), each span running from the
+/// first credited delta's opening record to the last one's closing record.
+/// A delta read across an hour line (its opening record in an earlier local
+/// hour, e.g. the one record pair either side of an off-wrist hole) is a span
+/// of its own that nothing merges into: when in that stretch its steps fell is
+/// unknown, and merging the next hour's deltas into it would stretch that whole
+/// hour's steps back across the hole.
+/// Local, not `ts ~/ 3600`: in a half-hour-offset zone a UTC hour crosses a
+/// local hour line, and the day chart spreads a span evenly over its extent,
+/// so a UTC-hour span would push steps into the wrong local hour.
+/// The spans sum to exactly [hardwareStepsFromCounter]'s total (raw ticks,
+/// before any calibration). Null whenever that is null.
+List<({int startTs, int endTs, int steps})>? hardwareStepSpansFromCounter(
+  Substrate sub, {
+  required int? cumulativeCounterModulus,
+  int maxStepsPerSecond = 5,
+}) {
+  final wrap = cumulativeCounterModulus;
+  if (wrap == null || wrap <= 0) return null;
+  final out = <({int startTs, int endTs, int steps})>[];
+  int? prev;
+  int? prevTs;
   var seen = false;
   for (var i = 0; i < sub.length; i++) {
     final c = sub.stepCounterAt(i);
@@ -901,17 +1070,31 @@ int? hardwareStepsFromCounter(
     seen = true;
     final ts = sub.tsSec[i];
     if (prev != null && prevTs != null && ts > prevTs) {
-      final gap = ts - prevTs;
-      final budget =
-          gap.clamp(minGapSecForBudget, maxGapSecForBudget) * maxStepsPerSecond;
-      var delta = c - prev;
-      if (delta < 0) delta += wrap; // wrap candidate; a reset overshoots below
-      if (delta > 0 && delta <= budget) total += delta;
+      final delta =
+          _creditedCounterDelta(prev, c, ts - prevTs, wrap, maxStepsPerSecond);
+      if (delta != null && delta > 0) {
+        final last = out.isEmpty ? null : out.last;
+        final hour = _localHourStart(ts);
+        if (last != null &&
+            _localHourStart(last.endTs) == hour &&
+            _localHourStart(last.startTs) == hour) {
+          out[out.length - 1] =
+              (startTs: last.startTs, endTs: ts, steps: last.steps + delta);
+        } else {
+          out.add((startTs: prevTs, endTs: ts, steps: delta));
+        }
+      }
     }
     prev = c;
     prevTs = ts;
   }
-  return seen ? total : null;
+  return seen ? out : null;
+}
+
+/// Epoch second of the start of the local clock hour containing [ts].
+int _localHourStart(int ts) {
+  final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  return ts - d.minute * 60 - d.second;
 }
 
 class _Rec {
@@ -1172,6 +1355,10 @@ List<PhysioDay> calendarDays(
             rrMs: rrMsSeg,
             rrTsMs: rrTsSeg,
             habitualMidsleepSec: habitualMidsleepSec,
+            // Gen5/MG band envelope, positional 1:1 with accelSlice: may END
+            // the auto night at the band's own last SLEEP (AUTO path only —
+            // never the override or the HR-led fallback below).
+            bandSleepState: sub.bandSleepStateSlice(loS, hiS),
           );
         } else {
           // Not an error and not "no sleep" — just no accel evidence. Fall
@@ -1207,10 +1394,15 @@ List<PhysioDay> calendarDays(
 
       if (s.present && s.window != null) {
         final offSec = s.window!.offsetMs! ~/ 1000;
+        // Which day owns the night is decided on the UNTRIMMED end, so the band
+        // rule moves the wake time but never the night's day (each day searches a
+        // slice clipped at its own midnight and would otherwise see two different
+        // tails — a night could be claimed by both days or by neither).
+        final ownerSec = offSec + (s.bandOffsetTrimSec ?? 0);
         // Auto/fallback: attribute only if the wake lands in this calendar day.
         // Manual/confirmed: trust the user — attribute to the day they set it on.
         final userSet = ov != null;
-        if (userSet || (offSec >= dayStart && offSec < dayEnd)) {
+        if (userSet || (ownerSec >= dayStart && ownerSec < dayEnd)) {
           seg = s;
           sleepLo = loS + s.window!.onsetIdx;
           sleepHi = loS + s.window!.offsetIdx;

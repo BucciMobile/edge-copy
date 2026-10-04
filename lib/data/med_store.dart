@@ -18,6 +18,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import '../state/clock_format.dart' show formatClockMinute;
 import 'day_label.dart';
 
 // ══════════════════ SCHEMA ══════════════════
@@ -165,10 +166,14 @@ class MedSlot {
   final int slotMin;
   final DoseState state;
 
-  String get timeLabel {
-    final h = (slotMin ~/ 60).toString().padLeft(2, '0');
-    final m = (slotMin % 60).toString().padLeft(2, '0');
-    return '$h:$m';
+  /// Display only, per the user's clock format — never a storage key.
+  String get timeLabel => formatClockMinute(slotMin);
+
+  /// `HH:mm` for payloads and the coach, whatever the clock format.
+  String get timeMachine {
+    final h = slotMin ~/ 60;
+    final m = slotMin % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}';
   }
 
   /// A slot that has passed and was neither taken nor deliberately skipped.
@@ -262,8 +267,11 @@ List<MedSlot> slotsForDay(
 class MedDb {
   MedDb._();
 
+  /// Letters and digits of ANY script survive: an ASCII-only class turned
+  /// every Chinese or Hindi name into the same `custom__`, so adding a second
+  /// one replaced the first and inherited its dose history.
   static String keyFor(String label) =>
-      'custom_${label.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}';
+      'custom_${label.trim().toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{M}\p{N}]+', unicode: true), '_')}';
 
   static Future<List<MedDef>> defs(Database db, {bool activeOnly = true}) async {
     final rows = await db.query(

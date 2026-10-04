@@ -32,7 +32,6 @@ import 'package:openstrap_edge/ui2/onboarding/welcome.dart'
     show isEncryptedBackup;
 import 'package:openstrap_edge/ui2/screens/log_workout.dart'
     show WorkoutSuggestionScreen;
-import 'package:openstrap_edge/ui2/screens/nutrition_screen.dart';
 import 'package:openstrap_edge/ui2/profile/devices.dart';
 import 'package:openstrap_edge/ui2/profile/profile.dart';
 import 'package:openstrap_edge/ui2/ui2.dart';
@@ -145,7 +144,8 @@ void main() {
         kRouteAiEvening: ShellDomain.home,
         kRouteJournalCompose: ShellDomain.wellness,
         kRouteBreathing: ShellDomain.wellness,
-        kRouteWorkoutSuggestion: ShellDomain.workout,
+        kRouteWorkoutSuggestion: ShellDomain.home,
+        kRouteDetectedActivities: ShellDomain.home,
         kRouteWater: ShellDomain.nutrition,
       };
       routes.forEach((route, domain) {
@@ -156,7 +156,10 @@ void main() {
       // The water reminder lands on Nutrition now — the water tile there
       // steps and clears in place, and the single-field screen it used to
       // open was reachable from nowhere else.
-      expect(screenForRoute(kRouteWater), isA<NutritionScreen>());
+      // It is a shell tab, so the tab switch is the whole landing: a pushed
+      // copy had no Scaffold, background or way back.
+      expect(domainForRoute(kRouteWater), ShellDomain.nutrition);
+      expect(screenForRoute(kRouteWater), isNull);
       // Payload routes that predate the five-tab shell, and that
       // `resolveTapRoute` does not carry yet — the destinations exist here so
       // they stop landing on Home the moment it does.
@@ -177,7 +180,7 @@ void main() {
       // unreviewed bout is the same broken promise one screen further in.
       const id = '2026-08-19:1755625800';
       final route = workoutSuggestionRoute(id);
-      expect(domainForRoute(route), ShellDomain.workout);
+      expect(domainForRoute(route), ShellDomain.home);
       final screen = screenForRoute(route);
       expect(screen, isA<WorkoutSuggestionScreen>());
       expect((screen! as WorkoutSuggestionScreen).focusId, id);

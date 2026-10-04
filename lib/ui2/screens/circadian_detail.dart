@@ -11,11 +11,11 @@
 // variability, relative amplitude, L5/M10) and the 24 h cosinor ARE computed —
 // `crossday_pipeline.dart:_crossDayCircadian` emits `circadian_rhythm`,
 // `circadian_cosinor` and `circadian_coverage` on every rollup. Their substrate
-// is not the textbook one: the 1 Hz accelerometry is pruned after three days,
-// so the battery runs on the per-day HOURLY HEART-RATE profile that `day_result`
-// keeps forever. That makes M10/L5 the highest- and lowest-HR windows rather
-// than step counts, and the card says so out loud rather than letting the
-// numbers imply accelerometry.
+// is not the textbook one: the 1 Hz accelerometry is pruned at
+// `rawRetentionDays`, so the battery runs on the per-day HOURLY HEART-RATE
+// profile that `day_result` keeps forever. That makes M10/L5 the highest- and
+// lowest-HR windows rather than step counts, and the card says so out loud
+// rather than letting the numbers imply accelerometry.
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
@@ -190,10 +190,17 @@ class CircadianData {
     // pinned. Naps are not passed — the forecast is for today and today's naps
     // have not happened; the card says it only knows last night.
     final wake = (latestNight?['wake_ts'] as num?)?.round();
-    final wakeLocal = wake == null
+    final wakeAt = wake == null
         ? null
         : DateTime.fromMillisecondsSinceEpoch(wake * 1000);
-    final tstMin = (latestNight?['duration_min'] as num?)?.toDouble();
+    // Last night only. `latestNight` is just the newest night in the window,
+    // which is weeks old when the band sat on the charger; a forecast for
+    // today built from that wake time is a fabricated one.
+    final wakeLocal =
+        wakeAt != null && dayLabelOf(wakeAt) == today ? wakeAt : null;
+    final tstMin = wakeLocal == null
+        ? null
+        : (latestNight?['duration_min'] as num?)?.toDouble();
 
     return CircadianData(
       actogram: cols,

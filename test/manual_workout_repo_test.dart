@@ -8,8 +8,10 @@
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/local_repository_impl.dart';
 import 'package:openstrap_edge/compute/manual_session.dart';
@@ -248,10 +250,32 @@ void main() {
     },
   );
 
+  test('retiming keeps the private flag and the rpe rating', () async {
+    final start = sessionStart - 11 * 86400;
+    await LocalDb.putSession({
+      'id': 'w-retime-own',
+      'start_ts': start,
+      'end_ts': start + 600,
+      'type': 'run',
+      'status': 'done',
+      'source': 'manual',
+      'created_at': start * 1000,
+    });
+    await LocalDb.setSessionPrivate('w-retime-own', true);
+    await LocalDb.setSessionRpe('w-retime-own', 8);
+    await repo.setWorkoutWindow('w-retime-own',
+        startTs: start, endTs: start + 3600);
+
+    final row = await LocalDb.session('w-retime-own');
+    expect(row!['private'], 1);
+    expect(row['rpe'], 8);
+  });
+
   test(
     'logging a session retires the auto-detect suggestion it covers',
     () async {
       final start = sessionStart - 12 * 86400;
+      await (await LocalDb.instance).update('activity_review_meta', {'activated_at': start - 1});
       await LocalDb.putWorkoutSuggestion({
         'id': 'sug-covered',
         'date': '2026-01-01',
@@ -532,6 +556,57 @@ void main() {
   });
 
   test(
+    'marking an exported workout private re-exports its day',
+    () async {
+      // Its calories come back into the day's active energy, and a day
+      // behind the export cursor is otherwise never written again.
+      SharedPreferences.setMockInitialValues({});
+      final start = sessionStart - 20 * 86400;
+      final day = dayLabelOf(DateTime.fromMillisecondsSinceEpoch(start * 1000));
+      await LocalDb.putSession({
+        'id': 'w-private-old',
+        'start_ts': start,
+        'end_ts': start + 1800,
+        'type': 'run',
+        'status': 'done',
+        'source': 'manual',
+        'created_at': start * 1000,
+      });
+      addTearDown(() => LocalDb.deleteSession('w-private-old'));
+      final through = dayLabelOf(DateTime.now());
+      await LocalDb.setCursor('health_export_through', through);
+      addTearDown(() => LocalDb.setCursor('health_export_through', ''));
+
+      await repo.setWorkoutPrivate('w-private-old', true);
+      String? cursor;
+      for (var i = 0; i < 50; i++) {
+        cursor = await LocalDb.getCursor('health_export_through');
+        if (cursor != through) break;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(cursor!.compareTo(day), lessThan(0));
+    },
+  );
+
+  test(
+    'a different window on the same start second is refused, not replaced',
+    () async {
+      final start = sessionStart - 16 * 86400;
+      await repo.logManualWorkout(
+          startTs: start, endTs: start + 3600, type: 'strength');
+      await expectLater(
+        () => repo.logManualWorkout(
+            startTs: start, endTs: start + 1800, type: 'run'),
+        throwsA(isA<ManualWindowException>().having(
+            (e) => e.error, 'error', ManualWindowError.overlapsExisting)),
+      );
+      final row = await LocalDb.session(manualSessionId(start));
+      expect(row!['type'], 'strength');
+      expect(row['end_ts'], start + 3600);
+    },
+  );
+
+  test(
     're-logging the identical window replaces rather than duplicates',
     () async {
       final start = sessionStart - 15 * 86400;
@@ -543,6 +618,36 @@ void main() {
 
       final rows = await LocalDb.sessionsInRange(start - 60, start + 3600);
       expect(rows.where((r) => r['id'] == a['workout_id']).length, 1);
+    },
+  );
+
+  test(
+    'logging at the old start second of a retimed session leaves it alone',
+    () async {
+      final start = sessionStart - 17 * 86400;
+      final first = await repo.logManualWorkout(
+          startTs: start, endTs: start + 1800, type: 'run');
+      final movedId = first['workout_id'] as String;
+      await repo.setWorkoutWindow(movedId,
+          startTs: start + 7200, endTs: start + 9000);
+
+      final fresh = await repo.logManualWorkout(
+          startTs: start, endTs: start + 1200, type: 'strength');
+      expect(fresh['workout_id'], isNot(movedId));
+
+      final moved = await LocalDb.session(movedId);
+      expect(moved!['start_ts'], start + 7200);
+      expect(moved['type'], 'run');
+      final added = await LocalDb.session(fresh['workout_id'] as String);
+      expect(added!['start_ts'], start);
+      expect(added['type'], 'strength');
+
+      // A retry of that exact entry updates it rather than tripping over it.
+      final retry = await repo.logManualWorkout(
+          startTs: start, endTs: start + 1200, type: 'strength');
+      expect(retry['workout_id'], fresh['workout_id']);
+      final rows = await LocalDb.sessionsInRange(start, start);
+      expect(rows, hasLength(1));
     },
   );
 }

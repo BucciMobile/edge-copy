@@ -60,6 +60,52 @@ enum OpenStrapShared {
     return "\(h) \(h == 1 ? "hour" : "hours") \(m) minutes"
   }
   static var noData: String { "I don't have today's numbers yet. Open OpenStrap and sync your band." }
+
+  /// The snapshot as JSON for [GetNumbersIntent]. Every number is null unless
+  /// [hasData]; a -1 sentinel is null too. `date` is the local day of `updated_at`.
+  static func numbersJSON() -> String {
+    let d = defaults()
+    let at = d?.object(forKey: "updated_at") as? Int ?? 0
+    let fresh = hasData
+    func int(_ key: String) -> Any {
+      guard fresh, let v = d?.object(forKey: key) as? Int, v >= 0 else { return NSNull() }
+      return v
+    }
+    var out: [String: Any] = [
+      "source": "OpenStrap",
+      "has_data": fresh,
+      "readiness": int("readiness"),
+      "hrv_ms": int("hrv"),
+      "hrv_baseline_ms": int("hrv_baseline"),
+      "resting_hr": int("rhr"),
+      "sleep_min": int("sleep_min"),
+      "sleep_need_min": int("sleep_need_min"),
+      "sleep_efficiency": int("sleep_efficiency"),
+    ]
+    let band = d?.string(forKey: "readiness_band") ?? ""
+    out["readiness_band"] = fresh && !band.isEmpty ? band : NSNull()
+    if fresh, let s = d?.object(forKey: "strain") as? Double, s >= 0 {
+      // Decimal so JSON says 8.4, not 8.4000000000000004.
+      out["strain"] = NSDecimalNumber(string: String(format: "%.1f", s))
+    } else {
+      out["strain"] = NSNull()
+    }
+    if at > 0 {
+      let written = Date(timeIntervalSince1970: TimeInterval(at))
+      let iso = ISO8601DateFormatter()
+      iso.timeZone = .current
+      out["updated_at"] = iso.string(from: written)
+      let day = DateFormatter()
+      day.locale = Locale(identifier: "en_US_POSIX")
+      day.dateFormat = "yyyy-MM-dd"
+      out["date"] = day.string(from: written)
+    } else {
+      out["updated_at"] = NSNull()
+      out["date"] = NSNull()
+    }
+    let data = (try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])) ?? Data("{}".utf8)
+    return String(data: data, encoding: .utf8) ?? "{}"
+  }
 }
 
 // MARK: - Intents
@@ -112,16 +158,69 @@ struct SleepIntent: AppIntent {
   }
 }
 
+/// "Get Today's Numbers": the widget snapshot as one JSON text value, so a
+/// shortcut can pass it to another app ("Get Dictionary from Input" picks keys).
+@available(iOS 16.0, *)
+struct GetNumbersIntent: AppIntent {
+  static var title: LocalizedStringResource = "Get Today's Numbers"
+  static var description = IntentDescription(
+    "Readiness, HRV, resting heart rate, sleep and strain from OpenStrap's latest sync, as JSON for your own Shortcuts. A number that isn't there is null.")
+  static var openAppWhenRun = false
+
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    .result(value: OpenStrapShared.numbersJSON())
+  }
+}
+
 // MARK: - Action intents (these actually DO something, not just answer)
 
-/// "Start breathing" — unlike the query intents above, this needs the live
-/// Flutter engine + BLE stack (a guided session reads live RR from the band),
-/// so it must open the app rather than answer standalone. Writes the target
-/// route into the App Group; the Dart side picks it up via
-/// WidgetService.consumePendingRoute() on launch AND on every foreground
-/// resume (see AppState.checkPendingSiriRoute — openAppWhenRun doesn't
-/// guarantee a fresh launch, it may just foreground an already-running
-/// process, so both call sites matter).
+@available(iOS 16.0, *)
+struct SyncDataIntent: AppIntent {
+  static var title: LocalizedStringResource = "Sync Data"
+  static var description = IntentDescription(
+    "Sync your paired band into Edge without opening the app. Large backlogs may need more than one run.")
+  static var openAppWhenRun = false
+  static var authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+
+  @Parameter(title: "Ignore Connectivity Errors", description:
+    "Skip quietly when Bluetooth is unavailable or the band cannot be reached. Pairing, permission, and other errors are still reported.", default: false)
+  var ignoreConnectivityErrors: Bool
+
+  static var parameterSummary: some ParameterSummary {
+    Summary("Sync band data") { \.$ignoreConnectivityErrors }
+  }
+
+  @MainActor
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    .result(value: try await syncMessage(using: .shared))
+  }
+
+  @MainActor
+  func syncMessage(using bridge: ShortcutSyncBridge) async throws -> String {
+    do {
+      return try await bridge.sync().message
+    } catch let error as ShortcutSyncFailure where ignoreConnectivityErrors && error.canIgnore {
+      return "Skipped: \(error.localizedDescription)"
+    }
+  }
+}
+
+@available(iOS 16.0, *)
+struct OpenEdgeAndSyncIntent: AppIntent {
+  static var title: LocalizedStringResource = "Open Edge and Sync"
+  static var description = IntentDescription(
+    "Open Edge and sync your paired band. Use this interactive action for catch-up that needs the app in front.")
+  static var openAppWhenRun = true
+
+  @MainActor
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    let reply = try await ShortcutSyncBridge.shared.sync()
+    return .result(value: reply.message)
+  }
+}
+
+/// Flutter consumes the breathing route on launch and resume because opening
+/// the app does not guarantee a fresh process.
 @available(iOS 16.0, *)
 struct StartBreathingIntent: AppIntent {
   static var title: LocalizedStringResource = "Start Breathing Session"
@@ -176,6 +275,12 @@ struct EnableTomorrowAlarmIntent: AppIntent {
 @available(iOS 16.0, *)
 struct OpenStrapShortcuts: AppShortcutsProvider {
   static var appShortcuts: [AppShortcut] {
+    AppShortcut(
+      intent: SyncDataIntent(),
+      phrases: ["Sync data in \(.applicationName)", "Sync my band with \(.applicationName)"],
+      shortTitle: "Sync Data",
+      systemImageName: "arrow.triangle.2.circlepath")
+
     AppShortcut(
       intent: RecoveryIntent(),
       phrases: [

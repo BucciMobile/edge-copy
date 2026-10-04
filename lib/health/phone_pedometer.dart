@@ -57,6 +57,9 @@ class PhonePedometer {
 
   final StepIntervalReader? _stepReader;
 
+  /// Bumped by [stop]; a sync that started under an older value banks nothing.
+  int _epoch = 0;
+
   /// The native side returns this for an interval it holds NO RECORD of: the
   /// sensor was not counting yet (fresh install, or the stretch lost across an
   /// Android reboot), or the interval predates iOS's seven-day pedometer cache.
@@ -123,7 +126,13 @@ class PhonePedometer {
   /// Nothing here can revoke the platform permission — that is the user's to do
   /// in Settings — but we can stop reading and discard what we read. iOS keeps
   /// no store of its own (CMPedometer is query-only), so there it is a no-op.
+  ///
+  /// Also cancels a sync already in flight: `syncRecent` walks days one by one
+  /// and each ends in a delete-then-insert, so without this a sync started
+  /// before the toggle went off writes phone rows back for every day it had not
+  /// reached yet, right after the caller cleared them.
   Future<void> stop() async {
+    _epoch++;
     try {
       await phoneStepsChannel.invokeMethod<void>('stop');
     } catch (e) {
@@ -183,6 +192,7 @@ class PhonePedometer {
   /// would also keep suppressing the band fallback.
   Future<int?> syncDay(DateTime dayStartLocal) async {
     final dayId = dayLabelOf(dayStartLocal);
+    final epoch = _epoch;
     try {
       final windows = <({int startTs, int endTs, int steps})>[];
       var total = 0;
@@ -279,6 +289,7 @@ class PhonePedometer {
         return null;
       }
 
+      if (epoch != _epoch) return null; // stopped mid-walk, see [stop]
       await LocalDb.replacePhoneCoverageForDay(dayId, windows);
       return total;
     } catch (e) {
@@ -323,9 +334,10 @@ class PhonePedometer {
       if (!await hasPermission()) return (daysRead: 0, totalSteps: 0);
     }
     final now = DateTime.now();
+    final epoch = _epoch;
     var ok = 0;
     var total = 0;
-    for (var d = 0; d < days; d++) {
+    for (var d = 0; d < days && epoch == _epoch; d++) {
       // Calendar subtraction, NOT `Duration(days: d)` — the latter lands on
       // 23:00 or 01:00 across a DST transition rather than local midnight,
       // which would mislabel the day and start its hour walk at the wrong

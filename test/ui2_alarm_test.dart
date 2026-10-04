@@ -8,8 +8,10 @@
 // The screen is otherwise a rendering of AppState, and its layout is covered
 // by the profile goldens.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:openstrap_edge/state/clock_format.dart';
 import 'package:openstrap_edge/ui2/profile/alarm.dart';
 
 void main() {
@@ -24,6 +26,64 @@ void main() {
       }
       expect(AlarmScreenView.stateLabel(AlarmArmState.confirmed),
           contains('Confirmed'));
+    });
+  });
+
+  group('a fired alarm', () {
+    setUp(() => ClockFormatController.seed(ClockFormat.h24));
+    tearDown(ClockFormatController.debugReset);
+
+    Future<void> pump(WidgetTester t, DateTime now) => t.pumpWidget(
+        MaterialApp(
+            home: AlarmScreenView(
+                firedAt: DateTime(2026, 8, 22, 6, 30), now: now)));
+
+    testWidgets('says it fired for the rest of that day', (t) async {
+      // the next alarm is armed the moment this one fires, so without this
+      // the row just swaps times and a real fire reads like a fault
+      await pump(t, DateTime(2026, 8, 22, 9));
+      expect(find.text('Fired at 06:30'), findsOneWidget);
+    });
+
+    testWidgets('and not the day after', (t) async {
+      await pump(t, DateTime(2026, 8, 23, 9));
+      expect(find.textContaining('Fired at'), findsNothing);
+    });
+  });
+
+  group('the home door', () {
+    // The time follows the user's clock format; pin the 24-hour one.
+    setUp(() => ClockFormatController.seed(ClockFormat.h24));
+    tearDown(ClockFormatController.debugReset);
+
+    // A fixed clock: whether the alarm is still ahead is relative to now.
+    Future<void> pump(WidgetTester t, DateTime? at, AlarmArmState s,
+            {DateTime? now}) =>
+        t.pumpWidget(MaterialApp(
+            home: Scaffold(
+                body: Builder(
+                    builder: (c) => alarmDoor(c, at, s,
+                        now: now ?? DateTime(2026, 8, 21, 22))))));
+
+    testWidgets('no alarm offers to set one', (t) async {
+      await pump(t, null, AlarmArmState.none);
+      expect(find.text('Set an alarm'), findsOneWidget);
+    });
+
+    testWidgets('an armed alarm shows its day, time and real state',
+        (t) async {
+      // 2026-08-22 is a Saturday.
+      await pump(t, DateTime(2026, 8, 22, 7, 30), AlarmArmState.unknown);
+      expect(find.text('Sat 07:30 · Not confirmed'), findsOneWidget);
+    });
+
+    testWidgets('a spent alarm says so instead of passing as the next one',
+        (t) async {
+      // Fired (or missed) while the link was down: the epoch is still saved.
+      await pump(t, DateTime(2026, 8, 22, 7, 30), AlarmArmState.confirmed,
+          now: DateTime(2026, 8, 22, 9));
+      expect(find.textContaining('Confirmed'), findsNothing);
+      expect(find.textContaining('Sat 07:30 · In the past'), findsOneWidget);
     });
   });
 }

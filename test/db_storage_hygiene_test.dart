@@ -112,8 +112,9 @@ void main() {
       'orphaned just because OTHER days reached newer versions', () async {
     final db = await LocalDb.instance;
     // '2026-06-01' only ever got derived once, at v48 — its raw substrate is
-    // long gone (raw retention is 3 days) so it can never write a v49/v50
-    // row of its own. Two unrelated recent days churn through v49 then v50.
+    // long gone (raw retention is `rawRetentionDays`) so it can never write a
+    // v49/v50 row of its own. Two unrelated recent days churn through v49 then
+    // v50.
     await db.insert('sleep_session_candidates', {
       'day_id': '2026-06-01',
       'algo_version': 48,

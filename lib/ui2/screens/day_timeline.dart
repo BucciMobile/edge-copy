@@ -281,13 +281,18 @@ List<Moment> dayMoments({
     final n = v.value == v.value.roundToDouble()
         ? v.value.round().toString()
         : v.value.toStringAsFixed(1);
+    // A wall-clock minute, so built on the calendar, not added as elapsed
+    // seconds: on a 23- or 25-hour day that lands an hour off.
+    final d = DateTime.fromMillisecondsSinceEpoch(dayStart * 1000);
+    final at =
+        DateTime(d.year, d.month, d.day, 0, min).millisecondsSinceEpoch ~/ 1000;
     out.add(Moment(
-      at: dayStart + min * 60,
+      at: at,
       title: spec?.label ?? key.replaceAll('_', ' '),
       // "last one at" is the stored meaning, and saying just "at" would turn a
       // total plus one timestamp into a single event that never happened.
       detail: '$n${spec == null || spec.unit.isEmpty ? '' : ' ${spec.unit}'} · '
-          '${l?.dayTimelineLastAt(clockOfTs(dayStart + min * 60)) ?? 'last at ${clockOfTs(dayStart + min * 60)}'}',
+          '${l?.dayTimelineLastAt(clockOfTs(at)) ?? 'last at ${clockOfTs(at)}'}',
       icon: LucideIcons.notebookPen,
       color: C.domMind,
     ));
@@ -296,18 +301,6 @@ List<Moment> dayMoments({
   out.sort((a, b) => a.at.compareTo(b.at));
   return out;
 }
-
-/// The row title for an observation. A vendor's own composite name
-/// ('BioCharge') renders verbatim; the stable ids an adapter mints for things
-/// we have words for map to a localized title.
-String observationTitle(String? vendorKey, String? key, AppLocalizations? l) =>
-    switch (vendorKey) {
-      'oura_sleep_deep' => l?.sleepDetailStageDeep ?? 'Deep sleep',
-      'oura_sleep_light' => l?.sleepDetailStageLight ?? 'Light sleep',
-      'oura_sleep_rem' => l?.sleepDetailStageRem ?? 'REM',
-      'oura_sleep_awake' => l?.sleepDetailStageAwake ?? 'Awake',
-      _ => vendorKey ?? key ?? '',
-    };
 
 /// Logged for the day, with no time on it. Same sources, opposite branch.
 List<DayNote> dayNotes({
@@ -630,8 +623,7 @@ class TimelineData {
         // the literal "null", which reads as a measurement.
         for (final r in observations)
           DayNote(
-            observationTitle(
-                r['vendor_key'] as String?, r['key'] as String?, l),
+            (r['vendor_key'] as String?) ?? (r['key'] as String?) ?? '',
             r['value'] == null
                 ? '${r['attribution']}'
                 : '${r['value']}${(r['unit'] as String?)?.isNotEmpty == true ? ' ${r['unit']}' : ''} · ${r['attribution']}',

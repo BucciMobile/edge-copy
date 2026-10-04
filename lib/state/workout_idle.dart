@@ -17,9 +17,11 @@
 /// ask "Still working out?".
 ///
 /// Fed once per 1 Hz workout tick. A tick is ACTIVE when it carries a real
-/// reading (positive bpm) at or above the calorie pipeline's activity gate —
-/// the same `Calories.activeGateHr` line that separates a bout from rest, so
-/// "quiet" here means exactly "billed as rest there". With no gate (a profile
+/// reading (positive bpm) at or above the [gate] the caller passes. The app
+/// passes the calorie pipeline's `Calories.activeGateHr`, capped at the
+/// zone-1 floor but never below a quarter of the way from resting HR to
+/// that gate, so "quiet" means billed as rest AND shown as rest on the live
+/// zone bar. With no gate (a profile
 /// without calorie anchors), intensity cannot be judged and any real reading
 /// counts as active: a worn strap is never nudged on a guess, and only
 /// absence — off skin, or the link gone — builds the streak.
@@ -48,6 +50,7 @@ class WorkoutIdleWatch {
 
   DateTime _lastActive;
   DateTime? _lastAsk;
+  DateTime? _pausedAt;
   bool _fired = false;
 
   /// When the watch last asked, or null if it never has. Read by the wiring
@@ -57,10 +60,18 @@ class WorkoutIdleWatch {
   /// Feed one tick. Returns true when the caller should try to nudge NOW.
   ///
   /// [hr] is this second's live reading (null when the band is stale or
-  /// dropped — the workout tick already refuses those); [gate] is
-  /// `Calories.activeGateHr` for this session's anchors, or null when the
-  /// anchors cannot define one.
+  /// dropped — the workout tick already refuses those); [gate] is the
+  /// session's activity line (see the class doc), or null when the anchors
+  /// cannot define one.
   bool onTick(DateTime now, {required int? hr, required num? gate}) {
+    if (_pausedAt != null) {
+      // First tick after resume: resuming is the user acting on the session,
+      // so the quiet stretch starts over here.
+      _pausedAt = null;
+      _lastActive = now;
+      _lastAsk = null;
+      return false;
+    }
     final active = hr != null && hr > 0 && (gate == null || hr >= gate);
     if (active) {
       _lastActive = now;
@@ -69,12 +80,32 @@ class WorkoutIdleWatch {
       _lastAsk = null;
       return false;
     }
+    return _ask(now);
+  }
+
+  bool _ask(DateTime now) {
     if (_fired) return false;
     if (now.difference(_lastActive) < nudgeAfter) return false;
     final ask = _lastAsk;
     if (ask != null && now.difference(ask) < retryEvery) return false;
     _lastAsk = now;
     return true;
+  }
+
+  /// Feed one tick while the session is paused since [pausedAt]. Pausing is
+  /// the user acting on the session, so the quiet stretch restarts at the
+  /// pause, and resuming restarts it again (see [onTick]). The pause itself
+  /// counts as quiet: finished, paused, phone locked and forgotten is the
+  /// same open session the watch exists for, and still gets asked about.
+  bool onPausedTick(DateTime now, DateTime pausedAt) {
+    if (_pausedAt != pausedAt) {
+      _pausedAt = pausedAt;
+      if (pausedAt.isAfter(_lastActive)) {
+        _lastActive = pausedAt;
+        _lastAsk = null;
+      }
+    }
+    return _ask(now);
   }
 
   /// The nudge actually reached the shade — stop asking, permanently. Only a

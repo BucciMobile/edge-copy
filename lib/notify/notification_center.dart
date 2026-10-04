@@ -33,6 +33,7 @@ import '../ai/reminder_plan.dart';
 import '../data/day_label.dart';
 import '../data/journal_fields.dart';
 import '../data/med_store.dart';
+import '../state/clock_format.dart' show formatClockMinute;
 import 'fired_keys.dart';
 import 'notification_event.dart';
 import 'notification_prefs.dart';
@@ -322,7 +323,7 @@ class NotificationCenter {
     final checkIn = checkInDoneToday == null
         ? null
         : checkInSlot(prefs, bedtimeMinOfDay,
-            doneToday: checkInDoneToday, nowMin: now.hour * 60 + now.minute);
+            doneToday: checkInDoneToday, now: now);
     final meds =
         medPromptSlots(prefs, medDefs ?? const [], medDosesToday, now: now);
     final nightCheck = alarmNightCheckSlot(prefs,
@@ -341,7 +342,9 @@ class NotificationCenter {
     await svc.ensureTimezone();
     await _armWaterSlots(svc, water);
     if (wantWeekly) await _armWeeklyLookback(svc, weeklyFinding);
-    if (windDownMin != null) await _armWindDown(svc, windDownMin);
+    if (windDownMin != null) {
+      await _armWindDown(svc, windDownMin, bedtimeMinOfDay!);
+    }
     if (checkIn != null) await _armCheckIn(svc, checkIn);
     await _armMedSlots(svc, meds);
     // Recomputed fresh right before arming, not reused from the `now` this
@@ -428,20 +431,20 @@ class NotificationCenter {
     }
   }
 
-  /// The daily check-in, as a ONE-SHOT at the next [minuteOfDay].
+  /// The daily check-in, as a ONE-SHOT at [at] (see [checkInSlot]).
   ///
   /// One-shot for the same reason the meds slots are: whether the day is
   /// already written changes daily, and a repeat would go on asking after the
-  /// journal was filled in. Re-armed on every foreground pass, and the caller
-  /// suppresses it outright once the day has any rating in it.
-  Future<void> _armCheckIn(NotificationService svc, int minuteOfDay) async {
+  /// journal was filled in. Re-armed on every foreground pass, and once the day
+  /// has any rating in it the caller moves it to tomorrow.
+  Future<void> _armCheckIn(NotificationService svc, DateTime at) async {
     await svc.scheduleOnce(
       id: NotificationService.idCheckIn,
       category: NotifCategory.reminders,
       title: 'How was today?',
       // No guilt, no count, no reference to a day that was missed.
       body: 'Mood, energy, stress — a minute of it.',
-      at: svc.nextDailyInstant(minuteOfDay ~/ 60, minuteOfDay % 60),
+      at: at,
       route: kRouteJournalCompose,
     );
   }
@@ -479,18 +482,27 @@ class NotificationCenter {
   /// reminder if the slot is still ahead — `nextInstanceOf` already resolves
   /// to the next occurrence strictly after now, and same-id re-scheduling
   /// replaces rather than stacks.
-  Future<void> _armWindDown(NotificationService svc, int minuteOfDay) async {
+  Future<void> _armWindDown(
+    NotificationService svc,
+    int minuteOfDay,
+    double bedtimeMinOfDay,
+  ) async {
     await svc.scheduleDaily(
       id: NotificationService.idWindDown,
       category: NotifCategory.reminders,
       title: 'Wind down',
-      body: 'Your bedtime is around ${_hhmm(minuteOfDay + windDownBeforeBedMin)}. '
-          'Start slowing down.',
+      body: windDownBody(bedtimeMinOfDay),
       hour: minuteOfDay ~/ 60,
       minute: minuteOfDay % 60,
       route: kRouteBreathing,
     );
   }
+
+  /// The wind-down copy. Names the LEARNED bedtime, not the slot plus the
+  /// offset: quiet hours can pull the slot earlier.
+  static String windDownBody(double bedtimeMinOfDay) =>
+      'Your bedtime is around ${_hhmm(bedtimeMinOfDay.round())}. '
+      'Start slowing down.';
 
   /// How long before the learned bedtime the wind-down lands.
   static const int windDownBeforeBedMin = 45;
@@ -531,12 +543,8 @@ class NotificationCenter {
     return t;
   }
 
-  /// Two-digit HH:MM from minutes-past-midnight (notification bodies).
-  static String _hhmm(int minuteOfDay) {
-    final m = minuteOfDay % 1440;
-    return '${(m ~/ 60).toString().padLeft(2, '0')}:'
-        '${(m % 60).toString().padLeft(2, '0')}';
-  }
+  /// Minutes-past-midnight → the user's clock format (notification bodies).
+  static String _hhmm(int minuteOfDay) => formatClockMinute(minuteOfDay);
 
   // ── the weekly lookback finding ─────────────────────────────────────────
 
@@ -551,7 +559,14 @@ class NotificationCenter {
   /// detections), then a plainly-stated resting-HR drift, then silence.
   static String? weeklyLookbackFinding(
       List<Map<String, dynamic>> recentDays) {
-    final days = recentDays
+    // `recent[]` is the whole rollup window (90 days, oldest first); the
+    // lookback is the last week of it.
+    // ponytail: last 7 rows, not 7 calendar days; a gappy week reaches a bit
+    // further back.
+    final week = recentDays.length > 7
+        ? recentDays.sublist(recentDays.length - 7)
+        : recentDays;
+    final days = week
         .where((d) => d['unsettled'] != true)
         .toList(growable: false);
     if (days.isEmpty) return null;
@@ -713,22 +728,36 @@ class NotificationCenter {
     return t;
   }
 
-  /// [checkInMinute], with the "already answered" rule applied.
+  /// [checkInMinute] as the instant to arm, with the "already answered" rule
+  /// applied.
   ///
-  /// Suppressed only when the slot would land TODAY and today is already
-  /// written. A day that is done at 21:00 still arms tomorrow's — the prompt
-  /// is re-armed on every foreground pass, but a user who does not open the
-  /// app tomorrow would otherwise never be asked again.
-  static int? checkInSlot(
+  /// Today's instance only while it is still ahead and today is unwritten;
+  /// otherwise tomorrow's. A day written at 19:00 for a 20:30 slot skips
+  /// tonight but still arms tomorrow — the prompt is re-armed on every
+  /// foreground pass, but a user who does not open the app tomorrow would
+  /// otherwise never be asked again.
+  static DateTime? checkInSlot(
     NotificationPrefs prefs,
     double? bedtimeMinOfDay, {
     required bool doneToday,
-    required int nowMin,
+    required DateTime now,
   }) {
     final t = checkInMinute(prefs, bedtimeMinOfDay);
     if (t == null) return null;
-    if (doneToday && t > nowMin) return null; // would land today, already asked
-    return t;
+    final today = !doneToday && t > now.hour * 60 + now.minute;
+    return DateTime(
+        now.year, now.month, now.day + (today ? 0 : 1), t ~/ 60, t % 60);
+  }
+
+  /// When the "time to move" one-shot fires for movement seen at [now]: two
+  /// hours on, or null when that lands outside the day or inside quiet hours.
+  /// The OS fires it with no Dart running, so [NotificationPrefs.shouldFireOs]
+  /// never sees it — quiet hours are applied here, as for [windDownSlot].
+  static DateTime? stillnessNudgeAt(NotificationPrefs prefs, DateTime now) {
+    final at = now.add(const Duration(hours: 2));
+    if (at.hour < 9 || at.hour >= 21) return null; // outside daytime
+    if (prefs.inQuietHours(at.hour * 60 + at.minute)) return null;
+    return at;
   }
 
   // ── medication ──────────────────────────────────────────────────────────

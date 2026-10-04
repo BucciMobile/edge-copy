@@ -40,6 +40,11 @@ void main() {
           HealthWorkoutActivityType.BOWLING);
       expect(healthActivityForType('bowling', ios: false),
           HealthWorkoutActivityType.OTHER);
+      // Skateboarding lands as SKATING on both, not OTHER.
+      for (final ios in [true, false]) {
+        expect(healthActivityForType('skateboarding', ios: ios),
+            HealthWorkoutActivityType.SKATING);
+      }
     });
 
     test('an OTHER workout still reaches Android under its own name', () {
@@ -105,5 +110,26 @@ void main() {
       }
     });
 
+    test('catalogue keys reach their family, not OTHER', () {
+      for (final ios in [true, false]) {
+        for (final k in ['weight_training', 'powerlifting', 'kettlebell']) {
+          expect(healthActivityForType(k, ios: ios),
+              ios
+                  ? HealthWorkoutActivityType.TRADITIONAL_STRENGTH_TRAINING
+                  : HealthWorkoutActivityType.STRENGTH_TRAINING,
+              reason: k);
+        }
+        for (final k in ['indoor_bike', 'mountain_biking']) {
+          expect(healthActivityForType(k, ios: ios),
+              HealthWorkoutActivityType.BIKING, reason: k);
+        }
+        for (final k in ['treadmill', 'sprinting']) {
+          expect(healthActivityForType(k, ios: ios),
+              HealthWorkoutActivityType.RUNNING, reason: k);
+        }
+        expect(healthActivityForType('dog_walking', ios: ios),
+            HealthWorkoutActivityType.WALKING);
+      }
+    });
   });
 }
