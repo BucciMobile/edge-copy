@@ -68,18 +68,17 @@ void main() {
           channel: channel,
         ),
         writeGeneric: (_, _) async => throw StateError('not Apple'),
+        clearGeneric: (_, _) async => throw StateError('not Apple'),
       );
 
       expect(wrote, isTrue);
       expect(calls, hasLength(1));
       expect(calls.single.method, 'replaceHeartRateDay');
       final args = (calls.single.arguments as Map).cast<String, Object?>();
-      expect(
-        args['startTime'],
-        start.millisecondsSinceEpoch,
-        reason: 'the day is one record starting at midnight and a range '
-            'delete matches by start time; a later start misses it',
-      );
+      // The day is one Health Connect record: the replace window must stay
+      // the whole day even when the first held minute is later, or an older
+      // whole-day record survives (duplicates) or loses its early minutes.
+      expect(args['startTime'], start.millisecondsSinceEpoch);
       expect(args['endTime'], end.millisecondsSinceEpoch);
       expect(args['samples'], [
         {
@@ -91,26 +90,6 @@ void main() {
           'beatsPerMinute': anyOf(81, 82),
         },
       ]);
-    });
-
-    test('Android leaves a partly pruned day\'s record alone', () async {
-      final writer = _UnusedHeartRateWriter();
-      final rows = [_row(DateTime(2026, 8, 5, 14, 7), 70)];
-      Future<bool> export(DateTime? prunedBefore) =>
-          exportContinuousHeartRateDay(
-            rows: rows,
-            start: start,
-            end: end,
-            useAndroidBatch: true,
-            androidWriter: writer,
-            prunedBefore: prunedBefore,
-            writeGeneric: (_, _) async => throw StateError('not Apple'),
-          );
-
-      expect(await export(DateTime(2026, 8, 5, 14)), isTrue);
-      expect(writer.calls, 0, reason: 'the record holds HR the rows lost');
-      expect(await export(start), isTrue);
-      expect(writer.calls, 1);
     });
 
     test('a day with no samples left is not rewritten', () {
@@ -147,6 +126,7 @@ void main() {
             channel: channel,
           ),
           writeGeneric: (_, _) async => true,
+          clearGeneric: (_, _) async => true,
         ),
         isFalse,
       );
@@ -171,6 +151,7 @@ void main() {
             writes.add((sample, sampleEnd));
             return sample.beatsPerMinute != 80;
           },
+          clearGeneric: (_, _) async => true,
         );
 
         expect(wrote, isFalse);
@@ -186,6 +167,45 @@ void main() {
         ]);
       },
     );
+
+    test(
+      'a day with pruned 1 Hz rows only clears the minutes it can rewrite',
+      () async {
+        final clears = <(DateTime, DateTime)>[];
+        final wrote = await exportContinuousHeartRateDay(
+          rows: [_row(DateTime(2026, 8, 5, 18), 70)],
+          start: start,
+          end: end,
+          useAndroidBatch: false,
+          androidWriter: _UnusedHeartRateWriter(),
+          writeGeneric: (_, _) async => true,
+          clearGeneric: (from, to) async {
+            clears.add((from, to));
+            return true;
+          },
+        );
+        expect(wrote, isTrue);
+        expect(clears, [(DateTime(2026, 8, 5, 18), end)]);
+      },
+    );
+
+    test('a failed clear writes nothing on top of the survivors', () async {
+      var writes = 0;
+      final wrote = await exportContinuousHeartRateDay(
+        rows: [_row(start.add(const Duration(minutes: 1)), 70)],
+        start: start,
+        end: end,
+        useAndroidBatch: false,
+        androidWriter: _UnusedHeartRateWriter(),
+        writeGeneric: (_, _) async {
+          writes++;
+          return true;
+        },
+        clearGeneric: (_, _) async => false,
+      );
+      expect(wrote, isFalse);
+      expect(writes, 0);
+    });
 
     test('empty normalized input succeeds without either writer', () async {
       var genericCalls = 0;
@@ -203,6 +223,10 @@ void main() {
           useAndroidBatch: true,
           androidWriter: androidWriter,
           writeGeneric: (_, _) async {
+            genericCalls++;
+            return true;
+          },
+          clearGeneric: (_, _) async {
             genericCalls++;
             return true;
           },
