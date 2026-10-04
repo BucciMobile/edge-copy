@@ -211,6 +211,29 @@ void main() {
     },
   );
 
+  test('a failed import rollup does not fail the import', () async {
+    for (var i = 1; i <= 3; i++) {
+      await LocalDb.putDayResult(
+        dayId: dayLabelOf(
+          DateTime.fromMillisecondsSinceEpoch((start - i * 86400) * 1000),
+        ),
+        algoVersion: kAlgoVersion,
+        payloadJson: jsonEncode({
+          'scalars': {'rhr': 53, 'readiness': 74},
+        }),
+        windowJson: '{}',
+        finalized: true,
+        source: 'band',
+        rhr: 53,
+        readiness: 74,
+        series: {'rhr': 53, 'readiness': 74},
+      );
+    }
+    await db.execute('ALTER TABLE cycle_log RENAME TO unavailable_cycle_log');
+    await DerivationEngine().finalizeImport(const Profile());
+    expect(await LocalDb.baseline('crossday'), isNull);
+  });
+
   test(
     'an evening proposal cannot overlap next morning\'s main sleep',
     () async {
