@@ -1954,13 +1954,15 @@ const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 // all live in SleepProfilePolicy (pure, unit-tested) — see
 // lib/compute/sleep_profile_policy.dart for the evidence behind each rule.
 
-/// Raw is kept this many days behind the data edge, then pruned (derived
-/// stays). A day stays recomputable until 48 h after its end (~72 h after its
-/// start), so 5 days keeps ~48 h of substrate past finalization.
+/// Raw is kept this many days behind the data edge, then pruned at a local
+/// midnight (derived stays). A day stays recomputable until 48 h past its last
+/// record, so its derive window (from the previous noon) keeps at least 48 h
+/// of substrate past finalization; the day's own rows last a day longer.
 const int rawRetentionDays = 5;
 
-/// A day stays recomputable for this long after its wake, then FINALIZES (locks)
-/// — more flash may still drain within this buffer (ARCHITECTURE_V2: ~48 h).
+/// A day stays recomputable for this long after its last record, then
+/// FINALIZES (locks) — more flash may still drain within this buffer
+/// (ARCHITECTURE_V2: ~48 h).
 const int _finalizationSec = 48 * 3600;
 
 /// How many trailing derived days feed readiness/composite baselines.
