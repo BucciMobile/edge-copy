@@ -521,6 +521,14 @@ void _wiredFamilies() {
       }
     });
 
+    test('a long gap pads one grid, not one per missing day', () {
+      final days = _synthDays(30)..removeRange(10, 20);
+      final reg = (buildCrossDayBundle(days, const {})['regularity'] as Map)
+          .cast<String, dynamic>();
+      // 20 real days + 1 pad for the 10-day break.
+      expect((reg['value'] as Map)['days'], 21);
+    });
+
     test('unobserved minutes are not scored as sleep', () {
       // Every night is light 23:00-03:00. After 03:00, half the nights are
       // awake and the other half the band saw nothing. Only 23:00-03:00 is

@@ -1006,8 +1006,8 @@ bool _isNextDay(String a, String b) {
 /// the true Phillips SRI. If too few covered days, the package returns absent.
 ///
 /// The SRI compares grid d-1 with grid d as if they were 24 h apart, so a
-/// missing calendar day gets its own all-invalid grid rather than letting the
-/// nights either side of it pair up. Returns the date of every grid, padding
+/// gap of missing calendar days gets one all-invalid grid rather than letting
+/// the nights either side of it pair up. Returns the date of every grid, padding
 /// included, since `SriPair.dayIndex` indexes those grids, not [days].
 (ana.Metric<ana.SriResult>, List<String>) _crossDaySri(
     List<Map<String, dynamic>> days) {
@@ -1022,7 +1022,12 @@ bool _isNextDay(String a, String b) {
       final prev = DateTime.tryParse('${gridDates.last}T00:00:00Z');
       final cur = DateTime.tryParse('${date}T00:00:00Z');
       final gap = prev == null || cur == null ? 1 : cur.difference(prev).inDays;
-      for (var k = 1; k < gap; k++) {
+      // One all-invalid grid already breaks the pair, so a gap of any length
+      // pads ONE grid. The day list is the newest 90 rows, not 90 calendar
+      // days: padding every missing day of a months-long break would allocate
+      // 1440-epoch grids for all of it. The pad never surfaces in a pair (it
+      // has no valid minutes), so its date is only a placeholder.
+      for (var k = 1; k < math.min(gap, 2); k++) {
         final pad = prev!.add(Duration(days: k));
         gridDates.add(pad.toIso8601String().substring(0, 10));
         sleepWake.addAll(List<bool>.filled(epochsPerDay, false));
