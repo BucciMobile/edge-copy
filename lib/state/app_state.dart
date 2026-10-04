@@ -5044,7 +5044,7 @@ class AppState extends ChangeNotifier {
         title: 'Alarm',
         body: 'Your strap alarm just fired.',
         date: todayLabel(),
-        route: '/today',
+        route: kRouteAlarm,
       ));
     } catch (e) {
       _log('[alarm] fired-notification skipped: $e');
