@@ -1733,7 +1733,10 @@ import 'substrate.dart';
 // across a missing day. Edge-only.
 // 99 → 100 (SRI, edge#494): 'unobserved' minutes no longer count as asleep,
 // and a gap of any length pads one grid. Edge-only.
-const int kAlgoVersion = 100;
+// 100 → 101 (crossday, edge#501): imported days' vendor scores are masked out
+// of the rollup, and today's night counts as settled once the data edge is
+// past its wake, so illness/anomaly alerts can fire the same day. Edge-only.
+const int kAlgoVersion = 101;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1955,8 +1958,10 @@ const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
 /// Raw is kept this many days past derivation, then pruned (derived stays).
 const int rawRetentionDays = 3;
 
-/// A day stays recomputable for this long after its wake, then FINALIZES (locks)
-/// — more flash may still drain within this buffer (ARCHITECTURE_V2: ~48 h).
+/// A day stays recomputable until the data edge is this far past the day's
+/// LAST record (`endSec`, ≈ the end of the calendar day), then FINALIZES
+/// (locks). So a full day locks ~72 h after it starts. More flash may still
+/// drain within this buffer.
 const int _finalizationSec = 48 * 3600;
 
 /// How many trailing derived days feed readiness/composite baselines.
@@ -1969,9 +1974,9 @@ const int _baselineWindowDays = 28;
 /// day (#128: "morning it was 49, now 45"). Once today's overnight is genuinely
 /// COMPLETE we PIN the first such readiness as the headline so it stops moving.
 ///
-/// "Complete" must be stronger than `overnight_state == 'ready'` — that flips as
-/// soon as the FIRST sleep-bearing row lands (mid-drain), so pinning on it could
-/// freeze a partial-night value. We instead require the drained data edge to
+/// "Complete" cannot be "a sleep-bearing row exists" — that is true as soon as
+/// the FIRST one lands (mid-drain), so pinning on it could freeze a
+/// partial-night value. We instead require the drained data edge to
 /// have moved at least this far PAST the sleep offset (wake): the whole sleep
 /// window is then decoded and the segmentation-placed wake is settled, so the
 /// overnight inputs are final. Same "edge past the window" model finalisation
@@ -1979,6 +1984,57 @@ const int _baselineWindowDays = 28;
 /// reached within the first post-wake sync in practice; raise it to trade a
 /// slightly later freeze for more safety margin.
 const int _headlineFreezeMarginSec = 60 * 60;
+
+/// How long after a night's wake we stop waiting for the data edge to pass
+/// it. A strap that went quiet right after waking (flat battery, taken off and
+/// not recording) never moves the edge again, and the night we hold is then
+/// the whole night as far as any sync will ever know.
+// ponytail: wall-clock give-up; a persisted "drain complete" marker would be exact.
+const int kOvernightGiveUpSec = 12 * 60 * 60;
+
+/// Whether a night whose sleep ends at [sleepOffsetSec] is SETTLED: the drained
+/// data edge has moved [_headlineFreezeMarginSec] past the wake, so the window
+/// is no longer just where the sync happened to stop (#448: mid-drain, the
+/// newest record is still inside the night and the stager closes the window at
+/// it, so a partial night and its readiness showed as this morning's). Home and
+/// the readiness freeze both read this, on the same band-only edge
+/// ([LocalDb.lastDecodedRecTs]).
+///
+/// [nowSec] enables the wall-clock give-up. Only Home passes it: a drain that
+/// stalled mid-night looks exactly like a strap that went quiet at wake, and
+/// Home recovers on the next derive, but the freeze pins for the whole day, so
+/// it waits for the edge.
+///
+/// A null [sleepOffsetSec] is a night with no window yet. Mid-drain that is
+/// usually an edge still before sleep onset, not a night without sleep, so it
+/// only settles once the band edge has caught up to [nowSec], or gone quiet
+/// for the give-up. A caught-up edge before local noon is still a night that
+/// may not have started (awake at 00:30, the coming sleep has no window yet),
+/// so "no sleep" waits for noon.
+bool overnightSettled({
+  required int? sleepOffsetSec,
+  required int dataEdgeSec,
+  int? nowSec,
+}) {
+  if (sleepOffsetSec == null) {
+    if (nowSec == null) return false;
+    final now = DateTime.fromMillisecondsSinceEpoch(nowSec * 1000);
+    return (now.hour >= 12 &&
+            dataEdgeSec >= nowSec - _headlineFreezeMarginSec) ||
+        nowSec >= dataEdgeSec + kOvernightGiveUpSec;
+  }
+  return dataEdgeSec >= sleepOffsetSec + _headlineFreezeMarginSec ||
+      (nowSec != null && nowSec >= sleepOffsetSec + kOvernightGiveUpSec);
+}
+
+/// The cross-day inputs an importer fills with its vendor's own scores.
+const _crossDayVendorScoreKeys = [
+  'rhr',
+  'rmssd',
+  'readiness',
+  'resp_rate',
+  'skin_temp_z',
+];
 
 /// The frozen morning readiness headline that should be persisted/surfaced for
 /// [today], given the current pin and a fresh look at today's live readiness and
@@ -1991,17 +2047,30 @@ const int _headlineFreezeMarginSec = 60 * 60;
 ///   drift — a re-derive that would RAISE or LOWER the score is ignored).
 /// - A new day → the prior day's pin no longer applies; re-pins once the new
 ///   day's overnight completes.
+/// - Same day, but the night's wake [wakeSec] moved a margin or more from the
+///   pinned one → a different sleep block is now the night (segmentation only
+///   bridges gaps under an hour, so a long mid-night awakening settles the
+///   first block, then a later one takes over as main sleep). Re-pins once that
+///   night settles; until then the old pin holds.
 @visibleForTesting
-({String day, int value})? nextFrozenHeadline({
+({String day, int value, int? wakeSec})? nextFrozenHeadline({
   required String today,
   required bool overnightComplete,
   required int? liveReadiness,
-  required ({String day, int value})? current,
+  required ({String day, int value, int? wakeSec})? current,
+  int? wakeSec,
 }) {
-  if (current != null && current.day == today) return current; // pinned; hold
+  final sameNight = current != null &&
+      current.day == today &&
+      (current.wakeSec == null ||
+          wakeSec == null ||
+          (wakeSec - current.wakeSec!).abs() < _headlineFreezeMarginSec);
+  if (sameNight) return current; // pinned; hold
   if (overnightComplete && liveReadiness != null) {
-    return (day: today, value: liveReadiness); // first complete settle → pin
+    // first complete settle of this night → pin
+    return (day: today, value: liveReadiness, wakeSec: wakeSec);
   }
+  if (current != null && current.day == today) return current;
   return null; // nothing to pin yet for today
 }
 
@@ -2748,7 +2817,7 @@ class DerivationEngine {
         _diag['stage'] = 'notifications';
         await _runNotifications();
       }
-      // 5. Prune raw — never for a day still inside its raw window / un-derived.
+      // 5. Prune raw — never for a day still inside its raw window / not finalized.
       // Runs on EVERY derive, not just a full restage: `rawRetentionDays` is
       // the only cap on the 1 Hz substrate, and behind `scope.fullHistory` it
       // fired only on a manual "Re-analyze data", so an ordinary install grew
@@ -4735,7 +4804,7 @@ class DerivationEngine {
       TelemetryService.instance.recordNonFatal(e, st, reason: 'day_blocks_failed');
     }
 
-    // Finalize once the DATA EDGE has moved >48 h past the day's wake — i.e. we
+    // Finalize once the DATA EDGE has moved >48 h past the day's last record — we
     // have continuous drained data well beyond it, so no more flash can land for
     // this day. (Anchored on the last record ts, NOT the wall clock.) Imports
     // force-finalize: there is no stored raw to ever recompute them from, so
@@ -4790,7 +4859,11 @@ class DerivationEngine {
     await LocalDb.putDayResult(
       dayId: day.date,
       algoVersion: kAlgoVersion,
-      payloadJson: jsonEncode(bundle),
+      // The data edge this row was derived against. The cross-day settled
+      // test compares the row's wake with THIS edge, not a fresher one read
+      // later: ingest keeps committing during a pass, and a newer edge would
+      // call a night settled whose wake came from a truncated substrate.
+      payloadJson: jsonEncode({...bundle, 'data_edge_sec': dataNowSec}),
       windowJson: jsonEncode(
         ((day.sleepJson['window'] as Map?) ?? const {}).cast<String, dynamic>(),
       ),
@@ -4934,23 +5007,27 @@ class DerivationEngine {
     if (day.date != todayLabel()) return;
     final hasSleep = day.sleepOffsetSec > day.sleepOnsetSec;
     if (!hasSleep) return;
-    final overnightComplete =
-        dataNowSec >= day.sleepOffsetSec + _headlineFreezeMarginSec;
+    final overnightComplete = overnightSettled(
+      sleepOffsetSec: day.sleepOffsetSec,
+      dataEdgeSec: dataNowSec,
+    );
     final current = await LocalDb.frozenHeadline();
     final next = nextFrozenHeadline(
       today: day.date,
       overnightComplete: overnightComplete,
       liveReadiness: readiness?.round(),
       current: current,
+      wakeSec: day.sleepOffsetSec,
     );
     if (next == null) return;
     // Already pinned to this exact value → skip the redundant write.
     if (current != null &&
         current.day == next.day &&
-        current.value == next.value) {
+        current.value == next.value &&
+        current.wakeSec == next.wakeSec) {
       return;
     }
-    await LocalDb.setFrozenHeadline(next.day, next.value);
+    await LocalDb.setFrozenHeadline(next.day, next.value, wakeSec: next.wakeSec);
     _log('froze headline readiness ${next.value} for ${next.day}');
   }
 
@@ -5360,34 +5437,20 @@ class DerivationEngine {
     // both static, so this whole transform+encode step is isolate-safe.
     final rows = await LocalDb.recentDayResults(_crossDayWindow);
     final today = LocalDb.localDayLabelNow();
+    final imported = await LocalDb.importedDates();
     final (days, json) = await _runIsolateCancellable(() {
       final days = <Map<String, dynamic>>[];
       for (final row in rows.reversed) {
         final payload = _decodeBundle(row['payload_json']);
         if (payload == null) continue;
         if (payload['skipped'] == true) continue;
-        final rec = _crossDayRecord(row, payload);
-        if (rec == null) continue;
-        // Today's own row updates on every derive pass while the night is
-        // still syncing/settling — feeding that partial reading into the
-        // illness/anomaly CUSUM can fire a false "possible illness onset" on
-        // data that's really just a truncated/mid-drain night. Only exclude
-        // TODAY specifically; older days already had their 48h to settle.
-        //
-        // FLAG it rather than DROP it: `days` is the single input list for the
-        // whole cross-day bundle, so dropping today also silently removed it
-        // from readiness/glass-box, the resting-HR trend-shift CUSUM, load,
-        // sleep debt and `recent` (whose last row dates every notification).
-        // buildCrossDayBundle nulls only the alert inputs for a flagged day.
-        if (row['day_id'] == today && (row['finalized'] as num?) != 1) {
-          rec['unsettled'] = true;
-        }
-        // Explicit identity for TODAY-scoped reads. `unsettled` cannot serve
-        // this purpose — it is only set while today is unfinalized. Without a
-        // flag, a today-scoped consumer can only take the LAST record
-        // positionally, which on a day with no derived row is YESTERDAY's.
-        if (row['day_id'] == today) rec['is_today'] = true;
-        days.add(rec);
+        final rec = crossDayInputRecord(
+          row,
+          payload,
+          today: today,
+          imported: imported,
+        );
+        if (rec != null) days.add(rec);
       }
       // `built_for_day` is what makes the `is_today` stamps inside `days`
       // interpretable later. Without it the envelope carries day-relative facts
@@ -5582,6 +5645,63 @@ class DerivationEngine {
   static Map<String, dynamic>? _decodeBundle(Object? json) =>
       SeriesCodec.decodePayloadJson(json);
 
+  /// One `day_result` row as a cross-day input record, with the per-day
+  /// masks the rollup needs. Static and pure so it runs in the isolate.
+  @visibleForTesting
+  static Map<String, dynamic>? crossDayInputRecord(
+    Map<String, dynamic> row,
+    Map<String, dynamic> payload, {
+    required String today,
+    required Set<String> imported,
+  }) {
+    final rec = _crossDayRecord(row, payload);
+    if (rec == null) return null;
+    // An imported day's scores are another vendor's maths. The baseline
+    // cache already masks them; the cross-day families (illness CUSUM,
+    // anomaly, glass-box, percentiles) need the same mask or tonight's
+    // reading is scored against that vendor's history. Sleep timing and
+    // load stay, they are not an algorithm's opinion of the night.
+    if (imported.contains(row['day_id'])) {
+      for (final k in _crossDayVendorScoreKeys) {
+        rec[k] = null;
+      }
+    }
+    // Today's own row updates on every derive pass while the night is
+    // still syncing/settling — feeding that partial reading into the
+    // illness/anomaly CUSUM can fire a false "possible illness onset" on
+    // data that's really just a truncated/mid-drain night. Only exclude
+    // TODAY specifically; older days already had their 48h to settle.
+    //
+    // FLAG it rather than DROP it: `days` is the single input list for the
+    // whole cross-day bundle, so dropping today also silently removed it
+    // from readiness/glass-box, the resting-HR trend-shift CUSUM, load,
+    // sleep debt and `recent` (whose last row dates every notification).
+    // buildCrossDayBundle nulls only the alert inputs for a flagged day.
+    //
+    // Today is never finalized (that waits 48 h behind the data edge), so
+    // "not finalized" alone held the alerts off all day, every day. The night
+    // is done once the data edge is [_headlineFreezeMarginSec] past its wake,
+    // the same test the headline pin uses; no wake yet is no complete night.
+    // The edge is the one the row was derived against (`data_edge_sec`), so
+    // the wake and the edge come from the same substrate; a row without one
+    // stays unsettled.
+    final wakeSec = (rec['wake_sec'] as num?)?.toInt();
+    final dataEdgeSec = (payload['data_edge_sec'] as num?)?.toInt();
+    if (row['day_id'] == today &&
+        (row['finalized'] as num?) != 1 &&
+        (wakeSec == null ||
+            dataEdgeSec == null ||
+            dataEdgeSec < wakeSec + _headlineFreezeMarginSec)) {
+      rec['unsettled'] = true;
+    }
+    // Explicit identity for TODAY-scoped reads. `unsettled` cannot serve
+    // this purpose — it is only set while today's night is unsettled. Without a
+    // flag, a today-scoped consumer can only take the LAST record
+    // positionally, which on a day with no derived row is YESTERDAY's.
+    if (row['day_id'] == today) rec['is_today'] = true;
+    return rec;
+  }
+
   /// Build the cross-day record from a day_result row + its payload bundle.
   static Map<String, dynamic>? _crossDayRecord(
     Map<String, dynamic> row,
@@ -5706,15 +5826,14 @@ class DerivationEngine {
   // ── raw pruning (raw-first invariant) ──────────────────────────────────────
 
   /// Longest the raw-first hold below may keep substrate past
-  /// [rawRetentionDays] for a day that still hasn't produced a complete result.
+  /// [rawRetentionDays] for a day that still hasn't finalized.
   ///
   /// The hold has to be bounded or it is not a hold, it is an off switch. A
   /// `partial` day is DELIBERATELY never finalized by age (see
   /// `_derivePreparedDay` — a headline-only row must keep its chance to be
-  /// filled in), and `dayResultIds` excludes both `partial` and `skipped`, so a
-  /// day whose second half fails every single time never becomes "derived" and
-  /// never becomes finalized either. One such day used to latch pruning off for
-  /// the whole install, forever, at ~12 MB/day.
+  /// filled in), and a transient skip never finalizes, so a day whose second
+  /// half fails every single time never becomes finalized. One such day used
+  /// to latch pruning off for the whole install, forever, at ~12 MB/day.
   static const int _maxRawHoldDays = 14;
 
   /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
@@ -5727,18 +5846,22 @@ class DerivationEngine {
   static int? rawPruneCutoffSec({
     required int dataNowSec,
     required List<String> rawDayIds,
-    required Set<String> derivedDayIds,
+    required Set<String> finalizedDayIds,
   }) {
     final cutoffSec = dataNowSec - rawRetentionDays * 86400;
     if (cutoffSec <= 0) return null;
-    final pending = rawDayIds.where((d) => !derivedDayIds.contains(d)).toList()
-      ..sort();
+    // Pending = not FINALIZED, not merely "has a result": an unlocked day is
+    // still re-derived, and a re-derive from a cut night overwrites the good
+    // row and then locks it.
+    final pending =
+        rawDayIds.where((d) => !finalizedDayIds.contains(d)).toList()..sort();
     if (pending.isEmpty) return _localDayStartOf(cutoffSec);
-    // Hold at the START of the oldest day still owed a result — its own rows
-    // survive, everything before it goes — floored so a permanently stuck day
-    // cannot hold the whole install (see [_maxRawHoldDays]).
+    // Hold at the start of the oldest pending day's derive window (the
+    // previous noon, where its night search begins, see [_targetDayWindow]),
+    // floored so a permanently stuck day cannot hold the whole install (see
+    // [_maxRawHoldDays]).
     final barrier = math.max(
-      _localDayLabelToSec(pending.first),
+      _localDayLabelToSec(pending.first) - kNocturnalSearchLookbackSec,
       dataNowSec - _maxRawHoldDays * 86400,
     );
     return _localDayStartOf(barrier < cutoffSec ? barrier : cutoffSec);
@@ -5760,8 +5883,8 @@ class DerivationEngine {
   /// backfill received in one sync must not be pruned just because it landed
   /// "now".
   ///
-  /// RAW-FIRST, DAY-SCOPED. A day in [rawDayIds] with no complete result at the
-  /// current algo version pulls the cutoff back to ITS OWN start instead of
+  /// RAW-FIRST, DAY-SCOPED. A day in [rawDayIds] not yet finalized at the
+  /// current algo version pulls the cutoff back to its derive window instead of
   /// aborting the whole prune — the old all-or-nothing guard meant a single
   /// stuck day kept every older day's substrate too. Bounded by
   /// [_maxRawHoldDays] so a permanently-stuck day cannot wedge it.
@@ -5785,11 +5908,10 @@ class DerivationEngine {
   ///     why a workout's average HR is written into the bundle (it was once
   ///     re-derived lazily and vanished the moment its substrate aged out).
   Future<void> _pruneOldDecoded(List<String> rawDayIds, int dataNowSec) async {
-    final derivedIds = await LocalDb.dayResultIds(kAlgoVersion);
     final cutoffSec = rawPruneCutoffSec(
       dataNowSec: dataNowSec,
       rawDayIds: rawDayIds,
-      derivedDayIds: derivedIds,
+      finalizedDayIds: await LocalDb.finalizedDayIds(kAlgoVersion),
     );
     if (cutoffSec == null) return;
     // Highest cutoff ever applied: a held-back pass can cut lower, but rows
