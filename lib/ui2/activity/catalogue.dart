@@ -50,9 +50,9 @@ class Activity {
   /// Metabolic equivalent of task — the honest basis for a calorie estimate.
   /// Compendium of Physical Activities, Ainsworth et al.
   ///
-  /// NULL for a row the compendium cannot price, which is exactly one:
-  /// 'General workout' means the user did not say what they did, and the
-  /// compendium prices named activities. Every number that could go here
+  /// NULL for a row the compendium cannot price. 'General workout' means the
+  /// user did not say what they did, and the compendium prices named
+  /// activities; 'Padel' is named but has no compendium row at all. Every number that could go here
   /// would be a stand-in — which is the 'Custom activity' mistake below,
   /// whose MET of 4.0 was invented. So [kcal] returns null, the picker and
   /// the setup screen show no estimate, and the session still gets a REAL
@@ -151,6 +151,10 @@ const activityLibrary = <ActGroup>[
     Activity(
         'Table tennis', LucideIcons.volleyball, C.blue, Track.duration, 4.0),
     Activity('Squash', LucideIcons.volleyball, C.red, Track.duration, 12.0),
+    // No MET: the compendium has no padel row. Tennis doubles and paddleball
+    // are different games, and borrowing either would be a stand-in. The
+    // post-session estimate still works from heart rate.
+    Activity('Padel', LucideIcons.volleyball, C.yellow, Track.duration, null),
     Activity('Volleyball', LucideIcons.volleyball, C.orange, Track.duration, 6.0),
     Activity('Hockey', LucideIcons.target, C.blue, Track.duration, 8.0),
     Activity('Baseball', LucideIcons.target, C.red, Track.duration, 5.0),
@@ -193,6 +197,10 @@ const activityLibrary = <ActGroup>[
         gps: true),
     Activity('Skating', LucideIcons.circleDashed, C.purple, Track.distance, 7.0,
         gps: true),
+    // Compendium 15580, "skateboarding, general, moderate effort". Timed, not
+    // a route: a park session goes nowhere, and cruising is the longboard rows.
+    Activity(
+        'Skateboarding', LucideIcons.circleDashed, C.orange, Track.duration, 5.0),
     Activity('Horse riding', LucideIcons.rabbit, C.orange, Track.duration, 5.5),
   ]),
   ActGroup('Mind & body', LucideIcons.leaf, [
@@ -369,6 +377,10 @@ class ExerciseDef {
   final String? sourceUpdatedAt;
   final List<ExerciseCredit> sourceCredits;
 
+  /// Done with the body as the load. With no history to seed from, the set
+  /// starts as bodyweight instead of inheriting the last lift's kilos.
+  final bool bodyweight;
+
   const ExerciseDef(
     this.key,
     this.label,
@@ -382,6 +394,7 @@ class ExerciseDef {
     this.sourceId,
     this.sourceUpdatedAt,
     this.sourceCredits = const [],
+    this.bodyweight = false,
   });
 
   bool get fromWger => sourceId != null;
@@ -448,6 +461,16 @@ const _edgeExerciseLibrary = <ExerciseDef>[
       'es': 'Aperturas en polea',
       'fr': 'Écarté à la poulie',
     },
+  ),
+  ExerciseDef(
+    'push_up',
+    'Push-up',
+    ['chest', 'triceps', 'shoulders'],
+    category: 'Chest',
+    equipment: ['none (bodyweight exercise)'],
+    aliases: ['push up', 'push-ups', 'press-up'],
+    localizedLabels: {'de': 'Liegestütz', 'es': 'Flexión', 'fr': 'Pompe'},
+    bodyweight: true,
   ),
   ExerciseDef(
     'overhead_press',
@@ -518,6 +541,7 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     equipment: ['Pull-up bar'],
     aliases: ['pull up', 'pull-ups'],
     localizedLabels: {'de': 'Klimmzug', 'es': 'Dominada', 'fr': 'Traction'},
+    bodyweight: true,
   ),
   ExerciseDef(
     'barbell_curl',
@@ -610,6 +634,7 @@ const _edgeExerciseLibrary = <ExerciseDef>[
     equipment: ['none (bodyweight exercise)'],
     step: 0,
     localizedLabels: {'de': 'Unterarmstütz', 'es': 'Plancha', 'fr': 'Gainage'},
+    bodyweight: true,
   ),
   ExerciseDef(
     'hanging_leg_raise',
@@ -623,6 +648,7 @@ const _edgeExerciseLibrary = <ExerciseDef>[
       'es': 'Elevación de piernas colgado',
       'fr': 'Relevé de jambes suspendu',
     },
+    bodyweight: true,
   ),
 ];
 
