@@ -1776,7 +1776,8 @@ import 'substrate.dart';
 // daytime HRV and the HR dip, and is no longer also booked as this day's nap
 // (`PreparedDerivationDay.tonightSleepOnsetSec`); a saved session's HRR
 // abstains when recording resumed more than 30 s after its end. Edge-only.
-const int kAlgoVersion = 106;
+// 106 → 107: analytics main @ c0effea, #86 rmssd gate refuses noise windows, so the stored rmssd/hrv can go null or move.
+const int kAlgoVersion = 107;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -1956,7 +1957,8 @@ const int kAlgoVersion = 106;
 // bandTrimmedOffsetSec, segmentSleep(bandSleepState:),
 // SleepSegmentation.bandOffsetTrimSec), on OpenStrap/analytics main, for v100
 // above.
-const String kAnalyticsPin = '4fc2b1229ab916d2d94c4dd3b7565f96a4c6e093';
+// REPIN @ c0effea: analytics main, #79 + #86 (rmssd gate), for v105.
+const String kAnalyticsPin = 'c0effea9a7f3113009ebec902f456ace56b774ca';
 // Repinned to analytics main's tip, which carries BOTH PR #72 (hrv_freq
 // Welch gap guard) and PR #73 (overreachingConjunction rhr quantum guard) —
 // the two independent kAlgoVersion bumps above (93 and 94). Verified both
@@ -1993,7 +1995,8 @@ const String kAnalyticsPin = '4fc2b1229ab916d2d94c4dd3b7565f96a4c6e093';
 // REPIN: protocol oura sleep-phase decoder (#71 merge) @ f04931b, on top of bc7d8d0.
 // NO kAlgoVersion bump: the stage minutes land in `observation`, which no
 // derivation reads.
-const String kProtocolPin = 'f04931ba7a06d0a20dc9e5e8bd750e14fb0a9510';
+// REPIN: protocol main @ ecb512b (#72-#77).
+const String kProtocolPin = 'ecb512b710fbfa5fffce999f939a64aa7c486ee0';
 
 // Fold idempotency, the minimum-nights warm-up, and legacy-payload handling
 // all live in SleepProfilePolicy (pure, unit-tested) — see
