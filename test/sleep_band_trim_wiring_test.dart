@@ -241,6 +241,8 @@ void main() {
       return _offSec(day) + day.sleep.bandOffsetTrimSec!;
     }
 
+    // Detected naps are review candidates now, not credited periods, so the
+    // detector's output is read from `candidates`.
     List<Map<String, dynamic>>? naps(int excludeEnd) {
       final sub = _build(_lieDay, _lieLen, _lieAt);
       final onset = calendarDays(sub)
@@ -249,7 +251,8 @@ void main() {
               .window!
               .onsetMs! ~/
           1000;
-      return DerivationEngine.debugAttachNaps(
+      final candidates = <Map<String, dynamic>>[];
+      DerivationEngine.debugAttachNaps(
         <String, dynamic>{},
         <String, dynamic>{},
         sub,
@@ -257,8 +260,10 @@ void main() {
         _lieTrimmed,
         attributionStartSec: _lieDay,
         attributionEndSec: _lieDay + 86400,
+        candidates: candidates,
         napExcludeEndSec: excludeEnd,
       );
+      return candidates;
     }
 
     final napStart = _local(2025, 6, 16, 7, 30);
@@ -268,8 +273,8 @@ void main() {
       expect(out, isNotNull);
       expect(
         out!.any((n) =>
-            (n['onset_ts'] as int) >= napStart - 120 &&
-            (n['onset_ts'] as int) <= napStart + 300),
+            (n['start'] as int) >= napStart - 120 &&
+            (n['start'] as int) <= napStart + 300),
         isTrue,
         reason: 'the fixture must create a nap candidate: $out',
       );
@@ -282,8 +287,8 @@ void main() {
       expect(out, isNotNull);
       expect(
         out!.where((n) =>
-            (n['onset_ts'] as int) >= _lieTrimmed &&
-            (n['onset_ts'] as int) < end),
+            (n['start'] as int) >= _lieTrimmed &&
+            (n['start'] as int) < end),
         isEmpty,
       );
     });
@@ -356,6 +361,11 @@ void main() {
         isEmpty,
         reason: 'naps: ${naps['value']}',
       );
+      // Detected naps land as review suggestions; the lie-in must not either.
+      final suggested = await db.query('activity_suggestions',
+          where: "kind = 'nap' AND start_ts >= ? AND start_ts < ?",
+          whereArgs: [trimmedEnd, untrimmed]);
+      expect(suggested, isEmpty);
     });
   });
 }

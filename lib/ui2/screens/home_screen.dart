@@ -54,6 +54,7 @@ import '../profile/profile.dart';
 import '../ui2.dart';
 import 'ai_briefing.dart' show AiBriefingScreen;
 import 'coach.dart';
+import 'detected_activities.dart';
 import 'day_timeline.dart' show DayTimelineScreen;
 import 'metric_detail.dart';
 import 'readiness_detail.dart';
@@ -1629,6 +1630,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           Align(alignment: Alignment.centerLeft, child: battery),
         ],
         const SizedBox(height: S.x3),
+        const DetectedActivitiesCard(),
+        const SizedBox(height: S.x3),
         if (_loading)
           const Center(child: CircularProgressIndicator())
         else if (_failed)
@@ -1780,6 +1783,10 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         ]),
       ),
 
+      if (bare) ...[
+        const DetectedActivitiesCard(),
+        const SizedBox(height: S.x3),
+      ],
       ...dayNavRow(_day ?? d.dayId, _days, _goDay),
 
       if (bare)
@@ -1845,8 +1852,9 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
             );
           }),
 
-        // Right under the rings, above everything else — the one spot on
-        // this screen nobody scrolls past without seeing.
+        const SizedBox(height: S.x3),
+        const DetectedActivitiesCard(),
+        const SizedBox(height: S.x3),
         const CommunityNudge(),
 
         // ── the rollup was withheld, not absent ──
