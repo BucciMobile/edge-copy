@@ -92,6 +92,19 @@ void main() {
       ]);
     });
 
+    test('a day with no samples left is not rewritten', () {
+      // The raw window is gone for an older day being re-exported. Clearing
+      // its HR anyway deletes what was written while the rows still existed.
+      expect(healthHeartRateRewriteFrom(const []), isNull);
+      expect(
+        healthHeartRateRewriteFrom([
+          HealthHeartRateSample(DateTime(2026, 8, 5, 14, 7), 70),
+          HealthHeartRateSample(DateTime(2026, 8, 5, 14, 8), 71),
+        ]),
+        DateTime(2026, 8, 5, 14, 7),
+      );
+    });
+
     test('Android batch false result is retryable', () async {
       const channel = MethodChannel(
         'openstrap/test_health_connect_heart_rate_failure',

@@ -2650,8 +2650,20 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<void> deleteWorkout(String id) async => LocalDb.deleteSession(id);
 
   @override
-  Future<void> setWorkoutPrivate(String id, bool private) async =>
-      LocalDb.setSessionPrivate(id, private);
+  Future<void> setWorkoutPrivate(String id, bool private) async {
+    await LocalDb.setSessionPrivate(id, private);
+    // The workout was already exported when it stopped, before this flag
+    // landed. Re-export: a private row clears its window and writes nothing.
+    unawaited(HealthExporter.exportWorkoutId(id));
+    // The day's active energy has exported workouts' calories taken off, so
+    // it changes too, and a day behind the export cursor is never rewritten.
+    final start = ((await LocalDb.session(id))?['start_ts'] as num?)?.toInt();
+    if (start != null) {
+      unawaited(HealthExporter.reexportFrom(
+        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(start * 1000)),
+      ));
+    }
+  }
 
   @override
   Future<Map<String, dynamic>> startWorkout(
