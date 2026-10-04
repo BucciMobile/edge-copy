@@ -178,8 +178,13 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
             // (PR #510 follow-up) — _absence below shows it in that one
             // case so it is not lost from the screen entirely, without
             // reintroducing the general "says it twice" duplication fixed
-            // earlier in this same PR.
-            final bannerShowsDiag = whyFromNote(d.readiness.note) == null;
+            // earlier in this same PR. Mirrors forMetric's precedence
+            // exactly: a need_baseline note is rendered as the fix, not
+            // `told`, so `why:` still wins there; a `gap` replaces `why:`.
+            final note = d.readiness.note;
+            final bannerShowsDiag = d.heldOverNight == null &&
+                (needMessageFromNote(note) != null ||
+                    whyFromNote(note) == null);
             return Column(children: [
               StatusCard.forMetric(
                       l?.readinessDetailNotScoredTitle ??
@@ -354,8 +359,8 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
   /// the screen saying the same thing twice.
   /// [fallbackReason] is non-null ONLY in the one case the banner above this
   /// section does not already show the diagnostic reason itself: a held-over
-  /// night, where `StatusCard.forMetric` prefers the metric's own prose note
-  /// ("nothing synced yet") over it. Null in the ordinary case — the banner
+  /// night (the `gap` sentence replaces `why:`), or a prose note on the
+  /// metric that `StatusCard.forMetric` prefers over it. Null in the ordinary case — the banner
   /// already said it once, and repeating it here is the exact duplication a
   /// prior pass of this same PR removed.
   Widget _absence(
