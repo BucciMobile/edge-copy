@@ -465,7 +465,7 @@
   "dayStepsOnDay": "am {day}",
   "dayStepsNoTimesTitle": "Keine Uhrzeiten zu den Schritten {when}",
   "dayStepsNoStepsTitle": "Keine Schritte gezählt {when}",
-  "dayStepsStrapCounterBody": "Die {count} Schritte {when} stammen vom Schrittzähler des Bands. Er liefert nur eine laufende Tagessumme ohne Uhrzeiten – es gibt also nichts, was sich zeitlich einordnen ließe.",
+  "dayStepsStrapCounterBody": "Die {count} Schritte {when} stammen vom Schrittzähler des Bands; die Uhrzeiten dazu wurden für diesen Tag nicht gespeichert – es gibt also nichts, was sich zeitlich einordnen ließe.",
   "dayStepsNothingCounted": "Kein Gerät, das Schritte zählen kann, hat {when} etwas aufgezeichnet.",
   "dayStepsChartTitle": "WANN SIE GEZÄHLT WURDEN",
   "dayStepsUnit": "Schritte",

@@ -1764,7 +1764,10 @@ import 'substrate.dart';
 // repinned to analytics main @ 4fc2b12, which also carries #81-#85.
 // 103 → 104: detected naps require review; only accepted naps receive sleep credit.
 // Detector methods and sibling pins are unchanged.
-const int kAlgoVersion = 104;
+// 104 → 105 (gen5 on-chip step counter spans, issue #475): a strap_counter
+// day also stores hourly `steps.spans` off the counter's per-record times,
+// scaled to the calibrated `value`, so the day screen can place them. Edge-only.
+const int kAlgoVersion = 105;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -6663,6 +6666,7 @@ class DerivationEngine {
     CounterDeltas? counter,
     StepCalibrationProfile? profile,
     int wearing = Wearing.wrist,
+    List<({int startTs, int endTs, int steps})>? bandSpans,
   }) {
     // THE SOURCE LADDER, and where each rung is actually decided.
     //
@@ -6673,11 +6677,11 @@ class DerivationEngine {
     // share of it. Nothing here re-decides that.
     //
     // Rung 2, the gen5 ON-CHIP COUNTER, cannot join that sum honestly. It is a
-    // cumulative u16 with no midnight reset and no timestamps of its own
-    // (`hardwareStepsFromCounter` differences it across the day's records): a
-    // whole-day total with no window behind it. Slicing it into spans would
-    // mean inventing an extent for it, and adding it to windowed spans would
-    // double-count every walk the other two already counted. So it stays a
+    // cumulative u16 with no midnight reset (`hardwareStepsFromCounter`
+    // differences it across the day's records). Its deltas do carry times, one
+    // per record, so the day screen gets hourly `spans` off them; but adding
+    // it to the windowed spans would double-count every walk the other two
+    // already counted. So it stays a
     // WHOLE-DAY FALLBACK — used only when no span source covered the day at
     // all. That inversion is deliberate: whole-day precedence for this counter
     // is exactly the bug being fixed (622 steps published over the phone's
@@ -6717,6 +6721,11 @@ class DerivationEngine {
           'gap_seconds': counter.gapSeconds,
           'dropped_boundaries': counter.droppedBoundaries,
         },
+      // When the on-chip counter is the day's answer, WHEN it counted: hourly
+      // spans off the counter's own per-record times, scaled by the same
+      // factor as `value` and summing to it exactly.
+      if (useBand && bandSpans != null)
+        'spans': _scaleSpans(bandSpans, rawBand!, calibratedBand),
       // WHICH SENSOR COUNTED WHAT, so a screen can say so instead of implying
       // the phone's count came off the wrist or the other way round. Only the
       // keys that contributed are present — a zero here would read as "that
@@ -6788,6 +6797,24 @@ class DerivationEngine {
     };
   }
 
+  /// [spans] (raw counter ticks summing to [raw]) as bundle maps rescaled to
+  /// sum to exactly [target]: cumulative rounding, so no step is lost or added.
+  static List<Map<String, int>> _scaleSpans(
+      List<({int startTs, int endTs, int steps})> spans, int raw, int target) {
+    var cum = 0;
+    var placed = 0;
+    return [
+      for (final s in spans)
+        () {
+          cum += s.steps;
+          final upTo = raw <= 0 ? 0 : (cum * target / raw).round();
+          final n = upTo - placed;
+          placed = upTo;
+          return {'start_ts': s.startTs, 'end_ts': s.endTs, 'steps': n};
+        }(),
+    ];
+  }
+
   /// STEPS (real pedometer counts ONLY) + movement minutes + total daily energy
   /// (TDEE), written into the bundle's `steps`/`movement` blocks + `scalars`.
   ///
@@ -6839,6 +6866,11 @@ class DerivationEngine {
         counter: counter,
         profile: counterProfile,
         wearing: counterWearing,
+        bandSpans: hardwareStepSpansFromCounter(
+          daySub,
+          cumulativeCounterModulus:
+              ana.calibrationFor(_stepCounterModulus, daySub.deviceFamily),
+        ),
       );
 
       if (daySub.length < 60) return;
