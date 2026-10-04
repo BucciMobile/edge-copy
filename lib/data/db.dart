@@ -7737,18 +7737,17 @@ class LocalDb {
   /// absence, so it must never take down the screen load that asked for it.
   static Future<Map<String, dynamic>?> readinessAbsentDiag(String? day) async {
     if (day == null) return null;
-    final Object? payload;
     try {
-      payload = (await dayResult(day))?['payload_json'];
+      final payload = (await dayResult(day))?['payload_json'];
+      if (payload is! String || !payload.contains('"readiness_absent_diag"')) {
+        return null;
+      }
+      final b = jsonDecode(payload);
+      final diag = b is Map ? b['readiness_absent_diag'] : null;
+      return diag is Map ? diag.cast<String, dynamic>() : null;
     } catch (_) {
       return null;
     }
-    if (payload is! String || !payload.contains('"readiness_absent_diag"')) {
-      return null;
-    }
-    final b = jsonDecode(payload);
-    final diag = b is Map ? b['readiness_absent_diag'] : null;
-    return diag is Map ? diag.cast<String, dynamic>() : null;
   }
 
   /// The most recent day (highest day_id label), latest version, or null.
