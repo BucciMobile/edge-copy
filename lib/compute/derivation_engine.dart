@@ -1938,8 +1938,10 @@ const String kProtocolPin = 'bc7d8d0df706e40a2546ffde4545263f09d0fecb';
 /// Raw is kept this many days past derivation, then pruned (derived stays).
 const int rawRetentionDays = 3;
 
-/// A day stays recomputable for this long after its wake, then FINALIZES (locks)
-/// — more flash may still drain within this buffer (ARCHITECTURE_V2: ~48 h).
+/// A day stays recomputable until the data edge is this far past the day's
+/// LAST record (`endSec`, ≈ the end of the calendar day), then FINALIZES
+/// (locks). So a full day locks ~72 h after it starts. More flash may still
+/// drain within this buffer.
 const int _finalizationSec = 48 * 3600;
 
 /// How many trailing derived days feed readiness/composite baselines.
@@ -2732,7 +2734,7 @@ class DerivationEngine {
         _diag['stage'] = 'notifications';
         await _runNotifications();
       }
-      // 5. Prune raw — never for a day still inside its raw window / un-derived.
+      // 5. Prune raw — never for a day still inside its raw window / not finalized.
       // Runs on EVERY derive, not just a full restage: `rawRetentionDays` is
       // the only cap on the 1 Hz substrate, and behind `scope.fullHistory` it
       // fired only on a manual "Re-analyze data", so an ordinary install grew
@@ -4713,7 +4715,7 @@ class DerivationEngine {
       TelemetryService.instance.recordNonFatal(e, st, reason: 'day_blocks_failed');
     }
 
-    // Finalize once the DATA EDGE has moved >48 h past the day's wake — i.e. we
+    // Finalize once the DATA EDGE has moved >48 h past the day's last record — we
     // have continuous drained data well beyond it, so no more flash can land for
     // this day. (Anchored on the last record ts, NOT the wall clock.) Imports
     // force-finalize: there is no stored raw to ever recompute them from, so
@@ -5676,15 +5678,14 @@ class DerivationEngine {
   // ── raw pruning (raw-first invariant) ──────────────────────────────────────
 
   /// Longest the raw-first hold below may keep substrate past
-  /// [rawRetentionDays] for a day that still hasn't produced a complete result.
+  /// [rawRetentionDays] for a day that still hasn't finalized.
   ///
   /// The hold has to be bounded or it is not a hold, it is an off switch. A
   /// `partial` day is DELIBERATELY never finalized by age (see
   /// `_derivePreparedDay` — a headline-only row must keep its chance to be
-  /// filled in), and `dayResultIds` excludes both `partial` and `skipped`, so a
-  /// day whose second half fails every single time never becomes "derived" and
-  /// never becomes finalized either. One such day used to latch pruning off for
-  /// the whole install, forever, at ~12 MB/day.
+  /// filled in), and a transient skip never finalizes, so a day whose second
+  /// half fails every single time never becomes finalized. One such day used
+  /// to latch pruning off for the whole install, forever, at ~12 MB/day.
   static const int _maxRawHoldDays = 14;
 
   /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
@@ -5697,18 +5698,22 @@ class DerivationEngine {
   static int? rawPruneCutoffSec({
     required int dataNowSec,
     required List<String> rawDayIds,
-    required Set<String> derivedDayIds,
+    required Set<String> finalizedDayIds,
   }) {
     final cutoffSec = dataNowSec - rawRetentionDays * 86400;
     if (cutoffSec <= 0) return null;
-    final pending = rawDayIds.where((d) => !derivedDayIds.contains(d)).toList()
-      ..sort();
+    // Pending = not FINALIZED, not merely "has a result": an unlocked day is
+    // still re-derived, and a re-derive from a cut night overwrites the good
+    // row and then locks it.
+    final pending =
+        rawDayIds.where((d) => !finalizedDayIds.contains(d)).toList()..sort();
     if (pending.isEmpty) return _localDayStartOf(cutoffSec);
-    // Hold at the START of the oldest day still owed a result — its own rows
-    // survive, everything before it goes — floored so a permanently stuck day
-    // cannot hold the whole install (see [_maxRawHoldDays]).
+    // Hold at the start of the oldest pending day's derive window (the
+    // previous noon, where its night search begins, see [_targetDayWindow]),
+    // floored so a permanently stuck day cannot hold the whole install (see
+    // [_maxRawHoldDays]).
     final barrier = math.max(
-      _localDayLabelToSec(pending.first),
+      _localDayLabelToSec(pending.first) - kNocturnalSearchLookbackSec,
       dataNowSec - _maxRawHoldDays * 86400,
     );
     return _localDayStartOf(barrier < cutoffSec ? barrier : cutoffSec);
@@ -5730,8 +5735,8 @@ class DerivationEngine {
   /// backfill received in one sync must not be pruned just because it landed
   /// "now".
   ///
-  /// RAW-FIRST, DAY-SCOPED. A day in [rawDayIds] with no complete result at the
-  /// current algo version pulls the cutoff back to ITS OWN start instead of
+  /// RAW-FIRST, DAY-SCOPED. A day in [rawDayIds] not yet finalized at the
+  /// current algo version pulls the cutoff back to its derive window instead of
   /// aborting the whole prune — the old all-or-nothing guard meant a single
   /// stuck day kept every older day's substrate too. Bounded by
   /// [_maxRawHoldDays] so a permanently-stuck day cannot wedge it.
@@ -5755,11 +5760,10 @@ class DerivationEngine {
   ///     why a workout's average HR is written into the bundle (it was once
   ///     re-derived lazily and vanished the moment its substrate aged out).
   Future<void> _pruneOldDecoded(List<String> rawDayIds, int dataNowSec) async {
-    final derivedIds = await LocalDb.dayResultIds(kAlgoVersion);
     final cutoffSec = rawPruneCutoffSec(
       dataNowSec: dataNowSec,
       rawDayIds: rawDayIds,
-      derivedDayIds: derivedIds,
+      finalizedDayIds: await LocalDb.finalizedDayIds(kAlgoVersion),
     );
     if (cutoffSec == null) return;
     // Highest cutoff ever applied: a held-back pass can cut lower, but rows
