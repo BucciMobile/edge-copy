@@ -220,17 +220,21 @@ void main() {
   );
 
   test(
-    'predicted next period counts calendar days across the fall-back',
+    'the cycle prediction counts calendar days across a fall-back',
     () async {
-      await LocalDb.putCycleLog('2026-09-12', 'start');
-      await LocalDb.putCycleLog('2026-10-10', 'start'); // 28 days
+      // Gaps 28, 21, 35 -> median 28, MAD 7, last start 2026-10-10. Adding
+      // 28 x 24 h crosses 2026-11-01's extra hour and lands at 23:00 on
+      // 11-06, so the date (and the band's upper edge) came out a day early.
+      for (final d in ['2026-07-18', '2026-08-15', '2026-09-05', '2026-10-10']) {
+        await LocalDb.putCycleLog(d, 'start');
+      }
       final repo = LocalRepositoryImpl(
         getProfileMap: () => {'track_cycle': true},
       );
       final cycle = await repo.getCycle();
-      // 2026-10-10 + 28 crosses $_fallBack (25 h); a Duration add lands at
-      // 23:00 on 2026-11-06.
       expect(cycle['predicted_next'], '2026-11-07');
+      expect(cycle['predicted_from'], '2026-10-31');
+      expect(cycle['predicted_to'], '2026-11-14');
     },
     skip: Platform.isWindows ? 'POSIX setenv/tzset only' : null,
   );
