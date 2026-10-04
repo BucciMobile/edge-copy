@@ -6665,8 +6665,14 @@ class AppState extends ChangeNotifier {
   Future<void> deleteWorkout(String id) async {
     final live = activeWorkout?.workoutId == id;
     if (live) await _cancelActiveWorkoutTeardown();
-    await repo?.deleteWorkout(id);
-    if (live) notifyListeners();
+    // The live session is already gone either way: a failed delete leaves its
+    // row `status='live'`, which the relaunch reconcile finalizes. The UI still
+    // has to hear that nothing is live any more.
+    try {
+      await repo?.deleteWorkout(id);
+    } finally {
+      if (live) notifyListeners();
+    }
   }
 
   // ── band-gesture actions (in-app) ─────────────────────────────────────────────

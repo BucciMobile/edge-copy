@@ -225,6 +225,8 @@ class RhrSeedImporter {
       ownId = (await PackageInfo.fromPlatform()).packageName;
     } catch (e) {
       debugPrint('[rhr_seed] package info: $e');
+      // without our own id we can't skip the rhr we wrote ourselves
+      return null;
     }
     final dayValues = <(String, double)>[];
     for (final p in points) {
