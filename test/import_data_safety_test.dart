@@ -283,7 +283,7 @@ void main() {
     expect((payload['scalars'] as Map)['skin_temp_z'], isNull);
   });
 
-  test('reopening the db scrubs °C skin_temp_z left by older WHOOP imports',
+  test('upgrading to v55 scrubs °C skin_temp_z left by older WHOOP imports',
       () async {
     Future<void> put(String day, Map<String, dynamic> bundle) =>
         LocalDb.putDayResult(
@@ -302,6 +302,13 @@ void main() {
       'date': '2026-04-21',
       'scalars': {'readiness': 60, 'skin_temp_z': 0.8},
     });
+    // a plain reopen leaves it alone: the heal is a one-time upgrade rung
+    await LocalDb.close();
+    expect(
+        ((jsonDecode((await _row('2026-04-20'))!['payload_json'] as String)
+            as Map)['scalars'] as Map)['skin_temp_z'],
+        33.4);
+    await (await LocalDb.instance).execute('PRAGMA user_version = 54');
     await LocalDb.close();
 
     Future<Map> scalars(String day) async =>
