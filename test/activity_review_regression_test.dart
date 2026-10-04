@@ -533,6 +533,45 @@ void main() {
     expect(bundle['scalars']['nap_min'], 0);
   });
 
+  test('removing the only logged nap on an unjudged day stays unknown', () async {
+    await LocalDb.putDayResult(
+      dayId: day,
+      algoVersion: kAlgoVersion,
+      windowJson: '{}',
+      finalized: true,
+      payloadJson: jsonEncode({
+        'scalars': <String, dynamic>{},
+        'naps': {
+          'value': null,
+          'count': null,
+          'confidence': 0,
+          'tier': 'ESTIMATE',
+          'inputs_used': [],
+          'note': 'could not be assessed',
+          'assessment_complete': false,
+        },
+      }),
+    );
+    await LocalDb.putNapEdit(
+      dayId: day,
+      startTs: start,
+      endTs: start + 1800,
+      source: 'manual',
+    );
+    await LocalDb.applyPendingActivityReviews();
+    var bundle = jsonDecode(
+      (await LocalDb.dayResult(day))!['payload_json'] as String,
+    );
+    expect(bundle['naps']['value'], hasLength(1));
+    await LocalDb.deleteNapEdit(day, start);
+    await LocalDb.applyPendingActivityReviews();
+    bundle = jsonDecode(
+      (await LocalDb.dayResult(day))!['payload_json'] as String,
+    );
+    expect(bundle['naps']['value'], isNull);
+    expect(bundle['scalars']['nap_min'], isNull);
+  });
+
   for (final localDecision in ['discarded', 'confirmed', 'none']) {
     test('workout restore respects $localDecision local decision', () async {
       final repo = LocalRepositoryImpl(getProfileMap: () => {});

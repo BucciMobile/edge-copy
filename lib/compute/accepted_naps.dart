@@ -6,7 +6,15 @@ void composeAcceptedNaps(Map<String, dynamic> bundle, List<NapEdit> edits) {
   final old = bundle['naps'] as Map?;
   if (old == null && edits.isEmpty) return;
   final accepted = applyNapEdits(const [], edits);
-  final assessed = old?['value'] != null || accepted.isNotEmpty;
+  // Whether the detector judged the day, persisted so a later compose cannot
+  // turn an unjudged day into a measured zero once its logged naps are gone.
+  // Rows from before the flag: an unjudged day only carried a value when the
+  // user had logged one, stamped inputs_used [user].
+  final inputs = old?['inputs_used'];
+  final judged = (old?['assessment_complete'] as bool?) ??
+      (old?['value'] != null &&
+          !(inputs is List && inputs.length == 1 && inputs.first == 'user'));
+  final assessed = judged || accepted.isNotEmpty;
   final minutes = assessed && accepted.every((n) => n['duration_min'] is num)
       ? napMinutes(accepted)
       : null;
@@ -14,7 +22,8 @@ void composeAcceptedNaps(Map<String, dynamic> bundle, List<NapEdit> edits) {
     ...?old?.cast<String, dynamic>(),
     'value': assessed ? accepted : null,
     'count': assessed ? accepted.length : null,
-    'note': assessed ? 'Confirmed and logged naps only' : old?['note'],
+    'note': judged ? 'Confirmed and logged naps only' : old?['note'],
+    'assessment_complete': judged,
   };
   final scalars = Map<String, dynamic>.from((bundle['scalars'] as Map?) ?? {});
   scalars['nap_min'] = minutes?.toDouble();

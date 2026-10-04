@@ -7642,6 +7642,7 @@ class DerivationEngine {
       'tier': ana.Tier.auth,
       'inputs_used': const ['user'],
       'note': '$note — showing what you logged',
+      'assessment_complete': false,
     };
     scMap?['nap_min'] = napMinutes(merged).toDouble();
     return [
@@ -7670,6 +7671,7 @@ class DerivationEngine {
       'tier': 'ESTIMATE',
       'inputs_used': const <String>[],
       'note': note,
+      'assessment_complete': false,
     };
   }
 
@@ -7795,6 +7797,7 @@ class DerivationEngine {
         'tier': m.tier,
         'inputs_used': m.inputs_used,
         'note': napEdits.isEmpty ? m.note : '${m.note} (edited)',
+        'assessment_complete': true,
       };
 
       // TST, never TIB. Crediting in-bed minutes against sleep need
