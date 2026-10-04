@@ -1767,7 +1767,16 @@ import 'substrate.dart';
 // 104 → 105 (gen5 on-chip step counter spans, issue #475): a strap_counter
 // day also stores hourly `steps.spans` off the counter's per-record times,
 // scaled to the calibrated `value`, so the day screen can place them. Edge-only.
-const int kAlgoVersion = 105;
+// 105 → 106 (sweep batch, edge#506 #512): manual HR zones reach the day
+// derive (Profile.toMap dropped `hr_zone_bounds`, so zone timeline/zone_source
+// banded on the automatic set); the habitual-midsleep prior reads the bare
+// `SleepWindow.toJson()` every writer stores (it never had history and every
+// night anchored on the 03:30 cold start); tonight's sleep begun before
+// midnight leaves the waking series behind strain/TRIMP/zones/calories,
+// daytime HRV and the HR dip, and is no longer also booked as this day's nap
+// (`PreparedDerivationDay.tonightSleepOnsetSec`); a saved session's HRR
+// abstains when recording resumed more than 30 s after its end. Edge-only.
+const int kAlgoVersion = 106;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
