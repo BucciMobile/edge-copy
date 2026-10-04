@@ -2619,15 +2619,46 @@ class LocalRepositoryImpl extends LocalRepository {
     required int startTs,
     required int endTs,
     required String type,
-  }) => _writeManualSession(
-    startTs: startTs,
-    endTs: endTs,
-    type: type,
+  }) async {
     // A manual row's id is derived from its start second, so re-logging the
-    // same window is an UPDATE of that row, not a collision with it. Pass
-    // the id we are about to write as the one to skip in the overlap check.
-    validateAgainstId: manualSessionId(startTs),
-  );
+    // IDENTICAL window is an update of that row, not a collision with it. A
+    // different end or type on the same start second is a different entry:
+    // skipping it in the overlap check would let REPLACE overwrite it, so it
+    // has to be refused like any other overlap.
+    //
+    // A retimed session keeps its id, so the row under that id may no longer
+    // start at this second. It is not this entry at all: give the new one its
+    // own id instead of REPLACEing (and inheriting the route of) the moved one.
+    // An entry already logged that way lives under `$id:<ms>`, so a retry of
+    // it is found there and stays an update.
+    final id = manualSessionId(startTs);
+    var prior = await LocalDb.session(id);
+    final moved =
+        prior != null && (prior['start_ts'] as num?)?.toInt() != startTs;
+    if (moved) {
+      prior = null;
+      for (final r in await LocalDb.sessionsInRange(startTs, startTs)) {
+        if ((r['id'] as String?)?.startsWith('$id:') ?? false) {
+          prior = r;
+          break;
+        }
+      }
+    }
+    final same = prior != null &&
+        (prior['end_ts'] as num?)?.toInt() == endTs &&
+        prior['type'] == type;
+    return _writeManualSession(
+      startTs: startTs,
+      endTs: endTs,
+      type: type,
+      existing: same ? prior : null,
+      sessionId:
+          moved ? '$id:${DateTime.now().millisecondsSinceEpoch}' : null,
+      validateAgainstId: same
+          ? prior['id'] as String
+          : (prior == null && !moved ? id : null),
+    );
+  }
 
   @override
   Future<Map<String, dynamic>> setWorkoutWindow(
@@ -2680,7 +2711,7 @@ class LocalRepositoryImpl extends LocalRepository {
     required int startTs,
     required int endTs,
     required String type,
-    required String validateAgainstId,
+    required String? validateAgainstId,
     Map<String, dynamic>? existing,
     String? sessionId,
     String source = 'manual',
