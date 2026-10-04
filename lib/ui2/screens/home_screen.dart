@@ -1631,7 +1631,6 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         ],
         const SizedBox(height: S.x3),
         const DetectedActivitiesCard(),
-        const SizedBox(height: S.x3),
         if (_loading)
           const Center(child: CircularProgressIndicator())
         else if (_failed)
@@ -1785,7 +1784,6 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
 
       if (bare) ...[
         const DetectedActivitiesCard(),
-        const SizedBox(height: S.x3),
       ],
       ...dayNavRow(_day ?? d.dayId, _days, _goDay),
 
@@ -1858,7 +1856,6 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
 
         const SizedBox(height: S.x3),
         const DetectedActivitiesCard(),
-        const SizedBox(height: S.x3),
         const CommunityNudge(),
 
         // ── the rollup was withheld, not absent ──
