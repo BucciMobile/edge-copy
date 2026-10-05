@@ -293,8 +293,8 @@ Future<RoughNight?> loadRoughNight(
           illnessFlagged = true;
           knows.add(
             l?.roughNightIllness ??
-                'The illness watch flagged this night too — a sustained rise '
-                    'against your own baseline, not a diagnosis.',
+                'The illness watch flagged this night too — recent nights add '
+                    'up to a rise above your own baseline, not a diagnosis.',
           );
           break;
         }

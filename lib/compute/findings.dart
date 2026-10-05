@@ -73,7 +73,7 @@ class Finding {
       };
 
   String get title => switch (kind) {
-        FindingKind.illness => 'Possible illness onset',
+        FindingKind.illness => 'Resting heart rate has been raised',
         FindingKind.anomaly => 'Unusual overnight physiology',
         FindingKind.tempElevated => 'Skin temperature elevated',
         FindingKind.irregularRhythm => 'Irregular heart rhythm — screen',
@@ -82,8 +82,13 @@ class Finding {
       };
 
   String get detail => switch (kind) {
+        // A red state is ACCUMULATED evidence: one very high night followed
+        // by an ordinary one is enough, so nothing here may claim a streak.
         FindingKind.illness =>
-          'Elevated resting HR + suppressed HRV over recent nights.',
+          'Your recent overnight resting heart rates add up to a rise above '
+              'your own baseline: one very high night can do it, or a few '
+              'slightly raised ones. This watches one signal only. It names a '
+              'pattern, not a cause.',
         FindingKind.anomaly =>
           'Your nightly signals deviate from your personal baseline.',
         FindingKind.tempElevated =>

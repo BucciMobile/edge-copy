@@ -1932,25 +1932,25 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     return [
       Observation(
         state == 'red'
-            ? (l?.homeIllnessRedTitle ?? 'Several nights in a row are away from your normal')
+            ? (l?.homeIllnessRedTitle ?? 'Recent nights add up to a raised resting heart rate')
             : sameNight
                 ? (l?.homeIllnessAmberSameNight ?? 'Last night sat outside your normal range')
                 : (l?.homeIllnessAmberOtherNight(prettyDay(d.illnessDay, l)) ??
                     '${prettyDay(d.illnessDay, l)} sat outside your normal range'),
         z == null
             ? (l?.homeIllnessBodyNoZ ??
-                'Your nocturnal resting heart rate has been running above your own '
-                'baseline. This reads one signal. It names a pattern, and it does '
-                'not name a cause.')
+                'Your recent nocturnal resting heart rates add up to a rise above '
+                'your own baseline. This reads one signal. It names a pattern, and '
+                'it does not name a cause.')
             : (z >= 0
                 ? (l?.homeIllnessBodyAbove(zAbs) ??
-                    'Your nocturnal resting heart rate has been running above your own '
-                    'baseline; that night sat $zAbs standardised deviations above it. '
+                    'Your recent nocturnal resting heart rates add up to a rise above '
+                    'your own baseline; that night sat $zAbs standardised deviations above it. '
                     'This reads one signal. It names a pattern, and it does not name '
                     'a cause.')
                 : (l?.homeIllnessBodyBelow(zAbs) ??
-                    'Your nocturnal resting heart rate has been running above your own '
-                    'baseline; that night sat $zAbs standardised deviations below it. '
+                    'Your recent nocturnal resting heart rates add up to a rise above '
+                    'your own baseline; that night sat $zAbs standardised deviations below it. '
                     'This reads one signal. It names a pattern, and it does not name '
                     'a cause.')),
         advice: l?.homeIllnessAdvice ?? 'Worth noting if it continues past a couple of days.',
