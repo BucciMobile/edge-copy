@@ -83,10 +83,11 @@ typedef CommitSyncBatchSink =
       String? deviceFamily,
     });
 
-/// Persist an UNDECODABLE historical record (unknown/unsupported version) to the
-/// durable archive (never pruned). Used only by the pre-setup fallback path; the
-/// drain path archives inside the SAME transaction as the batch commit so the
-/// safe-trim invariant holds (see [CommitSyncBatchSink]).
+/// Persist an UNDECODABLE historical record (unknown/unsupported version) to
+/// the durable archive (kept, except the thinning in
+/// `LocalDb.thinRawArchiveBefore`). Used only by the pre-setup fallback path;
+/// the drain path archives inside the SAME transaction as the batch commit so
+/// the safe-trim invariant holds (see [CommitSyncBatchSink]).
 typedef ArchiveSink = Future<void> Function(ArchiveRecord archive);
 
 // ── WHOOP MG ECG (Labrador) ─────────────────────────────────────────────────
@@ -4206,8 +4207,9 @@ class BleEngine {
             // Only while an offload is running: that is the only window where
             // an ACK can make the band delete these bytes, and we cannot tell a
             // record from a 100 Hz live frame under an unknown revision —
-            // archiving those (raw_archive is never pruned) would bloat the DB
-            // exactly the way live frames are kept out of raw_records for.
+            // archiving those (raw_archive is kept, except the thinning in
+            // `LocalDb.thinRawArchiveBefore`) would bloat the DB exactly the
+            // way live frames were kept out of the old raw_records ledger.
             if (_offloadActive) {
               _archiveHistoricalFrame(
                 frame,
@@ -5082,9 +5084,9 @@ class BleEngine {
   /// (plausibility + frontier via [RecordGate]) → storage enqueue. Keeping one
   /// path is deliberate: the previous duplicate had drifted, silently losing
   /// the plausibility gate and freezing the frontier the stuck-strap /
-  /// auto-continue policies read.
-  /// Set a historical frame aside in `raw_archive` — the never-pruned store for
-  /// bytes this build could not fully turn into a [Sample].
+  /// auto-continue policies read. Set a historical frame aside in `raw_archive`
+  /// — the kept store (except the thinning in `LocalDb.thinRawArchiveBefore`)
+  /// for bytes this build could not fully turn into a [Sample].
   ///
   /// Routed through the drain when one is active so the write lands inside the
   /// SAME transaction as the batch commit (safe-trim invariant: nothing the
@@ -5233,7 +5235,7 @@ class BleEngine {
       // SLP-05 sizes does not exist on real data.
       //
       // Worse, routing it here would be a REGRESSION: `_queueDecodedOneHz`
-      // writes REPLACE on the rec_ts key, so a v25 record arriving for a
+      // writes REPLACE on the second's key, so a v25 record arriving for a
       // second a v24 record already holds would evict it — deleting that
       // second's HR, R-R, optical and thermal readings and leaving an
       // HR-less row behind. That is 49% of v25 records.

@@ -287,9 +287,10 @@ class RawRecord {
 /// unknown/unsupported record version that also failed the physiological
 /// fallback). Rather than silently dropping it — which would lose a future
 /// firmware's records forever while the UI still showed a clean sync — we
-/// archive the raw bytes durably (never pruned) so they can be re-decoded once
-/// the format is understood. Archived as part of the SAME durable commit that
-/// runs BEFORE the HISTORY_END ACK, so the safe-trim invariant holds.
+/// archive the raw bytes durably (kept, except the thinning in
+/// `LocalDb.thinRawArchiveBefore`) so they can be re-decoded once the format is
+/// understood. Archived as part of the SAME durable commit that runs BEFORE the
+/// HISTORY_END ACK, so the safe-trim invariant holds.
 /// [ArchiveRecord.reason] for a record the plausibility gate refused.
 ///
 /// Load-bearing, not a label: three separate decisions branch on it — whether
