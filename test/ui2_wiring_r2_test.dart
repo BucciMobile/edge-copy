@@ -417,9 +417,11 @@ void main() {
   // amber has no notification, so before this the earliest signal the app
   // produces could only be found by opening Health and scrolling to it.
   group('illness watch on Home', () {
-    Widget frame(HomeData d) => MaterialApp(
+    Widget frame(HomeData d, {DateTime? now}) => MaterialApp(
         theme: buildTheme(Brightness.light),
-        home: Scaffold(body: HomeScreen(data: d, hour: 9)));
+        home: Scaffold(
+            body: HomeScreen(
+                data: d, hour: 9, now: now ?? DateTime(2026, 5, 20, 9))));
 
     const base = HomeData(dayId: '2026-05-20');
 
@@ -459,9 +461,98 @@ void main() {
 
     testWidgets('an older night is named rather than called last night',
         (t) async {
-      await t.pumpWidget(frame(base.copyOrIllness('amber', '2026-05-16', 2.2)));
-      expect(find.textContaining('16 May'), findsOneWidget);
+      await t.pumpWidget(frame(base.copyOrIllness('amber', '2026-05-19', 2.2)));
+      expect(find.textContaining('19 May'), findsOneWidget);
       expect(find.textContaining('Last night'), findsNothing);
+    });
+
+    // The watch publishes the newest SETTLED night, which after a few days off
+    // the wrist is days old — and the red title carries no date, so it would
+    // read as current. Older verdicts live in Observations, not on Home.
+    testWidgets('a verdict older than yesterday stays off Home', (t) async {
+      await t.pumpWidget(frame(base.copyOrIllness('red', '2026-05-16', 3.1)));
+      expect(find.textContaining('Several nights'), findsNothing);
+      expect(find.textContaining('normal range'), findsNothing);
+    });
+
+    testWidgets('an undated verdict renders nothing', (t) async {
+      await t.pumpWidget(frame(base.copyOrIllness('red', null, 3.1)));
+      expect(find.textContaining('Several nights'), findsNothing);
+    });
+
+    // A screen that stays mounted across midnight with no new sync keeps the
+    // payload it loaded; the verdict ages by the CLOCK, not by the payload.
+    testWidgets('the card expires when the calendar moves on', (t) async {
+      final d = base.copyOrIllness('red', '2026-05-19', 3.1);
+      await t.pumpWidget(frame(d, now: DateTime(2026, 5, 20, 9)));
+      expect(find.textContaining('Several nights'), findsOneWidget);
+      await t.pumpWidget(frame(d, now: DateTime(2026, 5, 21, 9)));
+      expect(find.textContaining('Several nights'), findsNothing);
+    });
+
+    testWidgets("yesterday's night is not called last night on a new day",
+        (t) async {
+      // Loaded on the 20th about the 20th's night; it is now the 21st.
+      await t.pumpWidget(frame(base.copyOrIllness('amber', '2026-05-20', 2.4),
+          now: DateTime(2026, 5, 21, 9)));
+      expect(find.textContaining('20 May sat outside'), findsOneWidget);
+      expect(find.textContaining('Last night'), findsNothing);
+    });
+  });
+
+  // Health's copy of the watch takes the same freshness rule as Home and the
+  // push, judged against the day the payload was built for.
+  group('illness watch on Health', () {
+    Future<void> pump(WidgetTester t, String? illnessDay,
+        {DateTime? now, String state = 'red'}) async {
+      t.view.physicalSize = const Size(390 * 3, 2400 * 3);
+      t.view.devicePixelRatio = 3;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: Scaffold(
+          body: HealthScreen(
+            now: now ?? DateTime(2026, 5, 20, 9),
+            data: HealthData(today: {
+              'status': {'today_day': '2026-05-20'},
+              'illness': {'state': state, 'date': illnessDay, 'z': 3.1},
+            }),
+          ),
+        ),
+      ));
+      await t.pumpAndSettle();
+    }
+
+    testWidgets('a red night yesterday shows', (t) async {
+      await pump(t, '2026-05-19');
+      expect(find.textContaining('Several nights in a row'), findsOneWidget);
+    });
+
+    testWidgets('a red night four days back does not', (t) async {
+      await pump(t, '2026-05-16');
+      expect(find.textContaining('Several nights in a row'), findsNothing);
+    });
+
+    testWidgets('an undated verdict renders nothing', (t) async {
+      await pump(t, null);
+      expect(find.textContaining('Several nights in a row'), findsNothing);
+    });
+
+    testWidgets('the card expires when the calendar moves on', (t) async {
+      // Same cached payload (built for the 20th), but it is now the 21st.
+      await pump(t, '2026-05-19', now: DateTime(2026, 5, 21, 9));
+      expect(find.textContaining('Several nights in a row'), findsNothing);
+    });
+
+    // "Last night" and the gate read the same clock: an amber verdict about
+    // the clock's own day is last night, one about the day before is named.
+    testWidgets('amber names the night by the same clock the gate uses',
+        (t) async {
+      await pump(t, '2026-05-20', state: 'amber');
+      expect(find.textContaining('Last night sat outside'), findsOneWidget);
+      await pump(t, '2026-05-20', state: 'amber', now: DateTime(2026, 5, 21, 9));
+      expect(find.textContaining('Last night sat outside'), findsNothing);
+      expect(find.textContaining('20 May sat outside'), findsOneWidget);
     });
   });
 
