@@ -865,7 +865,6 @@ void main() {
     // a wedged session never leaves a half-torn OuraLink behind. Same
     // deterministic wedge as the test above: the first write parks at a
     // completer that is never completed.
-    final epochBefore = OuraLink.instance.sessionEpochForTest;
     try {
       await OuraLink.instance.syncResultForTest(
         _deviceId,
@@ -885,37 +884,34 @@ void main() {
       // expected: the harness failure, AFTER cleanup ran
     }
     // Cleanup observables: the wedged session's link was closed by the
-    // harness teardown, its fields cleared, and the epoch moved on — the
-    // session left no half-torn state behind.
+    // harness teardown — and close() RELEASED the parked write (the gate
+    // completer), so the session could actually unwind instead of hanging
+    // `BandHost.stop`'s cancel() forever. The session's host is stopped
+    // and cleared BEFORE the harness failure surfaces: no half-torn
+    // state left behind.
     expect(OuraLink.instance.lastReplayLink!.closed, isTrue,
-        reason: 'the harness closed the wedged session\'s link on the '
+        reason: 'the harness closed the wedged session's link on the '
             'timeout path');
-    expect(OuraLink.instance.sessionEpochForTest, greaterThan(epochBefore),
-        reason: 'cleanup ran: the harness moved the session state on');
-    // A stop() naming an ALREADY-PAST epoch (here: one from before the
-    // wedged session even started) must be a no-op. The wedged session's
-    // OWN late stop (its epoch is still current — no follow-up has started
-    // in this test) is the idempotent double-stop the lifecycle tests
-    // already cover; the cross-session case is the next test.
-    await OuraLink.instance.stop(epoch: epochBefore);
+    expect(OuraLink.instance.hostForTest, isNull,
+        reason: 'cleanup ran BEFORE the harness failure surfaced: the '
+            'session's host is stopped and cleared');
   }, timeout: const Timeout(Duration(seconds: 10)));
 
   test(
-      'a late teardown of a PAST session cannot touch a follow-up session '
-      'that is STILL OPEN',
+      'a wedged session ENDS (not hangs) and a follow-up sync is unaffected',
       () async {
-    // THE SEQUENCE the epoch guard exists for, driven to the letter of
-    // the review: attempt 1 wedges (its first write parked at a completer)
-    // and its harness gives up on it, but its session body — and with it
-    // the `finally { stop(epoch: ...) }` — is still pending. Attempt 2
-    // then STARTS and is held open mid-session by a WITHHELD ring reply
-    // (the same concrete-step technique the lifecycle tests use). Only
-    // then is attempt 1's delayed teardown actually RELEASED, while
-    // attempt 2 is open. DURING the overlap: link 2 not closed, its RX
-    // subscription alive, its host untouched. Afterwards attempt 2 is
-    // completed normally and must succeed.
-    // ATTEMPT 1: wedged at its first write; its harness will give up on it.
-    final wedgedGate = Completer<void>();
+    // THE CLEANUP HANG PATH, made observable: attempt 1's first write parks
+    // at a gate; the harness watchdog expires, and its link.close() must
+    // RELEASE that gate — the ONLY way the parked write (and behind it
+    // `BandHost.stop`'s `cancel()`, which waits for the adapter generator
+    // to unwind) can ever end. Proof that the old session ACTUALLY
+    // finished, not a sleep loop: the harness's `done` future only
+    // completes after the session's own teardown ran
+    // (`_runSessionAndTeardown`'s finally), so awaiting the (throwing)
+    // verdict IS the completion proof. A follow-up session then runs to
+    // its honest success on the same ring — the serialized production
+    // reality, no artificial overlap.
+    final gate = Completer<void>();
     ReplayBandLink? wedgedLink;
     final firstAttempt = OuraLink.instance.syncResultForTest(
       _deviceId,
@@ -930,87 +926,41 @@ void main() {
       harnessTimeout: const Duration(seconds: 2),
       onLink: (link) {
         wedgedLink = link;
-        link.writeGate = wedgedGate;
+        link.writeGate = gate;
       },
     );
-    final wedgedEpoch = OuraLink.instance.sessionEpochForTest;
-    // ATTEMPT 2: manual-drive, NO gate on its writes — the test holds IT
-    // open by withholding ring replies, exactly like the lifecycle tests.
-    final nonceAsked = Completer<void>();
-    final proofAsked = Completer<void>();
-    final historyAsked = Completer<void>();
-    final (secondResult, secondLink) =
-        await OuraLink.instance.startSessionForTest(
+    // The session parked at its first write — proof, not a timer.
+    await wedgedLink!.gateEntered;
+    // The watchdog fires: harness deadline expired with the session
+    // unfinished. AWAITING the throw is the proof the session ENDED —
+    // done completes only after the session's own finally ran, and the
+    // finally could only run because close() released the gate.
+    await expectLater(firstAttempt, throwsA(isA<StateError>()));
+    expect(wedgedLink!.closed, isTrue,
+        reason: 'the harness closed the wedged session's link — and its '
+            'gate with it, so the session could unwind');
+    expect(OuraLink.instance.hostForTest, isNull,
+        reason: 'the wedged session's host is stopped and cleared — its '
+            'cleanup completed, not hang');
+    // FOLLOW-UP: a plain, successful session on the SAME ring, AFTER the
+    // wedged one fully ended — the serialized reality. It must succeed
+    // on its own terms, with no residue of the wedged attempt.
+    final second = await OuraLink.instance.syncResultForTest(
       _deviceId,
       _key,
-      nowSeconds: () => _nowSec,
-      onWrite: (uuid, value) {
-        if (value.first == 0x2f && value[2] == 0x2b) {
-          if (!nonceAsked.isCompleted) nonceAsked.complete();
-        } else if (value.first == 0x2f && value[2] == 0x2d) {
-          if (!proofAsked.isCompleted) proofAsked.complete();
-        } else if (value.first == 0x10) {
-          if (!historyAsked.isCompleted) historyAsked.complete();
-        }
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 0)];
+        return const <List<int>>[];
       },
+      nowSeconds: () => _nowSec,
     );
-    final secondEpoch = OuraLink.instance.sessionEpochForTest;
-    expect(secondEpoch, greaterThan(wedgedEpoch));
-    // Attempt 1's harness gives up on the wedged session (StateError) and
-    // runs its cleanup; attempt 1's session body stays parked at the gate.
-    await expectLater(firstAttempt, throwsA(isA<StateError>()));
-    // Drive attempt 2 INTO its held step: the nonce write went out (proof
-    // the session is driving the link), and the test withholds the reply.
-    await nonceAsked.future;
-    // ATTEMPT 2 IS NOW OPEN MID-HANDSHAKE: not closed, subscribed, no
-    // teardown begun. Record the state the late teardown must not touch.
-    expect(secondLink.closed, isFalse,
-        reason: 'attempt 2 is mid-handshake — its own teardown is far away');
-    expect(secondLink.isListening(kOuraNotifyChar), isTrue,
-        reason: 'attempt 2 owns a live RX subscription');
-    final hostBefore = OuraLink.instance.hostForTest;
-    // NOW RELEASE attempt 1's delayed teardown — attempt 2 still open.
-    wedgedGate.complete();
-    // Attempt 1's unwind after the release is a pure in-memory microtask
-    // chain: the released write returns false (its link was closed by the
-    // harness — the close contract at work), `_authenticate` returns
-    // false, `run()` ends, `_runSession` returns, and the `finally` runs
-    // `stop(epoch: wedgedEpoch)` — the LATE teardown, attempt 2 open.
-    // There is deliberately no completion to await: the guard makes the
-    // late stop a NO-OP, and a no-op leaves no trace — that is exactly
-    // what the assertions below verify. The settle window is bounded and
-    // orders of magnitude longer than the microtask chain needs; if the
-    // late stop is UNGUARDED (the regression), it nulls `_host` during
-    // this window and the `same(hostBefore)` assertion fails.
-    for (var i = 0; i < 50; i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-    }
-    // THE OVERLAP VERDICT — attempt 2 was open the whole time attempt 1's
-    // late teardown ran, and nothing it touched changed:
-    expect(secondLink.closed, isFalse,
-        reason: 'a late teardown of a PAST session must not close the '
-            'follow-up session\'s link');
-    expect(secondLink.isListening(kOuraNotifyChar), isTrue,
-        reason: 'a late teardown of a PAST session must not cancel the '
-            'follow-up session\'s RX subscription');
-    expect(OuraLink.instance.hostForTest, same(hostBefore),
-        reason: 'a late teardown of a PAST session must not stop or '
-            'replace the follow-up session\'s host');
-    // NOW complete attempt 2 normally: feed the withheld handshake, each
-    // reply after its write was observed — completer-driven, no sleeps.
-    secondLink.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
-    await proofAsked.future;
-    secondLink.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
-    await historyAsked.future;
-    secondLink.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
-    final ok2 = await secondResult;
-    expect(ok2, isTrue,
-        reason: 'the follow-up session must succeed on its own terms, '
-            'untouched by the past session\'s late teardown');
-    expect(secondLink.closed, isTrue,
-        reason: 'its OWN teardown closed it — not the past session\'s');
-    expect(secondLink.isListening(kOuraNotifyChar), isFalse);
-    expect(OuraLink.instance.sessionEpochForTest, secondEpoch);
+    expect(second, isTrue,
+        reason: 'the follow-up session must succeed on its own terms — '
+            'the wedged attempt left no residue');
+    expect(OuraLink.instance.lastReplayLink!.closed, isTrue,
+        reason: 'the follow-up session's own teardown ran');
   }, timeout: const Timeout(Duration(seconds: 20)));
 
   test('a closed replay link refuses new writes', () async {
@@ -1033,35 +983,54 @@ void main() {
 
   test('a replay write parked at a GATE is refused when close beats it',
       () async {
-    // THE SEPARATE CASE the review demanded, on the EXISTING gate seam
-    // (no wall-clock delays racing execution speed): a write that was
-    // ACCEPTED before close but is still parked at an await boundary must
-    // not report success once the link has closed underneath it.
+    // The gate sits BEFORE the writes record: a write that is parked at the
+    // gate has NOT been accepted or recorded yet. So when close() runs while
+    // the write is parked and the gate is then released, write() must
+    // return BEFORE recording — the link never records a write that met a
+    // closed link, at any await boundary.
     // NOT a claim that a GATT platform write behaves identically — the
     // real link's refusal is checked inside its write chain, before the
     // operation is handed to the plugin; what this pins is the CONTRACT
-    // (a closed link never reports success for a write that lands after
-    // close), which the replay link and the real link must both honour,
-    // each in its own implementation.
+    // (a closed link never reports success nor records a write that meets
+    // it after close), which the replay link and the real link must both
+    // honour, each in its own implementation.
     final gate = Completer<void>();
     final link = ReplayBandLink()..writeGate = gate;
     final inFlight = link.write(kOuraCommandChar, <int>[0x10]);
-    // The write is past acceptance and parked at the gate — proof, not a
-    // timer.
+    // The write is parked at the gate — proof, not a timer.
     await link.gateEntered;
     // close() WHILE the write is parked: the immediate refusal goes into
     // force under the in-flight write.
     await link.close();
-    // Release the parked write: it proceeds past the gate and must meet
-    // the refusal that came into force while it was parked.
+    // Release the parked write: it wakes up, meets the refusal, and must
+    // return BEFORE onWrite and BEFORE the writes record.
     gate.complete();
     expect(await inFlight, isFalse,
-        reason: 'a write that was in flight when the link closed must '
-            'not report success afterwards');
-    expect(link.writes, hasLength(1),
-        reason: 'the write WAS accepted before close (like an operation '
-            'already handed to the plugin queue) — the record stays, '
-            'but the VERDICT is refusal');
+        reason: 'a write that was parked when the link closed must not '
+            'report success afterwards');
+    expect(link.writes, isEmpty,
+        reason: 'the gate sits before the record — a refused, never '
+            'recorded write');
+  });
+
+  test('a closed replay link does not WAIT at an open gate', () async {
+    // A link that is closed BEFORE a write even starts must refuse the
+    // write IMMEDIATELY — not park it at a still-open gate, where the
+    // write would hang until something completes the completer. The
+    // first check of the close contract runs BEFORE the gate.
+    final gate = Completer<void>();
+    final link = ReplayBandLink()..writeGate = gate;
+    await link.close();
+    final accepted = await link.write(kOuraCommandChar, <int>[0x10]);
+    expect(accepted, isFalse,
+        reason: 'refused without waiting — the gate is not even '
+            'reached');
+    // The write RETURNED (the await above resolved) without the gate ever
+    // being completed: proof by resolution itself, not a timer — a
+    // write that parked would still be hanging on the un-completed
+    // completer, and `accepted` would not exist yet.
+    gate.complete(); // no-op either way; the write never parked
+    expect(link.writes, isEmpty);
   });
 
   test('the close contract separates immediate refusal from completed '

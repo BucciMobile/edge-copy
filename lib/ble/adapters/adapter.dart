@@ -398,25 +398,26 @@ class ReplayBandLink implements BandLink {
 
   @override
   Future<bool> write(String characteristicUuid, List<int> value) async {
+    // THE `close()` CONTRACT, actually honoured, and checked at EVERY await
+    // boundary of this method — a closed link must not even WAIT at a gate:
+    // a close that happens while a write is parked must be honoured when the
+    // write wakes up, and a write that starts after close is refused before
+    // anything else. The verdict is the same `GattBandLink` gives, so an
+    // adapter bug that writes past its teardown fails its test here instead
+    // of only on a radio.
+    if (writesRefused) return false;
     final gate = writeGate;
     if (gate != null) {
       if (!_gateEntered.isCompleted) _gateEntered.complete();
       await gate.future; // may hang forever — that is the point
+      // closed WHILE parked at the gate: the refusal came into force under
+      // the in-flight write — refuse instead of recording.
+      if (writesRefused) return false;
     }
-    // THE `close()` CONTRACT, actually honoured: after close, every write is
-    // refused — same verdict `GattBandLink` gives, so an adapter bug that
-    // writes past its teardown fails its test here instead of only on a
-    // radio.
-    if (writesRefused) return false;
     onWrite?.call(characteristicUuid, value);
     writes.add((characteristicUuid, value));
     if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
-    // CLOSED WHILE IN FLIGHT: a write accepted before close but still
-    // parked at an await boundary must not report success once the link
-    // has closed underneath it — the same verdict a real GATT link's
-    // write chain gives when `_closed` went true behind a queued write.
-    // The record stays (the write WAS accepted, exactly like an operation
-    // already handed to the plugin queue); the verdict is refusal.
+    // closed while parked at the delay: same rule, second await boundary.
     if (writesRefused) return false;
     return writeSucceeds;
   }
@@ -446,6 +447,14 @@ class ReplayBandLink implements BandLink {
   Future<void> close() async {
     closed = true;
     writesRefused = true; // the write refusal is IMMEDIATE, not after the closes
+    // Release a write parked at [writeGate]: close must leave NO await
+    // boundary of this link that can hang a caller forever — a parked
+    // write wakes up, sees the refusal above, and returns false, so a
+    // session (and the host `cancel()` waiting for it to unwind) always
+    // has a way to end. The channel closes below do the same for every
+    // parked notification reader.
+    final g = writeGate;
+    if (g != null && !g.isCompleted) g.complete();
     for (final c in _channels.values) {
       await c.close();
     }

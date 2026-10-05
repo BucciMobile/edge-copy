@@ -572,7 +572,6 @@ class OuraLink {
     required int cursor,
     Duration? replyTimeout,
     Duration? confirmTimeout,
-    int? epoch,
   }) async {
     var sessionThrew = false;
     try {
@@ -596,7 +595,7 @@ class OuraLink {
       //    Dart, so the teardown failure is logged beside it instead and
       //    is never silent.
       try {
-        await stop(epoch: epoch);
+        await stop();
       } catch (e, s) {
         if (sessionThrew) {
           debugPrint('[oura] teardown failed as well: $e — the session\'s '
@@ -608,33 +607,16 @@ class OuraLink {
     }
   }
 
-  /// The session this link state belongs to. THE PRODUCTION PATH never
-  /// overlaps sessions: `sync()` serializes on `[_busy]` and a session's own
-  /// teardown runs before `sync()` returns, so no second session can start
-  /// while the first one's fields are live. The OVERLAP this guards against
-  /// exists only in the replay harness, where a wedged session's watchdog
-  /// gives up on it while its body — and its `finally` — are still pending
-  /// and a follow-up attempt may already have started. A teardown that
-  /// runs LATE must not be able to touch the fields of a FOLLOW-UP
-  /// attempt: null a newer session's `_host`/`_link` mid-drain or swallow
-  /// its cursor writes. So `stop` takes the epoch of the session it tears
-  /// down and leaves anything newer alone.
-  int _sessionEpoch = 0;
-
   /// Drop the link, flush what the session can still stamp, disconnect.
-  /// Safe to call when nothing is connected. With [epoch], a LATE teardown
-  /// (its harness already gave up and a new session may have started) is a
-  /// no-op on the live fields: the wedged session's own link is closed
-  /// directly by its harness, and this stop only cleans up when it is still
-  /// the CURRENT session.
-  Future<void> stop({int? epoch}) async {
-    // A LATE teardown: the harness of the session named by [epoch] already
-    // gave up on it and a NEWER session may own the fields below. Everything
-    // this method touches must then stay put — nulling `_host`/`_link` or
-    // draining `_cursorWrites` here would tear down the follow-up session,
-    // not the wedged one. The wedged session's own link was closed directly
-    // by its harness; this call has nothing left to do for it.
-    if (epoch != null && epoch != _sessionEpoch) return;
+  /// Safe to call when nothing is connected. NO EPOCH GUARD is needed: the
+  /// production path serializes sessions on `[_busy]`, and the replay
+  /// harness never surfaces its verdict while the session body is still
+  /// live — `close()` releases every await boundary the fixture owns
+  /// (write gate, buffered channels), so the session ALWAYS unwinds and
+  /// its own `finally { stop() }` runs BEFORE the harness's `done` future
+  /// completes. A caller that awaited the session result can therefore
+  /// never observe a teardown racing a follow-up session.
+  Future<void> stop() async {
     // Before the host's run subscription is cancelled: an adapter's `finally`
     // can still write on the way out, and that write must not reach the radio.
     _link?.close();
@@ -886,17 +868,12 @@ class OuraLink {
     Duration harnessTimeout = const Duration(seconds: 30),
     void Function(ReplayBandLink link)? onLink,
   }) async {
-    // LINK, EPOCH and the [onLink] hook are set up SYNCHRONOUSLY, before the
+    // LINK and the [onLink] hook are set up SYNCHRONOUSLY, before the
     // first await: a test's `onLink` (installing a write gate, capturing the
     // link) must not race the session's first write or the test's own first
     // read of the captured link.
     final link = ReplayBandLink()..writeSucceeds = writeSucceeds;
     _lastLink = link;
-    // A NEW session epoch: this attempt's late teardown (its `finally` running
-    // after the harness watchdog below already gave up) is scoped to THIS
-    // number, so `stop(epoch:)` can tell it from a follow-up attempt's fields
-    // and a wedged session can never tear down its successor.
-    final epoch = ++_sessionEpoch;
     onLink?.call(link);
     _now = nowSeconds ?? _now;
     _deviceId = deviceId;
@@ -915,16 +892,18 @@ class OuraLink {
       cursor: cursor,
       replyTimeout: timeouts,
       confirmTimeout: timeouts,
-      epoch: epoch,
     ).whenComplete(() => finished = true);
     var served = 0;
-    // Bounded by wall time, not a spin count: a real sqflite commit between
-    // batches can outlast any fixed number of zero-length yields. The bound
-    // is the HARNESS patience, not the protocol timeouts: a session still
-    // running when this expires is wedged from the harness's point of view,
-    // and the watchdog below turns that into a test failure.
+    // ONE deadline, started ONCE and shared by every stage below: the
+    // serving loop, the link close and the session wait all draw on the
+    // SAME remaining budget. The bound is the HARNESS patience, not the
+    // protocol timeouts: a session still running when the budget expires
+    // is wedged from the harness's point of view, and the watchdog turns
+    // that into a test failure — it can never become a normal `false`,
+    // whichever stage expired first.
     final clock = Stopwatch()..start();
-    while (!finished && clock.elapsed < harnessTimeout) {
+    Duration left() => harnessTimeout - clock.elapsed;
+    while (!finished && left() > Duration.zero) {
       await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {
@@ -933,12 +912,17 @@ class OuraLink {
         served++;
       }
     }
-    // The wedged session's link: closed UNCONDITIONALLY (even a session that
-    // wedged inside link.close() itself must not turn the harness's own
-    // cleanup into the hang), and PROTECTED, so a close that never completes
-    // cannot become a second, unwatched hang on the cleanup path.
+    final servingExpired = !finished;
+    // The wedged session's link: closed UNCONDITIONALLY on the shared
+    // budget — close() releases every await boundary this fixture owns
+    // (the write gate, the buffered channels), so the parked session can
+    // ALWAYS unwind: `_authenticate` returns false behind the closed
+    // channels and `run()` ends. Without this, `BandHost.stop`'s
+    // `cancel()` would wait forever on a generator parked on a dead
+    // link — the cleanup hang the review called out.
     try {
-      await link.close().timeout(harnessTimeout, onTimeout: () {});
+      await link.close().timeout(left() > Duration.zero ? left() : Duration.zero,
+          onTimeout: () {});
     } catch (_) {
       // A fixture whose close throws still leaves `closed`/`writesRefused`
       // set synchronously at its top — the refusal is already in force.
@@ -946,23 +930,19 @@ class OuraLink {
     // TWO DIFFERENT TIMEOUTS, deliberately not collapsed:
     //  - the SESSION's own protocol timeouts (replyTimeout/confirmTimeout)
     //    produce a regular `false` — a reachable, tested behaviour;
-    //  - THIS watchdog is the HARNESS giving up on a wedged session (a
-    //    real sqflite commit can outlast any script, but 30 s means the
-    //    session is stuck, not slow). A negative test expecting `false`
-    //    must NOT be able to pass because the harness hung: the watchdog
-    //    therefore THROWS a visible test failure instead of returning
-    //    `false` and greenwashing a hang.
+    //  - THIS watchdog is the HARNESS giving up on a wedged session. A
+    //    negative test expecting `false` must NOT be able to pass because
+    //    the harness hung: the watchdog therefore THROWS a visible test
+    //    failure instead of returning `false` and greenwashing a hang.
     Object? harnessFailure;
     StackTrace? harnessFailureTrace;
-    var harnessTimedOut = false;
     bool result = false;
     try {
-      result = await done.timeout(harnessTimeout,
+      result = await done.timeout(left() > Duration.zero ? left() : Duration.zero,
           onTimeout: () {
         // Record, do not resolve: a `false` HERE would hand a negative
         // test the very `false` it expects and let a hang pass as a
-        // verdict. The flag decides AFTER cleanup whether to throw.
-        harnessTimedOut = true;
+        // verdict. The flag is `servingExpired || deadline spent` below.
         return false;
       });
     } catch (e, s) {
@@ -972,27 +952,35 @@ class OuraLink {
       harnessFailureTrace = s;
     }
     // CLEANUP RUNS ON EVERY PATH — including the harness timeout. It
-    // REUSES the epoch-guarded production teardown instead of resetting
-    // the shared fields directly: when the wedged session is still the
-    // current one, `stop(epoch:)` does the full cleanup (host stopped,
+    // reuses the production teardown: when the wedged session is still
+    // the current one, `stop()` does the full cleanup (host stopped,
     // cursor writes flushed, fields cleared) exactly as a normal path
-    // would; when a FOLLOW-UP session has already started, the same
-    // epoch check that protects the late `finally` above protects HERE —
-    // a harness that gave up on its session must not null the follow-up
-    // session's `_host`/`_anchor`/`_deviceId` mid-drain. Only AFTER
-    // cleanup does the watchdog's failure surface, so a wedged session
-    // can never leave a half-torn OuraLink behind either.
-    await stop(epoch: epoch);
-    if (harnessTimedOut) {
+    // would. The close above already released every await boundary the
+    // session can be parked on, so `stop()` cannot hang on it; only
+    // AFTER cleanup does the watchdog's failure surface, so a wedged
+    // session can never leave a half-torn OuraLink behind either.
+    await stop();
+    // THE HARNESS VERDICT: if the shared deadline expired with the session
+    // unfinished — whether the serving loop, the close, or the session
+    // wait drew the last of the budget — that is a wedged session and a
+    // TEST FAILURE, never a normal `false`. An expired deadline cannot be
+    // turned into a clean verdict by the session aborting (and returning
+    // false) only AFTER the deadline.
+    if (servingExpired || clock.elapsed >= harnessTimeout) {
+      if (harnessFailure != null) {
+        // The session threw on its own (close released it into an error,
+        // or it failed for its own reasons): its ORIGINAL error and
+        // stacktrace are the verdict, not a timeout label.
+        Error.throwWithStackTrace(harnessFailure, harnessFailureTrace!);
+      }
       throw StateError(
           'Oura replay session did not finish within $harnessTimeout — the '
           'harness cannot tell a wedged session from a slow one, so this is '
           'a test failure, not a sync result.');
     }
     if (harnessFailure != null) {
-      // SEPARATE verdict from the timeout: the session FAILED on its own.
-      // `Error.throwWithStackTrace` rethrows the ORIGINAL error with its
-      // ORIGINAL stacktrace attached, so nothing of the cause is lost.
+      // The session threw on its own WELL WITHIN the budget: its error
+      // with its original stacktrace is the verdict.
       Error.throwWithStackTrace(harnessFailure, harnessFailureTrace!);
     }
     return result;
@@ -1003,14 +991,8 @@ class OuraLink {
   /// writes the adapter actually put on the wire.
   ReplayBandLink? _lastLink;
 
-  /// The current session's epoch, so a test can name a PAST session's epoch
-  /// and prove `stop(epoch:)` leaves the live session alone — the exact
-  /// regression a wedged session's late teardown could otherwise cause.
-  @visibleForTesting
-  int get sessionEpochForTest => _sessionEpoch;
-
-  /// The live session's host, so a test can prove a LATE teardown left the
-  /// follow-up session's host untouched (identity, not just non-null).
+  /// The live session's host, so a test can prove the harness cleared it
+  /// before its verdict surfaced (identity, not just non-null).
   @visibleForTesting
   BandHost? get hostForTest => _host;
 
@@ -1038,9 +1020,6 @@ class OuraLink {
   }) async {
     // Set up SYNCHRONOUSLY before the first await — see `_replaySession`.
     final link = ReplayBandLink()..onWrite = onWrite;
-    // A NEW session epoch for this manual-drive attempt, same purpose as in
-    // `_replaySession`: a late teardown stays scoped to its own attempt.
-    final epoch = ++_sessionEpoch;
     onLink?.call(link);
     _now = nowSeconds ?? _now;
     _deviceId = deviceId;
@@ -1057,7 +1036,6 @@ class OuraLink {
       cursor: cursor,
       replyTimeout: const Duration(seconds: 30),
       confirmTimeout: const Duration(seconds: 30),
-      epoch: epoch,
     );
     return (result, link);
   }
