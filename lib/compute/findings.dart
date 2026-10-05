@@ -31,6 +31,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
+import '../data/day_label.dart' show dayLabelBefore;
+
 /// Below this, readiness is a finding. Shared so the notification and the log
 /// cannot disagree about which mornings were low.
 const double kLowReadiness = 34;
@@ -123,7 +125,9 @@ class Finding {
 /// UNSETTLED DAYS ARE SKIPPED, for the same reason the notification stands down
 /// on them: a night that is only half drained reads several bpm high, and a
 /// log that shows a finding in the morning and drops it by lunchtime is worse
-/// than one that waits for the day to settle.
+/// than one that waits for the day to settle. Today settles once its overnight
+/// is complete (the drained edge an hour past wake), so it appears here the
+/// same morning, not two days later.
 List<Finding> findingsHistory(
   Map<String, dynamic> cd, {
   Map<String, double> readiness = const {},
@@ -181,4 +185,79 @@ List<Finding> findingsHistory(
     }
   }
   return out;
+}
+
+/// The day the rollup's newest row is about, and whether it is still settling.
+typedef ExceptionAnchor = ({String date, bool unsettled});
+
+ExceptionAnchor? exceptionAnchor(Map<String, dynamic> cd) {
+  final recent = cd['recent'];
+  if (recent is! List || recent.isEmpty) return null;
+  final last = recent.last;
+  if (last is! Map || last['date'] is! String) return null;
+  return (date: last['date'] as String, unsettled: last['unsettled'] == true);
+}
+
+/// The overnight-detector findings (illness, anomaly, temperature), each read
+/// from its family's newest SETTLED entry and dated with THAT entry's date.
+List<Finding> crossDayAlertFindings(Map<String, dynamic> cd) {
+  Map? entry(String k) => cd[k] is Map ? cd[k] as Map : null;
+  String? dateOf(Map? e) => e?['date'] is String ? e!['date'] as String : null;
+  final ill = entry('illness'), an = entry('anomaly'), tmp = entry('temp_illness');
+  return [
+    if (ill?['state'] == 'red' && dateOf(ill) != null)
+      Finding(FindingKind.illness, dateOf(ill)!),
+    if (an?['flagged'] == true && dateOf(an) != null)
+      Finding(FindingKind.anomaly, dateOf(an)!),
+    if (tmp?['flag'] == 'elevated' && dateOf(tmp) != null)
+      Finding(FindingKind.tempElevated, dateOf(tmp)!),
+  ];
+}
+
+/// History does not interrupt: a finding may buzz only about today or
+/// yesterday, by CALENDAR (DST-safe), judged on the finding's OWN date.
+bool isRecentFindingDate(String date, {required String today}) =>
+    date == today || date == dayLabelBefore(today, 1);
+
+/// One aggregated health-exception notification, all about [date].
+@immutable
+class ExceptionNotice {
+  const ExceptionNotice(this.date, this.findings);
+
+  final String date;
+  final List<Finding> findings;
+
+  bool get medical => findings.any((f) => f.medical);
+
+  /// Same key grammar as before ('$date:exception' / '$date:exception:medical'),
+  /// keyed on the day the findings are ABOUT — so a night fires at most once.
+  String get dedupeKey =>
+      medical ? '$date:exception:medical' : '$date:exception';
+
+  String get title => findings.length == 1
+      ? findings.first.title
+      : '${findings.length} things to look at';
+
+  String get body => findings.length == 1
+      ? findings.first.detail
+      : findings.map((f) => '• ${f.title} — ${f.detail}').join('\n');
+}
+
+/// Group the due findings by the day they are about, newest day first; drop
+/// anything not about today/yesterday. Within a day, detector order is kept.
+///
+/// Per day rather than one notice per pass: the dedupe key must be the night
+/// the finding is about, or the same night evaluated under two different
+/// anchors (after midnight, then again the next day) could buzz twice.
+List<ExceptionNotice> dueExceptionNotices(
+  Iterable<Finding> findings, {
+  required String today,
+}) {
+  final byDate = <String, List<Finding>>{};
+  for (final f in findings) {
+    if (!isRecentFindingDate(f.date, today: today)) continue;
+    (byDate[f.date] ??= <Finding>[]).add(f);
+  }
+  final dates = byDate.keys.toList()..sort((a, b) => b.compareTo(a));
+  return [for (final d in dates) ExceptionNotice(d, byDate[d]!)];
 }
