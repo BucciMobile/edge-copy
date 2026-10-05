@@ -279,7 +279,11 @@ Future<BackupOutcome> _runBackup({
         error: 'no free backup filename for this second',
       );
     }
-    final snapshot = await (exportSnapshot ?? LocalDb.exportCopy)();
+    // WITHOUT the substrate archive: five rotating copies of an already
+    // deflated year of history is the one thing gzip cannot help with. The
+    // manual "Export the database" keeps it.
+    final snapshot = await (exportSnapshot ??
+        () => LocalDb.exportCopy(includeSubstrateArchive: false))();
     final tmp = File(snapshot);
     // STAGE, then publish by rename. Compressing straight into `dest` meant the
     // final backup name existed while it was still being written: kill the

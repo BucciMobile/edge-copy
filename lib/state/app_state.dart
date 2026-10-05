@@ -274,8 +274,11 @@ class AppState extends ChangeNotifier {
   // timeout, so seeding the scheduler alone left a headless first sweep running
   // the foreground budget. Late-initialized, so this reads the value both
   // constructors have already set by the time anything touches `_derive`.
-  late final DerivationEngine _derive =
-      DerivationEngine(log: _log, background: _background);
+  late final DerivationEngine _derive = DerivationEngine(
+    log: _log,
+    background: _background,
+    offloadActive: () => _deriveScheduler.offloadActive,
+  );
   late final DeriveScheduler _deriveScheduler = DeriveScheduler(
     run: ({required DeriveJobKind kind}) =>
         _afterDrain(heavy: kind == DeriveJobKind.heavy),
@@ -606,13 +609,32 @@ class AppState extends ChangeNotifier {
   /// reporting only the row count would claim a success the user does not have.
   String? importRollupError;
 
+  /// Days of stored raw history (substrate archive buckets) the last backup
+  /// import could NOT merge, because they are in a format this build does
+  /// not read. Every other row imported; this is reported, never dropped
+  /// silently.
+  int lastImportArchiveSkipped = 0;
+
+  /// Days of stored raw history the last backup import added or filled in.
+  int lastImportArchiveRestored = 0;
+
   Future<int> importEdgeBackup(String path) async {
     importRollupError = null;
+    lastImportArchiveSkipped = 0;
+    lastImportArchiveRestored = 0;
     // Gzipped auto-backups (`.db.gz`) are inflated INSIDE importFromDbFile —
     // do not add it back here. Its inflate checks the gzip trailer, so a
     // truncated backup fails loudly; `gzip.decoder` returns partial output
     // without raising and would restore short while reporting success.
     final counts = await LocalDb.importFromDbFile(path);
+    lastImportArchiveSkipped = counts['_substrate_archive_skipped'] ?? 0;
+    lastImportArchiveRestored = counts['substrate_archive'] ?? 0;
+    if (lastImportArchiveSkipped > 0) {
+      _log(
+        'import: $lastImportArchiveSkipped raw-history archive buckets are in '
+        'a format this build cannot read; not imported',
+      );
+    }
     // Imported rows include derived day_result/metric_series → refresh rollups.
     try {
       await refreshActivityReviews();

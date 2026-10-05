@@ -44,4 +44,42 @@ void main() {
     expect(find.textContaining('1 lab result'), findsOneWidget);
     expect(find.textContaining('1 journal day replaced'), findsOneWidget);
   });
+
+  testWidgets('archive buckets a backup could not merge are reported, not '
+      'dropped silently', (tester) async {
+    await _pump(
+      tester,
+      const ImportOutcome(
+          source: 'OpenStrap backup', days: 4, archiveBucketsSkipped: 2),
+    );
+    expect(find.textContaining('Part of that file could not be used'),
+        findsOneWidget);
+    expect(find.textContaining('2 days of stored raw sensor history'),
+        findsOneWidget);
+    expect(find.textContaining('Update the app'), findsOneWidget);
+  });
+
+  testWidgets('a re-import that lands nothing still reports the archive '
+      'buckets it could not merge', (tester) async {
+    // Every backed-up day already finalized here: 0 days imported.
+    await _pump(
+      tester,
+      const ImportOutcome(source: 'OpenStrap backup', archiveBucketsSkipped: 1),
+    );
+    expect(find.textContaining('Nothing was imported'), findsOneWidget);
+    expect(find.textContaining('1 day of stored raw sensor history'),
+        findsOneWidget);
+    expect(find.textContaining('Update the app'), findsOneWidget);
+  });
+
+  testWidgets('a restore that only adds raw history is not "nothing imported"',
+      (tester) async {
+    await _pump(
+      tester,
+      const ImportOutcome(source: 'OpenStrap backup', archiveBucketsRestored: 3),
+    );
+    expect(find.textContaining('Nothing was imported'), findsNothing);
+    expect(find.textContaining('restored or extended for 3 days'),
+        findsOneWidget);
+  });
 }
