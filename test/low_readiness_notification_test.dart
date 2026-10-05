@@ -60,6 +60,13 @@ void main() {
       }),
     );
     await LocalDb.putMetricSeriesValue(today, 'readiness', readiness);
+    // The day itself exists: a pin is only read for a day that has a result.
+    await LocalDb.putDayResult(
+      dayId: today,
+      algoVersion: kAlgoVersion,
+      payloadJson: '{}',
+      windowJson: '{}',
+    );
   }
 
   test('a low glass-box score under a normal ring does not buzz', () async {

@@ -3710,9 +3710,31 @@ class LocalDb {
   /// The pinned morning readiness headline (day + value), or null if unset /
   /// unparseable. The `day` must be compared to today's label by the caller — a
   /// pin left over from a previous day must NOT be surfaced.
+  ///
+  /// Null, too, when the pinned day has no `day_result`: the pin is a cursor,
+  /// not a day row, and an orphan (its day deleted) would put a deleted day's
+  /// readiness back on the ring, the recovery chart, the log and the push.
+  /// `deleteDays` clears a matching pin; an orphan found here however it arose
+  /// (an older build's delete, say) is removed, not just masked, so it cannot
+  /// come back as the pin once that day is derived again.
   static Future<({String day, int value, int? wakeSec})?> frozenHeadline() async {
-    final raw = await getCursor(kFrozenHeadlineCursor);
-    if (raw == null || raw.isEmpty) return null;
+    final pin = _parseFrozenHeadline(await getCursor(kFrozenHeadlineCursor));
+    if (pin == null) return null;
+    final db = await instance;
+    final dayExists = (await db.rawQuery(
+      'SELECT 1 FROM day_result WHERE day_id = ? LIMIT 1',
+      [pin.day],
+    )).isNotEmpty;
+    if (dayExists) return pin;
+    await deleteCursor(kFrozenHeadlineCursor);
+    return null;
+  }
+
+  /// The one reader of the frozen-headline cursor's JSON.
+  static ({String day, int value, int? wakeSec})? _parseFrozenHeadline(
+    Object? raw,
+  ) {
+    if (raw is! String || raw.isEmpty) return null;
     try {
       final d = jsonDecode(raw);
       if (d is Map && d['day'] is String && d['value'] is num) {
@@ -8837,6 +8859,27 @@ class LocalDb {
       await deleteByIn(txn, 'sleep_nap', 'day_id', sorted);
       await deleteByIn(txn, 'activity_suggestions', 'day_id', sorted);
       await deleteByIn(txn, 'activity_review_days', 'day_id', sorted);
+      // The frozen readiness headline is a cursor, not a day row, so nothing
+      // above reaches it. A pin that outlives its day is that day's readiness
+      // still on disk, and it would come back on the chart, in the log and
+      // in a push.
+      final pinRows = await txn.query(
+        'sync_cursor',
+        columns: ['value'],
+        where: 'name = ?',
+        whereArgs: [kFrozenHeadlineCursor],
+        limit: 1,
+      );
+      if (pinRows.isNotEmpty) {
+        final pinDay = _parseFrozenHeadline(pinRows.first['value'])?.day;
+        if (pinDay != null && dayIds.contains(pinDay)) {
+          deleted += await txn.delete(
+            'sync_cursor',
+            where: 'name = ?',
+            whereArgs: [kFrozenHeadlineCursor],
+          );
+        }
+      }
     });
     return deleted;
   }
