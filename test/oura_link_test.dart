@@ -890,11 +890,11 @@ void main() {
     // and cleared BEFORE the harness failure surfaces: no half-torn
     // state left behind.
     expect(OuraLink.instance.lastReplayLink!.closed, isTrue,
-        reason: 'the harness closed the wedged session's link on the '
+        reason: "the harness closed the wedged session's link on the "
             'timeout path');
     expect(OuraLink.instance.hostForTest, isNull,
         reason: 'cleanup ran BEFORE the harness failure surfaced: the '
-            'session's host is stopped and cleared');
+            "session's host is stopped and cleared");
   }, timeout: const Timeout(Duration(seconds: 10)));
 
   test(
@@ -937,10 +937,10 @@ void main() {
     // finally could only run because close() released the gate.
     await expectLater(firstAttempt, throwsA(isA<StateError>()));
     expect(wedgedLink!.closed, isTrue,
-        reason: 'the harness closed the wedged session's link — and its '
+        reason: "the harness closed the wedged session's link — and its "
             'gate with it, so the session could unwind');
     expect(OuraLink.instance.hostForTest, isNull,
-        reason: 'the wedged session's host is stopped and cleared — its '
+        reason: "the wedged session's host is stopped and cleared — its "
             'cleanup completed, not hang');
     // FOLLOW-UP: a plain, successful session on the SAME ring, AFTER the
     // wedged one fully ended — the serialized reality. It must succeed
@@ -960,7 +960,7 @@ void main() {
         reason: 'the follow-up session must succeed on its own terms — '
             'the wedged attempt left no residue');
     expect(OuraLink.instance.lastReplayLink!.closed, isTrue,
-        reason: 'the follow-up session's own teardown ran');
+        reason: "the follow-up session's own teardown ran");
   }, timeout: const Timeout(Duration(seconds: 20)));
 
   test('a closed replay link refuses new writes', () async {
@@ -985,9 +985,8 @@ void main() {
       () async {
     // The gate sits BEFORE the writes record: a write that is parked at the
     // gate has NOT been accepted or recorded yet. So when close() runs while
-    // the write is parked and the gate is then released, write() must
-    // return BEFORE recording — the link never records a write that met a
-    // closed link, at any await boundary.
+    // the write is parked, write() must return BEFORE recording — the link
+    // never records a write that met a closed link, at any await boundary.
     // NOT a claim that a GATT platform write behaves identically — the
     // real link's refusal is checked inside its write chain, before the
     // operation is handed to the plugin; what this pins is the CONTRACT
@@ -1000,11 +999,14 @@ void main() {
     // The write is parked at the gate — proof, not a timer.
     await link.gateEntered;
     // close() WHILE the write is parked: the immediate refusal goes into
-    // force under the in-flight write.
+    // force under the in-flight write, and close() itself completes the
+    // gate — the parked write is released by the close, never by the
+    // test completing an already-completed completer (complete is not
+    // idempotent).
     await link.close();
-    // Release the parked write: it wakes up, meets the refusal, and must
-    // return BEFORE onWrite and BEFORE the writes record.
-    gate.complete();
+    expect(gate.isCompleted, isTrue,
+        reason: 'close() released the gate — the parked write woke up by '
+            'itself, not because the test completed the completer');
     expect(await inFlight, isFalse,
         reason: 'a write that was parked when the link closed must not '
             'report success afterwards');
@@ -1017,20 +1019,36 @@ void main() {
     // A link that is closed BEFORE a write even starts must refuse the
     // write IMMEDIATELY — not park it at a still-open gate, where the
     // write would hang until something completes the completer. The
-    // first check of the close contract runs BEFORE the gate.
-    final gate = Completer<void>();
-    final link = ReplayBandLink()..writeGate = gate;
+    // first check of the close contract runs BEFORE the gate. The gate
+    // is installed AFTER close, so a completed-by-close gate cannot mask
+    // a missing early refusal: only the early writesRefused check can
+    // return the write without ever touching this gate.
+    final link = ReplayBandLink();
     await link.close();
-    final accepted = await link.write(kOuraCommandChar, <int>[0x10]);
-    expect(accepted, isFalse,
-        reason: 'refused without waiting — the gate is not even '
-            'reached');
-    // The write RETURNED (the await above resolved) without the gate ever
-    // being completed: proof by resolution itself, not a timer — a
-    // write that parked would still be hanging on the un-completed
-    // completer, and `accepted` would not exist yet.
-    gate.complete(); // no-op either way; the write never parked
+    final gate = Completer<void>();
+    link.writeGate = gate;
+    var completed = false;
+    try {
+      final accepted = await link.write(kOuraCommandChar, <int>[0x10]).timeout(
+        const Duration(seconds: 5),
+      );
+      expect(accepted, isFalse,
+          reason: 'refused without waiting — the gate is not even reached');
+    } finally {
+      // Cleanup: if the write DID park (the regression), release the gate
+      // so the pending future ends instead of leaking past the test.
+      if (!gate.isCompleted) {
+        completed = true;
+        gate.complete();
+      }
+    }
     expect(link.writes, isEmpty);
+    expect(gate.isCompleted, completed,
+        reason: completed
+            ? 'the write parked at the gate — the finally cleanup had to '
+                'release it, which the isFalse assertion above flagged'
+            : 'the write never reached the gate — the early refusal '
+                'ended it before any wait');
   });
 
   test('the close contract separates immediate refusal from completed '
