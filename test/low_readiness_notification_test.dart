@@ -1,7 +1,8 @@
-// "Low readiness today" thresholds the readiness the user sees (metric_series
-// 'readiness', the composite), not the deprecated glass-box score in the
-// cross-day bundle. The two are different models and can sit on opposite sides
-// of kLowReadiness on the same morning.
+// "Low readiness" thresholds the readiness the user sees (metric_series
+// 'readiness', the composite, or the morning pin for its day), not the
+// deprecated glass-box score in the cross-day bundle. The two are different
+// models and can sit on opposite sides of kLowReadiness (the ring's "Rest
+// today" band) on the same morning.
 
 import 'dart:convert';
 
@@ -75,10 +76,10 @@ void main() {
   });
 
   test('the morning pin wins over a drifted series value', () async {
-    // Pin 36 (ring shows 36, not low); a later re-derive drifted the series
-    // to 31. Must not buzz.
-    await seed(glassBox: 70, readiness: 31);
-    await LocalDb.setFrozenHeadline(todayLabel(), 36);
+    // Pin 30 (ring shows 30, "Take it easy"); a later re-derive drifted the
+    // series to 24. Must not buzz.
+    await seed(glassBox: 70, readiness: 24);
+    await LocalDb.setFrozenHeadline(todayLabel(), 30);
     await DerivationEngine().runNotificationsForTest();
     expect(shown, isEmpty);
   });
@@ -86,7 +87,7 @@ void main() {
   test('a low pin buzzes even after the series drifted above the line',
       () async {
     await seed(glassBox: 70, readiness: 40);
-    await LocalDb.setFrozenHeadline(todayLabel(), 30);
+    await LocalDb.setFrozenHeadline(todayLabel(), 22);
     await DerivationEngine().runNotificationsForTest();
     expect(shown, hasLength(1));
   });

@@ -19,6 +19,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 
 import '../compute/derivation_engine.dart';
+import '../compute/findings.dart' show servedReadiness;
 import '../compute/hr_max.dart';
 import '../compute/manual_session.dart';
 import '../compute/onehz_pipeline.dart' show kUnknownAbsenceNote, needInputNote;
@@ -1999,6 +2000,7 @@ class LocalRepositoryImpl extends LocalRepository {
 
     final oldestDaySec =
         rows.isEmpty ? _nowSec() : _dateToEpoch(rows.first['date'] as String);
+    final pinDayValue = pin == null ? null : (day: pin.day, value: pin.value);
 
     return {
       'points': [
@@ -2006,7 +2008,12 @@ class LocalRepositoryImpl extends LocalRepository {
           if (r['date'] != heldDay || r['date'] == pin?.day)
             {
               't': _dateToEpoch(r['date'] as String),
-              'v': r['date'] == pin?.day ? pin!.value : r['value'],
+              // One value rule with the low-readiness push and log.
+              'v': key == 'readiness'
+                  ? servedReadiness(r['date'] as String,
+                      pin: pinDayValue,
+                      stored: (r['value'] as num?)?.toDouble())
+                  : r['value'],
             },
       ],
       // L4 — THE DENOMINATOR. Worn minutes for the same days, so a long trend

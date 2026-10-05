@@ -5,6 +5,10 @@
 // that nothing may say "illness" without corroboration from a second signal.
 // The in-app illness cards already say "This watches one signal only". The
 // shared sentence the push and the log print must not claim more.
+//
+// Low readiness is judged on the number the ring shows, with the ring's own
+// lowest band ("Rest today"), so the push, the log and the ring cannot
+// disagree about which mornings were low.
 
 import 'dart:convert';
 import 'dart:io';
@@ -13,6 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
 import 'package:openstrap_edge/compute/findings.dart';
 import 'package:openstrap_edge/data/day_label.dart';
+import 'package:openstrap_edge/ui2/screens/home_screen.dart' show readinessBand;
 
 void main() {
   test('the illness sentence claims no signal the detector does not read', () {
@@ -117,5 +122,50 @@ void main() {
         }
       }
     }
+  });
+
+  test('no finding title says "today"', () {
+    // The same Finding renders under past dates in the log.
+    for (final kind in FindingKind.values) {
+      expect(Finding(kind, '2026-10-01').title.toLowerCase(),
+          isNot(contains('today')),
+          reason: '$kind');
+    }
+  });
+
+  test("low readiness carries the ring's number", () {
+    final f = lowReadinessFinding('2026-10-01', 22.4)!;
+    expect(f.score, 22);
+    expect(f.detail, contains('22'));
+    // The ring bands the raw value and prints it rounded.
+    expect(lowReadinessFinding('2026-10-01', 25.6)!.score, 26);
+    expect(lowReadinessFinding('2026-10-01', 26.0), isNull);
+    expect(lowReadinessFinding('2026-10-01', null), isNull);
+  });
+
+  test('an unscored low-readiness finding names no number', () {
+    const f = Finding(FindingKind.lowReadiness, '2026-10-01');
+    expect(f.detail, startsWith('Readiness was in its lowest band.'));
+  });
+
+  test("the push threshold is the ring's lowest band", () {
+    expect(kLowReadiness, kReadinessRestBelow);
+    expect(kReadinessRestBelow, 26);
+    expect(readinessBand(25.99).tier, 0);
+    expect(readinessBand(26).tier, 1);
+    expect(readinessBand(37).tier, 2);
+    expect(readinessBand(61).tier, 3);
+  });
+
+  test('servedReadiness: the pin wins for its own day only', () {
+    expect(
+        servedReadiness('2026-10-02',
+            pin: (day: '2026-10-02', value: 22), stored: 40),
+        22);
+    expect(
+        servedReadiness('2026-10-01',
+            pin: (day: '2026-10-02', value: 22), stored: 40),
+        40);
+    expect(servedReadiness('2026-10-02'), isNull);
   });
 }
