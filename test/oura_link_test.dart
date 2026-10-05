@@ -1019,36 +1019,56 @@ void main() {
     // A link that is closed BEFORE a write even starts must refuse the
     // write IMMEDIATELY — not park it at a still-open gate, where the
     // write would hang until something completes the completer. The
-    // first check of the close contract runs BEFORE the gate. The gate
-    // is installed AFTER close, so a completed-by-close gate cannot mask
-    // a missing early refusal: only the early writesRefused check can
-    // return the write without ever touching this gate.
+    // gate is installed AFTER close, so close() cannot have completed
+    // it: only the early writesRefused check can return this write
+    // without ever touching the gate.
     final link = ReplayBandLink();
     await link.close();
+
     final gate = Completer<void>();
     link.writeGate = gate;
-    var completed = false;
+
+    var writeObserved = false;
+    link.onWrite = (_, __) {
+      writeObserved = true;
+    };
+
     try {
-      final accepted = await link.write(kOuraCommandChar, <int>[0x10]).timeout(
-        const Duration(seconds: 5),
+      final accepted = await link
+          .write(kOuraCommandChar, <int>[0x10])
+          .timeout(const Duration(seconds: 5));
+
+      expect(
+        accepted,
+        isFalse,
+        reason: 'a closed link must refuse the write',
       );
-      expect(accepted, isFalse,
-          reason: 'refused without waiting — the gate is not even reached');
+
+      expect(
+        gate.isCompleted,
+        isFalse,
+        reason: 'the refusal must not release the open gate',
+      );
+
+      expect(
+        writeObserved,
+        isFalse,
+        reason: 'a refused write must not reach the write observer',
+      );
+
+      expect(
+        link.writes,
+        isEmpty,
+        reason: 'a refused write must not be recorded',
+      );
     } finally {
-      // Cleanup: if the write DID park (the regression), release the gate
-      // so the pending future ends instead of leaking past the test.
+      // Cleanup only: release a gate the write parked at (the regression)
+      // so its future ends instead of leaking past the test. All
+      // assertions above have already run by then.
       if (!gate.isCompleted) {
-        completed = true;
         gate.complete();
       }
     }
-    expect(link.writes, isEmpty);
-    expect(gate.isCompleted, completed,
-        reason: completed
-            ? 'the write parked at the gate — the finally cleanup had to '
-                'release it, which the isFalse assertion above flagged'
-            : 'the write never reached the gate — the early refusal '
-                'ended it before any wait');
   });
 
   test('the close contract separates immediate refusal from completed '
