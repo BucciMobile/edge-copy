@@ -812,6 +812,76 @@ void main() {
       expect(link.closed, isTrue, reason: 'still closed — no re-open');
       expect(link.isListening(kOuraNotifyChar), isFalse);
     });
+
+    test(
+        'a failing link close still stops the host, and surfaces after cleanup',
+        () async {
+      // Thread-1-Review: stop() darf close() nicht blind awaiten (die
+      // Replay-Kanalschließung kann auf einen Consumer warten, der erst mit
+      // host.stop() endet), ABER der Schließfehler darf auch keine unbeobachtete
+      // Future bleiben. Dieser Test pinnt beides: die Session läuft normal zu
+      // Ende, ihr teardown ruft stop(), close() schlägt FEHL — und der Host
+      // wird trotzdem beendet, der Fehler wirft MIT Stacktrace, und der
+      // Feldzustand ist danach sauber. Der Seam wirft ERST nach getaner
+      // Arbeit (Flags, Gates, Kanäle), also ist die Verweigerung real in
+      // Kraft — der Fehler ist reine Fehlerbeobachtung.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final historyAsked = Completer<void>();
+      ReplayBandLink? sessionLink;
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          } else if (value.first == 0x10) {
+            if (!historyAsked.isCompleted) historyAsked.complete();
+          }
+        },
+        onLink: (l) {
+          sessionLink = l;
+          l.closeThrows = true;
+        },
+      );
+      final hostBefore = OuraLink.instance.hostForTest;
+      expect(hostBefore, isNotNull, reason: 'the session owns a live host');
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      await proofAsked.future;
+      link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
+      await historyAsked.future;
+      link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
+      // The session completed HONESTLY, but its teardown's stop() hit the
+      // failing close: sessionThrew is false, so the teardown failure
+      // PROPAGATES through the result future with its own stacktrace —
+      // the documented error priority. Awaiting the result therefore
+      // throws; cleanup observables are checked AFTER, proving the host
+      // teardown ran DESPITE the close failure.
+      await expectLater(
+          result,
+          throwsA(isA<StateError>().having(
+              (e) => e.message, 'message',
+              contains('replay link close failure'))));
+      expect(OuraLink.instance.hostForTest, isNull,
+          reason: 'host cleanup ran DESPITE the link close failure');
+      expect(sessionLink!.closed, isTrue,
+          reason: 'the link really closed — the seam threw after the work');
+    });
+
+    // MATRIX GAP, documented honestly instead of tested speculatively:
+    // "host stop throws" has NO injectable production path today —
+    // `BandHost._commitLocked` catches commit failures itself (returns
+    // false, re-buffers, logs), so the primary-device guard used by the
+    // commit-failure test does NOT make `host.stop()` throw. The remaining
+    // `stop()` code (cursor flush, disconnect, field clears) running after
+    // a host failure is therefore guarded in `OuraLink.stop`'s own
+    // try/catch around `host.stop()`, verified statically — a fault seam
+    // for it would be a new test-only production hook, which this round
+    // excludes ("keine weitere Architektur-Erweiterung").
   });
 
   test(
@@ -1069,6 +1139,29 @@ void main() {
         gate.complete();
       }
     }
+  });
+
+  test('a replay write parked at its DELAY ends on close, not on the clock',
+      () async {
+    // Thread-2-Review, der ISOLIERTE Pfad: nur ReplayBandLink, kein
+    // OuraLink, kein sqflite, kein Harness-Stopwatch. close() unterbricht
+    // das Delay-Warten über das Close-Signal: writeDelay läuft länger als
+    // jedes Testbudget, der Write endet false LANGE vor Ablauf der
+    // Delay-Zeit. Die PR-Begründung (fake_async kann den HARNESS-Pfad
+    // wegen echtem sqflite-FFI-I/O und echtem Stopwatch nicht testen)
+    // gilt für den Session-Pfad — dieser Test kennt keines von beidem.
+    final link = ReplayBandLink()..writeDelay = const Duration(days: 1);
+    final inFlight = link.write(kOuraCommandChar, <int>[0x10]);
+    // One pump starts the delay wait (the write already recorded).
+    await Future<void>.delayed(Duration.zero);
+    await link.close();
+    final accepted = await inFlight;
+    expect(accepted, isFalse,
+        reason: 'close must interrupt the delay wait, not wait a day for it');
+    expect(link.writes, hasLength(1),
+        reason: 'the write was recorded BEFORE the delay — the record stays, '
+            'the VERDICT is refusal (the same rule as a GATT write already '
+            'handed to the plugin queue)');
   });
 
   test('the close contract separates immediate refusal from completed '

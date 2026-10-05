@@ -363,6 +363,12 @@ class ReplayBandLink implements BandLink {
   Completer<void>? writeGate;
 
   final Completer<void> _gateEntered = Completer<void>();
+  /// Completes on [close] — the same trick `GattBandLink` uses with its
+  /// `_closedSignal`: a write parked at [writeDelay]'s `Future.delayed` is
+  /// RACED against this signal, so `close()` interrupts the delay wait
+  /// instead of leaving the write parked there past the harness deadline
+  /// (`BandHost.stop`'s `cancel()` would otherwise wait for it).
+  final Completer<void> _closedSignal = Completer<void>();
 
   /// Completes the first time a [write] parks at [writeGate] — proof the
   /// session actually reached the held step, so a watchdog verdict never
@@ -416,7 +422,16 @@ class ReplayBandLink implements BandLink {
     }
     onWrite?.call(characteristicUuid, value);
     writes.add((characteristicUuid, value));
-    if (writeDelay > Duration.zero) await Future<void>.delayed(writeDelay);
+    if (writeDelay > Duration.zero) {
+      // The delay is RACED against the close signal: close must release
+      // EVERY await boundary of this link, this one included — a write
+      // parked here wakes on close (and then meets the `writesRefused`
+      // check below), never after the full delay.
+      await Future.any<void>([
+        Future<void>.delayed(writeDelay),
+        _closedSignal.future,
+      ]);
+    }
     // closed while parked at the delay: same rule, second await boundary.
     if (writesRefused) return false;
     return writeSucceeds;
@@ -444,9 +459,18 @@ class ReplayBandLink implements BandLink {
   /// to appear — so there was no real bug this gate was fixing; whatever
   /// narrow race it was reasoning about did not hold up against the real
   /// fixture. Keep this plain.
+  /// Test-only: make [close] fail with a [StateError] AFTER it has done its
+  /// real work (flags set, gates released, channels closed) — the close-failure
+  /// path of `OuraLink.stop`, on a link whose shutdown genuinely happened.
+  bool closeThrows = false;
+
   Future<void> close() async {
     closed = true;
     writesRefused = true; // the write refusal is IMMEDIATE, not after the closes
+    // Release a write parked at [writeDelay]'s delay wait, same as the gate
+    // below: close must leave NO await boundary of this link that can hang a
+    // caller forever.
+    if (!_closedSignal.isCompleted) _closedSignal.complete();
     // Release a write parked at [writeGate]: close must leave NO await
     // boundary of this link that can hang a caller forever — a parked
     // write wakes up, sees the refusal above, and returns false, so a
@@ -459,6 +483,9 @@ class ReplayBandLink implements BandLink {
       await c.close();
     }
     _channels.clear();
+    if (closeThrows) {
+      throw StateError('replay link close failure (test seam)');
+    }
   }
 
   /// End one channel while the others stay open — for an adapter test that

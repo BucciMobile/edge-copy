@@ -619,11 +619,47 @@ class OuraLink {
   Future<void> stop() async {
     // Before the host's run subscription is cancelled: an adapter's `finally`
     // can still write on the way out, and that write must not reach the radio.
-    _link?.close();
+    // The link and host are captured LOCALLY before the first await: the
+    // fields are cleared immediately, so a re-entrant stop() cannot hand the
+    // SAME resources to two cleanups or lose them. The close future is
+    // OBSERVED, not awaited-blind: awaiting close and letting its error
+    // propagate would SKIP the host shutdown below, and the replay link's
+    // channel closes can wait on a consumer that only ends when the host
+    // stops — so close's failure is recorded here and rethrown AFTER the
+    // full cleanup, with its original stacktrace. The session's own error
+    // keeps priority via the callers' `sessionThrew` logic in
+    // `_runSessionAndTeardown` and `_sync`'s finally.
+    final link = _link;
     _link = null;
+    Object? closeError;
+    StackTrace? closeStack;
+    if (link != null) {
+      // NOT awaited-blind: the replay link's channel closes can wait on a
+      // consumer that only ends when the host below stops — awaiting close
+      // HERE could deadlock before the cleanup it is part of. The error is
+      // still OBSERVED (an unobserved future error is a silent failure),
+      // recorded with its stacktrace, and rethrown after the cleanup.
+      link.close().catchError((Object e, StackTrace s) {
+        closeError = e;
+        closeStack = s;
+      });
+    }
     final host = _host;
     _host = null;
-    if (host != null) await host.stop();
+    Object? hostError;
+    StackTrace? hostStack;
+    if (host != null) {
+      // Same policy as the link close above: a host teardown failure must
+      // not SKIP the cursor flush and the disconnect still pending below.
+      // It is recorded and surfaces after the cleanup, under the close
+      // error if both failed (the close ran first, it stays the headline).
+      try {
+        await host.stop();
+      } catch (e, s) {
+        hostError = e;
+        hostStack = s;
+      }
+    }
     await _cursorWrites;
     _anchor = null;
     _deviceId = null;
@@ -633,6 +669,17 @@ class OuraLink {
       try {
         await d.disconnect();
       } catch (_) {/* already gone */}
+    }
+    // The link close or the host teardown failed, but the cleanup above has
+    // now fully run. Surface the captured failure with its ORIGINAL stacktrace
+    // — it must not be silent (an unobserved close error is an unobserved
+    // future error), but it must also not have prevented any part of the
+    // teardown from happening.
+    if (closeError != null) {
+      Error.throwWithStackTrace(closeError, closeStack!);
+    }
+    if (hostError != null) {
+      Error.throwWithStackTrace(hostError, hostStack!);
     }
   }
 
