@@ -940,6 +940,14 @@
   "@devicesBatteryNotReported": {
     "description": "Row sub: battery unknown."
   },
+  "devicesBatteryPack": "Battery pack",
+  "@devicesBatteryPack": {
+    "description": "Row title: the charge left in the external battery pack sitting on the band."
+  },
+  "devicesBatteryPackSub": "Reported by the band about every 10 minutes",
+  "@devicesBatteryPackSub": {
+    "description": "Row sub under the battery-pack charge: where the number comes from and how often it updates."
+  },
   "devicesCharging": "Charging",
   "@devicesCharging": {
     "description": "Battery sub tag: charging."

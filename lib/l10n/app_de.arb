@@ -209,6 +209,8 @@
   "devicesConnectToRename": "Verbinde dich mit dem Band, um ihn zu ändern",
   "devicesBattery": "Akku",
   "devicesBatteryNotReported": "Seit der letzten Verbindung nicht gemeldet",
+  "devicesBatteryPack": "Akkupack",
+  "devicesBatteryPackSub": "Vom Band etwa alle 10 Minuten gemeldet",
   "devicesCharging": "Lädt",
   "devicesHeartRate": "Herzfrequenz",
   "devicesRightNow": "Aktuell",

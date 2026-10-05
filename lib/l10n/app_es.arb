@@ -196,6 +196,8 @@
   "devicesConnectToRename": "Conéctate a la banda para cambiarlo",
   "devicesBattery": "Batería",
   "devicesBatteryNotReported": "No informada desde la última conexión",
+  "devicesBatteryPack": "Batería externa",
+  "devicesBatteryPackSub": "La pulsera la informa cada 10 minutos aprox.",
   "devicesCharging": "Cargando",
   "devicesHeartRate": "Frecuencia cardíaca",
   "devicesRightNow": "Ahora mismo",

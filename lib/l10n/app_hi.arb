@@ -196,6 +196,8 @@
   "devicesConnectToRename": "इसे बदलने के लिए बैंड से जुड़ें",
   "devicesBattery": "बैटरी",
   "devicesBatteryNotReported": "पिछले कनेक्शन के बाद से रिपोर्ट नहीं की गई",
+  "devicesBatteryPack": "बैटरी पैक",
+  "devicesBatteryPackSub": "बैंड लगभग हर 10 मिनट में बताता है",
   "devicesCharging": "चार्ज हो रहा है",
   "devicesHeartRate": "हृदय गति",
   "devicesRightNow": "अभी",

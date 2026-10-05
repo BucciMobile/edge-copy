@@ -1364,8 +1364,8 @@ class AppState extends ChangeNotifier {
       // BleEngine's EventSink typedef has no device field, so the id names
       // itself at this construction closure rather than widening the
       // engine's callback shape for a value it does not have.
-      onEvent: (id, ts, hex) =>
-          _onLiveEvent(id, ts, hex, LocalDb.kPrimaryDeviceId),
+      onEvent: (id, ts, hex, profile) =>
+          _onLiveEvent(id, ts, hex, profile, LocalDb.kPrimaryDeviceId),
       onEcgEvent: (e) => _ecgTransport?.onEngineEvent(e),
       onReadyEcgRecovery: _recoverEcgGuardOnReady,
       // Gated for the same reason as [_onRecord] — this one is wired straight
@@ -1513,8 +1513,8 @@ class AppState extends ChangeNotifier {
           onState: (s) => _onEngineState(LocalDb.kPrimaryDeviceId, s),
           log: _log,
           // M2: same marker as the constructor above.
-          onEvent: (id, ts, hex) =>
-              _onLiveEvent(id, ts, hex, LocalDb.kPrimaryDeviceId),
+          onEvent: (id, ts, hex, profile) =>
+              _onLiveEvent(id, ts, hex, profile, LocalDb.kPrimaryDeviceId),
           liveOwners: _liveOwners,
         );
     // Same wiring as the real constructor, and for the same reason it is safe
@@ -2442,9 +2442,15 @@ class AppState extends ChangeNotifier {
   // Live (foreground / kept-alive) event path: persist every event, then let the
   // gesture dispatcher act on it. Headless drain (background_sync) persists only —
   // it must never replay an old tap as a live action.
-  void _onLiveEvent(int id, int ts, String hex, String deviceId) {
+  void _onLiveEvent(
+    int id,
+    int ts,
+    String hex,
+    proto.BandProfile profile,
+    String deviceId,
+  ) {
     if (_resetting) return; // see [_resetting]
-    LocalDb.insertEvent(id, ts, hex, deviceId: deviceId);
+    LocalDb.insertEvent(id, ts, hex, deviceId: deviceId, profile: profile);
     // M3: gesture dispatch and the alarm handler stay unscoped — neither is
     // device-scoped in M3's scope, and a double-tap on either band should
     // still log water.

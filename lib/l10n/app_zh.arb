@@ -196,6 +196,8 @@
   "devicesConnectToRename": "连接腕带以更改",
   "devicesBattery": "电量",
   "devicesBatteryNotReported": "自上次连接以来未报告",
+  "devicesBatteryPack": "外接电池",
+  "devicesBatteryPackSub": "手环约每 10 分钟报告一次",
   "devicesCharging": "充电中",
   "devicesHeartRate": "心率",
   "devicesRightNow": "此刻",

@@ -6801,6 +6801,10 @@ class LocalDb {
     int ts,
     String hex, {
     required String deviceId,
+    // Required, not defaulted: a default of gen4 is exactly how every gen5
+    // BATTERY_PACK_INFO / condition-report / haptics event was stored as a
+    // bare `EVENT_<id>` with an empty payload.
+    required proto.BandProfile profile,
   }) async {
     final capturedAt = DateTime.now().millisecondsSinceEpoch;
     // Parse BEFORE acquiring the handle so both inserts run back-to-back on one
@@ -6809,7 +6813,7 @@ class LocalDb {
     // must not crash the app (the band re-sends events).
     final parsed = () {
       try {
-        return proto.parseEvent(proto.hexToBytes(hex));
+        return proto.parseEvent(proto.hexToBytes(hex), profile: profile);
       } catch (_) {
         return null;
       }
