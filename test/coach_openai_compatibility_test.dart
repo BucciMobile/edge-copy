@@ -138,17 +138,16 @@ void main() {
     }
 
     test(
-      'preserves requested reasoning without mutating caller input',
+      'uses provider-default reasoning and omits sampling without mutation',
       () async {
         final body = _body('gpt-6.1-sol')
-          ..['reasoning_effort'] = 'high'
           ..['top_p'] = 0.9
           ..['top_k'] = 10
           ..['logprobs'] = true
           ..['top_logprobs'] = 3;
         final original = jsonDecode(jsonEncode(body));
         final sent = await _capture(CoachConfig(), body, responses: true);
-        expect(sent['reasoning'], {'effort': 'high'});
+        expect(sent, isNot(contains('reasoning')));
         for (final key in [
           'reasoning_effort',
           'temperature',

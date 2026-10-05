@@ -116,18 +116,26 @@ void main() {
       expect(body, original);
     });
 
-    test('maps explicit effort without inventing a default effort', () {
-      final body = <String, dynamic>{
-        'model': 'gpt-6.1-sol',
-        'messages': [
-          {'role': 'user', 'content': 'Hello'},
-        ],
-      };
-      expect(_request(body), isNot(contains('reasoning')));
-      body['reasoning_effort'] = 'medium';
-      expect(_request(body)['reasoning'], {'effort': 'medium'});
-      expect(body['reasoning_effort'], 'medium');
-    });
+    test(
+      'uses provider-default reasoning and omits sampling without mutation',
+      () {
+        final body = <String, dynamic>{
+          'model': 'gpt-6.1-sol',
+          'messages': [
+            {'role': 'user', 'content': 'Hello'},
+          ],
+          'temperature': 0.3,
+        };
+        final before = jsonDecode(jsonEncode(body));
+        expect(_request(body), {
+          'model': 'gpt-6.1-sol',
+          'input': body['messages'],
+          'store': false,
+          'include': ['reasoning.encrypted_content'],
+        });
+        expect(body, before);
+      },
+    );
 
     test(
       'replays encrypted reasoning and interleaved output in original order',
@@ -184,112 +192,72 @@ void main() {
       },
     );
 
-    test('does not replay encrypted output after changing model', () {
-      final assistant = _reply(
-        _response([
+    for (final provenance in [
+      'another model',
+      'another endpoint',
+      'missing endpoint',
+    ]) {
+      test('$provenance reconstructs canonical calls and results', () {
+        const model = 'gpt-6-luna';
+        final assistant = _reply(
+          _response([
+            {
+              'id': 'rs_source',
+              'type': 'reasoning',
+              'summary': <dynamic>[],
+              'encrypted_content': 'opaque-source-provider-state',
+            },
+            _message('msg_source', 'Reading your day.'),
+            _call('fc_source', 'call_shared', 'lookup'),
+          ]),
+          model,
+        );
+        if (provenance == 'missing endpoint') {
+          assistant.remove('_responses_api_base');
+        }
+        final body = <String, dynamic>{
+          'model': provenance == 'another model' ? 'gpt-6.1-sol' : model,
+          'messages': [
+            assistant,
+            {
+              'role': 'tool',
+              'tool_call_id': 'call_shared',
+              'content': 'day result',
+            },
+          ],
+        };
+        final before = jsonDecode(jsonEncode(body));
+        final request = _request(
+          body,
+          apiBase: provenance == 'another endpoint'
+              ? 'https://other-provider.example/v1'
+              : _apiBase,
+        );
+        expect(request['input'], [
+          {'role': 'assistant', 'content': 'Reading your day.'},
           {
-            'id': 'rs_old',
-            'type': 'reasoning',
-            'summary': <dynamic>[],
-            'encrypted_content': 'private-old-model-state',
+            'type': 'function_call',
+            'call_id': 'call_shared',
+            'name': 'lookup',
+            'arguments': '{"date":"2026-10-04"}',
           },
-          _message('msg_old', 'Reading your day.'),
-          _call('fc_old', 'call_old', 'lookup'),
-        ]),
-        'gpt-6-luna',
-      );
-      final body = <String, dynamic>{
-        'model': 'gpt-6.1-sol',
-        'messages': [
-          assistant,
-          {'role': 'tool', 'tool_call_id': 'call_old', 'content': 'day result'},
-        ],
-      };
-      final before = jsonDecode(jsonEncode(body));
-      final request = _request(body);
-      expect(request['input'], [
-        {'role': 'assistant', 'content': 'Reading your day.'},
-        {
-          'type': 'function_call',
-          'call_id': 'call_old',
-          'name': 'lookup',
-          'arguments': '{"date":"2026-10-04"}',
-        },
-        {
-          'type': 'function_call_output',
-          'call_id': 'call_old',
-          'output': 'day result',
-        },
-      ]);
-      expect(jsonEncode(request), isNot(contains('private-old-model-state')));
-      expect(body, before);
-    });
-
-    for (final provenance in ['another endpoint', 'missing endpoint']) {
-      test(
-        '$provenance reconstructs canonical calls and results for the same model',
-        () {
-          const model = 'same-model-id';
-          final assistant = _reply(
-            _response([
-              {
-                'id': 'rs_source',
-                'type': 'reasoning',
-                'summary': <dynamic>[],
-                'encrypted_content': 'opaque-source-provider-state',
-              },
-              _message('msg_source', 'Reading your day.'),
-              _call('fc_source', 'call_shared', 'lookup'),
-            ]),
-            model,
-          );
-          if (provenance == 'missing endpoint') {
-            assistant.remove('_responses_api_base');
-          }
-          final body = <String, dynamic>{
-            'model': model,
-            'messages': [
-              assistant,
-              {
-                'role': 'tool',
-                'tool_call_id': 'call_shared',
-                'content': 'day result',
-              },
-            ],
-          };
-          final before = jsonDecode(jsonEncode(body));
-          final request = _request(
-            body,
-            apiBase: provenance == 'another endpoint'
-                ? 'https://other-provider.example/v1'
-                : _apiBase,
-          );
-          expect(request['input'], [
-            {'role': 'assistant', 'content': 'Reading your day.'},
-            {
-              'type': 'function_call',
-              'call_id': 'call_shared',
-              'name': 'lookup',
-              'arguments': '{"date":"2026-10-04"}',
-            },
-            {
-              'type': 'function_call_output',
-              'call_id': 'call_shared',
-              'output': 'day result',
-            },
-          ]);
-          for (final privateValue in [
-            'opaque-source-provider-state',
-            'rs_source',
-            'msg_source',
-            'fc_source',
-            '_responses_api_base',
-          ]) {
-            expect(jsonEncode(request), isNot(contains(privateValue)));
-          }
-          expect(body, before);
-        },
-      );
+          {
+            'type': 'function_call_output',
+            'call_id': 'call_shared',
+            'output': 'day result',
+          },
+        ]);
+        for (final privateValue in [
+          'opaque-source-provider-state',
+          'rs_source',
+          'msg_source',
+          'fc_source',
+          '_responses_api_base',
+        ]) {
+          expect(jsonEncode(request), isNot(contains(privateValue)));
+        }
+        expect(body, before);
+      });
     }
   });
 

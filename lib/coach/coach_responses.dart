@@ -61,46 +61,15 @@ class CoachResponses {
         });
       }
     }
-    final result = <String, dynamic>{...body, 'input': input, 'store': false};
-    for (final key in [
-      'messages',
-      'temperature',
-      'top_p',
-      'top_k',
-      'logprobs',
-      'top_logprobs',
-      'reasoning_effort',
-      'max_tokens',
-      'max_completion_tokens',
-    ]) {
-      result.remove(key);
-    }
-    // Preserve the provider's default effort instead of guessing capabilities.
-    if (body['reasoning_effort'] != null) {
-      result['reasoning'] = {
-        if (body['reasoning'] is Map) ...body['reasoning'] as Map,
-        'effort': body['reasoning_effort'],
-      };
-    }
-    final maxTokens = body['max_completion_tokens'] ?? body['max_tokens'];
-    if (maxTokens != null) result['max_output_tokens'] = maxTokens;
-    result['include'] = {
-      ...((body['include'] as List?) ?? const []),
-      'reasoning.encrypted_content',
-    }.toList();
-    if (body['tools'] != null) {
-      result['tools'] = [
-        for (final tool in _maps(body['tools'])) _functionTool(tool),
-      ];
-    }
-    final choice = body['tool_choice'];
-    if (choice is Map && choice['type'] == 'function') {
-      result['tool_choice'] = {
-        'type': 'function',
-        'name': (choice['function'] as Map?)?['name'],
-      };
-    }
-    return result;
+    return {
+      'model': model,
+      'input': input,
+      'store': false,
+      'include': ['reasoning.encrypted_content'],
+      if (body['tools'] != null)
+        'tools': [for (final tool in _maps(body['tools'])) _functionTool(tool)],
+      if (body['tool_choice'] != null) 'tool_choice': body['tool_choice'],
+    };
   }
 
   static Map<String, dynamic> _functionTool(Map tool) {
@@ -129,7 +98,6 @@ class CoachResponses {
     }
     final output = _maps(response['output']).toList();
     final text = <String>[];
-    final refusals = <String>[];
     final calls = <Map<String, dynamic>>[];
     for (final item in output) {
       switch (item['type']) {
@@ -146,7 +114,6 @@ class CoachResponses {
               text.add(content['text'] as String);
             } else if (content['type'] == 'refusal' &&
                 content['refusal'] is String) {
-              refusals.add(content['refusal'] as String);
               text.add(content['refusal'] as String);
             } else {
               throw const FormatException(
@@ -185,7 +152,6 @@ class CoachResponses {
       'role': 'assistant',
       'content': text.join('\n'),
       if (calls.isNotEmpty) 'tool_calls': calls,
-      if (refusals.isNotEmpty) 'refusal': refusals.join('\n'),
       '_responses_output': output,
       '_responses_model': model,
       '_responses_api_base': apiBase,

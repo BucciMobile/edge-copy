@@ -136,21 +136,7 @@ void main() {
         return http.Response(
           jsonEncode({
             'status': 'completed',
-            'output': [
-              {
-                'id': 'msg_fresh',
-                'type': 'message',
-                'status': 'completed',
-                'role': 'assistant',
-                'content': [
-                  {
-                    'type': 'output_text',
-                    'text': 'Fresh answer',
-                    'annotations': [],
-                  },
-                ],
-              },
-            ],
+            'output': [_answer('msg_fresh', 'Fresh answer')],
           }),
           200,
         );

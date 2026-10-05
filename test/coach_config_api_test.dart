@@ -1,22 +1,13 @@
-import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/coach/coach_config.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  const secureChannel = MethodChannel(
-    'plugins.it_nomads.com/flutter_secure_storage',
-  );
-
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureChannel, (_) async => null);
-  });
-  tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(secureChannel, null);
+    FlutterSecureStorage.setMockInitialValues({});
   });
 
   CoachConfig config() {
@@ -210,6 +201,7 @@ void main() {
       await reloaded.load();
       expect(reloaded.api, CoachApi.chatCompletions);
       expect(reloaded.model, 'gpt-6.1-sol');
+      expect(reloaded.apiKey, 'synthetic-test-key');
     },
   );
 }

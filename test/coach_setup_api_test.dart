@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,36 +8,6 @@ import 'package:openstrap_edge/coach/coach_config.dart';
 import 'package:openstrap_edge/ui2/screens/coach.dart';
 import 'package:openstrap_edge/ui2/screens/journal_compose.dart';
 import 'package:openstrap_edge/ui2/ui2.dart';
-
-// Keep the setup's key-boundary behavior testable without a platform keychain.
-// Base/model/API settings still use the real CoachConfig save path.
-class _TestConfig extends CoachConfig {
-  _TestConfig({String? key}) : _testKey = key;
-
-  String? _testKey;
-  String? savedKey;
-
-  @override
-  String? get apiKey => _testKey;
-
-  @override
-  Future<void> save({
-    String? baseUrl,
-    String? model,
-    CoachApi? api,
-    String? apiKey,
-    int? timeoutSeconds,
-  }) async {
-    savedKey = apiKey;
-    if (apiKey != null) _testKey = apiKey.isEmpty ? null : apiKey;
-    await super.save(
-      baseUrl: baseUrl,
-      model: model,
-      api: api,
-      timeoutSeconds: timeoutSeconds,
-    );
-  }
-}
 
 Future<void> _mount(WidgetTester tester, CoachConfig config) async {
   tester.view.physicalSize = const Size(390 * 3, 844 * 3);
@@ -112,17 +82,13 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
     SharedPreferences.setMockInitialValues({});
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
-        .setMockMethodCallHandler(
-          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-          (_) async => null,
-        );
+    FlutterSecureStorage.setMockInitialValues({});
   });
 
   testWidgets('every preset chooses its API without inspecting the model', (
     tester,
   ) async {
-    final config = _TestConfig();
+    final config = CoachConfig();
     addTearDown(config.dispose);
     await _mount(tester, config);
     expect(_selectedApi(tester), CoachApi.responses);
@@ -149,7 +115,7 @@ void main() {
   testWidgets('a custom endpoint Responses override survives save and reopen', (
     tester,
   ) async {
-    final config = _TestConfig();
+    final config = CoachConfig();
     addTearDown(config.dispose);
     await config.save(
       baseUrl: 'https://provider.example/v1',
@@ -164,7 +130,7 @@ void main() {
     expect(config.model, 'my-provider-model');
     expect(config.apiBase, 'https://provider.example/v1');
 
-    final restored = _TestConfig();
+    final restored = CoachConfig();
     addTearDown(restored.dispose);
     await restored.load();
     await _mount(tester, restored);
@@ -177,7 +143,7 @@ void main() {
   testWidgets('clearing the base saves the default OpenAI Responses endpoint', (
     tester,
   ) async {
-    final config = _TestConfig();
+    final config = CoachConfig();
     addTearDown(config.dispose);
     await config.save(
       baseUrl: 'https://provider.example/v1',
@@ -197,9 +163,9 @@ void main() {
   testWidgets(
     'an OpenAI Chat override survives path edits but resets by origin',
     (tester) async {
-      final config = _TestConfig(key: 'placeholder-key');
+      final config = CoachConfig();
       addTearDown(config.dispose);
-      await config.save(model: 'legacy-model');
+      await config.save(model: 'legacy-model', apiKey: 'placeholder-key');
       await _mount(tester, config);
 
       await _chooseApi(tester, CoachApi.chatCompletions);
@@ -211,7 +177,9 @@ void main() {
       );
       await _save(tester);
       expect(config.api, CoachApi.chatCompletions);
-      expect(config.savedKey, 'placeholder-key');
+      expect(config.apiKey, 'placeholder-key');
+      await config.load();
+      expect(config.apiKey, 'placeholder-key');
 
       await _mount(tester, config);
       expect(_selectedApi(tester), CoachApi.chatCompletions);
@@ -223,7 +191,9 @@ void main() {
         '',
       );
       await _save(tester);
-      expect(config.savedKey, '');
+      expect(config.apiKey, isNull);
+      await config.load();
+      expect(config.apiKey, isNull);
 
       await _mount(tester, config);
       await _enter(tester, 'Base URL', 'https://api.openai.com/v1');

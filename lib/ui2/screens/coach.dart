@@ -797,11 +797,7 @@ class _MenuRow extends StatelessWidget {
 class _Preset {
   final String label, sub, baseUrl;
   final bool local;
-  final CoachApi api;
-  const _Preset(this.label, this.sub, this.baseUrl, {
-    this.local = false,
-    this.api = CoachApi.chatCompletions,
-  });
+  const _Preset(this.label, this.sub, this.baseUrl, {this.local = false});
 }
 
 List<_Preset> _presets(BuildContext c) {
@@ -810,8 +806,7 @@ List<_Preset> _presets(BuildContext c) {
   return <_Preset>[
     _Preset('Ollama', local, 'http://localhost:11434/v1', local: true),
     _Preset('LM Studio', local, 'http://localhost:1234/v1', local: true),
-    _Preset('OpenAI', 'api.openai.com', 'https://api.openai.com/v1',
-        api: CoachApi.responses),
+    _Preset('OpenAI', 'api.openai.com', 'https://api.openai.com/v1'),
     _Preset('Anthropic', 'api.anthropic.com', 'https://api.anthropic.com/v1'),
     _Preset('OpenRouter', 'openrouter.ai', 'https://openrouter.ai/api/v1'),
   ];
@@ -1023,7 +1018,7 @@ class _CoachSetupState extends State<CoachSetup> {
                                 // discard that explanation.
                                 _msg = null;
                                 _base.text = preset.baseUrl;
-                                _api = preset.api;
+                                _api = CoachApi.defaultFor(preset.baseUrl);
                                 _models = const [];
                                 _model = '';
                               }),
