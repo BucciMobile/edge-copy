@@ -321,10 +321,10 @@ class OuraLink {
 
   BluetoothDevice? _device;
 
-  /// Kept only so teardown can [GattBandLink.close] it — that is what stops a
+  /// Kept only so teardown can [BandLink.close] it — that is what stops a
   /// write the adapter queued before teardown from landing on a LATER
   /// connection to the same ring.
-  GattBandLink? _link;
+  BandLink? _link;
 
   /// The session driving [OuraAdapter] over [_link] — see `adapters/host.dart`.
   BandHost? _host;
@@ -475,19 +475,37 @@ class OuraLink {
                 '${missing.map((u) => u.substring(0, 8)).join(", ")}.');
             return false;
           }
-          // `return await`, not a bare `return`: Dart runs this try's
-          // `finally` BEFORE awaiting a returned future, so a bare return
-          // tore the session down while the drain was still open. The
-          // teardown itself lives in [_runSessionAndTeardown] so the exact
-          // production order is testable without a radio.
+          // `return await`, NOT a bare `return future`. The claim that a
+          // bare `return future` in an async function is always equivalent
+          // to `return await` is NOT sound as specified: Dart SDK issue
+          // #44395 and language issue #870 document a specification/
+          // implementation divergence around exactly this try/finally
+          // interaction, and behavior around `finally`-vs-await ordering
+          // for a bare returned future has been implementation-defined
+          // territory rather than guaranteed semantics. The safe, explicit
+          // form is `return await` — the finally provably runs AFTER the
+          // session completes. The teardown itself lives in
+          // [_runSessionAndTeardown] so the exact production order is
+          // testable without a radio.
           return await _runSessionAndTeardown(link, deviceId,
               key: key, cursor: cursor);
         } finally {
           // Drop the link and DISCONNECT before the slot is released. Also
           // covers the EARLY returns above (adapter off, no characteristics),
           // which do not go through [_runSessionAndTeardown]; for the
-          // session path this is a second, idempotent stop.
-          await stop();
+          // session path this is a second, idempotent stop. A failure of
+          // THIS stop must never MASK an exception the session already
+          // raised (a throwing finally replaces the in-flight error in
+          // Dart) — so it is logged, not propagated. The FIRST stop, the
+          // one on the session path, already applied the same priority
+          // rule in [_runSessionAndTeardown] and propagates its own
+          // teardown failure when the session SUCCEEDED.
+          try {
+            await stop();
+          } catch (e) {
+            debugPrint('[oura] teardown failed: $e — the session\'s own '
+                'verdict is the one reported.');
+          }
         }
       });
     } catch (e) {
@@ -554,28 +572,76 @@ class OuraLink {
     required int cursor,
     Duration? replyTimeout,
     Duration? confirmTimeout,
+    int? epoch,
   }) async {
+    var sessionThrew = false;
     try {
       return await _runSession(link, deviceId,
           key: key,
           cursor: cursor,
           replyTimeout: replyTimeout,
           confirmTimeout: confirmTimeout);
+    } catch (_) {
+      sessionThrew = true;
+      rethrow;
     } finally {
-      // Drop the link and DISCONNECT before the slot is released.
-      await stop();
+      // ERROR PRIORITY, spelled out for all three cases:
+      //  - session returned (true OR false — both are VERDICTS, not errors)
+      //    and the teardown failed: the teardown failure propagates with
+      //    its own stacktrace — a `false` session does not license a lost
+      //    cleanup;
+      //  - session THREW and the teardown failed too: the session's
+      //    ORIGINAL error (already in flight, with its stacktrace) is the
+      //    one that propagates — a throwing `finally` would REPLACE it in
+      //    Dart, so the teardown failure is logged beside it instead and
+      //    is never silent.
+      try {
+        await stop(epoch: epoch);
+      } catch (e, s) {
+        if (sessionThrew) {
+          debugPrint('[oura] teardown failed as well: $e — the session\'s '
+              'own error is the one reported.');
+        } else {
+          Error.throwWithStackTrace(e, s);
+        }
+      }
     }
   }
 
+  /// The session this link state belongs to. THE PRODUCTION PATH never
+  /// overlaps sessions: `sync()` serializes on `[_busy]` and a session's own
+  /// teardown runs before `sync()` returns, so no second session can start
+  /// while the first one's fields are live. The OVERLAP this guards against
+  /// exists only in the replay harness, where a wedged session's watchdog
+  /// gives up on it while its body — and its `finally` — are still pending
+  /// and a follow-up attempt may already have started. A teardown that
+  /// runs LATE must not be able to touch the fields of a FOLLOW-UP
+  /// attempt: null a newer session's `_host`/`_link` mid-drain or swallow
+  /// its cursor writes. So `stop` takes the epoch of the session it tears
+  /// down and leaves anything newer alone.
+  int _sessionEpoch = 0;
+
   /// Drop the link, flush what the session can still stamp, disconnect.
-  /// Safe to call when nothing is connected.
-  Future<void> stop() async {
+  /// Safe to call when nothing is connected. With [epoch], a LATE teardown
+  /// (its harness already gave up and a new session may have started) is a
+  /// no-op on the live fields: the wedged session's own link is closed
+  /// directly by its harness, and this stop only cleans up when it is still
+  /// the CURRENT session.
+  Future<void> stop({int? epoch}) async {
+    // A LATE teardown: the harness of the session named by [epoch] already
+    // gave up on it and a NEWER session may own the fields below. Everything
+    // this method touches must then stay put — nulling `_host`/`_link` or
+    // draining `_cursorWrites` here would tear down the follow-up session,
+    // not the wedged one. The wedged session's own link was closed directly
+    // by its harness; this call has nothing left to do for it.
+    if (epoch != null && epoch != _sessionEpoch) return;
     // Before the host's run subscription is cancelled: an adapter's `finally`
     // can still write on the way out, and that write must not reach the radio.
     _link?.close();
     _link = null;
-    await _host?.stop();
+    final host = _host;
     _host = null;
+    if (host != null) await host.stop();
     await _cursorWrites;
     _anchor = null;
     _deviceId = null;
@@ -792,6 +858,8 @@ class OuraLink {
     int Function()? nowSeconds,
     Duration timeouts = const Duration(seconds: 30),
     bool writeSucceeds = true,
+    Duration harnessTimeout = const Duration(seconds: 30),
+    void Function(ReplayBandLink link)? onLink,
   }) async =>
       await _replaySession(
         deviceId,
@@ -800,6 +868,8 @@ class OuraLink {
         nowSeconds: nowSeconds,
         timeouts: timeouts,
         writeSucceeds: writeSucceeds,
+        harnessTimeout: harnessTimeout,
+        onLink: onLink,
       );
 
   /// One scripted ring session through the REAL result path: `_runSession`,
@@ -813,13 +883,25 @@ class OuraLink {
     int Function()? nowSeconds,
     required Duration timeouts,
     bool writeSucceeds = true,
+    Duration harnessTimeout = const Duration(seconds: 30),
+    void Function(ReplayBandLink link)? onLink,
   }) async {
+    // LINK, EPOCH and the [onLink] hook are set up SYNCHRONOUSLY, before the
+    // first await: a test's `onLink` (installing a write gate, capturing the
+    // link) must not race the session's first write or the test's own first
+    // read of the captured link.
+    final link = ReplayBandLink()..writeSucceeds = writeSucceeds;
+    _lastLink = link;
+    // A NEW session epoch: this attempt's late teardown (its `finally` running
+    // after the harness watchdog below already gave up) is scoped to THIS
+    // number, so `stop(epoch:)` can tell it from a follow-up attempt's fields
+    // and a wedged session can never tear down its successor.
+    final epoch = ++_sessionEpoch;
+    onLink?.call(link);
     _now = nowSeconds ?? _now;
     _deviceId = deviceId;
     await _loadAnchor(deviceId);
     final cursor = await LocalDb.getCursorInt(_cursorItem(deviceId)) ?? 0;
-    final link = ReplayBandLink()..writeSucceeds = writeSucceeds;
-    _lastLink = link;
     var finished = false;
     // THE REAL RESULT PATH, including the production outer order:
     // `_runSessionAndTeardown` is the session-then-stop pairing `sync()`
@@ -833,12 +915,16 @@ class OuraLink {
       cursor: cursor,
       replyTimeout: timeouts,
       confirmTimeout: timeouts,
+      epoch: epoch,
     ).whenComplete(() => finished = true);
     var served = 0;
     // Bounded by wall time, not a spin count: a real sqflite commit between
-    // batches can outlast any fixed number of zero-length yields.
+    // batches can outlast any fixed number of zero-length yields. The bound
+    // is the HARNESS patience, not the protocol timeouts: a session still
+    // running when this expires is wedged from the harness's point of view,
+    // and the watchdog below turns that into a test failure.
     final clock = Stopwatch()..start();
-    while (!finished && clock.elapsed < timeouts) {
+    while (!finished && clock.elapsed < harnessTimeout) {
       await Future<void>.delayed(const Duration(milliseconds: 1));
       while (served < link.writes.length) {
         for (final f in reply(served, link.writes[served].$2)) {
@@ -847,17 +933,68 @@ class OuraLink {
         served++;
       }
     }
-    await link.close();
-    // Same real-commit hazard as `timeouts` above (`BandHost.stop`'s own
-    // final flush is the same sqflite write), so the same generous bound.
-    await done.timeout(const Duration(seconds: 30), onTimeout: () {});
-    final host = _host;
-    if (host != null) await host.stop();
-    await _cursorWrites;
-    _host = null;
-    _anchor = null;
-    _deviceId = null;
-    final result = await done;
+    // The wedged session's link: closed UNCONDITIONALLY (even a session that
+    // wedged inside link.close() itself must not turn the harness's own
+    // cleanup into the hang), and PROTECTED, so a close that never completes
+    // cannot become a second, unwatched hang on the cleanup path.
+    try {
+      await link.close().timeout(harnessTimeout, onTimeout: () {});
+    } catch (_) {
+      // A fixture whose close throws still leaves `closed`/`writesRefused`
+      // set synchronously at its top — the refusal is already in force.
+    }
+    // TWO DIFFERENT TIMEOUTS, deliberately not collapsed:
+    //  - the SESSION's own protocol timeouts (replyTimeout/confirmTimeout)
+    //    produce a regular `false` — a reachable, tested behaviour;
+    //  - THIS watchdog is the HARNESS giving up on a wedged session (a
+    //    real sqflite commit can outlast any script, but 30 s means the
+    //    session is stuck, not slow). A negative test expecting `false`
+    //    must NOT be able to pass because the harness hung: the watchdog
+    //    therefore THROWS a visible test failure instead of returning
+    //    `false` and greenwashing a hang.
+    Object? harnessFailure;
+    StackTrace? harnessFailureTrace;
+    var harnessTimedOut = false;
+    bool result = false;
+    try {
+      result = await done.timeout(harnessTimeout,
+          onTimeout: () {
+        // Record, do not resolve: a `false` HERE would hand a negative
+        // test the very `false` it expects and let a hang pass as a
+        // verdict. The flag decides AFTER cleanup whether to throw.
+        harnessTimedOut = true;
+        return false;
+      });
+    } catch (e, s) {
+      // The session's OWN exception survives WITH its cause and stacktrace —
+      // the watchdog wraps, it does not swallow.
+      harnessFailure = e;
+      harnessFailureTrace = s;
+    }
+    // CLEANUP RUNS ON EVERY PATH — including the harness timeout. It
+    // REUSES the epoch-guarded production teardown instead of resetting
+    // the shared fields directly: when the wedged session is still the
+    // current one, `stop(epoch:)` does the full cleanup (host stopped,
+    // cursor writes flushed, fields cleared) exactly as a normal path
+    // would; when a FOLLOW-UP session has already started, the same
+    // epoch check that protects the late `finally` above protects HERE —
+    // a harness that gave up on its session must not null the follow-up
+    // session's `_host`/`_anchor`/`_deviceId` mid-drain. Only AFTER
+    // cleanup does the watchdog's failure surface, so a wedged session
+    // can never leave a half-torn OuraLink behind either.
+    await stop(epoch: epoch);
+    if (harnessTimedOut) {
+      throw StateError(
+          'Oura replay session did not finish within $harnessTimeout — the '
+          'harness cannot tell a wedged session from a slow one, so this is '
+          'a test failure, not a sync result.');
+    }
+    if (harnessFailure != null) {
+      // SEPARATE verdict from the timeout: the session FAILED on its own.
+      // `Error.throwWithStackTrace` rethrows the ORIGINAL error with its
+      // ORIGINAL stacktrace attached, so nothing of the cause is lost.
+      Error.throwWithStackTrace(harnessFailure, harnessFailureTrace!);
+    }
     return result;
   }
 
@@ -865,6 +1002,17 @@ class OuraLink {
   /// session, so a test can assert on BOTH the session result and the
   /// writes the adapter actually put on the wire.
   ReplayBandLink? _lastLink;
+
+  /// The current session's epoch, so a test can name a PAST session's epoch
+  /// and prove `stop(epoch:)` leaves the live session alone — the exact
+  /// regression a wedged session's late teardown could otherwise cause.
+  @visibleForTesting
+  int get sessionEpochForTest => _sessionEpoch;
+
+  /// The live session's host, so a test can prove a LATE teardown left the
+  /// follow-up session's host untouched (identity, not just non-null).
+  @visibleForTesting
+  BandHost? get hostForTest => _host;
 
   @visibleForTesting
   ReplayBandLink? get lastReplayLink => _lastLink;
@@ -886,13 +1034,19 @@ class OuraLink {
     List<int> key, {
     int Function()? nowSeconds,
     void Function(String uuid, List<int> value)? onWrite,
+    void Function(ReplayBandLink link)? onLink,
   }) async {
+    // Set up SYNCHRONOUSLY before the first await — see `_replaySession`.
+    final link = ReplayBandLink()..onWrite = onWrite;
+    // A NEW session epoch for this manual-drive attempt, same purpose as in
+    // `_replaySession`: a late teardown stays scoped to its own attempt.
+    final epoch = ++_sessionEpoch;
+    onLink?.call(link);
     _now = nowSeconds ?? _now;
     _deviceId = deviceId;
     _drainOk = false;
     await _loadAnchor(deviceId);
     final cursor = await LocalDb.getCursorInt(_cursorItem(deviceId)) ?? 0;
-    final link = ReplayBandLink()..onWrite = onWrite;
     // Set as `_link`, exactly as `_sync` does after discovery, so the
     // teardown's `_link?.close()` runs the same code path production runs.
     _link = link;
@@ -903,6 +1057,7 @@ class OuraLink {
       cursor: cursor,
       replyTimeout: const Duration(seconds: 30),
       confirmTimeout: const Duration(seconds: 30),
+      epoch: epoch,
     );
     return (result, link);
   }
