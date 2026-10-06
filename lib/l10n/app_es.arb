@@ -197,7 +197,7 @@
   "devicesBattery": "Batería",
   "devicesBatteryNotReported": "No informada desde la última conexión",
   "devicesBatteryPack": "Batería externa",
-  "devicesBatteryPackSub": "La pulsera la informa cada 10 minutos aprox.",
+  "devicesBatteryPackSub": "La banda informa de su carga aproximadamente cada 10 minutos",
   "devicesCharging": "Cargando",
   "devicesHeartRate": "Frecuencia cardíaca",
   "devicesRightNow": "Ahora mismo",

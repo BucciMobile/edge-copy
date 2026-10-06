@@ -63,10 +63,36 @@ void main() {
       expect(engine.state.batteryPackPct, isNull);
     });
 
-    test('BATTERY_PACK_REMOVED clears it, even when replayed', () {
+    test('a removal newer than the reading clears it', () {
+      final engine = newEngine();
+      final t = _now();
+      engine.debugAbsorbDecoded(_decoded(_at(_packInfo, t - 60)));
+      engine.debugAbsorbDecoded(_decoded(_at(_packRemoved, t)));
+      expect(engine.state.batteryPackPct, isNull);
+    });
+
+    test('a removal older than the reading is the past and is ignored', () {
+      // Replayed from before the pack went back on: clearing on it would hide
+      // a pack that is sitting on the band right now.
+      final engine = newEngine();
+      final t = _now();
+      engine.debugAbsorbDecoded(_decoded(_at(_packInfo, t)));
+      engine.debugAbsorbDecoded(_decoded(_at(_packRemoved, t - 60)));
+      expect(engine.state.batteryPackPct, 94.6);
+    });
+
+    test('a reading older than a removal does not bring the pack back', () {
+      final engine = newEngine();
+      final t = _now();
+      engine.debugAbsorbDecoded(_decoded(_at(_packRemoved, t)));
+      engine.debugAbsorbDecoded(_decoded(_at(_packInfo, t - 60)));
+      expect(engine.state.batteryPackPct, isNull);
+    });
+
+    test('DeviceState.reset forgets it', () {
       final engine = newEngine();
       engine.debugAbsorbDecoded(_decoded(_at(_packInfo, _now())));
-      engine.debugAbsorbDecoded(_decoded(hexToBytes(_packRemoved)));
+      engine.state.reset();
       expect(engine.state.batteryPackPct, isNull);
     });
 

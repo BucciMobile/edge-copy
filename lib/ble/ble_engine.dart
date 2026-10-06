@@ -2023,6 +2023,11 @@ class BleEngine {
   int? _strapAlarmEpoch;
   bool? _strapAlarmActive;
 
+  /// Strap timestamp of the newest battery-pack reading or removal applied to
+  /// [DeviceState.batteryPackPct]. An older one arriving later is the past,
+  /// whatever the freshness gate says.
+  int? _batteryPackEventTs;
+
   /// Why the last running haptics pattern stopped (HAPTICS_TERMINATED(100),
   /// `expired`, `error` or `user_double_tap`. The double tap is the
   /// only way to learn the WEARER dismissed an alarm rather than letting it
@@ -2381,7 +2386,10 @@ class BleEngine {
     state.connection = connStringFor(p);
     // Removal is only heard over a live link, so off one the pack reading is
     // no longer known to be true. The next 109 brings it back.
-    if (p != BleConnState.listening) state.batteryPackPct = null;
+    if (p != BleConnState.listening) {
+      state.batteryPackPct = null;
+      _batteryPackEventTs = null;
+    }
     onState(state);
   }
 
@@ -5429,25 +5437,34 @@ class BleEngine {
       }
     }
     // The battery pack's own charge, relayed by the strap in
-    // BATTERY_PACK_INFO(109) as tenths of a percent. Same timestamp gate as the
-    // strap's level above: a replayed 109 is the pack's charge hours ago. A
-    // raw value past 1000 is not a percentage and is dropped rather than
-    // clamped.
-    if (f.containsKey('pack_battery_raw')) {
+    // BATTERY_PACK_INFO(109) as tenths of a percent, and its removal (22).
+    // Newest event wins: a 109 or 22 older than the last one applied is
+    // ignored, so a late replay cannot bring back a removed pack or clear a
+    // re-attached one. Attach (21) sets nothing: the 109 after it carries the
+    // level.
+    final packTs = (f['ts_epoch'] as num?)?.toInt();
+    final packEventIsNewest = packTs != null &&
+        (_batteryPackEventTs == null || packTs >= _batteryPackEventTs!);
+    if (f.containsKey('pack_battery_raw') && packEventIsNewest) {
+      // Same freshness gate as the strap's level above: a replayed 109 is the
+      // pack's charge hours ago. A raw value past 1000 is not a percentage and
+      // is dropped rather than clamped.
       final raw = (f['pack_battery_raw'] as num).toInt();
-      final packTs = (f['ts_epoch'] as num?)?.toInt();
       final wallNow = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       if (raw <= 1000 && BatteryPolicy.acceptsEventReading(packTs, wallNow)) {
+        _batteryPackEventTs = packTs;
         state.batteryPackPct = raw / 10.0;
         onState(state);
       }
     }
-    // Removal clears it whatever its age — forgetting a reading never claims
-    // anything. Attach (21) sets nothing: the 109 that follows it carries the
-    // level.
-    if (f['pack_connected'] == false && state.batteryPackPct != null) {
-      state.batteryPackPct = null;
-      onState(state);
+    // Removal needs no freshness gate — forgetting a reading never claims
+    // anything — only to be newer than the reading it would clear.
+    if (f['pack_connected'] == false && packEventIsNewest) {
+      _batteryPackEventTs = packTs;
+      if (state.batteryPackPct != null) {
+        state.batteryPackPct = null;
+        onState(state);
+      }
     }
     if (f.containsKey('charging')) {
       state.charging = f['charging'] as bool;
