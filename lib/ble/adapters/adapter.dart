@@ -382,6 +382,28 @@ class ReplayBandLink implements BandLink {
   StreamController<(int, List<int>)> _channel(String uuid) =>
       _channels.putIfAbsent(uuid, StreamController<(int, List<int>)>.new);
 
+  /// Test-only: while set, [close] PARKS here — after the refusal flags and
+  /// gate releases are already in force, but BEFORE the channel closes. The
+  /// deterministic way to hold `OuraLink.stop()` pending at exactly the
+  /// `await closing` step it must not skip: the test completes this
+  /// completer when it chooses to let the teardown finish.
+  Completer<void>? closeGate;
+
+  /// Completes the first time [close] is ENTERED — the deterministic hook a
+  /// lifecycle test awaits instead of polling event-loop turns for
+  /// `closeCount` to grow. Completes BEFORE the [closeGate] wait, so a test
+  /// can prove ordering ("the close entered, the teardown is inside it")
+  /// with an await, not a spin.
+  final Completer<void> _closeEntered = Completer<void>();
+  Future<void> get closeEntered => _closeEntered.future;
+
+  /// How many times [close] has been ENTERED. The observable that separates a
+  /// teardown-driven close from the harness's fallback close: a replay
+  /// session whose production teardown really owns the link closes it once
+  /// itself and the harness's unconditional fallback close makes two —
+  /// without the teardown registration the fallback is the ONLY close.
+  int closeCount = 0;
+
   @override
   Stream<(int, List<int>)> notify(String characteristicUuid) =>
       _channel(characteristicUuid).stream;
@@ -465,6 +487,8 @@ class ReplayBandLink implements BandLink {
   bool closeThrows = false;
 
   Future<void> close() async {
+    closeCount++;
+    if (!_closeEntered.isCompleted) _closeEntered.complete();
     closed = true;
     writesRefused = true; // the write refusal is IMMEDIATE, not after the closes
     // Release a write parked at [writeDelay]'s delay wait, same as the gate
@@ -479,6 +503,8 @@ class ReplayBandLink implements BandLink {
     // parked notification reader.
     final g = writeGate;
     if (g != null && !g.isCompleted) g.complete();
+    final cg = closeGate;
+    if (cg != null) await cg.future;
     for (final c in _channels.values) {
       await c.close();
     }

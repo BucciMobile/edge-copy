@@ -154,6 +154,44 @@ void main() {
     }
   });
 
+  test(
+      'a PACKED notification archives each frame once, byte-exact, in the '
+      'actual raw_archive rows',
+      () async {
+    // The DB-level invariant behind Fix C: one notification carrying three
+    // frames must produce THREE archive rows — each the frame's own exact
+    // hex, none the whole packed notification, none duplicated. `raw_archive`
+    // INSERT-OR-IGNOREs on the hex, so a whole-notification copy would not
+    // even collide — it would silently bank the packed blob once per event
+    // under three different event reasons. This test checks the actual
+    // `raw_archive` rows (hex bytes, reason, count), not an adapter list.
+    const syncUnix = 1782043215;
+    final frame1 = _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix));
+    final frame2 = _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436));
+    final frame3 = _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436));
+    final packed = <int>[...frame1, ...frame2, ...frame3, ..._summary(3, 0)];
+    final r = await _run([
+      [packed]
+    ]);
+    expect(r.onehz, hasLength(2),
+        reason: 'every packed event decoded — the walk did not stop at '
+            'frame one');
+    expect(r.archive, hasLength(3),
+        reason: 'three frames, three archive rows — not three copies of '
+            'the packed notification');
+    final hexes = r.archive.map((a) => a['hex']).toList();
+    expect(hexes[0], _hexOf(frame1),
+        reason: 'archive row one is frame one\'s own bytes');
+    expect(hexes[1], _hexOf(frame2));
+    expect(hexes[2], _hexOf(frame3));
+    expect(hexes.contains(_hexOf(packed)), isFalse,
+        reason: 'the packed notification as a whole is NOT an archive row');
+    expect(r.archive.map((a) => a['reason']).toSet(),
+        {'oura_evt_0x42', 'oura_evt_0x69'},
+        reason: 'one reason per TAG — the summary is not an event and never '
+            'archived');
+  });
+
   test('a measured time_sync is what stamps the batch carrying it', () async {
     const syncUnix = 1782043215;
     final r = await _run([
@@ -464,6 +502,70 @@ void main() {
     expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0);
   });
 
+  test(
+      'the PRODUCTION teardown closes the replay link, not the harness '
+      '(Fix B)',
+      () async {
+    // FIX B: `_replaySession` registers the replay link as `_link`, exactly
+    // as `startSessionForTest` and the production `_sync` do — so the
+    // session's own teardown (`stop()` → `_link?.close()`) really closes
+    // it. Without the registration, `_link` is null at teardown and ONLY
+    // the harness's unconditional fallback close below closes the link —
+    // masking, in every replay test, the exact code path a real sync runs.
+    //
+    // THE ORDERING PROOF, deterministic — no clock: the session result
+    // future (`done`) completes only after `_runSessionAndTeardown`'s
+    // `finally { await stop(); }`, and `stop()` only completes after its
+    // `await closing` — so the teardown's close is ENTERED before the
+    // serving loop can exit and before the harness fallback close runs.
+    // Parking the close at the `closeGate` seam therefore freezes the world
+    // at exactly that point: `closeCount == 1` (the TEARDOWN'S close) while
+    // the session result is still unsettled proves the teardown — not the
+    // harness — owns the close. Releasing the gate lets the whole chain
+    // finish; the harness's fallback close then runs as the SECOND close
+    // (harmless: channels already cleared), which is the honest total.
+    final gate = Completer<void>();
+    ReplayBandLink? held;
+    final ok = OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 0)];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      onLink: (l) {
+        held = l;
+        l.closeGate = gate;
+      },
+    );
+    final link = held!;
+    // The teardown's close ENTRY, awaited on the link's own completer — the
+    // close completes it the moment the production teardown reaches it.
+    await link.closeEntered;
+    // THE TEARDOWN'S close is parked — and it is the ONLY one so far.
+    expect(link.closeCount, 1,
+        reason: 'the production teardown entered the link close first');
+    expect(link.closed, isTrue,
+        reason: 'the close entered: the refusal is in force');
+    var settled = false;
+    ok.then((_) => settled = true, onError: (_) => settled = true);
+    await Future<void>.delayed(Duration.zero);
+    expect(settled, isFalse,
+        reason: 'the result is chained behind stop()\'s awaited close — '
+            'it cannot settle while the close is parked');
+    // Release the close: the teardown finishes, the session result settles,
+    // the serving loop exits, and the harness fallback close runs SECOND.
+    gate.complete();
+    expect(await ok, isTrue);
+    expect(link.closeCount, 2,
+        reason: 'teardown close + harness fallback close — and the fallback '
+            'is harmless on an already-closed link');
+    expect(OuraLink.instance.hostForTest, isNull);
+  });
+
   test('a drain that reaches the end reports the session as synced', () async {
     // An empty, up-to-date ring is a SUCCESSFUL sync — the honest end of a
     // drain, with no measurement invented. The expectation is on the SAME
@@ -637,6 +739,377 @@ void main() {
           where: 'device_id = ?', whereArgs: [LocalDb.kPrimaryDeviceId]),
       isEmpty,
     );
+  });
+
+  // ── Time anchor / re-drain scenarios (the #2455 shape, made honest) ──
+  test(
+      'RE-DRAIN A: same events, same anchor — REPLACE collapses, nothing '
+      'duplicates',
+      () async {
+    // Scenario A: the ring re-delivers IDENTICAL events under the SAME
+    // anchor. The primary key (device_id, ts_ms) makes the second delivery
+    // REPLACE the first — one row, not two, and the value is the same one.
+    const syncUnix = 1782043215;
+    final batch = [
+      _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+      _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+      _summary(2, 0),
+    ];
+    final first = await _run([batch]);
+    expect(first.onehz, hasLength(1));
+    final second = await _run([batch]);
+    expect(second.onehz, hasLength(1),
+        reason: 'the same second under the same anchor is ONE row, not two');
+    expect(second.onehz.first['rec_ts'], first.onehz.first['rec_ts'],
+        reason: 'the same anchor maps the same decisecond to the same '
+            'wall-clock second — no drift between deliveries');
+  });
+
+  test(
+      'RE-DRAIN B: same events, CHANGED anchor — the rows re-stamp, the '
+      'record count stays honest',
+      () async {
+    // Scenario B: the anchor the session measures DIFFERS between two
+    // deliveries of the same events (e.g. the ring rebooted and its uptime
+    // restarted; the second sync's time_sync pairs a new decisecond with a
+    // new Unix second). The rows under (device_id, ts_ms) are keyed by the
+    // NEW stamp: if the two anchors disagree on the same decisecond, the
+    // two deliveries write DIFFERENT keys — two rows for one physiological
+    // second, the exact #2455 shape. This test PINS today's behaviour
+    // honestly: it exists so the day a real capture shows a re-anchored
+    // re-drain, the duplicate is caught here first, by counts and values,
+    // not by a user's chart.
+    const syncUnix1 = 1782043215;
+    const syncUnix2 = 1782043215 + 3600; // one hour apart
+    final first = await _run([
+      [
+        _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix1)),
+        _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+        _summary(2, 0),
+      ],
+    ]);
+    // Second session: the ring re-delivers the SAME deciseconds, but this
+    // sync's own time_sync measures a DIFFERENT Unix second for them.
+    final second = await _run([
+      [
+        _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix2)),
+        _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+        _summary(2, 0),
+      ],
+    ]);
+    // HONEST PIN of today's behaviour: both deliveries stamp their own
+    // anchor, so the same physiological decisecond exists under BOTH
+    // wall-clock seconds — two rows. A schema-level record identity is the
+    // only fix for that, and it needs a migration plan and an explicit
+    // approval — NOT a speculative change here.
+    expect(first.onehz, hasLength(1));
+    expect(second.onehz, hasLength(1));
+    expect(second.onehz.first['rec_ts'], isNot(first.onehz.first['rec_ts']),
+        reason: 'a changed anchor re-stamps the same decisecond — the '
+            '#2455 duplicate shape, pinned here as a KNOWN gap');
+  });
+
+  test(
+      'RE-DRAIN C/D: a session aborted after a confirmed batch resumes '
+      'from the persisted boundary',
+      () async {
+    // Scenario C + D in one honest flow: the first sync delivers a batch,
+    // it is confirmed and committed — and then the ring stops answering
+    // (bytesLeft > 0 but no second batch). The cursor HAS advanced past the
+    // confirmed batch; the session reports not-synced. The second sync must
+    // resume from the persisted boundary: it asks from the advanced cursor,
+    // and the re-delivered tail does not duplicate what the first session
+    // already committed.
+    const syncUnix = 1782043215;
+    await OuraLink.instance.ingestForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
+          if (cursor == 0) {
+            return [
+              _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+              _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+              _summary(2, 512),
+            ];
+          }
+          // The second ask: the ring goes silent (protocol timeout).
+          return const <List<int>>[];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(milliseconds: 50),
+    );
+    // The first batch's boundary IS persisted: the confirmed cursor.
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 1101);
+    final db = await LocalDb.instance;
+    expect(
+        (await db.query('decoded_onehz',
+                columns: ['count(*) as n'],
+                where: "device_id = '$_deviceId'"))
+            .first['n'],
+        1,
+        reason: 'the aborted session kept its confirmed batch');
+    // RESUME: the second session asks from 1101 — the re-delivered tail
+    // below that boundary never re-banks, and the new data stamps on.
+    final second = await _run([
+      [
+        // Replayed tail (below 1101) plus the new event.
+        _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+        _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436)),
+        _summary(2, 0),
+      ],
+    ]);
+    expect(second.onehz, hasLength(2),
+        reason: 'the resumed session keeps the committed row and adds the '
+            'new one — the replayed tail neither duplicates nor shifts');
+    expect(
+        second.onehz.map((r) => r['rec_ts']).toSet(),
+        hasLength(2),
+        reason: 'two distinct seconds — no key collision from the replay');
+  });
+
+  test(
+      'RE-DRAIN G: a ring counter reset strands the bookmark — the '
+      're-read starts from zero',
+      () async {
+    // Scenario G: the ring reboots, its decisecond counter restarts near
+    // zero, and the stored bookmark points past everything it holds. The
+    // stranded-cursor reset drops the bookmark so the NEXT sync re-reads
+    // from the beginning — the re-read is idempotent by the (device_id,
+    // ts_ms) key, so nothing duplicates.
+    const syncUnix = 1782043215;
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
+    await LocalDb.setCursor('oura_anchor:$_deviceId', '4000,${syncUnix - 100}');
+    final first = await _run([
+      [
+        // The new boot's records, all far below the 5000 bookmark.
+        _event(kOuraEvtTimeSync, 100, _syncBody(syncUnix)),
+        _event(kOuraEvtTempPeriod, 200, _hex(_temp3436)),
+        _summary(2, 0),
+      ],
+    ]);
+    // The bookmark was stranded and reset — nothing was decoded under it.
+    expect(first.onehz, isEmpty,
+        reason: 'the stranded bookmark keeps everything below it out');
+    expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 0,
+        reason: 'the stranded reset dropped the bookmark for the re-read');
+    // THE RE-READ: same records, now from cursor 0, stamped by the stored
+    // anchor the reset invalidated and the session re-measured.
+    final second = await _run([
+      [
+        _event(kOuraEvtTimeSync, 100, _syncBody(syncUnix)),
+        _event(kOuraEvtTempPeriod, 200, _hex(_temp3436)),
+        _summary(2, 0),
+      ],
+    ]);
+    expect(second.onehz, hasLength(1),
+        reason: 'the re-read banks the new boot\'s records exactly once');
+  });
+
+  test(
+      'RE-DRAIN H: a DIFFERENT physical ring never sees the old ring\'s '
+      'cursor or anchor',
+      () async {
+    // Scenario H: another ring pairs under a DIFFERENT device id. Its
+    // cursor and anchor items are its own — the old ring's bookmark and
+    // origin are invisible to it, and its rows are keyed under its own id.
+    const other = 'oura-ffeeddcc';
+    const syncUnix = 1782043215;
+    await LocalDb.setCursor('oura_cursor_ds:$_deviceId', '5000');
+    await LocalDb.setCursor('oura_anchor:$_deviceId', '4000,$syncUnix');
+    await OuraLink.instance.ingestForTest(
+      other,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          final cursor = v[2] | (v[3] << 8) | (v[4] << 16) | (v[5] << 24);
+          // The other ring starts from ITS OWN cursor: zero.
+          expect(cursor, 0,
+              reason: 'the new ring\'s first ask is from ITS zero — the '
+                  'old ring\'s 5000 bookmark never leaked across ids');
+          return [
+            _event(kOuraEvtTimeSync, 100, _syncBody(syncUnix)),
+            _summary(1, 0),
+          ];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    // Its rows are its own: the old ring's id has none.
+    final db = await LocalDb.instance;
+    expect(
+        (await db.query('decoded_onehz',
+                columns: ['count(*) as n'],
+                where: "device_id = '$other'"))
+            .first['n'],
+        greaterThan(0),
+        reason: 'the other ring banked its own row under its own id');
+    expect(
+        (await db.query('decoded_onehz',
+                columns: ['count(*) as n'],
+                where: "device_id = '$_deviceId'"))
+            .first['n'],
+        0,
+        reason: 'the old ring\'s table rows are untouched by the new ring');
+    expect(await LocalDb.getCursor('oura_anchor:$other'), isNotNull,
+        reason: 'the other ring measured its own anchor');
+  });
+
+  test('FAULT E: an injected durable-commit failure under a LEGAL ring id',
+      () async {
+    // This test sets the fault FIRST (the correct order) and proves the
+    // whole chain: commit throws, batch re-buffers, cursor NEVER advances,
+    // no drain-ok, NOT synced, honest category.
+    const syncUnix = 1782043215;
+    OuraLink.instance.commitFaultForTest = (commit) async {
+      // NOT calling commit() is the point: the injected fault replaces the
+      // durable commit entirely, exactly like a database that refused the
+      // transaction. The restore-on-failure path in `BandHost`'s catch runs
+      // for it the same as for a genuine failure.
+      throw StateError('injected durable-commit failure (test seam)');
+    };
+    try {
+      final ok = await OuraLink.instance.syncResultForTest(
+        _deviceId,
+        _key,
+        (i, v) {
+          if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+          if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+          if (v.first == 0x10) {
+            return [
+              _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+              _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+              _summary(2, 0),
+            ];
+          }
+          return const <List<int>>[];
+        },
+        nowSeconds: () => _nowSec,
+        harnessTimeout: const Duration(seconds: 10),
+      );
+      expect(ok, isFalse, reason: 'a failed durable commit is NOT a success');
+      expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), isNot(1101),
+          reason: 'the cursor must not advance past data that was not '
+              'durably committed');
+      final db = await LocalDb.instance;
+      expect(
+          (await db.query('decoded_onehz',
+                  columns: ['count(*) as n'],
+                  where: "device_id = '$_deviceId'"))
+              .first['n'],
+          0,
+          reason: 'the failed commit left no rows behind');
+      expect(OuraLink.instance.lastSyncCategory,
+          OuraSyncCategory.checkpointUnconfirmed);
+    } finally {
+      OuraLink.instance.commitFaultForTest = null;
+    }
+  });
+
+  test(
+      'FAULT F: a cursor-persistence failure leaves the durable data, '
+      'reports NOT synced, and never claims a moved bookmark',
+      () async {
+    // Scenario F: the commit LANDS (the rows are durable) but the cursor
+    // write throws. The honest outcome: NOT synced (the drain never
+    // completed its checkpoint chain), rows present, cursor unchanged.
+    const syncUnix = 1782043215;
+    OuraLink.instance.cursorFaultForTest = (item, value) async {
+      throw StateError('injected cursor-persistence failure (test seam)');
+    };
+    try {
+      final ok = await OuraLink.instance.syncResultForTest(
+        _deviceId,
+        _key,
+        (i, v) {
+          if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+          if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+          if (v.first == 0x10) {
+            return [
+              _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+              _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+              _summary(2, 0),
+            ];
+          }
+          return const <List<int>>[];
+        },
+        nowSeconds: () => _nowSec,
+        harnessTimeout: const Duration(seconds: 10),
+      );
+      expect(ok, isFalse,
+          reason: 'a session whose checkpoint chain broke is NOT a success');
+      final db = await LocalDb.instance;
+      expect(
+          (await db.query('decoded_onehz',
+                  columns: ['count(*) as n'],
+                  where: "device_id = '$_deviceId'"))
+              .first['n'],
+          greaterThan(0),
+          reason: 'the durable commit DID land — the data is safe');
+      expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), isNull,
+          reason: 'the cursor never persisted — the next sync re-reads, '
+              'which is idempotent and honest');
+    } finally {
+      OuraLink.instance.cursorFaultForTest = null;
+    }
+  });
+
+  test('a CATEGORY never leaks into the next attempt', () async {
+    // The reset proof: a failing session sets a category; the NEXT
+    // attempt, failing EARLY (auth refusal), reports the NEW category;
+    // a session that never reaches a note (empty reply script, refused
+    // write) reports `none`, not the stale previous one.
+    const syncUnix = 1782043215;
+    final refused = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) {
+          return [_frame(0x2f, _hex('2e01'))];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(milliseconds: 50),
+    );
+    expect(refused, isFalse);
+    expect(OuraLink.instance.lastSyncCategory, OuraSyncCategory.authRefused);
+    // A WRITE-refused session (writeSucceeds: false) must NOT still report
+    // the auth refusal: the new session starts clean.
+    final writeRefused = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) => const <List<int>>[],
+      nowSeconds: () => _nowSec,
+      writeSucceeds: false,
+      harnessTimeout: const Duration(seconds: 10),
+    );
+    expect(writeRefused, isFalse);
+    expect(OuraLink.instance.lastSyncCategory, isNot(OuraSyncCategory.authRefused),
+        reason: 'the category describes THIS session, not the previous one');
+    // And a successful clean session reports `drained`.
+    final drained = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) return [_summary(0, 0)];
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+    );
+    expect(drained, isTrue);
+    expect(OuraLink.instance.lastSyncCategory, OuraSyncCategory.drained);
   });
 
   test('a confirmed batch with bytes left DOES ask again (control case)',
@@ -870,6 +1343,177 @@ void main() {
           reason: 'host cleanup ran DESPITE the link close failure');
       expect(sessionLink!.closed, isTrue,
           reason: 'the link really closed — the seam threw after the work');
+    });
+
+    test(
+        'stop() stays pending until the link close fully completes '
+        '(Fix A)', () async {
+      // FIX A: stop() STARTS the link close (refusal in force at once), does
+      // the host shutdown and the remaining cleanup, and only then AWAITS the
+      // close future before reporting the teardown complete. This test parks
+      // the close at the `closeGate` seam — after the flags and gates are
+      // already in force — and proves stop() (and the session result chained
+      // behind it) stays pending for exactly that awaited close, never
+      // reporting success while the close is still running.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final historyAsked = Completer<void>();
+      final gate = Completer<void>();
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          } else if (value.first == 0x10) {
+            if (!historyAsked.isCompleted) historyAsked.complete();
+          }
+        },
+        onLink: (l) {
+          // Park the link close: the close ENTERS (flags set, refusal in
+          // force) but does not finish until this test releases it.
+          l.closeGate = gate;
+        },
+      );
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      await proofAsked.future;
+      link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
+      await historyAsked.future;
+      link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
+      // The session ended and the teardown STARTED — the close entered (its
+      // synchronous refusal is in force) — but it is PARKED. The confirm
+      // chain before it runs on REAL sqflite I/O, so the close's ENTRY is
+      // awaited on the link's own `closeEntered` completer — the close
+      // itself completes it, deterministically, the moment it runs.
+      await link.closeEntered;
+      expect(link.closed, isTrue,
+          reason: 'the teardown started — the close entered');
+      expect(link.closeCount, 1,
+          reason: 'the close ran exactly once — it is parked INSIDE it');
+      var settled = false;
+      result.then((_) => settled = true, onError: (_) => settled = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(settled, isFalse,
+          reason: 'stop() must stay pending until the close completes');
+      // Release the close: NOW the teardown can finish.
+      gate.complete();
+      final ok = await result;
+      expect(ok, isTrue);
+      expect(OuraLink.instance.hostForTest, isNull,
+          reason: 'the host teardown ran before stop() reported completion');
+    });
+
+    test(
+        'a DELAYED close failure surfaces only after the full cleanup '
+        '(Fix A)', () async {
+      // FIX A, error path: a close that fails LATE — after stop()'s captured
+      // error checks would have passed in the old code — must still surface
+      // with its own error, and only after every cleanup step ran.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final historyAsked = Completer<void>();
+      final gate = Completer<void>();
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          } else if (value.first == 0x10) {
+            if (!historyAsked.isCompleted) historyAsked.complete();
+          }
+        },
+        onLink: (l) {
+          l.closeGate = gate;
+          l.closeThrows = true;
+        },
+      );
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      await proofAsked.future;
+      link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
+      await historyAsked.future;
+      link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
+      gate.complete();
+      // The session ended honestly; the teardown's close FAILED. The result
+      // future (sessionThrew = false) propagates the teardown failure.
+      await expectLater(
+          result,
+          throwsA(isA<StateError>().having(
+              (e) => e.message, 'message',
+              contains('replay link close failure'))));
+      // The full cleanup ran despite the failure.
+      expect(OuraLink.instance.hostForTest, isNull,
+          reason: 'host cleanup ran despite the close failure');
+      expect(link.closeCount, 1);
+    });
+
+    test('a re-entrant stop() shares the ONE running cleanup (Fix A)',
+        () async {
+      // FIX A, re-entrancy: a second stop() while the first teardown is
+      // parked inside the link close must WAIT on the same running cleanup —
+      // neither double-running it nor returning early against a half-torn
+      // state. `closeCount` staying 1 is the no-double-teardown proof;
+      // BOTH futures completing only after the gate release is the
+      // no-premature-completion proof.
+      final nonceAsked = Completer<void>();
+      final proofAsked = Completer<void>();
+      final historyAsked = Completer<void>();
+      final gate = Completer<void>();
+      final (result, link) = await OuraLink.instance.startSessionForTest(
+        _deviceId,
+        _key,
+        nowSeconds: () => _nowSec,
+        onWrite: (uuid, value) {
+          if (value.first == 0x2f && value[2] == 0x2b) {
+            if (!nonceAsked.isCompleted) nonceAsked.complete();
+          } else if (value.first == 0x2f && value[2] == 0x2d) {
+            if (!proofAsked.isCompleted) proofAsked.complete();
+          } else if (value.first == 0x10) {
+            if (!historyAsked.isCompleted) historyAsked.complete();
+          }
+        },
+        onLink: (l) {
+          l.closeGate = gate;
+        },
+      );
+      await nonceAsked.future;
+      link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
+      await proofAsked.future;
+      link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
+      await historyAsked.future;
+      link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
+      // The teardown's close ENTRY, awaited on the link's own completer —
+      // the confirm chain before it is real sqflite I/O, so the entry
+      // itself is the deterministic signal (see the Fix A test above).
+      await link.closeEntered;
+      expect(link.closeCount, 1,
+          reason: 'the session teardown entered its close');
+      // The second stop() — the re-entrant caller — while the first is
+      // parked inside the close.
+      final secondStop = OuraLink.instance.stop();
+      var secondDone = false;
+      secondStop.then((_) => secondDone = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(secondDone, isFalse,
+          reason: 'the second stop() must not report completion early');
+      gate.complete();
+      final ok = await result;
+      expect(ok, isTrue);
+      await secondStop;
+      expect(secondDone, isTrue);
+      // ONE teardown ran: the close was entered exactly once across both
+      // callers, and no cleanup step ran a second time.
+      expect(link.closeCount, 1,
+          reason: 'the shared cleanup ran once — no double teardown');
+      expect(OuraLink.instance.hostForTest, isNull);
     });
 
     // MATRIX GAP, documented honestly instead of tested speculatively:

@@ -202,22 +202,59 @@ class OuraAdapter extends BandAdapter {
     final inbox = _Inbox();
     final sub = link.notify(kOuraNotifyChar).listen(
           (rec) {
-            final f = parseOuraFrame(rec.$2);
-            // The notification bytes AS DELIVERED, not `f` re-encoded: the ring
-            // is known to append trailing bytes past `parseFrame`'s declared
-            // length (see its doc), and those bytes are exactly what a future
-            // decoder for the still-undecoded event types needs. Kept even
-            // though `f` was accepted, because it is `raw_archive`'s copy, not
-            // the parser's.
-            if (f != null) {
-              inbox.add(rec.$1, f, Uint8List.fromList(rec.$2));
+            // ONE notification can carry SEVERAL frames — the ring is
+            // documented to pack ~10 records into one notification, and
+            // `parseOuraFrame` only ever reads the FIRST frame in the bytes
+            // it is handed. Walk the notification frame by frame: each
+            // accepted frame enters the inbox on its own, so the
+            // batch/summary state machine below sees the same sequence it
+            // would see if the ring had sent each frame as its own
+            // notification.
+            //
+            // RAW GRANULARITY — one archive row per FRAME, not per
+            // notification: the frame's own slice of the delivered bytes,
+            // INCLUDING any bytes the parser accepted past the payload when
+            // the slice ran to the notification's end. The old
+            // whole-notification copy was correct only while a notification
+            // held one frame; with packed frames it would bank the SAME
+            // notification once per event — duplicate `raw_archive` rows for
+            // one delivery. Slicing keeps the invariant exact: every accepted
+            // frame is archived once, byte-for-byte as the radio delivered
+            // it, and no delivery is banked twice.
+            //
+            // A tail that does not form a frame (too short, or a length
+            // running past the end) stops the walk and is NOT archived as a
+            // frame and NOT decoded — no invented samples. Cross-notification
+            // reassembly is deliberately NOT attempted: the protocol docs
+            // document whole frames per notification (single or packed), and
+            // no capture in this project shows a frame split across
+            // notifications. If a real capture ever does, that tail needs a
+            // session-local continuation buffer HERE — see the adapter test
+            // pinning today's documented behaviour.
+            var off = 0;
+            while (off < rec.$2.length) {
+              final f = parseOuraFrame(rec.$2.sublist(off));
+              if (f == null) break;
+              inbox.add(rec.$1, f,
+                  Uint8List.fromList(rec.$2.sublist(off, off + 2 + f.payload.length)));
+              off += 2 + f.payload.length;
             }
           },
           onDone: inbox.close,
           onError: (Object _) => inbox.close(),
         );
     try {
-      if (!await _authenticate(link, inbox)) return;
+      final auth = await _authenticate(link, inbox);
+      if (auth != _AuthOutcome.ok) {
+        if (auth == _AuthOutcome.refused) {
+          // The user-facing category: the ring rejected the key. Deliberately
+          // NOT emitted for silence — a ring that never answered is a
+          // transport/timeout case, and telling that user to re-pair would be
+          // exactly the wrong remedy.
+          yield const BandNote('oura_auth_refused');
+        }
+        return;
+      }
 
       // Both writes are documented preconditions of a history drain rather than
       // housekeeping. The clock set is also what makes a later `time_sync`
@@ -233,6 +270,10 @@ class OuraAdapter extends BandAdapter {
       // earlier session covers it.
       if (!await link.write(kOuraCommandChar, ouraCmdSetNotifyFlags(0x3f))) {
         link.log('oura: notify-flag write refused; ending the drain.');
+        // The user-facing category: the link took the write refusal. A
+        // subscription/setup failure is not "could not reach the ring" and
+        // not a key problem — the ring was reachable and answered nothing.
+        yield const BandNote('oura_write_refused');
         return;
       }
       if (!await link.write(kOuraCommandChar, ouraCmdSyncTime(nowSeconds()))) {
@@ -250,6 +291,7 @@ class OuraAdapter extends BandAdapter {
         final req = ouraCmdGetEvents(cursor, maxEvents: _kMaxEventsPerBatch);
         if (!await link.write(kOuraCommandChar, req)) {
           link.log('oura: history request refused; ending the drain.');
+          yield const BandNote('oura_write_refused');
           return;
         }
         final got = await _collectBatch(inbox);
@@ -257,6 +299,10 @@ class OuraAdapter extends BandAdapter {
           // No summary = the batch never ended. Leave the cursor put; the
           // next sync re-reads from the last confirmed boundary.
           link.log('oura: no batch summary within the reply window.');
+          // The user-facing category: a protocol timeout / incomplete
+          // answer — the ring was connected and authenticated, the batch
+          // just never ended within the reply window.
+          yield const BandNote('oura_no_batch_summary');
           return;
         }
         if (got.events.isEmpty) {
@@ -355,6 +401,10 @@ class OuraAdapter extends BandAdapter {
             .timeout(confirmTimeout, onTimeout: () => false);
         if (!confirmed) {
           link.log('oura: batch was not confirmed; leaving the cursor put.');
+          // The user-facing category: the durable commit or its confirm did
+          // not land — a STORAGE failure, not an unreachable ring. The data
+          // is safe (re-read is idempotent), the cursor did not move.
+          yield const BandNote('oura_batch_unconfirmed');
           return;
         }
         // A FULL BATCH RE-READS ITS LAST DECISECOND; A SHORT ONE MOVES PAST IT.
@@ -382,20 +432,25 @@ class OuraAdapter extends BandAdapter {
     }
   }
 
-  /// Nonce, encrypt, answer. False on any refusal — a session that carries on
-  /// unauthenticated gets `auth required` to every command and looks identical
-  /// to a dead link.
-  Future<bool> _authenticate(BandLink link, _Inbox inbox) async {
-    if (!await link.write(kOuraCommandChar, ouraCmdAuthNonce())) return false;
+  /// Nonce, encrypt, answer. [ok] is the only way a session may carry on —
+  /// a session that continues unauthenticated gets `auth required` to every
+  /// command and looks identical to a dead link. [refused] is the ring's
+  /// OWN explicit rejection, kept apart from [silent]: a refused key and a
+  /// ring that never answered have different remedies, and the host's
+  /// user-facing category hangs off exactly that difference.
+  Future<_AuthOutcome> _authenticate(BandLink link, _Inbox inbox) async {
+    if (!await link.write(kOuraCommandChar, ouraCmdAuthNonce())) {
+      return _AuthOutcome.silent;
+    }
     final challenge =
         await inbox.firstWhere((f) => ouraAuthNonce(f) != null, replyTimeout);
     if (challenge == null) {
       link.log('oura: no authentication challenge.');
-      return false;
+      return _AuthOutcome.silent;
     }
     final answer = ouraAuthResponse(key, ouraAuthNonce(challenge)!);
     if (!await link.write(kOuraCommandChar, ouraCmdAuthenticate(answer))) {
-      return false;
+      return _AuthOutcome.silent;
     }
     final reply =
         await inbox.firstWhere((f) => ouraAuthResult(f) != null, replyTimeout);
@@ -404,9 +459,9 @@ class OuraAdapter extends BandAdapter {
       // Worth naming, because the remedies differ: a wrong key needs re-pairing
       // and a ring in factory reset needs its key installed first.
       link.log('oura: authentication refused (result ${result ?? "none"}).');
-      return false;
+      return _AuthOutcome.refused;
     }
-    return true;
+    return _AuthOutcome.ok;
   }
 
   /// Read frames until the batch summary arrives.
@@ -607,6 +662,20 @@ class _Inbox {
     }
     return null;
   }
+}
+
+/// How the authentication handshake ended — the difference the host's
+/// user-facing error category hangs off.
+enum _AuthOutcome {
+  /// The ring accepted the key.
+  ok,
+
+  /// The ring EXPLICITLY rejected the key (its own refusal frame).
+  refused,
+
+  /// No answer, a refused write, a missing challenge: everything that is NOT
+  /// the ring's own verdict.
+  silent,
 }
 
 /// The ring's 2-bit stage code in our `stages4` words, or null for a code we

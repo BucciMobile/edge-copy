@@ -76,13 +76,21 @@ class BandHost {
     ArchiveRecord? Function(List<int> raw, int capturedAtMs)? buildArchive,
     Map<String, String> Function()? extraCursors,
     int Function()? nowSeconds,
+    Future<void> Function(Future<void> Function() commit)? faultCommitForTest,
   })  : _admitSample = admitSample,
         _buildArchive = buildArchive,
         _extraCursors = extraCursors,
+        _faultCommitForTest = faultCommitForTest,
         _nowSeconds =
             nowSeconds ?? (() => DateTime.now().millisecondsSinceEpoch ~/ 1000);
 
   final BandAdapter adapter;
+  /// Test-only fault seam around the durable batch commit: when set, the
+  /// commit runs THROUGH this hook, so a test can inject a failure at the
+  /// REAL commit site (inside `_commitLocked`'s try, after the snapshot was
+  /// taken) without a mock database. Never set in production.
+  final Future<void> Function(Future<void> Function() commit)?
+      _faultCommitForTest;
 
   /// Which physical device's rows this host writes. Asserted non-primary for
   /// a neutral-sample adapter by [LocalDb.commitSyncBatch] itself;
@@ -355,16 +363,26 @@ class BandHost {
     ];
     try {
       final extra = _extraCursors?.call();
-      await LocalDb.commitSyncBatch(
-        const [],
-        const [],
-        deviceId: deviceId,
-        deviceFamily: adapter.id,
-        neutrals: neutrals,
-        archives: archive.isEmpty ? null : archive,
-        extraCursors: extra == null || extra.isEmpty ? null : extra,
-        onCheckpoint: onLog,
-      );
+      Future<void> commit() async => await LocalDb.commitSyncBatch(
+            const [],
+            const [],
+            deviceId: deviceId,
+            deviceFamily: adapter.id,
+            neutrals: neutrals,
+            archives: archive.isEmpty ? null : archive,
+            extraCursors: extra == null || extra.isEmpty ? null : extra,
+            onCheckpoint: onLog,
+          );
+      // The fault seam wraps the REAL commit, at its REAL site: a test's
+      // hook replaces the await, not the surrounding logic, so the
+      // restore-on-failure path below runs for an injected fault exactly
+      // as it does for a genuine database failure.
+      final fault = _faultCommitForTest;
+      if (fault != null) {
+        await fault(commit);
+      } else {
+        await commit();
+      }
       return true;
     } catch (e) {
       // Put the snapshot back so the next flush can retry it, same shape as
