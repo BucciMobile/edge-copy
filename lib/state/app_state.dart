@@ -54,11 +54,12 @@ import '../data/journal_fields.dart'
     show JournalMetricValue, kJournalFieldsByKey;
 import '../data/med_store.dart' show MedDb, MedDef;
 import '../data/auto_backup.dart'
-    show BackupCadence, BackupOutcome, runBackup;
+    show BackupCadence, BackupOutcome, BackupFolder, AndroidBackupStorage, runBackup;
 import '../stress/breath_phases.dart';
 // `runBackupIfDue` is also the name of the AppState method below, so the pure
 // scheduler is imported under an alias rather than shadowed by it.
-import '../data/auto_backup.dart' as backup show runBackupIfDue;
+import '../data/auto_backup.dart' as backup
+    show runBackupIfDue, selectedBackupFolder, saveBackupFolder, deleteAutomaticBackups;
 import 'alarm_schedule.dart';
 import 'smart_wake.dart';
 import 'prefs.dart';
@@ -1029,6 +1030,19 @@ class AppState extends ChangeNotifier {
   BackupCadence get backupCadence =>
       BackupCadence.fromName(Prefs.getString(Prefs.backupCadence, ''));
 
+  BackupFolder? get backupFolder => backup.selectedBackupFolder;
+
+  String? get lastBackupError {
+    final error = Prefs.getString(Prefs.backupLastError, '');
+    return error.isEmpty ? null : error;
+  }
+
+  Future<void> setBackupFolder(BackupFolder? folder) async {
+    await backup.saveBackupFolder(folder);
+    Prefs.setString(Prefs.backupLastError, '');
+    notifyListeners();
+  }
+
   DateTime? get lastBackupAt {
     final ms = Prefs.getInt(Prefs.backupLastRunMs, 0);
     return ms == 0 ? null : DateTime.fromMillisecondsSinceEpoch(ms);
@@ -1052,9 +1066,17 @@ class AppState extends ChangeNotifier {
   /// caller can say so — a backup that silently did not happen is the failure
   /// this feature exists to prevent.
   Future<BackupOutcome> runBackupNow() async {
+    if (ResetGate.active) return const BackupOutcome(skipped: true);
     final outcome = await runBackup();
+    _recordBackupOutcome(outcome);
     if (outcome.succeeded) _markBackupRun(DateTime.now());
     return outcome;
+  }
+
+  void _recordBackupOutcome(BackupOutcome outcome) {
+    if (outcome.skipped) return;
+    Prefs.setString(Prefs.backupLastError, outcome.error ?? '');
+    notifyListeners();
   }
 
   /// Foreground hook. Silent unless it actually writes something.
@@ -1081,10 +1103,11 @@ class AppState extends ChangeNotifier {
       // running export would otherwise act on the setting as it was when it
       // queued, and someone who switched backup off in the meantime would
       // still get a copy of their health data written after disabling it.
-      cadence: () => backupCadence,
+      cadence: () => ResetGate.active ? BackupCadence.off : backupCadence,
       lastRun: () => lastBackupAt,
       markRun: (when) async => _markBackupRun(when),
     );
+    _recordBackupOutcome(outcome);
     if (outcome.error != null) _log('Backup failed: ${outcome.error}');
   }
 
@@ -1120,11 +1143,15 @@ class AppState extends ChangeNotifier {
   ///   2. The database, then the preferences, then the keychain — the reads
   ///      that could re-create state are all downstream of the writes.
   ///   3. [signOut] last, because it flips the route and the UI unwinds.
-  Future<void> resetAllData() async {
+  /// Returns a cleanup error if backup copies or folder access remain.
+  Future<String?> resetAllData() async {
     // 0 · nothing further ENTERS the database either. The band is still
     //     connected and still draining — see [_resetting].
     ResetGate.enter();
     try {
+      // Wait for a running backup and remove copies while the selected folder
+      // grant is still known. Queued scheduled writes see Off inside the lock.
+      Prefs.setString(Prefs.backupCadence, BackupCadence.off.name);
       // 1 · nothing further leaves this phone, starting now.
       telemetryConsent = false;
       healthShareConsent = false;
@@ -1132,6 +1159,17 @@ class AppState extends ChangeNotifier {
       TelemetryService.instance.applyConsent(false);
       HealthUploader.instance.deviceId = null; // maybeUpload bails without one
       deviceId = '';
+
+      String? backupCleanupError;
+      try {
+        await backup.deleteAutomaticBackups();
+      } catch (e) {
+        // An unavailable backup folder must not prevent deleting app data.
+        backupCleanupError = e.toString();
+        _log('[reset] backup cleanup failed: $e');
+      }
+      // Cleanup waits for in-flight folder saves, including on failure.
+      final folderToRelease = backupFolder;
 
       // 2 · every row in every table (see LocalDb.wipeAll for why it is not a
       // hand-written table list, and for the sync_cursor decision).
@@ -1153,7 +1191,14 @@ class AppState extends ChangeNotifier {
       // user through a "delete everything".
       try {
         final prefs = await SharedPreferences.getInstance();
-        await prefs.clear();
+        if (await prefs.clear() && Platform.isAndroid && folderToRelease != null) {
+          try {
+            await AndroidBackupStorage.release(folderToRelease);
+          } catch (e) {
+            backupCleanupError ??= e.toString();
+            _log('[reset] backup folder access release failed: $e');
+          }
+        }
       } catch (e) {
         _log('[reset] prefs clear failed: $e');
       }
@@ -1179,6 +1224,7 @@ class AppState extends ChangeNotifier {
 
       // signOut() unpairs, so by the time it returns nothing is delivering.
       await signOut();
+      return backupCleanupError;
     } finally {
       // Never leave ingest refused if the reset threw part-way: a half-reset
       // install that silently drops every record is worse than the race.
