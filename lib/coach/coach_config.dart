@@ -53,8 +53,12 @@ String? coachApiKeyToSave({
 
 /// True when [url]'s host is one that wants no API key and, once configured,
 /// gets the user-adjustable request timeout instead of the fixed cloud one —
-/// loopback, the Android emulator's host alias, `.local` mDNS names, and the
-/// three private IPv4 ranges. Shared by [CoachConfig.isLocalEndpoint] and the
+/// loopback, the Android emulator's host alias, `.local` mDNS names, the
+/// three private IPv4 ranges, and the 100.64.0.0/10 shared address space
+/// (RFC 6598), which is where Tailscale hands out its node addresses — an
+/// Ollama reached over a tailnet is the user's own machine, but without this
+/// it was classified as cloud, needed a key it never has, and Save left the
+/// coach unconfigured. Shared by [CoachConfig.isLocalEndpoint] and the
 /// coach setup screen so a LAN-hosted Ollama/LM Studio is recognized the same
 /// way everywhere: a narrower check in just one place used to leave that case
 /// with its timeout field hidden and silently capped at the cloud timeout.
@@ -71,7 +75,10 @@ bool isLocalCoachHost(String url) {
   final v4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$').firstMatch(h);
   if (v4 == null) return false;
   final a = int.parse(v4.group(1)!), b = int.parse(v4.group(2)!);
-  return a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168);
+  return a == 10 ||
+      (a == 172 && b >= 16 && b <= 31) ||
+      (a == 192 && b == 168) ||
+      (a == 100 && b >= 64 && b <= 127);
 }
 
 /// True for the iOS/macOS errSecDuplicateItem shape the plugin surfaces when
