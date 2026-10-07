@@ -297,6 +297,16 @@ void main() {
       isFalse,
       reason: 'the batch was never confirmed — no durable commit, no success',
     );
+    // The ADAPTER-level truth: with no confirmation and no host error
+    // observation available at this seam, the only honest note is the
+    // generic unconfirmed-checkpoint one — the commit's own outcome is
+    // not named here (the host reports that separately when it has it).
+    expect(
+      events.whereType<BandNote>().any((n) => n.key == 'oura_batch_unconfirmed'),
+      isTrue,
+      reason: 'no confirm and no observed host error leaves the generic '
+          'unconfirmed note as the honest report',
+    );
     // And the cursor note never moved either: partial data stays banked,
     // the bookmark stays put.
     expect(
@@ -666,7 +676,7 @@ void main() {
     expect(batch.raw[0], _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
         reason: 'the first frame is archived as its own exact bytes');
     expect(batch.raw[1], _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')));
-    expect(batch.raw[2], _event(kOuraEvtTempPeriod, 1200, _hex('6c0e'));
+    expect(batch.raw[2], _event(kOuraEvtTempPeriod, 1200, _hex('6c0e')));
     expect(batch.raw.any((r) => r.length == packed.length), isFalse,
         reason: 'no archive row is the WHOLE packed notification — that '
             'would duplicate one delivery across every event it carried');

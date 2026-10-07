@@ -993,12 +993,13 @@ void main() {
           return const <List<int>>[];
         },
         nowSeconds: () => _nowSec,
-        harnessTimeout: const Duration(seconds: 10),
+        // 5s protocol budget < 30s harness budget: the failed commit parks
+        // the adapter on the confirm timeout, and that wait must end in a
+        // NORMAL false — never in the harness watchdog's StateError.
+        timeouts: const Duration(seconds: 5),
+        harnessTimeout: const Duration(seconds: 30),
       );
       expect(ok, isFalse, reason: 'a failed durable commit is NOT a success');
-      expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), isNot(1101),
-          reason: 'the cursor must not advance past data that was not '
-              'durably committed');
       final db = await LocalDb.instance;
       expect(
           (await db.query('decoded_onehz',
@@ -1007,11 +1008,136 @@ void main() {
               .first['n'],
           0,
           reason: 'the failed commit left no rows behind');
-      expect(OuraLink.instance.lastSyncCategory,
-          OuraSyncCategory.checkpointUnconfirmed);
+      expect(
+        await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'),
+        isNull,
+        reason: 'the cursor must remain exactly at the previous boundary — '
+            'the cursor note only fires after a confirmed batch',
+      );
+      expect(
+        OuraLink.instance.lastSyncCategory,
+        OuraSyncCategory.storageFailed,
+        reason: 'the host observed the commit failure; the later generic '
+            'unconfirmed-checkpoint note must not replace it',
+      );
+      final link = OuraLink.instance.lastReplayLink!;
+      final historyWrites = link.writes
+          .where((w) => w.$2.isNotEmpty && w.$2.first == 0x10);
+      expect(
+        historyWrites,
+        hasLength(1),
+        reason: 'an unconfirmed failed batch must not advance the drain',
+      );
+      expect(
+        OuraLink.instance.hostForTest,
+        isNull,
+        reason: 'the failed session must complete host cleanup',
+      );
     } finally {
       OuraLink.instance.commitFaultForTest = null;
     }
+
+    // The follow-up attempt WITHOUT the fault must succeed cleanly: the
+    // failure category is session-scoped and must not stick.
+    final ok2 = await OuraLink.instance.syncResultForTest(
+      _deviceId,
+      _key,
+      (i, v) {
+        if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+        if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+        if (v.first == 0x10) {
+          return [
+            _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+            _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436)),
+            _summary(2, 0),
+          ];
+        }
+        return const <List<int>>[];
+      },
+      nowSeconds: () => _nowSec,
+      timeouts: const Duration(seconds: 5),
+      harnessTimeout: const Duration(seconds: 30),
+    );
+    expect(ok2, isTrue,
+        reason: 'a follow-up sync without the fault must succeed');
+    expect(OuraLink.instance.lastSyncCategory, OuraSyncCategory.drained,
+        reason: 'the successful follow-up reports drained — the storage '
+            'failure never leaks into the next session');
+    final db = await LocalDb.instance;
+    expect(
+        (await db.query('decoded_onehz',
+                columns: ['count(*) as n'],
+                where: "device_id = '$_deviceId'"))
+            .first['n'],
+        greaterThan(0),
+        reason: 'the successful follow-up durably stored its rows');
+    expect(
+      await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'),
+      isNotNull,
+      reason: 'the successful follow-up advanced the cursor',
+    );
+  });
+
+  test('an unconfirmed checkpoint does not hide an observed commit failure',
+      () async {
+    // NOTE-PRIORITY, driven through the production handler: the generic
+    // `oura_batch_unconfirmed` must not overwrite a commit failure the
+    // host actually observed, but alone (no known failure) it stays the
+    // honest `checkpointUnconfirmed`.
+    final link = OuraLink.instance;
+
+    Future<bool> runEmptySuccessfulSession() => link.syncResultForTest(
+          _deviceId,
+          _key,
+          (i, v) {
+            if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+            if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
+            if (v.first == 0x10) return [_summary(0, 0)];
+            return const <List<int>>[];
+          },
+          nowSeconds: () => _nowSec,
+          timeouts: const Duration(seconds: 5),
+          harnessTimeout: const Duration(seconds: 30),
+        );
+
+    // A clean session first, so the category is a known baseline.
+    expect(await runEmptySuccessfulSession(), isTrue);
+    expect(link.lastSyncCategory, OuraSyncCategory.drained);
+
+    // No known persistence failure: the generic category is appropriate.
+    link.handleSyncNoteForTest('oura_batch_unconfirmed');
+    expect(
+      link.lastSyncCategory,
+      OuraSyncCategory.checkpointUnconfirmed,
+      reason: 'without an observed commit failure the unconfirmed '
+          'checkpoint is the honest category',
+    );
+
+    // The host now reports an observed durable commit failure.
+    link.handleSyncNoteForTest('host_commit_failed');
+    expect(
+      link.lastSyncCategory,
+      OuraSyncCategory.storageFailed,
+      reason: 'the observed commit failure is the specific truth',
+    );
+
+    // A later generic note must preserve the more specific cause.
+    link.handleSyncNoteForTest('oura_batch_unconfirmed');
+    expect(
+      link.lastSyncCategory,
+      OuraSyncCategory.storageFailed,
+      reason: 'the generic unconfirmed-note must not overwrite the '
+          'observed commit failure',
+    );
+
+    // A new real session resets the old category.
+    expect(await runEmptySuccessfulSession(), isTrue);
+    expect(
+      link.lastSyncCategory,
+      OuraSyncCategory.drained,
+      reason: 'a new session starts clean — no failure category sticks '
+          'across sessions',
+    );
   });
 
   test(

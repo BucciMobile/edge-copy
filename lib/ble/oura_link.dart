@@ -846,11 +846,20 @@ class OuraLink {
         // Connected and authenticated, but the batch never ended inside the
         // reply window — a protocol timeout, not an unreachable ring.
         _category = OuraSyncCategory.protocolTimeout;
+      case 'host_commit_failed':
+        // The host observed a failed durable batch commit — the most
+        // specific persistence signal. Recorded ahead of the adapter's
+        // generic unconfirmed-note below, which arrives later and must not
+        // overwrite it.
+        _category = OuraSyncCategory.storageFailed;
       case 'oura_batch_unconfirmed':
         // Only the CONFIRM is known to have failed here — the commit's own
         // outcome is not named by this note, so the category must not claim
-        // one: `checkpointUnconfirmed`, not `storageFailed`.
-        _category = OuraSyncCategory.checkpointUnconfirmed;
+        // one: `checkpointUnconfirmed`, not `storageFailed`. A commit failure
+        // the host already reported stays the more specific truth.
+        if (_category != OuraSyncCategory.storageFailed) {
+          _category = OuraSyncCategory.checkpointUnconfirmed;
+        }
       case 'battery':
         if (value is int) _batteryPct = value;
       case 'battery_mv':
@@ -1181,6 +1190,12 @@ class OuraLink {
   /// it can never describe an earlier attempt. NOT test-only: the devices
   /// screen reads it to pick the honest failure sentence.
   OuraSyncCategory get lastSyncCategory => _category;
+
+  /// Test-only drive of the PRODUCTION note handler — the one place the
+  /// category decisions live. For regression tests of note priority only;
+  /// never a way for production code to set categories.
+  @visibleForTesting
+  void handleSyncNoteForTest(String key) => _handleNote(key, null);
 
   /// Test-only fault injection at the REAL durable-commit site. Set it,
   /// run `syncResultForTest`, clear it in a `finally`.

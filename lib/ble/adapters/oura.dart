@@ -401,9 +401,10 @@ class OuraAdapter extends BandAdapter {
             .timeout(confirmTimeout, onTimeout: () => false);
         if (!confirmed) {
           link.log('oura: batch was not confirmed; leaving the cursor put.');
-          // The user-facing category: the durable commit or its confirm did
-          // not land — a STORAGE failure, not an unreachable ring. The data
-          // is safe (re-read is idempotent), the cursor did not move.
+          // The checkpoint was not confirmed within the allowed wait. This
+          // note alone does not identify the persistence outcome; a commit
+          // failure the host actually observed is reported separately via
+          // `host_commit_failed` and keeps priority in `OuraLink`.
           yield const BandNote('oura_batch_unconfirmed');
           return;
         }

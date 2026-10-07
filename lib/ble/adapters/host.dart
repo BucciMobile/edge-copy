@@ -311,6 +311,12 @@ class BandHost {
     // where it was — confirming it would authorise deleting data never
     // banked.
     if (!await _commit(all: true)) {
+      // The host observed the failed durable commit itself — the most
+      // specific persistence signal there is. The adapter can only learn
+      // this from the host, so it travels as a note; the adapter's own
+      // later `oura_batch_unconfirmed` (missing confirm) must not paint
+      // this outcome with the vaguer brush.
+      onNote?.call('host_commit_failed', null);
       onLog('[${adapter.id}] batch not committed; leaving the cursor where '
           'it is.');
       return;
