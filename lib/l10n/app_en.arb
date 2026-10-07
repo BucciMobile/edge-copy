@@ -305,6 +305,10 @@
   "@alarmInThePast": {
     "description": "Which-day label: in the past."
   },
+  "alarmGlanceInThePast": "Fired or missed",
+  "@alarmGlanceInThePast": {
+    "description": "Short form of alarmInThePast for the Home 'At a glance' alarm tile, which is half the screen wide."
+  },
   "alarmLaterToday": "Later today",
   "@alarmLaterToday": {
     "description": "Which-day label: later today."

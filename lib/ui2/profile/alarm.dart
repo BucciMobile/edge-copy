@@ -91,6 +91,31 @@ Widget alarmDoor(BuildContext c, DateTime? at, AlarmArmState state,
       sub, () => go(c, const AlarmScreen()));
 }
 
+/// The same facts as [alarmDoor], as an "At a glance" tile: the armed time
+/// (or "Not set") and, under it, which day and what we know about it. The
+/// icon takes the state's colour, so an unconfirmed alarm is not drawn in the
+/// same calm tone as a confirmed one.
+Widget alarmGlanceCard(BuildContext c, DateTime? at, AlarmArmState state,
+    {DateTime? now}) {
+  final l = AppLocalizations.of(c);
+  final n = now ?? DateTime.now();
+  return SignalCard(
+    LucideIcons.alarmClock,
+    AlarmScreenView._stateColor(state),
+    l?.alarmNavTitle ?? 'Alarm',
+    at == null
+        ? (l?.alarmStateNotSet ?? 'Not set')
+        : AlarmScreenView._hhmm(at),
+    sub: at == null
+        ? (l?.alarmSetAnAlarm ?? 'Set an alarm')
+        : at.isAfter(n)
+            ? '${AlarmScreenView._whichDay(c, at, n)} · '
+                '${AlarmScreenView._localizedStateLabel(c, state)}'
+            : (l?.alarmGlanceInThePast ?? 'Fired or missed'),
+    onTap: () => go(c, const AlarmScreen()),
+  );
+}
+
 class AlarmScreen extends StatelessWidget {
   const AlarmScreen({super.key});
 

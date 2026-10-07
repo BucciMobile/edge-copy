@@ -48,7 +48,8 @@ import '../../state/clock_format.dart' show formatClockOf;
 import '../../state/units_controller.dart';
 import '../../theme/theme_switcher.dart' show themedRoute;
 import '../activity/day_strain.dart' show DayStrainDetail;
-import '../profile/alarm.dart' show AlarmArmState, alarmArmOf, alarmDoor;
+import '../profile/alarm.dart'
+    show AlarmArmState, alarmArmOf, alarmDoor, alarmGlanceCard;
 import '../profile/devices.dart' show formatDayTime;
 import '../profile/profile.dart';
 import '../ui2.dart';
@@ -1862,7 +1863,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         if (stale != null) ...[const SizedBox(height: S.x3), stale],
 
         // ── at a glance ──
-        Section(l?.homeAtAGlance ?? 'At a glance', _glance(c, d)),
+        Section(l?.homeAtAGlance ?? 'At a glance',
+            _glance(c, d, isToday: isToday)),
 
         // ── today's plan: only what the app can actually stand behind ──
         // Skipped on a past day — "3,000 steps left" or "aim for 11.4
@@ -1885,7 +1887,9 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
       ],
 
       // ── the next alarm: a door, same as the one above ──
-      if (isToday)
+      // Only on a bare day: otherwise it is a tile in "At a glance", and the
+      // same alarm twice on one screen is one too many.
+      if (isToday && bare)
         if (alarmArmOfContext(c) case final (DateTime?, AlarmArmState) a) ...[
           const SizedBox(height: S.x3),
           alarmDoor(c, a.$1, a.$2),
@@ -1951,7 +1955,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
   Widget _refreshable(Widget list) =>
       RefreshIndicator(onRefresh: _load, child: list);
 
-  Widget _glance(BuildContext c, HomeData d) {
+  Widget _glance(BuildContext c, HomeData d, {required bool isToday}) {
     final l = AppLocalizations.of(c);
     final cards = <Widget>[];
     final absent = <Widget>[];
@@ -2048,6 +2052,13 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
       // for an entirely different reason that the card never asked for.
       () => StatusCard.forMetric(l?.homeNoEnergyEstimate ?? 'No energy estimate', d.calories),
     );
+    // The next alarm is not a reading of the day, so only today carries it —
+    // "Tomorrow 07:30" under a day already over would be about a different day.
+    if (isToday) {
+      if (alarmArmOfContext(c) case final (DateTime?, AlarmArmState) a) {
+        cards.add(alarmGlanceCard(c, a.$1, a.$2));
+      }
+    }
 
     return Column(children: [
       for (var i = 0; i < cards.length; i += 2) ...[

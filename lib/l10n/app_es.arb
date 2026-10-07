@@ -72,6 +72,7 @@
   "alarmCancelled": "Alarma cancelada",
   "alarmSentToBand": "Alarma enviada a la banda",
   "alarmInThePast": "En el pasado: ya sonó o se pasó",
+  "alarmGlanceInThePast": "Ya sonó o se pasó",
   "alarmLaterToday": "Más tarde hoy",
   "alarmTomorrow": "Mañana",
   "alarmInDays": "En {days} días",

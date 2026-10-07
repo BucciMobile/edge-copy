@@ -72,6 +72,7 @@
   "alarmCancelled": "अलार्म रद्द",
   "alarmSentToBand": "अलार्म बैंड पर भेजा गया",
   "alarmInThePast": "अतीत में — यह पहले ही बज चुका है या छूट गया है",
+  "alarmGlanceInThePast": "बज चुका या छूट गया",
   "alarmLaterToday": "आज बाद में",
   "alarmTomorrow": "कल",
   "alarmInDays": "{days} दिनों में",
