@@ -95,6 +95,23 @@ void main() {
     expect(exited(), isTrue);
   });
 
+  testWidgets('switching back and forth does not lengthen the way out', (
+    tester,
+  ) async {
+    await mount(tester);
+    for (var i = 0; i < 5; i++) {
+      await select(tester, ShellDomain.health);
+      await select(tester, ShellDomain.workout);
+    }
+    await back(tester);
+    expect(find.text('screen Health'), findsOneWidget);
+    await back(tester);
+    expect(find.text('screen Home'), findsOneWidget);
+    expect(exited(), isFalse);
+    await back(tester);
+    expect(exited(), isTrue);
+  });
+
   testWidgets('a deliberate return to Home keeps the previous tab in history', (
     tester,
   ) async {

@@ -81,7 +81,15 @@ class _AppShellState extends State<AppShell> {
 
   void _select(ShellDomain d) {
     setState(() {
-      if (d != _current) _history.add(_current);
+      // Each tab at most once, most recent last, so switching back and forth
+      // between two tabs does not add a Back press per switch. Home stays in
+      // as the way back into the app even while it is the tab on screen.
+      if (d != _current) {
+        _history
+          ..remove(_current)
+          ..add(_current);
+        if (d != ShellDomain.home) _history.remove(d);
+      }
       _current = d;
       _built.add(d);
     });
