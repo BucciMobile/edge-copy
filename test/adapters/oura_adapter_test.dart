@@ -161,8 +161,19 @@ void main() {
       return const [];
     });
     expect(link.writes.any((w) => w.$2.first == 0x10), isFalse);
-    expect(events, isEmpty);
+    expect(events.map((e) => (e as BandNote).key), ['oura_auth_refused']);
     expect(link.logs.any((l) => l.contains('authentication refused')), isTrue);
+  });
+
+  test('a ring that never answers the key is NOT reported as a refusal',
+      () async {
+    final (events, link) = await _drive(_adapter(), (i, v) {
+      if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
+      return const [];
+    });
+    expect(link.writes.any((w) => w.$2.first == 0x10), isFalse);
+    expect(events, isEmpty,
+        reason: 'silence must not drive the re-pair remedy');
   });
 
   test('every event frame reaches raw, decoded or not', () async {
@@ -671,13 +682,14 @@ void main() {
     // the frame's own slice of the notification, byte for byte — never the
     // whole packed notification once per event (which would duplicate one
     // delivery) and never a re-encoded stand-in.
-    expect(batch.raw, hasLength(3),
+    final raw = batch.raw!;
+    expect(raw, hasLength(3),
         reason: 'one archive row per frame, not per notification');
-    expect(batch.raw[0], _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
+    expect(raw[0], _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
         reason: 'the first frame is archived as its own exact bytes');
-    expect(batch.raw[1], _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')));
-    expect(batch.raw[2], _event(kOuraEvtTempPeriod, 1200, _hex('6c0e')));
-    expect(batch.raw.any((r) => r.length == packed.length), isFalse,
+    expect(raw[1], _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')));
+    expect(raw[2], _event(kOuraEvtTempPeriod, 1200, _hex('6c0e')));
+    expect(raw.any((r) => r.length == packed.length), isFalse,
         reason: 'no archive row is the WHOLE packed notification — that '
             'would duplicate one delivery across every event it carried');
     expect(
@@ -696,8 +708,8 @@ void main() {
     // A packed notification whose LAST frame is cut short: the walk must
     // stop at the incomplete tail, not hand the parser a frame whose
     // declared length runs past the end. The COMPLETE frames before the
-    // cut still bank; the summary never arrives, so the batch honestly
-    // times out — no invented sample out of the fragment.
+    // cut still bank once the summary (its own notification) ends the
+    // batch — no invented sample out of the fragment.
     const syncUnix = 1782043215;
     final complete = <int>[
       ..._event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
@@ -711,7 +723,7 @@ void main() {
         (i, v) {
           if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
           if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-          if (v.first == 0x10) return [[...complete, ...cut]];
+          if (v.first == 0x10) return [[...complete, ...cut], _summary(2, 0)];
           return const [];
         },
         confirmBatches: false);
@@ -767,10 +779,12 @@ void main() {
     final (events, _) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-      if (v.first == 0x10) return [
-        [anchor, whole.sublist(0, 4)].expand((x) => x).toList(),
-        [whole.sublist(4)].expand((x) => x).toList(),
-      ];
+      if (v.first == 0x10) {
+        return [
+          [anchor, whole.sublist(0, 4)].expand((x) => x).toList(),
+          [whole.sublist(4)].expand((x) => x).toList(),
+        ];
+      }
       return const [];
     });
     expect(events.whereType<SampleBatch>(), isEmpty);
@@ -818,10 +832,12 @@ void main() {
     final (events, _) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-      if (v.first == 0x10) return [
-        [...anchor, ...cut],
-        [...temp, ...summary],
-      ];
+      if (v.first == 0x10) {
+        return [
+          [...anchor, ...cut],
+          [...temp, ...summary],
+        ];
+      }
       return const [];
     });
     final batch = events.whereType<SampleBatch>().single;

@@ -486,6 +486,7 @@ class ReplayBandLink implements BandLink {
   /// path of `OuraLink.stop`, on a link whose shutdown genuinely happened.
   bool closeThrows = false;
 
+  @override
   Future<void> close() async {
     closeCount++;
     if (!_closeEntered.isCompleted) _closeEntered.complete();

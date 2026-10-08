@@ -11,6 +11,8 @@
 // refusing to stamp a second it cannot honestly name, and never putting a
 // command on the wire that no builder produced.
 
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_protocol/openstrap_protocol.dart';
 import 'package:openstrap_edge/ble/adapters/_registry.dart';
@@ -789,7 +791,11 @@ void main() {
       ],
     ]);
     // Second session: the ring re-delivers the SAME deciseconds, but this
-    // sync's own time_sync measures a DIFFERENT Unix second for them.
+    // sync's own time_sync measures a DIFFERENT Unix second for them. A
+    // re-delivery only reaches the host once the bookmark is gone (a reset
+    // re-read): with the cursor in place the adapter drops every replayed
+    // decisecond and nothing re-stamps at all.
+    await LocalDb.deleteCursor('oura_cursor_ds:$_deviceId');
     final second = await _run([
       [
         _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix2)),
@@ -803,8 +809,8 @@ void main() {
     // only fix for that, and it needs a migration plan and an explicit
     // approval — NOT a speculative change here.
     expect(first.onehz, hasLength(1));
-    expect(second.onehz, hasLength(1));
-    expect(second.onehz.first['rec_ts'], isNot(first.onehz.first['rec_ts']),
+    expect(second.onehz, hasLength(2));
+    expect(second.onehz.last['rec_ts'], isNot(first.onehz.first['rec_ts']),
         reason: 'a changed anchor re-stamps the same decisecond — the '
             '#2455 duplicate shape, pinned here as a KNOWN gap');
   });
@@ -936,7 +942,8 @@ void main() {
                   'old ring\'s 5000 bookmark never leaked across ids');
           return [
             _event(kOuraEvtTimeSync, 100, _syncBody(syncUnix)),
-            _summary(1, 0),
+            _event(kOuraEvtTempPeriod, 200, _hex(_temp3436)),
+            _summary(2, 0),
           ];
         }
         return const <List<int>>[];
@@ -1193,7 +1200,6 @@ void main() {
     // attempt, failing EARLY (auth refusal), reports the NEW category;
     // a session that never reaches a note (empty reply script, refused
     // write) reports `none`, not the stale previous one.
-    const syncUnix = 1782043215;
     final refused = await OuraLink.instance.syncResultForTest(
       _deviceId,
       _key,
@@ -1869,7 +1875,7 @@ void main() {
     link.writeGate = gate;
 
     var writeObserved = false;
-    link.onWrite = (_, __) {
+    link.onWrite = (_, _) {
       writeObserved = true;
     };
 
