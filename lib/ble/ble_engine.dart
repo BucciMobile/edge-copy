@@ -3123,6 +3123,9 @@ class BleEngine {
       // A task that ended while its request was queued had the request
       // withheld; its terminal (or a replacement) owns this state now.
       if (_historyTaskGen != taskGen) return true;
+      // The gate marks a request as gone out before the transport write; if
+      // that write failed nothing went out, and no straggler may answer it.
+      _historyRequestedGen = null;
       _historyAwaitingFirstStart = false;
       _setOffloadActive(false);
       _lastBackfillAt = floorBeforeInit;
@@ -4261,6 +4264,8 @@ class BleEngine {
       // replacement task now owns.
       if (!claimStale()) {
         session.historyTaskEnded = endedBeforeClaim;
+        // Nothing went out (see the INIT rollback): nothing answers it.
+        _historyRequestedGen = null;
         _historyAwaitingFirstStart = false;
         _setOffloadActive(false);
       }

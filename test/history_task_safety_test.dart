@@ -1501,6 +1501,34 @@ void main() {
       });
     });
 
+    for (final init in [false, true]) {
+      test('${init ? 'INIT' : 'refresh'}: a request whose write failed is '
+          'answered by nothing', () {
+        fakeAsync((async) {
+          final r = _Rig();
+          r.holdOpcode = Cmd.sendHistoricalData;
+          r.holdWrite = Completer<bool>();
+          final held = r.holdWrite!;
+          bool? result;
+          (init
+                  ? r.engine.debugStartInitDrain()
+                  : r.engine.debugStartHistoricalRefresh())
+              .then((v) => result = v);
+          async.elapse(const Duration(seconds: 1));
+          held.complete(false); // the transport refused the bytes
+          async.elapse(Duration.zero);
+          expect(result, init ? isTrue : isFalse);
+          expect(r.engine.offloadActive, isFalse);
+          // A straggler COMPLETE from before: it answers no request of ours.
+          r.rx(_historyComplete());
+          async.elapse(Duration.zero);
+          expect(r.engine.offloadSnapshot['history_completions'], 0);
+          expect(r.logs.where((l) => l.contains('leftover of the previous')),
+              hasLength(1));
+        });
+      });
+    }
+
     test('INIT arms it too', () {
       fakeAsync((async) {
         final r = _Rig();
