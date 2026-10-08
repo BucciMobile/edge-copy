@@ -3,7 +3,8 @@
 /// One decoded 1 Hz record (type-24 / R10): timestamp + counter + HR, plus the
 /// sensor fields (RR beats, accel, SpO₂ raw, skin-temp raw) decoded ON-DEVICE
 /// via proto.parseR24 — the app is local-first and owns the full sensor decode
-/// (see LocalDb._queueDecodedOneHz); raw hex is kept as the replay ledger.
+/// (see LocalDb._queueDecodedOneHz). No raw-record replay ledger is kept;
+/// only undecodable records reach `raw_archive`.
 class Sample {
   final int tsEpoch;
   final int counter;

@@ -5717,9 +5717,8 @@ class LocalDb {
   /// No ledger keeps the raw bytes a decoded row came from (`raw_records` was
   /// dropped at v19), so an evicted row could not be rebuilt (only seconds the
   /// v44 pass re-drove from `raw_archive` still have their source bytes).
-  /// Every other
-  /// item on the band-agnostic roadmap can be done after a second device has
-  /// written; this one cannot.
+  /// Every other item on the band-agnostic roadmap can be done after a second
+  /// device has written; this one cannot.
   ///
   /// WHAT IT DOES NOT CHANGE. Every existing row is copied under
   /// `device_id = ''` with `ts_ms = rec_ts * 1000`, which is exactly as unique
@@ -7727,8 +7726,7 @@ class LocalDb {
   /// full scan of every retained second plus a temp b-tree — 91 ms on a 3-day
   /// (259 k row) table on desktop, and the derive calls this up to three times
   /// a pass. `rec_ts` leads the `idx_decoded_onehz_rects (rec_ts, counter)`
-  /// index, so a bounded
-  /// `MAX(rec_ts) WHERE rec_ts >= a AND rec_ts < b` is a single index seek, and
+  /// index, so a bounded `MAX(rec_ts) WHERE rec_ts >= a AND rec_ts < b` is a single index seek, and
   /// the span is bounded by `rawRetentionDays` in any healthy install.
   ///
   /// The day walk goes through [localDayEndSec] rather than `+ 86400` for the
@@ -7807,8 +7805,7 @@ class LocalDb {
   /// page is ordered `rec_ts ASC`, so first = min, last = max). A beat carries
   /// its decoded_onehz parent's rec_ts, so `[fromRecTs, toRecTs]` on
   /// decoded_rr's rec_ts index contains exactly the page's beats — bounded,
-  /// indexed, and immune to the
-  /// strap's reboot counter reset (the old counter-span read could degenerate to
+  /// indexed, and immune to the strap's reboot counter reset (the old counter-span read could degenerate to
   /// `counter >= high AND counter <= low` = zero rows, silently dropping a whole
   /// page's RR).
   static Future<List<Map<String, dynamic>>> decodedRrByRecTsRange({
@@ -9575,8 +9572,7 @@ class LocalDb {
               // REPLACE the beat set for a colliding second, don't patch it.
               // decoded_rr is keyed by (device_id, ts_ms, beat_index), so a
               // row-by-row replace-insert only overwrites the indices the
-              // foreign export
-              // actually reaches: importing [500] over a local [700, 710, 720]
+              // foreign export actually reaches: importing [500] over a local [700, 710, 720]
               // leaves beats 1 and 2 behind and hands that second a spliced
               // foreign/local RR series — silently wrong RMSSD, out of a restore.
               // [_queueDecodedOneHz] guards the identical hazard on the write

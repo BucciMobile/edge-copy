@@ -6268,8 +6268,7 @@ class DerivationEngine {
   /// derive, but only inside `run()`, past its early returns), and ordinary
   /// light/heavy derives ran with `fullHistory: false`. Putting the
   /// back-catalogue rewrite there made it resumable but effectively
-  /// unreachable — a normal install
-  /// would have converted nothing.
+  /// unreachable — a normal install would have converted nothing.
   ///
   /// CALLED FROM THE `finally` OF EVERY ENTRY PATH, and it swallows its own
   /// errors, for two reasons that were both live:
