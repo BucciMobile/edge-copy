@@ -838,6 +838,8 @@
   "nutritionNoneYet": "अभी तक कुछ नहीं",
   "nutritionAddWater": "पानी जोड़ें",
   "nutritionRemoveWater": "पानी घटाएँ",
+  "coachApiFormatHelp": "वह API चुनें जिसे आपका एंडपॉइंट सपोर्ट करता है। Responses टूल्स के साथ OpenAI रीज़निंग को सपोर्ट करता है।",
+  "coachApiFormatLabel": "API",
   "coachApiKeyLabel": "API कुंजी",
   "coachApiKeyLocalLabel": "API कुंजी (लोकल के लिए ज़रूरी नहीं)",
   "coachAsking": "पूछा जा रहा है…",

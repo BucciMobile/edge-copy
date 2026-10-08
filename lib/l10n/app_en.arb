@@ -4325,6 +4325,14 @@
   "@nutritionRemoveWater": {
     "description": "Nutrition Today tab: semantic label on the water minus-step button"
   },
+  "coachApiFormatHelp": "Choose the API your endpoint supports. Responses supports OpenAI reasoning with tools.",
+  "@coachApiFormatHelp": {
+    "description": "Coach AI settings: helper text under the provider API format dropdown (Responses / Chat Completions are API names, keep untranslated)"
+  },
+  "coachApiFormatLabel": "API",
+  "@coachApiFormatLabel": {
+    "description": "Coach AI settings: label for the provider API format dropdown"
+  },
   "coachApiKeyLabel": "API key",
   "@coachApiKeyLabel": {
     "description": "Coach AI settings: text field label for a cloud provider's API key"

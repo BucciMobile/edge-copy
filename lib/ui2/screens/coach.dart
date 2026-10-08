@@ -1070,7 +1070,8 @@ class _CoachSetupState extends State<CoachSetup> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('API', style: F.over.copyWith(color: p.ink3)),
+                      Text(l?.coachApiFormatLabel ?? 'API',
+                          style: F.over.copyWith(color: p.ink3)),
                       const SizedBox(height: S.x2),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: S.x3),
@@ -1080,7 +1081,7 @@ class _CoachSetupState extends State<CoachSetup> {
                           border: Border.all(color: p.line),
                         ),
                         child: Semantics(
-                          label: 'API',
+                          label: l?.coachApiFormatLabel ?? 'API',
                           child: DropdownButtonHideUnderline(
                             child: DropdownButton<CoachApi>(
                               value: _api,
@@ -1106,8 +1107,9 @@ class _CoachSetupState extends State<CoachSetup> {
                       ),
                       const SizedBox(height: S.x2),
                       Text(
-                        'Choose the API your endpoint supports. Responses '
-                        'supports OpenAI reasoning with tools.',
+                        l?.coachApiFormatHelp ??
+                            'Choose the API your endpoint supports. Responses '
+                                'supports OpenAI reasoning with tools.',
                         style: F.cap.copyWith(color: p.ink3, height: 1.5),
                       ),
                     ],

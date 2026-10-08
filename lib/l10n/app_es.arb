@@ -838,6 +838,8 @@
   "nutritionNoneYet": "Nada aún",
   "nutritionAddWater": "Añadir agua",
   "nutritionRemoveWater": "Quitar agua",
+  "coachApiFormatHelp": "Elige la API que admite tu endpoint. Responses admite el razonamiento de OpenAI con herramientas.",
+  "coachApiFormatLabel": "API",
   "coachApiKeyLabel": "Clave de API",
   "coachApiKeyLocalLabel": "Clave de API (no necesaria en local)",
   "coachAsking": "Preguntando…",

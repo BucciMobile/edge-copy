@@ -838,6 +838,8 @@
   "nutritionNoneYet": "还没有",
   "nutritionAddWater": "增加饮水",
   "nutritionRemoveWater": "减少饮水",
+  "coachApiFormatHelp": "选择你的端点支持的 API。Responses 支持带工具的 OpenAI 推理。",
+  "coachApiFormatLabel": "API",
   "coachApiKeyLabel": "API 密钥",
   "coachApiKeyLocalLabel": "API 密钥（本地无需填写）",
   "coachAsking": "查询中…",

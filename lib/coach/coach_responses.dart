@@ -61,6 +61,9 @@ class CoachResponses {
         });
       }
     }
+    // Sampling params (temperature/top_p) are deliberately not forwarded:
+    // OpenAI reasoning models reject them on Responses, and the protocol is
+    // never chosen from model names. Chat Completions keeps them.
     return {
       'model': model,
       'input': input,
