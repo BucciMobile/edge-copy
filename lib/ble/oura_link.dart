@@ -392,8 +392,17 @@ class OuraLink {
 
   void _writeCursor(int ds) {
     _cursorWrites =
-        _cursorWrites.then((_) => _persistCursor(ds)).catchError((_) {});
+        _cursorWrites.then((_) => _persistCursor(ds)).catchError((Object e) {
+      // Kept off the error path so later writes still run, but NOT silent:
+      // a bookmark that never persisted means the checkpoint chain broke,
+      // and `_runSession` must not report that session as synced.
+      _cursorWriteFailed = true;
+      debugPrint('[oura] cursor write failed: $e');
+    });
   }
+
+  /// A cursor write of the CURRENT session failed. Reset per session.
+  bool _cursorWriteFailed = false;
 
   /// Drop the bookmark and the stored time anchor, through the same queue.
   ///
@@ -592,6 +601,7 @@ class OuraLink {
     Duration? confirmTimeout,
   }) async {
     _drainOk = false;
+    _cursorWriteFailed = false;
     // A NEW SESSION STARTS CLEAN: the category describes THIS session only.
     // A previous failure must not colour the next attempt's report.
     _category = OuraSyncCategory.none;
@@ -608,6 +618,14 @@ class OuraLink {
     );
     _host = host;
     await host.run(link);
+    // The bookmark writes the drain queued must have landed before the
+    // drain counts as done: a cursor that never persisted is a broken
+    // checkpoint chain, not a sync.
+    await _cursorWrites;
+    if (_cursorWriteFailed) {
+      _drainOk = false;
+      _category = OuraSyncCategory.storageFailed;
+    }
     if (!_drainOk) {
       debugPrint('[oura] session ended before the drain reached its '
           'end — reporting the sync as unsuccessful.');
@@ -779,7 +797,7 @@ class OuraLink {
     // their ORIGINAL stacktraces — none may be silent, and none may have
     // prevented any part of the teardown from happening.
     if (closeError != null) {
-      Error.throwWithStackTrace(closeError, closeStack!);
+      Error.throwWithStackTrace(closeError!, closeStack!);
     }
     if (hostError != null) {
       Error.throwWithStackTrace(hostError, hostStack!);
