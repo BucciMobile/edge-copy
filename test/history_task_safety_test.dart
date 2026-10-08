@@ -1445,6 +1445,62 @@ void main() {
       });
     });
 
+    test('a refresh request whose task ends while it is queued is withheld',
+        () {
+      fakeAsync((async) {
+        final r = _Rig();
+        r.holdOpcode = Cmd.getBatteryLevel;
+        r.holdWrite = Completer<bool>();
+        final held = r.holdWrite!;
+        r.onClockRequest = () => r.engine.debugWriteRaw(
+            buildCommand(99, Cmd.getBatteryLevel, const [], BandProfile.gen5));
+        bool? sent;
+        r.engine.debugStartHistoricalRefresh().then((v) => sent = v);
+        async.elapse(Duration.zero);
+        expect(r.drainRequests, isEmpty, reason: 'queued behind the held write');
+        // The task ends while its opcode 22 still sits in the write chain.
+        r.engine.endHistoryTask(reason: 'test');
+        async.elapse(Duration.zero);
+        held.complete(true);
+        async.elapse(const Duration(seconds: 1));
+        expect(r.drainRequests, isEmpty,
+            reason: 'no drain request for a task that already ended');
+        expect(r.aborts, hasLength(1));
+        expect(sent, isFalse);
+        expect(r.engine.offloadActive, isFalse);
+        async.elapse(const Duration(seconds: 11));
+        expect(r.aborts, hasLength(1), reason: 'no watchdog for it either');
+      });
+    });
+
+    test('an INIT request whose task ends while it is queued is withheld', () {
+      fakeAsync((async) {
+        final r = _Rig();
+        r.holdOpcode = Cmd.getBatteryLevel;
+        r.holdWrite = Completer<bool>();
+        final held = r.holdWrite!;
+        bool? ready;
+        r.engine.debugStartInitDrain().then((v) => ready = v);
+        async.elapse(Duration.zero);
+        expect(r.rangePolls, hasLength(1));
+        // Something takes the write chain inside INIT's 120 ms gap, so the
+        // opcode 22 queues behind it — then the task ends.
+        r.engine.debugWriteRaw(
+            buildCommand(99, Cmd.getBatteryLevel, const [], BandProfile.gen5));
+        async.elapse(const Duration(milliseconds: 150));
+        r.engine.endHistoryTask(reason: 'test');
+        async.elapse(Duration.zero);
+        held.complete(true);
+        async.elapse(const Duration(seconds: 1));
+        expect(r.drainRequests, isEmpty);
+        expect(r.aborts, hasLength(1));
+        expect(ready, isTrue, reason: 'the link itself is up');
+        expect(r.engine.offloadActive, isFalse);
+        async.elapse(const Duration(seconds: 11));
+        expect(r.aborts, hasLength(1));
+      });
+    });
+
     test('INIT arms it too', () {
       fakeAsync((async) {
         final r = _Rig();

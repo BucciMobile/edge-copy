@@ -3107,10 +3107,7 @@ class BleEngine {
     // stops at the already-transmitting guard.
     final initOk = await sendInit(
       drain: drainOnInit,
-      beforeDrainRequest: () {
-        if (_historyTaskGen == taskGen) _historyRequestedGen = taskGen;
-        return true;
-      },
+      beforeDrainRequest: _historyRequestGate(taskGen),
     );
     // UNCONDITIONAL staleness re-check — not only on a failed INIT. The last
     // write can succeed and the link die before this continuation resumes;
@@ -3123,6 +3120,9 @@ class BleEngine {
       return false;
     }
     if (!initOk) {
+      // A task that ended while its request was queued had the request
+      // withheld; its terminal (or a replacement) owns this state now.
+      if (_historyTaskGen != taskGen) return true;
       _historyAwaitingFirstStart = false;
       _setOffloadActive(false);
       _lastBackfillAt = floorBeforeInit;
@@ -4255,10 +4255,7 @@ class BleEngine {
       owner: session,
       // Answerable from the moment the bytes go out — not from when the
       // write was queued behind earlier ones.
-      beforeTransport: () {
-        if (_historyTaskGen == taskGen) _historyRequestedGen = taskGen;
-        return true;
-      },
+      beforeTransport: _historyRequestGate(taskGen),
     )) {
       // A claim that went stale UNDER the write must not clear the state the
       // replacement task now owns.
@@ -5776,6 +5773,20 @@ class BleEngine {
       },
     );
   }
+
+  /// The `beforeTransport` gate of task [taskGen]'s SEND_HISTORICAL_DATA:
+  /// marks the request as gone out, or withholds it when the task ended
+  /// while the write sat queued — the band must not be asked to drain for a
+  /// task nothing will ACK.
+  bool Function() _historyRequestGate(int taskGen) => () {
+        if (_historyTaskGen != taskGen) {
+          _log('[SYNC] SEND_HISTORICAL_DATA withheld — its task ended while '
+              'the write was queued.');
+          return false;
+        }
+        _historyRequestedGen = taskGen;
+        return true;
+      };
 
   /// Arm the first-START watchdog for task [taskGen]. Only ever called AFTER
   /// the SEND_HISTORICAL_DATA write reported success, so the range/clock/floor
