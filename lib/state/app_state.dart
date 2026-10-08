@@ -1191,7 +1191,11 @@ class AppState extends ChangeNotifier {
       // user through a "delete everything".
       try {
         final prefs = await SharedPreferences.getInstance();
-        if (await prefs.clear() && Platform.isAndroid && folderToRelease != null) {
+        final cleared = await prefs.clear();
+        if (!cleared) {
+          throw const FileSystemException('Preferences were not cleared');
+        }
+        if (Platform.isAndroid && folderToRelease != null) {
           try {
             await AndroidBackupStorage.release(folderToRelease);
           } catch (e) {
@@ -1201,6 +1205,10 @@ class AppState extends ChangeNotifier {
         }
       } catch (e) {
         _log('[reset] prefs clear failed: $e');
+        // The saved folder and its grant both survive; say so.
+        if (Platform.isAndroid && folderToRelease != null) {
+          backupCleanupError ??= e.toString();
+        }
       }
       appStatus = null;
       _savedAlarm = null;

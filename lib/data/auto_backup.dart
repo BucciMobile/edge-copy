@@ -375,7 +375,12 @@ Future<BackupOutcome> _runBackup({
     // are invisible to retention by design, so nothing else would ever remove
     // them.
     await _pruneStorage(destination, keep: kBackupsKept);
-    return BackupOutcome(path: published.path);
+    // A document URI means nothing to a person; show the folder they chose.
+    return BackupOutcome(
+      path: destination is AndroidBackupStorage
+          ? '${destination.folder.name}/${published.name}'
+          : published.path,
+    );
   } catch (e) {
     return BackupOutcome(
       error: e is PlatformException ? (e.message ?? e.code) : e.toString(),

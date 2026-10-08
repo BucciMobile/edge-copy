@@ -194,8 +194,20 @@ class _DataScreenState extends State<DataScreen> {
   Future<_Note> _chooseBackupFolder(AppState app) async {
     final l = AppLocalizations.of(context);
     final folder = await AndroidBackupStorage.pick();
-    if (folder == null || !mounted) return ('', false);
-    await app.setBackupFolder(folder);
+    if (folder == null) return ('', false);
+    // The grant is already persisted; save it even if the screen closed, and
+    // hand it back if saving fails so no unreferenced grant is left behind.
+    final current = app.backupFolder?.uri;
+    try {
+      await app.setBackupFolder(folder);
+    } catch (_) {
+      if (folder.uri != current) {
+        try {
+          await AndroidBackupStorage.release(folder);
+        } catch (_) {}
+      }
+      rethrow;
+    }
     return (l?.dataBackupFolderSaved ?? 'Backup folder saved.', false);
   }
 

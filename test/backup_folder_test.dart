@@ -181,11 +181,11 @@ void main() {
   );
 
   test(
-    'writes gzip, publishes a URI, and removes both private temp copies',
+    'writes gzip, reports the folder name, and removes both private temp copies',
     () async {
       final result = await run();
       expect(result.succeeded, isTrue, reason: result.error);
-      expect(result.path, documents.uri(backupFileName(when)));
+      expect(result.path, 'My backups/${backupFileName(when)}');
       expect(gzip.decode(documents.files.values.single), bytes);
       expect(documents.calls.take(3), ['list', 'write', 'rename']);
       expect(documents.files.keys.any((n) => n.endsWith('.partial')), isFalse);
