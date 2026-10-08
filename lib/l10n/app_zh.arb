@@ -444,7 +444,7 @@
   "roughNightSignDip": "你夜间心率的下降幅度比平时小",
   "roughNightSignTemp": "你的皮肤温度更高",
   "roughNightLateTraining": "你训练到了 {at}，这本身就常常会导致这种情况。",
-  "roughNightIllness": "疾病监测也标记了这一晚——最近几晚累计显示高于你自己的基线，这不是诊断。",
+  "roughNightIllness": "静息心率也标记了这一晚——最近几晚累计显示高于你自己的基线，这不是诊断。",
   "roughNightLuteal": "你正处于黄体期，这本身就会提高静息心率和皮肤温度。",
   "roughNightWarmRoom": "你的皮肤比平时更热——闷热的房间也会导致这种情况。",
   "roughNightDismiss": "关闭",

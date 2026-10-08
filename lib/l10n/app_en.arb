@@ -2367,9 +2367,9 @@
       }
     }
   },
-  "roughNightIllness": "The illness watch flagged this night too — recent nights add up to a rise above your own baseline, not a diagnosis.",
+  "roughNightIllness": "Your resting heart rate flagged this night too — recent nights add up to a rise above your own baseline, not a diagnosis.",
   "@roughNightIllness": {
-    "description": "Rough Night card: stated fact when the illness watch also flagged the same night."
+    "description": "Rough Night card: stated fact when the resting-heart-rate watch also flagged the same night (an accumulated rise, never an illness claim)."
   },
   "roughNightLuteal": "You are in the luteal phase, which lifts resting heart rate and skin temperature by itself.",
   "@roughNightLuteal": {

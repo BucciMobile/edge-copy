@@ -444,7 +444,7 @@
   "roughNightSignDip": "tu frecuencia cardíaca bajó menos por la noche de lo habitual",
   "roughNightSignTemp": "tu piel estuvo más caliente",
   "roughNightLateTraining": "Entrenaste hasta las {at}, lo que a menudo causa esto por sí solo.",
-  "roughNightIllness": "El monitor de enfermedad también marcó esta noche: en conjunto, las noches recientes muestran una subida respecto a tu propia base, no un diagnóstico.",
+  "roughNightIllness": "Tu frecuencia cardíaca en reposo también marcó esta noche: en conjunto, las noches recientes muestran una subida respecto a tu propia base, no un diagnóstico.",
   "roughNightLuteal": "Estás en la fase lútea, que por sí sola eleva la frecuencia cardíaca en reposo y la temperatura de la piel.",
   "roughNightWarmRoom": "Tu piel estuvo más caliente de lo habitual — una habitación calurosa también provoca esto.",
   "roughNightDismiss": "Descartar",

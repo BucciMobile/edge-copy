@@ -124,6 +124,46 @@ void main() {
     }
   });
 
+  // The rough-night note names the same verdict as the cards: an accumulated
+  // resting-heart-rate rise. It must not credit an illness detector with it.
+  test('no illness-card string, in any locale, credits an illness detector',
+      () {
+    const banned = {
+      'en': ['illness watch', 'illness monitor', 'illness detect'],
+      'de': ['krankheitserkennung', 'krankheitsüberwachung'],
+      'es': ['monitor de enfermedad', 'detección de enfermedad'],
+      'fr': ['suivi de maladie', 'détection de maladie'],
+      'hi': ['बीमारी की निगरानी', 'बीमारी का पता'],
+      'zh': ['疾病监测', '疾病检测'],
+    };
+    for (final MapEntry(key: locale, value: phrases) in banned.entries) {
+      final arb = (jsonDecode(
+              File('lib/l10n/app_$locale.arb').readAsStringSync()) as Map)
+          .cast<String, dynamic>();
+      final illness = {
+        for (final e in arb.entries)
+          if (RegExp(r'^((home|health)Illness|roughNightIllness)')
+              .hasMatch(e.key))
+            e.key: (e.value as String).toLowerCase(),
+      };
+      expect(illness, contains('roughNightIllness'), reason: locale);
+      for (final MapEntry(key: k, value: v) in illness.entries) {
+        for (final phrase in phrases) {
+          expect(v, isNot(contains(phrase)), reason: '$locale $k');
+        }
+      }
+    }
+    // The English fallback and the gallery fixture print the same sentence.
+    for (final path in [
+      'lib/ui2/screens/rough_night.dart',
+      'lib/ui2/profile/gallery.dart',
+    ]) {
+      expect(File(path).readAsStringSync().toLowerCase(),
+          isNot(contains('the illness watch flagged')),
+          reason: path);
+    }
+  });
+
   test('no finding title says "today"', () {
     // The same Finding renders under past dates in the log.
     for (final kind in FindingKind.values) {

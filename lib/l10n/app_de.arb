@@ -481,7 +481,7 @@
   "roughNightSignDip": "dein Puls sank nachts weniger stark ab als sonst",
   "roughNightSignTemp": "deine Haut war wärmer",
   "roughNightLateTraining": "Du hast bis {at} trainiert – das allein bewirkt so etwas oft schon.",
-  "roughNightIllness": "Die Krankheitserkennung hat diese Nacht ebenfalls markiert – die letzten Nächte ergeben zusammen einen Anstieg über deine Baseline, keine Diagnose.",
+  "roughNightIllness": "Auch dein Ruhepuls hat diese Nacht markiert – die letzten Nächte ergeben zusammen einen Anstieg über deine Baseline, keine Diagnose.",
   "roughNightLuteal": "Du bist in der Lutealphase, die Ruhepuls und Hauttemperatur von sich aus erhöht.",
   "roughNightWarmRoom": "Deine Haut war wärmer als sonst – das kann auch an einem warmen Zimmer liegen.",
   "roughNightDismiss": "Ausblenden",
