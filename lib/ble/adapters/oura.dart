@@ -455,11 +455,17 @@ class OuraAdapter extends BandAdapter {
     }
     final reply =
         await inbox.firstWhere((f) => ouraAuthResult(f) != null, replyTimeout);
-    final result = reply == null ? null : ouraAuthResult(reply);
+    if (reply == null) {
+      // No verdict inside the reply window is silence, not a refusal: the
+      // re-pair remedy that `refused` drives would be the wrong one.
+      link.log('oura: no authentication result.');
+      return _AuthOutcome.silent;
+    }
+    final result = ouraAuthResult(reply);
     if (result != 0) {
       // Worth naming, because the remedies differ: a wrong key needs re-pairing
       // and a ring in factory reset needs its key installed first.
-      link.log('oura: authentication refused (result ${result ?? "none"}).');
+      link.log('oura: authentication refused (result $result).');
       return _AuthOutcome.refused;
     }
     return _AuthOutcome.ok;
