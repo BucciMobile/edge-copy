@@ -144,7 +144,20 @@ class _AlarmTickState extends State<_AlarmTick> {
   Timer? _t;
 
   @override
-  Widget build(BuildContext c) {
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void didUpdateWidget(_AlarmTick old) {
+    super.didUpdateWidget(old);
+    if (old.at != widget.at) _schedule();
+  }
+
+  // Scheduled here rather than in build, so a Home rebuild on new data does
+  // not throw away and re-create the timer every time.
+  void _schedule() {
     final now = clock.now();
     final midnight = DateTime(now.year, now.month, now.day + 1);
     final at = widget.at;
@@ -152,10 +165,14 @@ class _AlarmTickState extends State<_AlarmTick> {
         at != null && at.isAfter(now) && at.isBefore(midnight) ? at : midnight;
     _t?.cancel();
     _t = Timer(next.difference(now), () {
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {});
+      _schedule();
     });
-    return widget.build(now);
   }
+
+  @override
+  Widget build(BuildContext c) => widget.build(clock.now());
 
   @override
   void dispose() {
