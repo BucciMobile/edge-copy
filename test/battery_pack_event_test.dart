@@ -150,5 +150,18 @@ void main() {
       expect(row['name'], 'EVENT_109');
       expect(row['payload_json'], '{}');
     });
+
+    test('a re-sent gen5 frame repairs the row stored undecoded', () async {
+      LocalDb.dbName = 'battery_pack_event_test.db';
+      await LocalDb.close();
+      await stored(BandProfile.gen4); // the row as written before the fix
+      await LocalDb.insertEvent(109, 1788811885, _packInfo,
+          deviceId: LocalDb.kPrimaryDeviceId, profile: BandProfile.gen5);
+      final db = await LocalDb.instance;
+      final row = (await db.query('band_events')).single;
+      expect(row['name'], 'BATTERY_PACK_INFO');
+      final payload = jsonDecode(row['payload_json'] as String) as Map;
+      expect(payload['pack_battery_raw'], 946);
+    });
   });
 }
