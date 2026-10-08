@@ -56,8 +56,7 @@ class ImportOutcome {
   final Set<String> corruptTables;
 
   /// Days of stored raw sensor history in the backup that this build could
-  /// not read (a newer archive format), so they were not merged. Everything
-  /// else in the backup imported.
+  /// not read (a newer archive format), so they were not merged.
   final int archiveBucketsSkipped;
 
   /// Days of stored raw sensor history (archive buckets) the backup added or

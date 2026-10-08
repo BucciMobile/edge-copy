@@ -611,8 +611,7 @@ class AppState extends ChangeNotifier {
 
   /// Days of stored raw history (substrate archive buckets) the last backup
   /// import could NOT merge, because they are in a format this build does
-  /// not read. Every other row imported; this is reported, never dropped
-  /// silently.
+  /// not read. Reported in the import report, never dropped silently.
   int lastImportArchiveSkipped = 0;
 
   /// Days of stored raw history the last backup import added or filled in.
