@@ -85,9 +85,14 @@ class _AppShellState extends State<AppShell> {
       // between two tabs does not add a Back press per switch. Home stays in
       // as the way back into the app even while it is the tab on screen.
       if (d != _current) {
-        _history
-          ..remove(_current)
-          ..add(_current);
+        _history.remove(_current);
+        // Leaving Home puts it back at the bottom, never on top: it is the
+        // last stop before Back leaves the app.
+        if (_current == ShellDomain.home) {
+          _history.insert(0, _current);
+        } else {
+          _history.add(_current);
+        }
         if (d != ShellDomain.home) _history.remove(d);
       }
       _current = d;

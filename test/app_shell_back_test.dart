@@ -112,6 +112,22 @@ void main() {
     expect(exited(), isTrue);
   });
 
+  testWidgets('leaving Home again keeps Home as the last stop before exit', (
+    tester,
+  ) async {
+    await mount(tester);
+    await select(tester, ShellDomain.health);
+    await select(tester, ShellDomain.home);
+    await select(tester, ShellDomain.workout);
+    await back(tester);
+    expect(find.text('screen Health'), findsOneWidget);
+    await back(tester);
+    expect(find.text('screen Home'), findsOneWidget);
+    expect(exited(), isFalse);
+    await back(tester);
+    expect(exited(), isTrue);
+  });
+
   testWidgets('a deliberate return to Home keeps the previous tab in history', (
     tester,
   ) async {
