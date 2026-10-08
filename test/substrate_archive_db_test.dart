@@ -4,6 +4,7 @@
 // export day, restore/salvage, schema health, the prune guard).
 
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -95,6 +96,7 @@ Future<void> _clear() async {
   SubstrateArchive.debugCorruptEncode = false;
   SubstrateArchive.debugBeforeBucket = null;
   SubstrateArchive.debugThrowInBucket = null;
+  SubstrateArchive.debugBeforeFallbackDelete = null;
   LocalDb.debugFailExportStrip = false;
 }
 
@@ -1406,6 +1408,58 @@ void main() {
       }
     },
   );
+
+  test('a failed unarchived delete neither stops the pass nor loses the '
+      'failure counts', () async {
+    await _seed();
+    SubstrateArchive.debugThrowInBucket = Exception('out of memory');
+    for (var pass = 1; pass < SubstrateArchive.maxFailedPasses; pass++) {
+      await LocalDb.pruneDecodedBeforeRecTs(
+        cutoff,
+        archive: policy,
+        hardFloorSec: cutoff,
+      );
+    }
+    // The pass that would delete unarchived: the FIRST bucket's delete fails
+    // (a concurrent writer holding the lock).
+    var calls = 0;
+    SubstrateArchive.debugBeforeFallbackDelete = () async {
+      if (calls++ == 0) throw Exception('database is locked');
+    };
+    await LocalDb.pruneDecodedBeforeRecTs(
+      cutoff,
+      archive: policy,
+      hardFloorSec: cutoff,
+    );
+    SubstrateArchive.debugBeforeFallbackDelete = null;
+    SubstrateArchive.debugThrowInBucket = null;
+    expect(calls, greaterThan(1), reason: 'the later buckets still ran');
+    final left = await _live('decoded_onehz', 'rec_ts > 0 AND rec_ts < ?', [
+      cutoff,
+    ]);
+    expect(left, isNotEmpty, reason: 'the failed bucket stays live');
+    final days = {for (final r in left) (r['rec_ts'] as int) ~/ 86400};
+    expect(days, hasLength(1));
+    // The rest of the prune ran: the undatable row is gone.
+    expect(await _live('decoded_onehz', 'rec_ts <= 0', const []), isEmpty);
+    // Every bucket's count was saved; only the failed one is still counted.
+    final row = await (await _db()).query(
+      'compute_freshness',
+      where: 'key = ?',
+      whereArgs: [SubstrateArchive.failuresKey],
+    );
+    final counts = jsonDecode(row.single['payload_json'] as String) as Map;
+    expect(counts.values.toSet(), {SubstrateArchive.maxFailedPasses});
+    expect(counts.keys.every((k) => (k as String).endsWith('|${days.single}')),
+        isTrue);
+    // The next pass finishes the job.
+    await LocalDb.pruneDecodedBeforeRecTs(
+      cutoff,
+      archive: policy,
+      hardFloorSec: cutoff,
+    );
+    expect(await _live('decoded_onehz', 'rec_ts < ?', [cutoff]), isEmpty);
+  });
 
   test('a bucket that keeps failing past the hold is deleted after '
       '${SubstrateArchive.maxFailedPasses} passes', () async {

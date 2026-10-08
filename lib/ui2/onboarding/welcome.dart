@@ -835,8 +835,8 @@ String _archiveSkipped(ImportOutcome o, AppLocalizations? l) {
   return l?.welcomeArchiveSkipped(n) ??
       '$n day${n == 1 ? '' : 's'} of stored raw sensor history could not be '
           'merged, because this version cannot read ${n == 1 ? 'its' : 'their'} '
-          'format. Everything else imported normally; update the app and '
-          'import the backup again to bring them in.';
+          'format. Update the app and import the backup again to bring '
+          '${n == 1 ? 'it' : 'them'} in.';
 }
 
 /// The first few refusals, with a count for the rest. Six is where a

@@ -1620,7 +1620,7 @@
       }
     }
   },
-  "welcomeArchiveSkipped": "{n, plural, one{1 day of stored raw sensor history could not be merged, because this version cannot read its format.} other{{n} days of stored raw sensor history could not be merged, because this version cannot read their format.}} Everything else imported normally; update the app and import the backup again to bring them in.",
+  "welcomeArchiveSkipped": "{n, plural, one{1 day of stored raw sensor history could not be merged, because this version cannot read its format. Update the app and import the backup again to bring it in.} other{{n} days of stored raw sensor history could not be merged, because this version cannot read their format. Update the app and import the backup again to bring them in.}}",
   "@welcomeArchiveSkipped": {
     "description": "Backup import: N days of archived raw sensor history were in a storage format this version cannot read (in the backup or on the phone) and were not merged.",
     "placeholders": {

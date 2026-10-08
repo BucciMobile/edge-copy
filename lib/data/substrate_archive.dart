@@ -102,6 +102,11 @@ abstract final class SubstrateArchive {
   @visibleForTesting
   static Object? debugThrowInBucket;
 
+  /// Test seam: awaited inside the past-the-hold unarchived delete's
+  /// transaction, so a test can make that delete fail.
+  @visibleForTesting
+  static Future<void> Function()? debugBeforeFallbackDelete;
+
   @visibleForTesting
   static int get pageSizeForTest => _pageSize;
 
@@ -297,64 +302,82 @@ abstract final class SubstrateArchive {
     var deleted = 0, attempted = 0;
     final failures = await _readFailures(db);
     var failuresChanged = false;
-    for (final b in buckets) {
-      final deviceId = b['device_id'] as String;
-      final day = (b['d'] as num).toInt();
-      final lo = day * 86400;
-      final hi = math.min((day + 1) * 86400, cutoffSec);
-      await debugBeforeBucket?.call();
-      if (maxBuckets != null && attempted >= maxBuckets) break;
-      attempted++;
-      if (shouldYield?.call() ?? false) {
-        log?.call(
-          'substrate archive: offload active, leaving the rest live for the '
-          'next pass',
-        );
-        break;
-      }
-      final failureKey = '$deviceId|$day';
-      try {
-        deleted += await db.transaction((txn) async {
-          final n = await _archiveBucket(txn, deviceId, day, lo, hi);
-          await onDeleted?.call(txn, hi);
-          return n;
-        });
-        if (failures.remove(failureKey) != null) failuresChanged = true;
-      } catch (e) {
-        final pastHold = hardFloorSec != null && hi <= hardFloorSec;
-        var permanent =
-            e is StateError || e is ArgumentError || e is FormatException;
-        if (pastHold && !permanent) {
-          final n = (failures[failureKey] ?? 0) + 1;
-          failures[failureKey] = n;
-          failuresChanged = true;
-          permanent = n >= maxFailedPasses;
+    // The counts are saved however the loop ends, so a pass that stops
+    // early never loses the increments it already made.
+    try {
+      for (final b in buckets) {
+        final deviceId = b['device_id'] as String;
+        final day = (b['d'] as num).toInt();
+        final lo = day * 86400;
+        final hi = math.min((day + 1) * 86400, cutoffSec);
+        await debugBeforeBucket?.call();
+        if (maxBuckets != null && attempted >= maxBuckets) break;
+        attempted++;
+        if (shouldYield?.call() ?? false) {
+          log?.call(
+            'substrate archive: offload active, leaving the rest live for the '
+            'next pass',
+          );
+          break;
         }
-        if (permanent && pastHold) {
-          if (failures.remove(failureKey) != null) failuresChanged = true;
+        final failureKey = '$deviceId|$day';
+        try {
           deleted += await db.transaction((txn) async {
-            final n = await _deleteLive(txn, deviceId, lo, hi);
+            final n = await _archiveBucket(txn, deviceId, day, lo, hi);
             await onDeleted?.call(txn, hi);
             return n;
           });
-          log?.call(
-            'substrate archive failed for $deviceId/$day ($e); past the hold, '
-            'deleted unarchived',
-          );
-        } else {
-          log?.call(
-            'substrate archive failed for $deviceId/$day ($e); kept live for '
-            'the next pass',
-          );
+          if (failures.remove(failureKey) != null) failuresChanged = true;
+        } catch (e) {
+          final pastHold = hardFloorSec != null && hi <= hardFloorSec;
+          var permanent =
+              e is StateError || e is ArgumentError || e is FormatException;
+          if (pastHold && !permanent) {
+            final n = (failures[failureKey] ?? 0) + 1;
+            failures[failureKey] = n;
+            failuresChanged = true;
+            permanent = n >= maxFailedPasses;
+          }
+          if (permanent && pastHold) {
+            // Guarded: one bucket whose delete fails (a concurrent writer
+            // holding the lock) must not end the pass for every other
+            // bucket. It stays live and keeps its count, so the next pass
+            // tries again.
+            try {
+              deleted += await db.transaction((txn) async {
+                await debugBeforeFallbackDelete?.call();
+                final n = await _deleteLive(txn, deviceId, lo, hi);
+                await onDeleted?.call(txn, hi);
+                return n;
+              });
+              if (failures.remove(failureKey) != null) failuresChanged = true;
+              log?.call(
+                'substrate archive failed for $deviceId/$day ($e); past the '
+                'hold, deleted unarchived',
+              );
+            } catch (e2) {
+              log?.call(
+                'substrate archive failed for $deviceId/$day ($e) and the '
+                'unarchived delete failed too ($e2); kept live for the next '
+                'pass',
+              );
+            }
+          } else {
+            log?.call(
+              'substrate archive failed for $deviceId/$day ($e); kept live for '
+              'the next pass',
+            );
+          }
         }
       }
-    }
-    if (failuresChanged) {
-      await db.insert('compute_freshness', {
-        'key': failuresKey,
-        'payload_json': jsonEncode(failures),
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    } finally {
+      if (failuresChanged) {
+        await db.insert('compute_freshness', {
+          'key': failuresKey,
+          'payload_json': jsonEncode(failures),
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
     }
     return deleted;
   }
