@@ -20,8 +20,12 @@ void main() {
   late String dir;
   final shown = <NotificationEvent>[];
   final original = NotificationCenter.instance.presentSink;
-  final today = todayLabel();
+  // One fixed clock for the seed AND the pass: labels taken from the real
+  // clock at load time go stale if the run crosses midnight.
+  const today = '2026-03-10';
   final yesterday = dayLabelBefore(today, 1)!;
+  Future<void> runPass() =>
+      DerivationEngine().runNotificationsForTest(today: today);
 
   setUp(() async {
     sqfliteFfiInit();
@@ -59,7 +63,7 @@ void main() {
 
   test("yesterday's red night buzzes, dated and keyed by that night", () async {
     await seed(illnessDate: yesterday);
-    await DerivationEngine().runNotificationsForTest();
+    await runPass();
     expect(shown, hasLength(1));
     expect(shown.single.date, yesterday);
     expect(shown.single.dedupeKey, '$yesterday:exception:medical');
@@ -67,14 +71,14 @@ void main() {
 
   test('the same night does not buzz twice', () async {
     await seed(illnessDate: yesterday);
-    await DerivationEngine().runNotificationsForTest();
-    await DerivationEngine().runNotificationsForTest();
+    await runPass();
+    await runPass();
     expect(shown, hasLength(1));
   });
 
   test('a red night two days back is history', () async {
     await seed(illnessDate: dayLabelBefore(today, 2)!);
-    await DerivationEngine().runNotificationsForTest();
+    await runPass();
     expect(shown, isEmpty);
   });
 }

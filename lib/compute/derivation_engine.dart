@@ -5796,9 +5796,12 @@ class DerivationEngine {
   // ── notifications generator ─────────────────────────────────────────────────
 
   @visibleForTesting
-  Future<void> runNotificationsForTest() => _runNotifications();
+  /// [today] pins the day the pass runs on, so a test's seed and the pass
+  /// agree even across a real midnight.
+  Future<void> runNotificationsForTest({String? today}) =>
+      _runNotifications(today: today);
 
-  Future<void> _runNotifications() async {
+  Future<void> _runNotifications({String? today}) async {
     try {
       final cdRow = await LocalDb.baseline('crossday');
       final cd = _decodeBundle(cdRow?['payload_json']);
@@ -5818,7 +5821,7 @@ class DerivationEngine {
       // finding is current. Anything older is history, and history does not
       // interrupt. The gate is by CALENDAR label (`isRecentFindingDate`), so a
       // DST transition cannot gate out a current night.
-      final today = LocalDb.localDayLabelNow();
+      today ??= LocalDb.localDayLabelNow();
       // ONE exception per day, not one per finding.
       //
       // These six signals are correlated by construction — an illness flag, an
