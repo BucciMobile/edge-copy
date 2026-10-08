@@ -92,9 +92,14 @@ bool isPrivateCoachHost(String url) {
 /// The first two octets of [url]'s host when it is a dotted IPv4 literal.
 (int, int)? _ipv4LeadingOctets(String url) {
   final h = Uri.tryParse(url)?.host ?? '';
-  final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$').firstMatch(h);
-  if (m == null) return null;
-  return (int.parse(m.group(1)!), int.parse(m.group(2)!));
+  // parseIPv4Address checks every octet is 0-255: `100.64.0.999` is a
+  // registered name to Uri, not an address in any range.
+  try {
+    final o = Uri.parseIPv4Address(h);
+    return (o[0], o[1]);
+  } on FormatException {
+    return null;
+  }
 }
 
 /// True for the iOS/macOS errSecDuplicateItem shape the plugin surfaces when

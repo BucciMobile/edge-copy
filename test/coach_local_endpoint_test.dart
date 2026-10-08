@@ -28,6 +28,9 @@ void main() {
       ('http://100.127.255.254:11434/v1', true),
       ('http://100.63.0.1:11434/v1', false),
       ('http://100.128.0.1:11434/v1', false),
+      // Not IPv4 literals at all: an out-of-range octet is a host name.
+      ('http://100.64.0.999:11434/v1', false),
+      ('http://192.168.1.999:11434/v1', false),
       ('https://api.openai.com/v1', false),
       ('https://192.168.1.40.evil.com/v1', false),
     ]) {
