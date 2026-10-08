@@ -36,4 +36,20 @@ void main() {
       expect(c.configured, want, reason: '$url configured');
     }
   });
+
+  // 100.64.0.0/10 is carrier-grade NAT before it is Tailscale: an address in
+  // it may skip the API key, but must not skip the ECG consent prompt.
+  test('the shared address space is local but not private', () async {
+    final c = CoachConfig();
+    for (final (url, local, private) in <(String, bool, bool)>[
+      ('http://100.95.55.34:11434/v1', true, false),
+      ('http://192.168.1.40:11434/v1', true, true),
+      ('http://localhost:11434/v1', true, true),
+      ('https://api.openai.com/v1', false, false),
+    ]) {
+      await c.save(baseUrl: url, apiKey: null, model: 'm');
+      expect(c.isLocalEndpoint, local, reason: url);
+      expect(c.isPrivateEndpoint, private, reason: url);
+    }
+  });
 }

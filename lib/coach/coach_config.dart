@@ -53,32 +53,48 @@ String? coachApiKeyToSave({
 
 /// True when [url]'s host is one that wants no API key and, once configured,
 /// gets the user-adjustable request timeout instead of the fixed cloud one —
-/// loopback, the Android emulator's host alias, `.local` mDNS names, the
-/// three private IPv4 ranges, and the 100.64.0.0/10 shared address space
-/// (RFC 6598), which is where Tailscale hands out its node addresses — an
-/// Ollama reached over a tailnet is the user's own machine, but without this
-/// it was classified as cloud, needed a key it never has, and Save left the
-/// coach unconfigured. Shared by [CoachConfig.isLocalEndpoint] and the
-/// coach setup screen so a LAN-hosted Ollama/LM Studio is recognized the same
-/// way everywhere: a narrower check in just one place used to leave that case
-/// with its timeout field hidden and silently capped at the cloud timeout.
+/// every [isPrivateCoachHost] host, plus the 100.64.0.0/10 shared address
+/// space (RFC 6598), which is where Tailscale hands out its node addresses —
+/// an Ollama reached over a tailnet was classified as cloud, needed a key it
+/// never has, and Save left the coach unconfigured. Shared by
+/// [CoachConfig.isLocalEndpoint] and the coach setup screen so a LAN-hosted
+/// Ollama/LM Studio is recognized the same way everywhere: a narrower check in
+/// just one place used to leave that case with its timeout field hidden and
+/// silently capped at the cloud timeout.
 ///
 /// Deliberately narrow beyond that — a public host still needs a key, because
 /// "endpoint with no credential" is a thing worth being sure about before
 /// sending someone's health data to it.
 bool isLocalCoachHost(String url) {
+  if (isPrivateCoachHost(url)) return true;
+  final v4 = _ipv4LeadingOctets(url);
+  return v4 != null && v4.$1 == 100 && v4.$2 >= 64 && v4.$2 <= 127;
+}
+
+/// The stricter half of [isLocalCoachHost]: loopback, the Android emulator's
+/// host alias, `.local` mDNS names, and the three private IPv4 ranges — NOT
+/// the 100.64.0.0/10 shared space. That range is carrier-grade NAT before it
+/// is Tailscale, so an address in it says nothing about whose machine is on
+/// the other end; it may skip the key requirement, but never the consent
+/// prompt before health data is sent (see [CoachConfig.isPrivateEndpoint]).
+bool isPrivateCoachHost(String url) {
   final h = Uri.tryParse(url)?.host.toLowerCase() ?? '';
   if (h == 'localhost' || h == '127.0.0.1' || h == '::1' ||
       h == '10.0.2.2' || h.endsWith('.local')) {
     return true;
   }
-  final v4 = RegExp(r'^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$').firstMatch(h);
+  final v4 = _ipv4LeadingOctets(url);
   if (v4 == null) return false;
-  final a = int.parse(v4.group(1)!), b = int.parse(v4.group(2)!);
-  return a == 10 ||
-      (a == 172 && b >= 16 && b <= 31) ||
-      (a == 192 && b == 168) ||
-      (a == 100 && b >= 64 && b <= 127);
+  final (a, b) = v4;
+  return a == 10 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168);
+}
+
+/// The first two octets of [url]'s host when it is a dotted IPv4 literal.
+(int, int)? _ipv4LeadingOctets(String url) {
+  final h = Uri.tryParse(url)?.host ?? '';
+  final m = RegExp(r'^(\d{1,3})\.(\d{1,3})\.\d{1,3}\.\d{1,3}$').firstMatch(h);
+  if (m == null) return null;
+  return (int.parse(m.group(1)!), int.parse(m.group(2)!));
 }
 
 /// True for the iOS/macOS errSecDuplicateItem shape the plugin surfaces when
@@ -237,6 +253,11 @@ class CoachConfig extends ChangeNotifier {
   /// on with nothing on screen to explain why. See [isLocalCoachHost] for the
   /// host classification.
   bool get isLocalEndpoint => isLocalCoachHost(apiBase);
+
+  /// Whether the endpoint is on this device or a private network — the gate
+  /// for skipping a consent prompt before health data leaves the phone.
+  /// Narrower than [isLocalEndpoint]; see [isPrivateCoachHost].
+  bool get isPrivateEndpoint => isPrivateCoachHost(apiBase);
 
   bool get configured =>
       (hasKey || isLocalEndpoint) && _baseUrl.isNotEmpty && _model.isNotEmpty;
