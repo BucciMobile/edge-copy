@@ -3718,7 +3718,8 @@ class LocalDb {
   /// (an older build's delete, say) is removed, not just masked, so it cannot
   /// come back as the pin once that day is derived again.
   static Future<({String day, int value, int? wakeSec})?> frozenHeadline() async {
-    final pin = _parseFrozenHeadline(await getCursor(kFrozenHeadlineCursor));
+    final raw = await getCursor(kFrozenHeadlineCursor);
+    final pin = _parseFrozenHeadline(raw);
     if (pin == null) return null;
     final db = await instance;
     final dayExists = (await db.rawQuery(
@@ -3726,9 +3727,21 @@ class LocalDb {
       [pin.day],
     )).isNotEmpty;
     if (dayExists) return pin;
-    await deleteCursor(kFrozenHeadlineCursor);
+    await debugBeforeOrphanPinClear?.call();
+    // Compare-and-delete: only the orphan read above. A derive can pin a new
+    // headline between that read and here, and that pin must survive.
+    await db.delete(
+      'sync_cursor',
+      where: 'name = ? AND value = ?',
+      whereArgs: [kFrozenHeadlineCursor, raw],
+    );
     return null;
   }
+
+  /// Test seam: awaited between [frozenHeadline] finding an orphan pin and
+  /// clearing it, so a test can land a new pin in that gap.
+  @visibleForTesting
+  static Future<void> Function()? debugBeforeOrphanPinClear;
 
   /// The one reader of the frozen-headline cursor's JSON.
   static ({String day, int value, int? wakeSec})? _parseFrozenHeadline(

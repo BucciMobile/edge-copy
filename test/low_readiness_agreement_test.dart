@@ -184,6 +184,29 @@ void main() {
     await expectNothingFor(today);
   });
 
+  test('clearing an orphan pin never deletes a pin written meanwhile',
+      () async {
+    await seed(nullRow: false);
+    await (await LocalDb.instance).delete('day_result'); // orphan the pin
+    final yesterday = dayLabelBefore(today, 1)!;
+    // A derive pins a new headline between the orphan check and its clear.
+    LocalDb.debugBeforeOrphanPinClear = () async {
+      await LocalDb.putDayResult(
+        dayId: yesterday,
+        algoVersion: kAlgoVersion,
+        payloadJson: '{}',
+        windowJson: '{}',
+      );
+      await LocalDb.setFrozenHeadline(yesterday, 55);
+    };
+    addTearDown(() => LocalDb.debugBeforeOrphanPinClear = null);
+    expect(await LocalDb.frozenHeadline(), isNull, reason: 'the orphan');
+    LocalDb.debugBeforeOrphanPinClear = null;
+    final pin = await LocalDb.frozenHeadline();
+    expect(pin?.day, yesterday, reason: 'the new pin survived');
+    expect(pin?.value, 55);
+  });
+
   test('a pin whose day has no result is never read', () async {
     await seed(nullRow: false);
     // An orphan however it arose — not through deleteDays.
