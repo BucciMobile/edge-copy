@@ -264,9 +264,9 @@ class VitalsData {
 
 /// Whole calendar days between a `'YYYY-MM-DD'` day id and today, or null when
 /// there is no day. Zero or less means the day IS today.
-int? _behind(String? dayId) {
+int? _behind(String? dayId, [DateTime? now]) {
   final d = dayId == null ? null : DateTime.tryParse(dayId);
-  return d == null ? null : calendarDaysBetween(d, DateTime.now());
+  return d == null ? null : calendarDaysBetween(d, now ?? DateTime.now());
 }
 
 class LabsData {
@@ -457,13 +457,18 @@ class HealthScreen extends StatefulWidget {
   /// Which sub-tab to open on. Goldens use it; production always starts at 0.
   final int tab;
 
+  /// The wall clock, injected only by tests. The illness watch ages by the
+  /// calendar, so a test of "a day later" needs to move it.
+  final DateTime? now;
+
   const HealthScreen(
       {super.key,
       this.data,
       this.vitals,
       this.labs,
       this.explore,
-      this.tab = 0});
+      this.tab = 0,
+      this.now});
 
   @override
   State<HealthScreen> createState() => _HealthScreenState();
@@ -791,11 +796,17 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     // day, so after a gap "Last night" named a night the user did not wear the
     // band for.
     final illnessDay = illness is Map ? illness['date']?.toString() : null;
-    final illnessBehind = _behind(illnessDay);
+    final illnessBehind = _behind(illnessDay, widget.now);
 
     // Hoisted out of the tree so the section that now wraps it does not push
     // its copy two levels deeper. The card itself is untouched.
-    final illnessCard = state == null || state == 'green'
+    // Same freshness rule as the push and Home: only today's or yesterday's
+    // night, judged by the WALL CLOCK at build time — a payload loaded
+    // yesterday and rebuilt today with no new sync has aged a day all the same.
+    final illnessCard = state == null ||
+            state == 'green' ||
+            illnessDay == null ||
+            !isRecentFindingDate(illnessDay, today: todayLabel(widget.now))
         ? null
         : Observation(
             state == 'red'

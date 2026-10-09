@@ -34,6 +34,7 @@ import 'package:provider/provider.dart';
 
 import '../../ai/briefing.dart'
     show Briefing, BriefingPeriod, BriefingStore, currentBriefingPeriod, resolveBriefingToShow;
+import '../../compute/findings.dart' show isRecentFindingDate;
 import '../../data/day_label.dart' show todayLabel, calendarDaysBetween;
 import '../../compute/onehz_pipeline.dart'
     show readinessInputShortfallNote, readinessUnstableBaselineNote;
@@ -1395,7 +1396,12 @@ class HomeScreen extends StatefulWidget {
   /// reads it off AppState via [workoutLiveOf].
   final bool? workoutLive;
 
-  const HomeScreen({super.key, this.data, this.hour, this.workoutLive});
+  /// The wall clock, injected only by tests. The illness watch ages by the
+  /// calendar, so a test of "a day later" needs to move it.
+  final DateTime? now;
+
+  const HomeScreen(
+      {super.key, this.data, this.hour, this.workoutLive, this.now});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -1707,7 +1713,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
       // them — the watch comes off the CROSSDAY rollup, so it can carry a real
       // state on a morning whose own bundle has not derived yet, which is
       // exactly the morning you would most want to be told.
-      ...?_bodyWatch(c, d),
+      ...?_bodyWatch(c, d, todayLabel(widget.now)),
       // ── greeting ──
       Padding(
         padding: const EdgeInsets.only(top: S.x3, bottom: S.x5),
@@ -1905,12 +1911,21 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
   /// series, so the honest answer to "why are you telling me this" is to show
   /// it. Health keeps its own fuller card; this is not a duplicate route to the
   /// same words, it is a shorter road to the number underneath them.
-  static List<Widget>? _bodyWatch(BuildContext c, HomeData d) {
+  ///
+  /// [today] is the WALL-CLOCK day at build time, not the loaded payload's: a
+  /// payload loaded yesterday and rebuilt today with no new sync has aged a
+  /// day all the same.
+  static List<Widget>? _bodyWatch(BuildContext c, HomeData d, String today) {
     final state = d.illnessState;
     if (state == null || state == 'green') return null;
+    // The watch publishes the newest SETTLED night, which after days off the
+    // wrist is days old, and the red title carries no date. Same freshness
+    // rule as the push: older verdicts live in Observations, not on Home.
+    final day = d.illnessDay;
+    if (day == null || !isRecentFindingDate(day, today: today)) return null;
     final l = AppLocalizations.of(c);
 
-    final sameNight = d.illnessDay == null || d.illnessDay == d.dayId;
+    final sameNight = day == today;
     final z = d.illnessZ;
     final zAbs = z == null ? '' : z.abs().toStringAsFixed(1);
 
