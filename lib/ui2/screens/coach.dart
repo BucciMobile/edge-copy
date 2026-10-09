@@ -1072,9 +1072,10 @@ class _CoachSetupState extends State<CoachSetup> {
                   const SizedBox(height: S.x3),
                   // The one sentence that decides whether a cloud key is a
                   // reasonable choice. It is here, next to the field, and not
-                  // in a settings page nobody opens.
+                  // in a settings page nobody opens. Private hosts only: a
+                  // 100.64.0.0/10 address needs no key but may not be yours.
                   Text(
-                    _isLocal
+                    isPrivateCoachHost(_base.text.trim())
                         ? (l?.coachLocalDataNote ??
                             'Your questions and the rows the coach reads stay on '
                                 'your own machine.')
