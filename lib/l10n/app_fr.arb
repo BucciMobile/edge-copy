@@ -73,6 +73,7 @@
   "alarmCancelled": "Alarme annulée",
   "alarmSentToBand": "Alarme envoyée au bracelet",
   "alarmInThePast": "Dans le passé — elle s’est déjà déclenchée ou a été manquée",
+  "alarmGlanceInThePast": "Déclenchée ou manquée",
   "alarmLaterToday": "Plus tard aujourd’hui",
   "alarmTomorrow": "Demain",
   "alarmInDays": "Dans {days} jours",

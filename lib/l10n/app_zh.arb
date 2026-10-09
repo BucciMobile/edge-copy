@@ -73,6 +73,7 @@
   "alarmCancelled": "闹钟已取消",
   "alarmSentToBand": "闹钟已发送到腕带",
   "alarmInThePast": "已过去——已响铃或已错过",
+  "alarmGlanceInThePast": "已响铃或已错过",
   "alarmLaterToday": "今天晚些时候",
   "alarmTomorrow": "明天",
   "alarmInDays": "{days} 天后",

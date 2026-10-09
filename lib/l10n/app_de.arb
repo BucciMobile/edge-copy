@@ -76,6 +76,7 @@
   "alarmCancelled": "Wecker gelöscht",
   "alarmSentToBand": "Wecker ans Band gesendet",
   "alarmInThePast": "In der Vergangenheit – er hat schon geklingelt oder wurde verpasst",
+  "alarmGlanceInThePast": "Geklingelt oder verpasst",
   "alarmLaterToday": "Heute, später",
   "alarmTomorrow": "Morgen",
   "alarmInDays": "In {days} Tagen",
