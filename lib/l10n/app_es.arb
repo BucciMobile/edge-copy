@@ -197,6 +197,8 @@
   "devicesConnectToRename": "Conéctate a la banda para cambiarlo",
   "devicesBattery": "Batería",
   "devicesBatteryNotReported": "No informada desde la última conexión",
+  "devicesBatteryPack": "Batería externa",
+  "devicesBatteryPackSub": "La banda informa de su carga aproximadamente cada 10 minutos",
   "devicesCharging": "Cargando",
   "devicesHeartRate": "Frecuencia cardíaca",
   "devicesRightNow": "Ahora mismo",

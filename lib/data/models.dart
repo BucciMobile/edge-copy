@@ -365,6 +365,13 @@ class DeviceState {
   /// event (notifications) has to check the age first.
   int? chargingTs;
 
+  /// The external battery pack's OWN charge (gen5), from the strap's
+  /// BATTERY_PACK_INFO(109) event — sent on attach and about every ten minutes
+  /// while the pack sits on the band. Null when no pack is known to be
+  /// attached: set by a live 109, cleared by BATTERY_PACK_REMOVED(22) and
+  /// whenever the link leaves `listening`.
+  double? batteryPackPct;
+
   bool? wristOn;
   int? liveHr; // latest live HR from the foreground stream
   int? liveHrAt; // epoch ms
@@ -442,6 +449,7 @@ class DeviceState {
     batteryPct = null;
     charging = null;
     chargingTs = null;
+    batteryPackPct = null;
     wristOn = null;
     liveHr = null;
     liveHrAt = null;

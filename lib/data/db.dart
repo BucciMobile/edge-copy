@@ -6890,6 +6890,10 @@ class LocalDb {
     int ts,
     String hex, {
     required String deviceId,
+    // Required, not defaulted: a default of gen4 is exactly how every gen5
+    // BATTERY_PACK_INFO / condition-report / haptics event was stored as a
+    // bare `EVENT_<id>` with an empty payload.
+    required proto.BandProfile profile,
   }) async {
     final capturedAt = DateTime.now().millisecondsSinceEpoch;
     // Parse BEFORE acquiring the handle so both inserts run back-to-back on one
@@ -6898,7 +6902,7 @@ class LocalDb {
     // must not crash the app (the band re-sends events).
     final parsed = () {
       try {
-        return proto.parseEvent(proto.hexToBytes(hex));
+        return proto.parseEvent(proto.hexToBytes(hex), profile: profile);
       } catch (_) {
         return null;
       }
@@ -6923,6 +6927,18 @@ class LocalDb {
         ),
         'captured_at': capturedAt,
       }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      // A gen5 row stored before the profile reached this method sits as a
+      // bare `EVENT_<id>` with `{}`. When the band re-sends that frame the
+      // ignored insert above leaves it so; rewrite such an undecoded row, never
+      // a decoded one. INSERT OR IGNORE + UPDATE, as in [upsertDevice].
+      if (profile.isGen5 && parsed != null && parsed.name != 'EVENT_$eventId') {
+        await db.update(
+          'band_events',
+          {'name': parsed.name, 'payload_json': jsonEncode(parsed.decoded)},
+          where: 'device_id = ? AND hex = ? AND name = ?',
+          whereArgs: [deviceId, hex, 'EVENT_$eventId'],
+        );
+      }
       if (battery != null) {
         await db.insert(
           'band_battery',

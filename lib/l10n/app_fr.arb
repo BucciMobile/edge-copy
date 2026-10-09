@@ -197,6 +197,8 @@
   "devicesConnectToRename": "Connectez-vous au bracelet pour le changer",
   "devicesBattery": "Batterie",
   "devicesBatteryNotReported": "Non signalée depuis la dernière connexion",
+  "devicesBatteryPack": "Batterie externe",
+  "devicesBatteryPackSub": "Signalée par le bracelet environ toutes les 10 minutes",
   "devicesCharging": "En charge",
   "devicesHeartRate": "Fréquence cardiaque",
   "devicesRightNow": "En ce moment",
