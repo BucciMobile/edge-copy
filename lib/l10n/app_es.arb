@@ -2174,7 +2174,8 @@
   "settingsNo": "No",
   "settingsContribute": "Contribuir",
   "settingsResetTitle": "¿Eliminar todo?",
-  "settingsResetBody": "Esto elimina, de forma permanente y sin copia en ningún otro lugar:\n\n· cada día medido, sueño, entrenamiento y ruta\n· cada resultado de laboratorio, comida, dosis de medicación, hábito, sesión de respiración y serie registrada\n· tu diario, registro de ciclo y líneas base continuas\n· tu perfil, cada preferencia y cualquier clave de IA guardada\n· el widget de pantalla de inicio y cada recordatorio programado\n\nEl band queda desvinculado, y no puede reenviar el historial que ya entregó. Exporta desde Tus datos primero si quieres una copia.",
+  "settingsResetBackupWarning": "Datos de la app eliminados. La limpieza de las copias de seguridad no se completó. Pueden quedar archivos o permisos de acceso a carpetas.",
+  "settingsResetBody": "Esto elimina permanentemente los datos de esta app en este dispositivo:\n\n· cada día medido, sueño, entrenamiento y ruta\n· cada resultado de laboratorio, comida, dosis de medicación, hábito, sesión de respiración y serie registrada\n· tu diario, registro de ciclo y líneas base continuas\n· tu perfil, cada preferencia y cualquier clave de IA guardada\n· el widget de pantalla de inicio y cada recordatorio programado\n\nLas copias exportadas y los backups en carpetas anteriores o no disponibles pueden permanecer. Elimínalos por separado.\n\nEl band queda desvinculado, y no puede reenviar el historial que ya entregó. Exporta desde Tus datos primero si quieres una copia.",
   "settingsResetKeepData": "Conservar mis datos",
   "settingsResetDeleteEverything": "Eliminar todo",
   "settingsNavTitle": "Ajustes",
@@ -2490,5 +2491,11 @@
   "tabHealth": "Salud",
   "tabNutrition": "Nutrición",
   "tabWorkout": "Entrenamiento",
-  "tabWellness": "Bienestar"
+  "tabWellness": "Bienestar",
+  "dataBackupFolder": "Carpeta de copias de seguridad",
+  "dataBackupFolderDefault": "Carpeta de la app (predeterminada)",
+  "dataBackupFolderSub": "Elige dónde guardar las nuevas copias. Las copias existentes permanecen donde están",
+  "dataBackupFolderUseDefault": "Usar carpeta predeterminada",
+  "dataBackupFolderSaved": "Carpeta de copias guardada.",
+  "dataBackupFolderRetry": "Reintenta con Crear copia ahora o elige otra carpeta"
 }
