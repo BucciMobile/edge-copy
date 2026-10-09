@@ -2636,8 +2636,16 @@ class _AsyncLock {
 }
 
 class DerivationEngine {
-  DerivationEngine({this.log, this.background = false});
+  DerivationEngine({this.log, this.background = false, this.offloadActive});
   final void Function(String)? log;
+
+  /// True while a band offload is draining. The scheduler never STARTS a
+  /// derive during one, but one can start mid-pass; the raw prune checks this
+  /// before archiving each substrate bucket and stops for the pass, so a drain
+  /// commit waits behind at most one in-flight bucket (see
+  /// `SubstrateArchive.archiveAndDeleteBefore`). Null — never yield — for
+  /// headless engines, which derive after the band has disconnected.
+  final bool Function()? offloadActive;
 
   /// True when this engine was constructed inside a headless/background entry
   /// (iOS BGProcessingTask / BGAppRefreshTask, Android WorkManager, the
@@ -6150,9 +6158,20 @@ class DerivationEngine {
     // below an earlier cut are still gone. See [rescanDayIds]. Advanced inside
     // the delete's own transaction, so a kill can't split the two and a
     // concurrent lower-cutoff run can't write it backwards.
+    //
+    // ARCHIVED, NOT LOST: the rows go to `substrate_archive` first (see
+    // LocalDb.pruneDecodedBeforeRecTs). The cut stays a local midnight; an
+    // archive bucket it splits (buckets are UTC days) merges on the next pass.
     final deleted = await LocalDb.pruneDecodedBeforeRecTs(
       cutoffSec,
       cursorName: _prunedBeforeCursor,
+      hardFloorSec: dataNowSec - _maxRawHoldDays * 86400,
+      log: _log,
+      shouldYield: offloadActive,
+      // A background engine runs on a short, throttled budget in its own
+      // isolate, where the foreground offload flag is not visible: one bucket
+      // per pass bounds how long it can hold the write lock.
+      maxArchiveBuckets: background ? 1 : null,
     );
     if (deleted > 0) {
       _log('pruned $deleted decoded rows with rec_ts < $cutoffSec');
@@ -6199,6 +6218,16 @@ class DerivationEngine {
       final reencoded = await LocalDb.reencodeLegacyDayResults();
       if (reencoded > 0) {
         _log('re-encoded $reencoded legacy day bundles');
+      }
+      // Substrate archive retention, measured against the data edge like the
+      // live prune. Off the commit path; vacuumIfBloated reclaims the pages.
+      final edge = await LocalDb.lastDecodedRecTs();
+      if (edge != null) {
+        final evicted = await LocalDb.evictSubstrateArchive(
+          await LocalDb.substrateArchivePolicy(),
+          edge,
+        );
+        if (evicted > 0) _log('evicted $evicted substrate archive buckets');
       }
     } catch (e) {
       _log('storage housekeeping skipped: $e');
