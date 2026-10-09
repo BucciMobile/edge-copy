@@ -1,8 +1,10 @@
 // Local raw-first storage (SQLite via sqflite).
 //
 // Durable storage layers:
-//   decoded_onehz — canonical per-second decoded substrate, keyed by rec_ts.
-//   decoded_rr    — sparse RR beats for that substrate, keyed by (rec_ts, beat_index).
+//   decoded_onehz — canonical per-second decoded substrate, keyed
+//                   (device_id, ts_ms) since v47 (ts_ms = rec_ts * 1000).
+//   decoded_rr    — sparse RR beats for that substrate, keyed
+//                   (device_id, ts_ms, beat_index).
 //   samples       — legacy header cache kept only for backward-compat fallback.
 //
 // `counter` (u32 @[3:7]) is still kept as the strap's record id, but analytics
@@ -675,10 +677,10 @@ class LocalDb {
         if (oldV < 21) {
           // FIRMWARE RESILIENCE: durable archive of historical records we could
           // NOT decode (unknown/unsupported version). They used to be dropped
-          // unseen — lost forever. Now they land in raw_archive (never pruned)
-          // so a future firmware's records can be re-decoded. Also add
-          // `millivolts` to band_battery for the battery-health series. Both
-          // additive.
+          // unseen — lost forever. Now they land in raw_archive (kept, except
+          // the thinning in [thinRawArchiveBefore]) so a future firmware's
+          // records can be re-decoded. Also add `millivolts` to band_battery
+          // for the battery-health series. Both additive.
           await _createRawArchive(db);
           await _ensureBandBatteryMillivolts(db);
         }
@@ -5283,10 +5285,14 @@ class LocalDb {
     ''');
   }
 
-  // decoded_onehz / decoded_rr — durable canonical decoded substrate, additive
-  // beside raw_records. This is the canonical query surface for on-device
-  // analytics: one row per real second (`rec_ts`) plus sparse RR beats for that
-  // second. raw_records stays as the replay/debug ledger and upgrade fallback.
+  // decoded_onehz / decoded_rr — durable canonical decoded substrate. This is
+  // the canonical query surface for on-device analytics: one row per real
+  // second (`rec_ts`) plus sparse RR beats for that second, keyed
+  // `(device_id, ts_ms)` since v47. raw_records was dropped at v19, so no
+  // complete raw-record replay ledger remains behind this store — the v44
+  // [redriveArchivedRecords] pass re-decodes only selected, previously
+  // undecodable `raw_archive` records — and it is pruned at
+  // `rawRetentionDays`.
   static Future<void> _createDecodedStore(Database db) async {
     // KEYED BY rec_ts, NOT the band's record `counter`. The strap resets its
     // per-record counter to ~0 on every reboot, so `counter INTEGER PRIMARY KEY`
@@ -5302,9 +5308,8 @@ class LocalDb {
     // indexed READ key — every query in this file and in health_export ranges
     // over it — but it can no longer be the identity, because a second device
     // measuring the same second is a DIFFERENT reading, and REPLACE on a
-    // shared rec_ts silently deletes the first one (raw prunes at
-    // `rawRetentionDays`, so that loss is permanent). See
-    // [_rekeyTableByDevice].
+    // shared rec_ts silently deletes the first one (and no raw copy is kept
+    // to rebuild it, so that loss is permanent). See [_rekeyTableByDevice].
     //
     // `device_id = ''` IS RESERVED PERMANENTLY FOR THE PRIMARY BAND. Not a
     // migration default — a standing rule, and it is load-bearing twice over:
@@ -5465,8 +5470,8 @@ class LocalDb {
 
   /// Rebuild the decoded substrate into noop-style canonical time-keyed rows:
   /// keep exactly one decoded row per record second and one RR beat per
-  /// (second, beat_index). Older duplicate counters remain in raw_records for
-  /// forensics, but analytics no longer sees them.
+  /// (second, beat_index). (When this ran, older duplicate counters stayed in
+  /// raw_records for forensics; that table was dropped at v19.)
   static Future<void> _rebuildCanonicalDecodedStore(Database db) async {
     // FROZEN v17 step: it dedups the OLD counter-keyed decoded tables by rec_ts
     // via a `decoded_rr.counter` join. If the store is ALREADY rec_ts-keyed (the
@@ -5709,10 +5714,11 @@ class LocalDb {
   /// PRIMARY KEY` written with REPLACE and `decoded_rr` was cleared by an
   /// unscoped `DELETE … WHERE rec_ts = ?`, so a second device measuring the
   /// same second did not merge with the first — it DELETED it, row and beats.
-  /// `raw_archive` prunes at `rawRetentionDays`, so within that window the
-  /// bytes that could rebuild the evicted row are gone too. Every other item on
-  /// the band-agnostic roadmap can be done after a second device has written;
-  /// this one cannot.
+  /// No ledger keeps the raw bytes a decoded row came from (`raw_records` was
+  /// dropped at v19), so an evicted row could not be rebuilt (only seconds the
+  /// v44 pass re-drove from `raw_archive` still have their source bytes).
+  /// Every other item on the band-agnostic roadmap can be done after a second
+  /// device has written; this one cannot.
   ///
   /// WHAT IT DOES NOT CHANGE. Every existing row is copied under
   /// `device_id = ''` with `ts_ms = rec_ts * 1000`, which is exactly as unique
@@ -6157,7 +6163,7 @@ class LocalDb {
         // A near-constant vector reads downstream as a perfectly still wrist,
         // which is the one thing the nullable accel columns exist to prevent.
         //
-        // Banking it would also REPLACE (rec_ts is the PK) the v24 row for
+        // Banking it would also REPLACE (the second is the PK) the v24 row for
         // that second on 49% of records, deleting real HR and R-R. Refused at
         // the seam so no future caller can reintroduce it by accident. The
         // bytes stay in `raw_archive`, whole and unpruned.
@@ -6240,13 +6246,15 @@ class LocalDb {
     }
     final recTs = _recTsFrom(raw, decoded);
     final ambient = decoded.ambientRaw == 0 ? null : decoded.ambientRaw;
-    // TIME-KEYED, NEWEST-WINS (noop/WHOOP-4 model: dedupe records by their
-    // embedded timestamp, not by the volatile counter). decoded_onehz is keyed
-    // by rec_ts and decoded_rr by (rec_ts, beat_index). We use REPLACE, not
-    // IGNORE: a freshly-offloaded record for a given second should win over a
-    // stale one. Because rec_ts is the key, the strap's per-reboot counter reset
-    // can no longer make one second's record evict another's (the pre-fix
-    // counter-PK eviction that silently, unrecoverably deleted 1 Hz rows).
+    // TIME-KEYED, NEWEST-WINS (dedupe records by their embedded timestamp,
+    // not by the volatile counter). decoded_onehz is keyed by
+    // (device_id, ts_ms) and decoded_rr by (device_id, ts_ms, beat_index),
+    // with ts_ms = rec_ts * 1000; rec_ts is the indexed range field. We use
+    // REPLACE, not IGNORE: a freshly-offloaded record for a given second
+    // should win over a stale one. Because the second is the key, the strap's
+    // per-reboot counter reset can no longer make one second's record evict
+    // another's (the pre-fix counter-PK eviction that silently, unrecoverably
+    // deleted 1 Hz rows).
     batch.insert('decoded_onehz', {
       // v47: WHICH DEVICE, in front of the key. '' is the primary band and
       // nothing else may ever use it — see _createDecodedStore for why an
@@ -6336,7 +6344,8 @@ class LocalDb {
 
   /// `rec_ts` for one raw+decoded pair.
   ///
-  /// `??` substitutes on NULL only, and `rec_ts` is the primary key now. The
+  /// `??` substitutes on NULL only, and `rec_ts` determines the primary key
+  /// (`ts_ms = rec_ts * 1000` under `(device_id, ts_ms)`). The
   /// legacy `raw_records.rec_ts` column is `NOT NULL DEFAULT 0`, so every
   /// undated row [_backfillDecodedStore] replays arrives here as an explicit
   /// 0 — which under the old counter PK coexisted harmlessly and under this
@@ -6352,8 +6361,11 @@ class LocalDb {
   /// Replaces this second's RR beats. Returns the ops queued.
   ///
   /// Clear the second before reinserting so a SHRINKING beat count can't strand
-  /// stale high-index beats — parent and child share the rec_ts key, so this
-  /// single DELETE replaces the old counter-based orphan guard.
+  /// stale high-index beats. The child's key extends the parent's `(device_id,
+  /// ts_ms)`, so this single DELETE of the writing device's second replaces the
+  /// old counter-based orphan guard. (The mid-ladder replay that runs before
+  /// v47 adds the device key — [preDeviceKey] — can only clear by `rec_ts`,
+  /// because no other key exists yet.)
   static int _queueRrBeats(
     Batch batch,
     int recTs,
@@ -6364,9 +6376,9 @@ class LocalDb {
   }) {
     // SCOPED TO THE WRITING DEVICE (v47). Unscoped, this cleared every device's
     // beats for the second — so a second band writing one row deleted the
-    // first band's R-R for that second, permanently (raw prunes at
-    // `rawRetentionDays`). Same key prefix as the parent row, so the PK serves
-    // the delete.
+    // first band's R-R for that second, permanently (no raw copy is kept to
+    // rebuild it). Same key prefix as the parent row, so the PK serves the
+    // delete.
     if (preDeviceKey) {
       batch.rawDelete('DELETE FROM decoded_rr WHERE rec_ts = ?', [recTs]);
     } else {
@@ -7053,9 +7065,10 @@ class LocalDb {
     };
   }
 
-  /// Persist an undecodable historical record to the durable archive (never
-  /// pruned). Used by the immediate fallback path; the drain path archives inside
-  /// the same commit transaction as the batch (see [commitSyncBatch]).
+  /// Persist an undecodable historical record to the durable archive (kept,
+  /// except the thinning in [thinRawArchiveBefore]). Used by the immediate
+  /// fallback path; the drain path archives inside the same commit transaction
+  /// as the batch (see [commitSyncBatch]).
   ///
   /// [deviceId] is written EXPLICITLY rather than left to the column default,
   /// which is the same rule [insertEvent] states: `raw_archive` is keyed
@@ -7712,8 +7725,8 @@ class LocalDb {
   /// is a function of the column, so SQLite could use no index for it: it was a
   /// full scan of every retained second plus a temp b-tree — 91 ms on a 3-day
   /// (259 k row) table on desktop, and the derive calls this up to three times
-  /// a pass. `rec_ts` is the INTEGER PRIMARY KEY (the rowid), so a bounded
-  /// `MAX(rec_ts) WHERE rec_ts >= a AND rec_ts < b` is a single index seek, and
+  /// a pass. `rec_ts` leads the `idx_decoded_onehz_rects (rec_ts, counter)`
+  /// index, so a bounded `MAX(rec_ts) WHERE rec_ts >= a AND rec_ts < b` is a single index seek, and
   /// the span is bounded by `rawRetentionDays` in any healthy install.
   ///
   /// The day walk goes through [localDayEndSec] rather than `+ 86400` for the
@@ -7789,10 +7802,10 @@ class LocalDb {
   /// Sparse RR beats for one contiguous decoded 1 Hz page, by its rec_ts window.
   ///
   /// [fromRecTs] / [toRecTs] are the page's first and last record seconds (the
-  /// page is ordered `rec_ts ASC`, so first = min, last = max). decoded_rr shares
-  /// the rec_ts key with decoded_onehz, so `[fromRecTs, toRecTs]` on the PK
-  /// contains exactly the page's beats — bounded, indexed, and immune to the
-  /// strap's reboot counter reset (the old counter-span read could degenerate to
+  /// page is ordered `rec_ts ASC`, so first = min, last = max). A beat carries
+  /// its decoded_onehz parent's rec_ts, so `[fromRecTs, toRecTs]` on
+  /// decoded_rr's rec_ts index contains exactly the page's beats — bounded,
+  /// indexed, and immune to the strap's reboot counter reset (the old counter-span read could degenerate to
   /// `counter >= high AND counter <= low` = zero rows, silently dropping a whole
   /// page's RR).
   static Future<List<Map<String, dynamic>>> decodedRrByRecTsRange({
@@ -9138,8 +9151,9 @@ class LocalDb {
       // source app may have deleted since. `workout_route` is already in this
       // list above and carries the imported routes too.
       'imported_workout',
-      // The never-pruned archive of frames we could not decode. exportCopy()
-      // is a whole-database VACUUM INTO, so these rows DO leave the device —
+      // The archive of frames we could not decode (kept, except the thinning
+      // in [thinRawArchiveBefore]). exportCopy() is a whole-database
+      // VACUUM INTO, so these rows DO leave the device —
       // leaving the table out here meant a backup/restore round trip silently
       // dropped them, in the one table whose entire purpose is that a frame is
       // never lost. Keyed by `hex`, so two same-counter frames from different
@@ -9556,9 +9570,9 @@ class LocalDb {
                 rows.add(row);
               }
               // REPLACE the beat set for a colliding second, don't patch it.
-              // decoded_rr is keyed by (rec_ts, beat_index), so a row-by-row
-              // replace-insert only overwrites the indices the foreign export
-              // actually reaches: importing [500] over a local [700, 710, 720]
+              // decoded_rr is keyed by (device_id, ts_ms, beat_index), so a
+              // row-by-row replace-insert only overwrites the indices the
+              // foreign export actually reaches: importing [500] over a local [700, 710, 720]
               // leaves beats 1 and 2 behind and hands that second a spliced
               // foreign/local RR series — silently wrong RMSSD, out of a restore.
               // [_queueDecodedOneHz] guards the identical hazard on the write
@@ -11821,9 +11835,10 @@ class LocalDb {
           await setCursor(cursorName, '$cutoffSec', txn: txn);
         }
       }
-      // decoded_rr shares the rec_ts key, so a plain rec_ts range delete covers
-      // every beat in the window — no counter subquery, no orphan sweep (there
-      // are no counter-orphans once parent and child are keyed the same way).
+      // A beat lives on its parent's second (decoded_rr's key extends the
+      // parent's `(device_id, ts_ms)`, and both carry the same `rec_ts`), so a
+      // plain rec_ts range delete covers every beat in the window — no counter
+      // subquery, no orphan sweep.
       deleted += await txn.delete(
         'decoded_rr',
         where: 'rec_ts < ?',

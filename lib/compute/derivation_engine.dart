@@ -718,7 +718,7 @@ import 'vendor_sleep.dart';
 //   the page decoded with an EMPTY beat list, and every beat-derived figure for
 //   that stretch — RMSSD, SDNN, the HRV curve, and the readiness that leans on
 //   them — silently came back absent or computed off whatever beats survived on
-//   the other pages. Both tables are keyed by rec_ts now, so the lookup uses the
+//   the other pages. Both tables carry rec_ts (indexed), so the lookup uses the
 //   page's own rec_ts bounds and pulls exactly its beats.
 //
 //   Days already finalized at v62 hold those RR-less results permanently — they
@@ -3810,9 +3810,10 @@ class DerivationEngine {
               ? const <Map<String, dynamic>>[]
               : combined.sublist(splitIdx);
           if (toSend.isNotEmpty) {
-            // decoded_rr shares the rec_ts key with decoded_onehz, so
-            // [rrFrom, lastSentRecTs] is a PK range read — no counter span
-            // (which broke across the strap's reboot reset).
+            // decoded_rr carries the same rec_ts as its decoded_onehz parent,
+            // so [rrFrom, lastSentRecTs] is a range read on decoded_rr's
+            // rec_ts index — no counter span (which broke across the strap's
+            // reboot reset).
             final lastSentRecTs = (toSend.last['rec_ts'] as num).toInt();
             final rawRrRows = await LocalDb.decodedRrByRecTsRange(
               fromRecTs: rrFrom,
@@ -6262,11 +6263,12 @@ class DerivationEngine {
 
   /// Storage housekeeping that must run on EVERY derive.
   ///
-  /// Deliberately NOT inside [_pruneOldDecoded]: both of that method's call
-  /// sites sit behind `if (scope.fullHistory)`, and ordinary light/heavy
-  /// derives run with `fullHistory: false`. Putting the back-catalogue rewrite
-  /// there made it resumable but effectively unreachable — a normal install
-  /// would have converted nothing.
+  /// Deliberately NOT inside [_pruneOldDecoded]. Both of that method's call
+  /// sites used to sit behind `if (scope.fullHistory)` (they now run on every
+  /// derive, but only inside `run()`, past its early returns), and ordinary
+  /// light/heavy derives ran with `fullHistory: false`. Putting the
+  /// back-catalogue rewrite there made it resumable but effectively
+  /// unreachable — a normal install would have converted nothing.
   ///
   /// CALLED FROM THE `finally` OF EVERY ENTRY PATH, and it swallows its own
   /// errors, for two reasons that were both live:
