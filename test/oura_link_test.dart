@@ -157,41 +157,30 @@ void main() {
   });
 
   test(
-      'a PACKED notification archives each frame once, byte-exact, in the '
-      'actual raw_archive rows',
+      'trailing bytes after a valid frame are not a second frame, and the '
+      'raw_archive row keeps them byte-exact',
       () async {
-    // The DB-level invariant behind Fix C: one notification carrying three
-    // frames must produce THREE archive rows — each the frame's own exact
-    // hex, none the whole packed notification, none duplicated. `raw_archive`
-    // INSERT-OR-IGNOREs on the hex, so a whole-notification copy would not
-    // even collide — it would silently bank the packed blob once per event
-    // under three different event reasons. This test checks the actual
-    // `raw_archive` rows (hex bytes, reason, count), not an adapter list.
+    // One notification carries exactly one frame; the ring may append bytes
+    // past the declared length. Here the trailing bytes look like a whole
+    // second temperature frame. Checked on the actual `raw_archive` and
+    // `decoded_onehz` rows: one temperature second, not two, and one archive
+    // row holding the whole notification as delivered.
     const syncUnix = 1782043215;
-    final frame1 = _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix));
-    final frame2 = _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436));
-    final frame3 = _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436));
-    final packed = <int>[...frame1, ...frame2, ...frame3, ..._summary(3, 0)];
+    final anchor = _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix));
+    final temp = _event(kOuraEvtTempPeriod, 1100, _hex(_temp3436));
+    final trailing = _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436));
+    final withTrailing = <int>[...temp, ...trailing];
     final r = await _run([
-      [packed]
+      [anchor, withTrailing, _summary(2, 0)]
     ]);
-    expect(r.onehz, hasLength(2),
-        reason: 'every packed event decoded — the walk did not stop at '
-            'frame one');
-    expect(r.archive, hasLength(3),
-        reason: 'three frames, three archive rows — not three copies of '
-            'the packed notification');
-    final hexes = r.archive.map((a) => a['hex']).toList();
-    expect(hexes[0], _hexOf(frame1),
-        reason: 'archive row one is frame one\'s own bytes');
-    expect(hexes[1], _hexOf(frame2));
-    expect(hexes[2], _hexOf(frame3));
-    expect(hexes.contains(_hexOf(packed)), isFalse,
-        reason: 'the packed notification as a whole is NOT an archive row');
+    expect(r.onehz, hasLength(1),
+        reason: 'the trailing bytes are not read as a second record');
+    expect(r.archive, hasLength(2));
+    final hexes = r.archive.map((a) => a['hex']).toSet();
+    expect(hexes, {_hexOf(anchor), _hexOf(withTrailing)},
+        reason: 'one row per notification, trailing bytes kept');
     expect(r.archive.map((a) => a['reason']).toSet(),
-        {'oura_evt_0x42', 'oura_evt_0x69'},
-        reason: 'one reason per TAG — the summary is not an event and never '
-            'archived');
+        {'oura_evt_0x42', 'oura_evt_0x69'});
   });
 
   test('a measured time_sync is what stamps the batch carrying it', () async {
@@ -675,29 +664,27 @@ void main() {
   });
 
   test('a failed durable commit reports the session as NOT synced', () async {
-    // Echter Commit-Fehler, nicht nur ein ausbleibendes Confirm: der Host
-    // läuft gegen die produktionsseitige Guard-Assertion in
-    // `commitSyncBatch` (neutrale Zeilen unter der primären Device-Id), die
-    // INNERHALB der echten Transaktion wirft. `BandHost._commitLocked`
-    // behandelt jede Exception als Commit-Fehler und puffert zurück, also
-    // steht diese Assertion modellhaft für jeden Transaktionsfehler.
+    // A real commit failure, not just a missing confirm: the host runs into the
+    // production-side guard assertion in `commitSyncBatch` (neutral rows under
+    // the primary device id), which throws INSIDE the real transaction.
+    // `BandHost._commitLocked` treats every exception as a commit failure and
+    // buffers back, so this assertion stands in for any transaction failure.
     //
-    // GRENZE DIESER INJEKTION: die öffentliche `sync()`-Methode verweigert
-    // die primäre Device-Id bereits VOR jeder Session (`_sync`'s guard). Der
-    // Test erreicht den tieferen In-Transaction-Fehler über die Test-Seam.
-    // Es existiert keine produktionsseitige Fault-Injection an `LocalDb`
-    // für einen Speicherfehler unter zulässiger Oura-Device-ID; ein solches
-    // Seam wäre ein Refactoring, das über diesen Test hinausginge.
+    // LIMIT OF THIS INJECTION: the public `sync()` method already refuses the
+    // primary device id BEFORE any session (`_sync`'s guard). The test reaches
+    // the deeper in-transaction failure through the test seam. There is no
+    // production-side fault injection on `LocalDb` for a storage failure under
+    // a permitted Oura device id; such a seam would be a refactor beyond the
+    // scope of this test.
     //
-    // DAS CONFIRM IST NUR INDIREKT BEOBACHTBAR: das Protokoll hat keinen
-    // ACK-Write — `OffloadCheckpoint.confirm()` ist ein reiner interner
-    // Rückruf. Der einzige wire-sichtbare Nachweis eines BESTÄTIGTEN Batches
-    // ist der zweite History-Request, und der passiert NUR bei
-    // `bytesLeft > 0` (Adapter-Schleife). Deshalb meldet dieser Batch Bytes
-    // als verbleibend: nach einem bestätigten Commit MÜSSTE der Adapter
-    // erneut anfragen; nach einem fehlgeschlagenen Commit bleibt jeder
-    // weitere Write aus. Der Kontrollfall im nächsten Test zeigt, dass die
-    // Assertion die beiden Verläufe wirklich unterscheidet.
+    // THE CONFIRM IS ONLY INDIRECTLY OBSERVABLE: the protocol has no ACK write;
+    // `OffloadCheckpoint.confirm()` is a purely internal callback. The only
+    // wire-visible proof of a CONFIRMED batch is the second history request,
+    // and that happens ONLY when `bytesLeft > 0` (adapter loop). That is why
+    // this batch reports bytes as remaining: after a confirmed commit the
+    // adapter WOULD have to ask again; after a failed commit every further
+    // write stays out. The control case in the next test shows the assertion
+    // really tells the two paths apart.
     await LocalDb.setCursor(
         'oura_anchor:${LocalDb.kPrimaryDeviceId}', '1000,1782043215');
     final ok = await OuraLink.instance.syncResultForTest(
@@ -707,8 +694,8 @@ void main() {
         if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
         if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
         if (v.first == 0x10) {
-          // Ein Batch mit verbleibenden Daten: nur ein BESTÄTIGTES Confirm
-          // führt zum zweiten History-Request.
+          // A batch with data remaining: only a CONFIRMED confirm leads to the
+          // second history request.
           return [
             _event(kOuraEvtTempPeriod, 1200, _hex(_temp3436)),
             _summary(1, 4096),
@@ -722,19 +709,19 @@ void main() {
     expect(ok, isFalse, reason: 'the commit failed — no durable data, no '
         'confirm, so no success');
     final link = OuraLink.instance.lastReplayLink!;
-    // KEIN ZWEITER HISTORY-REQUEST: das Confirm lief nie, also blieb jeder
-    // weitere Write aus. (Ein bestätigter Batch MIT bytesLeft > 0 hätte
-    // zwingend einen zweiten 0x10-Write erzeugt — siehe Kontrollfall.)
+    // NO SECOND HISTORY REQUEST: the confirm never ran, so every further write
+    // stayed out. (A confirmed batch WITH bytesLeft > 0 would necessarily have
+    // produced a second 0x10 write; see the control case.)
     final writes = [for (final w in link.writes) w.$2];
     expect(writes.where((w) => w.first == 0x10), hasLength(1),
         reason: 'the failed commit must end the session before the loop '
             'asks again');
-    // Cursor nie bewegt: die Cursor-Note feuert nur nach bestätigtem Batch.
+    // Cursor never moved: the cursor note fires only after a confirmed batch.
     expect(
       await LocalDb.getCursorInt('oura_cursor_ds:${LocalDb.kPrimaryDeviceId}'),
       isNull,
     );
-    // Nichts aus der fehlgeschlagenen Transaktion erreichte die Tabelle.
+    // Nothing from the failed transaction reached the table.
     final db = await LocalDb.instance;
     expect(
       await db.query('decoded_onehz',
@@ -1246,12 +1233,11 @@ void main() {
 
   test('a confirmed batch with bytes left DOES ask again (control case)',
       () async {
-    // KONTROLLFALL: dieselbe Ring-Antwort (1 Event, bytesLeft > 0) unter
-    // einer ZULÄSSIGEN Oura-Device-ID mit erfolgreichem Commit. Der Adapter
-    // MUSS hier den zweiten History-Request stellen — erst damit ist die
-    // Single-Request-Assertion des Fehlertests ein echter Nachweis, dass
-    // das Confirm unterblieb, und nicht nur die normale Endsequenz eines
-    // abschließenden Batches.
+    // CONTROL CASE: the same ring reply (1 event, bytesLeft > 0) under a
+    // PERMITTED Oura device id with a successful commit. The adapter MUST make
+    // the second history request here; only that makes the failure test's
+    // single-request assertion real proof that the confirm did not happen, and
+    // not just the normal end sequence of a final batch.
     await LocalDb.setCursor('oura_anchor:$_deviceId', '1000,1782043215');
     var batches = 0;
     final ok = await OuraLink.instance.syncResultForTest(
@@ -1274,25 +1260,24 @@ void main() {
       },
       nowSeconds: () => _nowSec,
     );
-    // Die Session endet hier erst im zweiten Durchlauf (zweiter Batch:
-    // summary(0,0) → drain ok) — Ergebnis true, und es gab mehr als einen
-    // History-Request: der Nachweis des Confirms.
+    // The session only ends here on the second pass (second batch: summary(0,0)
+    // → drain ok). Result true, and there was more than one history request:
+    // the proof of the confirm.
     expect(ok, isTrue);
     final link = OuraLink.instance.lastReplayLink!;
     final writes = [for (final w in link.writes) w.$2];
     expect(writes.where((w) => w.first == 0x10).length, greaterThan(1),
         reason: 'the confirmed batch advanced the loop — this is the '
             'behaviour the failed-commit test proves was MISSING');
-    // Und der Cursor ist tatsächlich gewachsen.
+    // And the cursor actually grew.
     expect(await LocalDb.getCursorInt('oura_cursor_ds:$_deviceId'), 1201);
   });
 
   group('session lifecycle (the production outer order)', () {
     test('cleanup waits for a successful session, then runs', () async {
-      // VOLLE HANDSHAKE-STEUERUNG, keine Scheduler-Zufälligkeit: der
-      // Beobachter läuft von Beginn an, und jede Ring-Antwort wird erst
-      // gefüttert, NACHDEM der zugehörige Write beobachtet wurde — die
-      // Completer werden synchron in `onWrite` abgeschlossen.
+      // FULL HANDSHAKE CONTROL, no scheduler randomness: the observer runs from
+      // the start, and every ring reply is fed only AFTER the matching write
+      // was observed; the completers are completed synchronously in `onWrite`.
       final nonceAsked = Completer<void>();
       final proofAsked = Completer<void>();
       final historyAsked = Completer<void>();
@@ -1310,47 +1295,46 @@ void main() {
           }
         },
       );
-      // Nonce-Anfrage beobachtet → mit der Challenge antworten.
+      // Nonce request observed → answer with the challenge.
       await nonceAsked.future;
       link.feed(kOuraNotifyChar, _nonceReply, atSec: _nowSec);
-      // Proof-Write beobachtet → der Ring akzeptiert den Schlüssel.
+      // Proof write observed → the ring accepts the key.
       await proofAsked.future;
       link.feed(kOuraNotifyChar, _authOk, atSec: _nowSec);
-      // History-Anfrage beobachtet → die Antwort ZURÜCKHALTEN.
+      // History request observed → HOLD BACK the reply.
       await historyAsked.future;
-      // OFFENE SESSION: das Cleanup darf noch nicht begonnen haben.
-      // GENAU HIER FÄNGT DIESEN TEST EIN VORZEITIGES TEARDOWN IN
-      // `_runSessionAndTeardown` selbst (ein `finally`, das vor dem
-      // Session-Ende läuft): `stop()` hätte den Link bereits geschlossen
-      // und das Abonnement gekündigt, während der Drain noch auf seine
-      // Antwort wartet.
-      // GRENZE: der äußere `_sync`-Rumpf (connect, discovery) ist ohne
-      // Radio nicht testbar und hier NICHT abgedeckt.
+      // OPEN SESSION: cleanup must not have started yet. THIS IS EXACTLY WHERE
+      // THIS TEST CATCHES A PREMATURE TEARDOWN in `_runSessionAndTeardown`
+      // itself (a `finally` that runs before the session ends): `stop()` would
+      // already have closed the link and cancelled the subscription while the
+      // drain is still waiting for its reply. LIMIT: the outer `_sync` body
+      // (connect, discovery) cannot be tested without a radio and is NOT
+      // covered here.
       expect(link.closed, isFalse, reason: 'teardown must not have begun');
       expect(link.isListening(kOuraNotifyChar), isTrue,
           reason: 'the session still owns the notify subscription');
       var settled = false;
       result.then((_) => settled = true);
-      // Ein Mikrotask-Turn, damit sich das `.then` anhängen kann — kein
-      // Sleep; die Reihenfolge steht bereits durch die Assertionen oben.
+      // One microtask turn so the `.then` can attach; no sleep, the ordering is
+      // already fixed by the assertions above.
       await Future<void>.delayed(Duration.zero);
       expect(settled, isFalse,
           reason: 'the session is still open — the result is not settled');
 
-      // Die Abschlussantwort: leer und auf dem neuesten Stand.
+      // The final reply: empty and up to date.
       link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
       final ok = await result;
       expect(ok, isTrue);
-      // CLEANUP GELAUFEN, nach dem Session-Ende.
+      // CLEANUP RAN, after the session ended.
       expect(link.closed, isTrue, reason: 'stop() closed the link');
       expect(link.isListening(kOuraNotifyChar), isFalse,
           reason: 'the host cancelled its run subscription on the way out');
     });
 
     test('cleanup also runs after a failing session', () async {
-      // Derselbe äußere Ablauf für den Fehlerpfad. Der Proof-Beobachter ist
-      // dieselbe Instanz und lief VOR dem Füttern der Challenge — die
-      // Reihenfolge, die der Reviewer verlangt hat.
+      // The same outer flow for the failure path. The proof observer is the
+      // same instance and ran BEFORE the challenge was fed, the ordering the
+      // reviewer asked for.
       final nonceAsked = Completer<void>();
       final proofAsked = Completer<void>();
       final (result, link) = await OuraLink.instance.startSessionForTest(
@@ -1370,7 +1354,7 @@ void main() {
       await proofAsked.future;
       expect(link.closed, isFalse,
           reason: 'the session is still mid-handshake');
-      // Die Authentifizierung verweigern: Ergebnis 1 = falscher Schlüssel.
+      // Refuse the authentication: result 1 = wrong key.
       link.feed(kOuraNotifyChar, _frame(0x2f, _hex('2e01')),
           atSec: _nowSec);
       final ok = await result;
@@ -1382,12 +1366,12 @@ void main() {
 
     test('the second stop() of the session path is a harmless no-op',
         () async {
-      // `_sync` behält sein äußeres `finally { await stop(); }` für die
-      // Early-Returns (Bluetooth aus, fehlende Characteristics) und die
-      // Ausnahmepfade — deshalb läuft stop() auf dem Session-Pfad zweimal:
-      // einmal in `_runSessionAndTeardown`, einmal im äußeren finally.
-      // Dieser Test pinnt, dass der zweite Aufruf sicher ist: kein Wurf,
-      // keine Cursor-Korruption, kein Zustandsrest.
+      // `_sync` keeps its outer `finally { await stop(); }` for the early
+      // returns (Bluetooth off, missing characteristics) and the exception
+      // paths, so stop() runs twice on the session path: once in
+      // `_runSessionAndTeardown`, once in the outer finally. This test pins
+      // that the second call is safe: no throw, no cursor corruption, no
+      // leftover state.
       final nonceAsked = Completer<void>();
       final proofAsked = Completer<void>();
       final historyAsked = Completer<void>();
@@ -1412,7 +1396,7 @@ void main() {
       await historyAsked.future;
       link.feed(kOuraNotifyChar, _summary(0, 0), atSec: _nowSec);
       expect(await result, isTrue);
-      // Der erste stop() lief im Session-Teardown; das hier ist der zweite.
+      // The first stop() ran in the session teardown; this is the second.
       await OuraLink.instance.stop();
       expect(link.closed, isTrue, reason: 'still closed — no re-open');
       expect(link.isListening(kOuraNotifyChar), isFalse);
@@ -1421,15 +1405,15 @@ void main() {
     test(
         'a failing link close still stops the host, and surfaces after cleanup',
         () async {
-      // Thread-1-Review: stop() darf close() nicht blind awaiten (die
-      // Replay-Kanalschließung kann auf einen Consumer warten, der erst mit
-      // host.stop() endet), ABER der Schließfehler darf auch keine unbeobachtete
-      // Future bleiben. Dieser Test pinnt beides: die Session läuft normal zu
-      // Ende, ihr teardown ruft stop(), close() schlägt FEHL — und der Host
-      // wird trotzdem beendet, der Fehler wirft MIT Stacktrace, und der
-      // Feldzustand ist danach sauber. Der Seam wirft ERST nach getaner
-      // Arbeit (Flags, Gates, Kanäle), also ist die Verweigerung real in
-      // Kraft — der Fehler ist reine Fehlerbeobachtung.
+      // Thread-1 review: stop() must not blindly await close() (closing the
+      // replay channel can wait on a consumer that only ends with host.stop()),
+      // BUT the close error must not stay an unobserved Future either. This
+      // test pins both: the session runs to completion normally, its teardown
+      // calls stop(), close() FAILS, and the host still stops, the error throws
+      // WITH a stack trace, and the field state is clean afterwards. The seam
+      // throws only AFTER the work is done (flags, gates, channels), so the
+      // refusal is really in force; the error is purely about observing the
+      // failure.
       final nonceAsked = Completer<void>();
       final proofAsked = Completer<void>();
       final historyAsked = Completer<void>();
@@ -1657,7 +1641,7 @@ void main() {
     // a host failure is therefore guarded in `OuraLink.stop`'s own
     // try/catch around `host.stop()`, verified statically — a fault seam
     // for it would be a new test-only production hook, which this round
-    // excludes ("keine weitere Architektur-Erweiterung").
+    // excludes ("no further architecture extension").
   });
 
   test(
@@ -1919,13 +1903,12 @@ void main() {
 
   test('a replay write parked at its DELAY ends on close, not on the clock',
       () async {
-    // Thread-2-Review, der ISOLIERTE Pfad: nur ReplayBandLink, kein
-    // OuraLink, kein sqflite, kein Harness-Stopwatch. close() unterbricht
-    // das Delay-Warten über das Close-Signal: writeDelay läuft länger als
-    // jedes Testbudget, der Write endet false LANGE vor Ablauf der
-    // Delay-Zeit. Die PR-Begründung (fake_async kann den HARNESS-Pfad
-    // wegen echtem sqflite-FFI-I/O und echtem Stopwatch nicht testen)
-    // gilt für den Session-Pfad — dieser Test kennt keines von beidem.
+    // Thread-2 review, the ISOLATED path: only ReplayBandLink, no OuraLink, no
+    // sqflite, no harness stopwatch. close() interrupts the delay wait via the
+    // close signal: writeDelay runs longer than any test budget, and the write
+    // ends false LONG before the delay elapses. The PR rationale (fake_async
+    // cannot test the HARNESS path because of real sqflite FFI I/O and a real
+    // stopwatch) applies to the session path; this test involves neither.
     final link = ReplayBandLink()..writeDelay = const Duration(days: 1);
     final inFlight = link.write(kOuraCommandChar, <int>[0x10]);
     // One pump starts the delay wait (the write already recorded).

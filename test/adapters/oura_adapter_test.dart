@@ -650,88 +650,40 @@ void main() {
         reason: 'bytesLeft 0 ends the drain after this batch');
   });
 
-  // ── Packed frames: one notification, several records ──────────────
+  // ── One frame per notification; trailing bytes are not a frame ────────
   test(
-      'a notification carrying SEVERAL frames banks every one of them',
+      'trailing bytes after a valid frame are NOT read as a second frame',
       () async {
-    // The ring is documented to pack ~10 records into ONE notification,
-    // and `parseOuraFrame` reads only the FIRST frame of the bytes it is
-    // handed. This test packs a whole batch — event, event, summary —
-    // into a single notification's bytes and proves the walk banks each
-    // frame: two samples, the batch summary honoured, the drain completed.
-    // On the old single-frame parse the second event and the summary were
-    // silently dropped: no second sample, and the session timed out
-    // waiting for a summary that had already arrived.
+    // `parseOuraFrame`'s contract: one notification carries exactly one
+    // frame, and the ring may append bytes past the declared length. Here
+    // the trailing bytes happen to look like a whole second temperature
+    // frame. They must be ignored: one sample (1100), not two, and the
+    // archive row is the whole notification as delivered, trailing bytes
+    // included, not a second row.
     const syncUnix = 1782043215;
-    final packed = <int>[
-      ..._event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
-      ..._event(kOuraEvtTempPeriod, 1100, _hex('6c0d')),
-      ..._event(kOuraEvtTempPeriod, 1200, _hex('6c0e')),
-      ..._summary(3, 0),
-    ];
+    final anchor = _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix));
+    final temp = _event(kOuraEvtTempPeriod, 1100, _hex('6c0d'));
+    final trailing = _event(kOuraEvtTempPeriod, 1200, _hex('6c0e'));
+    final withTrailing = <int>[...temp, ...trailing];
     final (events, link) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-      if (v.first == 0x10) return [packed];
+      if (v.first == 0x10) return [anchor, withTrailing, _summary(2, 0)];
       return const [];
     });
     final batch = events.whereType<SampleBatch>().single;
-    expect(batch.samples, hasLength(2),
-        reason: 'every packed event must reach the batch, not just the first');
-    // BYTE EXACTNESS, not just counts: the archive keeps one row per FRAME —
-    // the frame's own slice of the notification, byte for byte — never the
-    // whole packed notification once per event (which would duplicate one
-    // delivery) and never a re-encoded stand-in.
+    expect(batch.samples, hasLength(1),
+        reason: 'the trailing bytes are not a second temperature record');
     final raw = batch.raw!;
-    expect(raw, hasLength(3),
-        reason: 'one archive row per frame, not per notification');
-    expect(raw[0], _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
-        reason: 'the first frame is archived as its own exact bytes');
-    expect(raw[1], _event(kOuraEvtTempPeriod, 1100, _hex('6c0d')));
-    expect(raw[2], _event(kOuraEvtTempPeriod, 1200, _hex('6c0e')));
-    expect(raw.any((r) => r.length == packed.length), isFalse,
-        reason: 'no archive row is the WHOLE packed notification — that '
-            'would duplicate one delivery across every event it carried');
+    expect(raw, hasLength(2), reason: 'one archive row per notification');
+    expect(raw[0], anchor);
+    expect(raw[1], withTrailing,
+        reason: 'archived byte for byte as delivered, trailing bytes kept');
     expect(
       events.whereType<BandNote>().where((n) => n.key == 'oura_drain_ok'),
       hasLength(1),
-      reason: 'the packed summary must be honoured — bytesLeft 0 ends the '
-          'drain instead of timing out waiting for a summary that already '
-          'arrived',
     );
-    expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1),
-        reason: 'the packed summary says nothing is left — no re-ask');
-  });
-
-  test('an incomplete trailing frame in a packed notification is dropped, '
-      'not mis-parsed', () async {
-    // A packed notification whose LAST frame is cut short: the walk must
-    // stop at the incomplete tail, not hand the parser a frame whose
-    // declared length runs past the end. The COMPLETE frames before the
-    // cut still bank once the summary (its own notification) ends the
-    // batch — no invented sample out of the fragment.
-    const syncUnix = 1782043215;
-    final complete = <int>[
-      ..._event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix)),
-      ..._event(kOuraEvtTempPeriod, 1100, _hex('6c0d')),
-    ];
-    // A temperature frame header whose payload length (5) runs past the
-    // two bytes actually delivered.
-    final cut = <int>[0x69, 0x05, 0x01, 0x02];
-    final (events, link) = await _drive(
-        _adapter(),
-        (i, v) {
-          if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
-          if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-          if (v.first == 0x10) return [[...complete, ...cut], _summary(2, 0)];
-          return const [];
-        },
-        confirmBatches: false);
     expect(link.writes.where((w) => w.$2.first == 0x10), hasLength(1));
-    final batch = events.whereType<SampleBatch>().single;
-    expect(batch.samples, hasLength(1),
-        reason: 'the complete frames bank; the cut one invents nothing');
-    expect(batch.raw, hasLength(2));
   });
 
   test(
@@ -739,12 +691,11 @@ void main() {
       'documented boundary is the notification',
       () async {
     // NO REASSEMBLY ACROSS NOTIFICATIONS, pinned as today's documented
-    // behaviour: the protocol docs describe whole frames per notification
-    // (single or packed), and no capture in this project shows a frame
-    // split across notifications. A split header or payload is therefore
-    // an UNRECOGNISED delivery: the complete first fragment banks nothing
-    // (its parse fails on the truncated tail), and the second fragment —
-    // starting mid-payload — is not a frame the walk can accept either.
+    // behaviour: one notification carries exactly one frame, and no capture
+    // in this project shows a frame split across notifications. A split
+    // header or payload is therefore an UNRECOGNISED delivery: the first
+    // fragment banks nothing (its declared length runs past the end), and
+    // the second fragment, starting mid-payload, is not a frame either.
     // If a real capture ever shows cross-notification fragmentation, the
     // fix is a session-local continuation buffer in `run()`'s notify
     // listener — THIS test is what flips then.
@@ -795,10 +746,10 @@ void main() {
 
   test('an unknown opcode banks nothing, decodes nothing', () async {
     // Unknown opcodes below the event range are command responses; the
-    // walk accepts a WELL-FORMED unknown frame (it parses — length honest)
-    // and the batch machinery ignores it: no sample, no batch, no invented
+    // parser accepts a WELL-FORMED unknown frame (length honest) and the
+    // batch machinery ignores it: no sample, no batch, no invented
     // interpretation. A frame whose length LIES (declared length past the
-    // end) stops the walk — same refusal, different line.
+    // end) is refused by the parser itself: same refusal, different line.
     final (events, _) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
@@ -816,39 +767,31 @@ void main() {
   });
 
   test(
-      'an incomplete tail does not desync the NEXT notification — each '
-      'session starts frame-aligned',
+      'a truncated frame does not desync the NEXT notification — each '
+      'notification is parsed from byte zero',
       () async {
-    // A notification ending in an incomplete frame leaves NO session state
-    // (there is no continuation buffer — see the split-frame test): the
-    // next notification is parsed from byte zero. The incomplete tail is
-    // dropped (not archived as a frame, not decoded); the well-formed
-    // frames around it bank normally.
+    // There is no continuation buffer (see the split-frame test): a
+    // notification whose one frame declares more bytes than were delivered
+    // is dropped (not archived, not decoded), and the next notification is
+    // parsed from byte zero.
     const syncUnix = 1782043215;
     final anchor = _event(kOuraEvtTimeSync, 1000, _syncBody(syncUnix));
     final temp = _event(kOuraEvtTempPeriod, 1100, _hex('6c0d'));
     final cut = <int>[0x69, 0x05, 0x01, 0x02]; // length 5, only 2 delivered
-    final summary = _summary(2, 0);
     final (events, _) = await _drive(_adapter(), (i, v) {
       if (v.first == 0x2f && v[2] == 0x2b) return [_nonceReply];
       if (v.first == 0x2f && v[2] == 0x2d) return [_authOk];
-      if (v.first == 0x10) {
-        return [
-          [...anchor, ...cut],
-          [...temp, ...summary],
-        ];
-      }
+      if (v.first == 0x10) return [anchor, cut, temp, _summary(2, 0)];
       return const [];
     });
     final batch = events.whereType<SampleBatch>().single;
     expect(batch.samples, hasLength(1),
-        reason: 'the frames after the cut bank — the tail desyncs nothing');
+        reason: 'the frame after the cut banks — the cut desyncs nothing');
     expect(batch.raw, hasLength(2),
         reason: 'the cut frame is neither archived nor decoded');
     expect(
       events.whereType<BandNote>().where((n) => n.key == 'oura_drain_ok'),
-      hasLength(1),
-      reason: 'the packed temp+summary notification ends the drain');
+      hasLength(1));
   });
 
   // ── The ring's own sleep staging, banked as vendor scalars ──────────────

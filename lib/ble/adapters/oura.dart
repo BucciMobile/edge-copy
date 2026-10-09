@@ -202,43 +202,18 @@ class OuraAdapter extends BandAdapter {
     final inbox = _Inbox();
     final sub = link.notify(kOuraNotifyChar).listen(
           (rec) {
-            // ONE notification can carry SEVERAL frames — the ring is
-            // documented to pack ~10 records into one notification, and
-            // `parseOuraFrame` only ever reads the FIRST frame in the bytes
-            // it is handed. Walk the notification frame by frame: each
-            // accepted frame enters the inbox on its own, so the
-            // batch/summary state machine below sees the same sequence it
-            // would see if the ring had sent each frame as its own
-            // notification.
+            // ONE notification carries exactly ONE frame (`parseOuraFrame`'s
+            // contract). The ring may append bytes past the declared length;
+            // the parser ignores them, and so does this callback: they are
+            // never read as a second frame. A notification that cannot be a
+            // frame (too short, or a length running past the end) is dropped,
+            // not decoded, so no samples are invented.
             //
-            // RAW GRANULARITY — one archive row per FRAME, not per
-            // notification: the frame's own slice of the delivered bytes,
-            // INCLUDING any bytes the parser accepted past the payload when
-            // the slice ran to the notification's end. The old
-            // whole-notification copy was correct only while a notification
-            // held one frame; with packed frames it would bank the SAME
-            // notification once per event — duplicate `raw_archive` rows for
-            // one delivery. Slicing keeps the invariant exact: every accepted
-            // frame is archived once, byte-for-byte as the radio delivered
-            // it, and no delivery is banked twice.
-            //
-            // A tail that does not form a frame (too short, or a length
-            // running past the end) stops the walk and is NOT archived as a
-            // frame and NOT decoded — no invented samples. Cross-notification
-            // reassembly is deliberately NOT attempted: the protocol docs
-            // document whole frames per notification (single or packed), and
-            // no capture in this project shows a frame split across
-            // notifications. If a real capture ever does, that tail needs a
-            // session-local continuation buffer HERE — see the adapter test
-            // pinning today's documented behaviour.
-            var off = 0;
-            while (off < rec.$2.length) {
-              final f = parseOuraFrame(rec.$2.sublist(off));
-              if (f == null) break;
-              inbox.add(rec.$1, f,
-                  Uint8List.fromList(rec.$2.sublist(off, off + 2 + f.payload.length)));
-              off += 2 + f.payload.length;
-            }
+            // The archived raw bytes are the WHOLE notification as the radio
+            // delivered it, trailing bytes included, so a future decoder can
+            // still see them (see the archive comment in the batch reader).
+            final f = parseOuraFrame(rec.$2);
+            if (f != null) inbox.add(rec.$1, f, Uint8List.fromList(rec.$2));
           },
           onDone: inbox.close,
           onError: (Object _) => inbox.close(),
