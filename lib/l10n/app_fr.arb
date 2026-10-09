@@ -843,6 +843,8 @@
   "nutritionNoneYet": "Rien pour l'instant",
   "nutritionAddWater": "Ajouter de l'eau",
   "nutritionRemoveWater": "Retirer de l'eau",
+  "coachApiFormatHelp": "Choisissez l'API prise en charge par votre point de terminaison. Responses prend en charge le raisonnement OpenAI avec des outils.",
+  "coachApiFormatLabel": "API",
   "coachApiKeyLabel": "Clé API",
   "coachApiKeyLocalLabel": "Clé API (inutile en local)",
   "coachAsking": "Interrogation…",
