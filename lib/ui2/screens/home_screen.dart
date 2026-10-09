@@ -34,7 +34,12 @@ import 'package:provider/provider.dart';
 
 import '../../ai/briefing.dart'
     show Briefing, BriefingPeriod, BriefingStore, currentBriefingPeriod, resolveBriefingToShow;
-import '../../compute/findings.dart' show isRecentFindingDate;
+import '../../compute/findings.dart'
+    show
+        isRecentFindingDate,
+        kReadinessEasyBelow,
+        kReadinessGoodFrom,
+        kReadinessRestBelow;
 import '../../data/day_label.dart' show todayLabel, calendarDaysBetween;
 import '../../compute/onehz_pipeline.dart'
     show readinessInputShortfallNote, readinessUnstableBaselineNote;
@@ -712,8 +717,10 @@ String prettyDay(String? dayId, [AppLocalizations? l]) {
 ///   score = 100 / (1 + exp(-0.65 · Φ⁻¹(p)))
 ///     p=.05 → 26   p=.20 → 37   p=.75 → 61
 ///
-/// which lands 5 % of nights on "Rest today", 15 % on "Take it easy", 55 % on
-/// "Steady" and 25 % on "Good to go". The median night is now the neutral band,
+/// (`kReadinessRestBelow` / `kReadinessEasyBelow` / `kReadinessGoodFrom` in
+/// findings.dart, shared with the push and the log), which lands 5 % of nights
+/// on "Rest today", 15 % on "Take it easy", 55 % on "Steady" and 25 % on
+/// "Good to go". The median night is now the neutral band,
 /// which is the whole point. Under the old cut-offs the same distribution read
 /// 27 / 47 / 25 / 2.
 ///
@@ -726,13 +733,13 @@ String prettyDay(String? dayId, [AppLocalizations? l]) {
   if (v == null) {
     return (label: l?.homeReadinessNotScored ?? 'Not scored', color: C.n400, tier: -1);
   }
-  if (v >= 61) {
+  if (v >= kReadinessGoodFrom) {
     return (label: l?.homeReadinessGoodToGo ?? 'Good to go', color: C.green, tier: 3);
   }
-  if (v >= 37) {
+  if (v >= kReadinessEasyBelow) {
     return (label: l?.homeReadinessSteady ?? 'Steady', color: C.green, tier: 2);
   }
-  if (v >= 26) {
+  if (v >= kReadinessRestBelow) {
     return (label: l?.homeReadinessTakeItEasy ?? 'Take it easy', color: C.orange, tier: 1);
   }
   return (label: l?.homeReadinessRestToday ?? 'Rest today', color: C.red, tier: 0);
@@ -1932,25 +1939,25 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     return [
       Observation(
         state == 'red'
-            ? (l?.homeIllnessRedTitle ?? 'Several nights in a row are away from your normal')
+            ? (l?.homeIllnessRedTitle ?? 'Recent nights add up to a raised resting heart rate')
             : sameNight
                 ? (l?.homeIllnessAmberSameNight ?? 'Last night sat outside your normal range')
                 : (l?.homeIllnessAmberOtherNight(prettyDay(d.illnessDay, l)) ??
                     '${prettyDay(d.illnessDay, l)} sat outside your normal range'),
         z == null
             ? (l?.homeIllnessBodyNoZ ??
-                'Your nocturnal resting heart rate has been running above your own '
-                'baseline. This reads one signal. It names a pattern, and it does '
-                'not name a cause.')
+                'Your recent nocturnal resting heart rates add up to a rise above '
+                'your own baseline. This reads one signal. It names a pattern, and '
+                'it does not name a cause.')
             : (z >= 0
                 ? (l?.homeIllnessBodyAbove(zAbs) ??
-                    'Your nocturnal resting heart rate has been running above your own '
-                    'baseline; that night sat $zAbs standardised deviations above it. '
+                    'Your recent nocturnal resting heart rates add up to a rise above '
+                    'your own baseline; that night sat $zAbs standardised deviations above it. '
                     'This reads one signal. It names a pattern, and it does not name '
                     'a cause.')
                 : (l?.homeIllnessBodyBelow(zAbs) ??
-                    'Your nocturnal resting heart rate has been running above your own '
-                    'baseline; that night sat $zAbs standardised deviations below it. '
+                    'Your recent nocturnal resting heart rates add up to a rise above '
+                    'your own baseline; that night sat $zAbs standardised deviations below it. '
                     'This reads one signal. It names a pattern, and it does not name '
                     'a cause.')),
         advice: l?.homeIllnessAdvice ?? 'Worth noting if it continues past a couple of days.',

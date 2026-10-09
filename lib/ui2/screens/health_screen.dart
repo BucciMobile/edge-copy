@@ -811,7 +811,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
         : Observation(
             state == 'red'
                 ? (l?.healthIllnessRedTitle ??
-                    'Several nights in a row are away from your normal')
+                    'Recent nights add up to a raised resting heart rate')
                 : (illnessBehind == null || illnessBehind <= 0
                     ? (l?.healthIllnessLastNightTitle ??
                         'Last night sat outside your normal range')
@@ -824,16 +824,16 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
             // below it".
             illnessZ == null
                 ? (l?.healthIllnessBodyNoZ ??
-                    'Your nocturnal resting heart rate has been running above '
-                        'your own baseline. This watches one signal only. It '
-                        'names a pattern, not a cause.')
+                    'Your recent nocturnal resting heart rates add up to a rise '
+                        'above your own baseline. This watches one signal only. '
+                        'It names a pattern, not a cause.')
                 : (l?.healthIllnessBodyWithZ(
                         illnessZ.abs().toStringAsFixed(1),
                         illnessZ >= 0
                             ? (l.healthDirectionAbove)
                             : (l.healthDirectionBelow)) ??
-                    'Your nocturnal resting heart rate has been running above '
-                        'your own baseline; that night sat '
+                    'Your recent nocturnal resting heart rates add up to a rise '
+                        'above your own baseline; that night sat '
                         '${illnessZ.abs().toStringAsFixed(1)} standard deviations '
                         '${illnessZ >= 0 ? 'above' : 'below'} it. This watches '
                         'one signal only. It names a pattern, not a cause.'),

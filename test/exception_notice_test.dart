@@ -129,4 +129,11 @@ void main() {
     expect(a?.date, '2024-01-30');
     expect(a?.unsettled, isTrue);
   });
+
+  test('a low-readiness notice carries the score in its body', () {
+    final n = ExceptionNotice(
+        '2026-10-02', [lowReadinessFinding('2026-10-02', 22)!]);
+    expect(n.body, contains('22'));
+    expect(n.dedupeKey, '2026-10-02:exception');
+  });
 }

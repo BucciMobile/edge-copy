@@ -2367,9 +2367,9 @@
       }
     }
   },
-  "roughNightIllness": "The illness watch flagged this night too — a sustained rise against your own baseline, not a diagnosis.",
+  "roughNightIllness": "Your resting heart rate flagged this night too — recent nights add up to a rise above your own baseline, not a diagnosis.",
   "@roughNightIllness": {
-    "description": "Rough Night card: stated fact when the illness watch also flagged the same night."
+    "description": "Rough Night card: stated fact when the resting-heart-rate watch also flagged the same night (an accumulated rise, never an illness claim)."
   },
   "roughNightLuteal": "You are in the luteal phase, which lifts resting heart rate and skin temperature by itself.",
   "@roughNightLuteal": {
@@ -6431,7 +6431,7 @@
   "@healthWhyNoReadingLastNight": {
     "description": "Why-absent reason: no respiratory reading from last night"
   },
-  "healthIllnessRedTitle": "Several nights in a row are away from your normal",
+  "healthIllnessRedTitle": "Recent nights add up to a raised resting heart rate",
   "@healthIllnessRedTitle": {
     "description": "Illness observation card title, red/severe state"
   },
@@ -6448,11 +6448,11 @@
       }
     }
   },
-  "healthIllnessBodyNoZ": "Your nocturnal resting heart rate has been running above your own baseline. This watches one signal only. It names a pattern, not a cause.",
+  "healthIllnessBodyNoZ": "Your recent nocturnal resting heart rates add up to a rise above your own baseline. This watches one signal only. It names a pattern, not a cause.",
   "@healthIllnessBodyNoZ": {
     "description": "Illness observation card body when no z-score is available"
   },
-  "healthIllnessBodyWithZ": "Your nocturnal resting heart rate has been running above your own baseline; that night sat {z} standard deviations {direction} it. This watches one signal only. It names a pattern, not a cause.",
+  "healthIllnessBodyWithZ": "Your recent nocturnal resting heart rates add up to a rise above your own baseline; that night sat {z} standard deviations {direction} it. This watches one signal only. It names a pattern, not a cause.",
   "@healthIllnessBodyWithZ": {
     "description": "Illness observation card body including the standard-deviation figure and direction",
     "placeholders": {
@@ -7502,9 +7502,9 @@
   "@homeBriefingSubtitleEmpty": {
     "description": "Link row subtitle under the briefing title when nothing has been generated for today yet."
   },
-  "homeIllnessRedTitle": "Several nights in a row are away from your normal",
+  "homeIllnessRedTitle": "Recent nights add up to a raised resting heart rate",
   "@homeIllnessRedTitle": {
-    "description": "Illness watch headline when several nights in a row are away from baseline (red state)."
+    "description": "Illness watch headline in the red state: accumulated evidence of a raised resting heart rate, which one very high night can produce. Must not claim consecutive nights."
   },
   "homeIllnessAmberSameNight": "Last night sat outside your normal range",
   "@homeIllnessAmberSameNight": {
@@ -7520,11 +7520,11 @@
       }
     }
   },
-  "homeIllnessBodyNoZ": "Your nocturnal resting heart rate has been running above your own baseline. This reads one signal. It names a pattern, and it does not name a cause.",
+  "homeIllnessBodyNoZ": "Your recent nocturnal resting heart rates add up to a rise above your own baseline. This reads one signal. It names a pattern, and it does not name a cause.",
   "@homeIllnessBodyNoZ": {
     "description": "Illness watch body text when no standardised-deviation figure is available."
   },
-  "homeIllnessBodyAbove": "Your nocturnal resting heart rate has been running above your own baseline; that night sat {z} standardised deviations above it. This reads one signal. It names a pattern, and it does not name a cause.",
+  "homeIllnessBodyAbove": "Your recent nocturnal resting heart rates add up to a rise above your own baseline; that night sat {z} standardised deviations above it. This reads one signal. It names a pattern, and it does not name a cause.",
   "@homeIllnessBodyAbove": {
     "description": "Illness watch body text when the flagged night's heart rate sat above baseline, with the deviation amount.",
     "placeholders": {
@@ -7534,7 +7534,7 @@
       }
     }
   },
-  "homeIllnessBodyBelow": "Your nocturnal resting heart rate has been running above your own baseline; that night sat {z} standardised deviations below it. This reads one signal. It names a pattern, and it does not name a cause.",
+  "homeIllnessBodyBelow": "Your recent nocturnal resting heart rates add up to a rise above your own baseline; that night sat {z} standardised deviations below it. This reads one signal. It names a pattern, and it does not name a cause.",
   "@homeIllnessBodyBelow": {
     "description": "Illness watch body text when the flagged night's heart rate sat below baseline, with the deviation amount.",
     "placeholders": {

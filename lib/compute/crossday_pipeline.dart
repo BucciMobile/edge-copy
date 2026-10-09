@@ -207,6 +207,8 @@ Map<String, dynamic> buildCrossDayBundle(
   // elsewhere. This call is kept only for glassBoxReadiness's percentile-of-you
   // breakdown and deterministic narrative, which readinessComposite does not
   // produce, and for back-compat with the stored "readiness_glassbox" key.
+  // It feeds no notification: the low-readiness push reads the ring's own
+  // composite.
   //
   // Migrating this to readinessComposite is a deliberate open decision, not an
   // oversight: it changes user-visible numbers, so it needs a kAlgoVersion bump

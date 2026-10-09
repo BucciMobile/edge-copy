@@ -431,16 +431,19 @@ void main() {
       expect(find.textContaining('outside your normal range'), findsOneWidget);
     });
 
-    testWidgets('red shows, and says it is a run rather than one night',
+    testWidgets('red shows, and claims no streak it cannot back',
         (t) async {
       await t.pumpWidget(frame(base.copyOrIllness('red', '2026-05-20', 3.1)));
-      expect(find.textContaining('Several nights in a row'), findsOneWidget);
+      expect(find.textContaining('add up to a raised resting heart rate'), findsOneWidget);
+      // Accumulated evidence, not a streak: one high night can turn it red.
+      expect(find.textContaining('in a row'), findsNothing);
+      expect(find.textContaining('running above'), findsNothing);
     });
 
     testWidgets('green is SILENT, not a card saying you are fine', (t) async {
       await t.pumpWidget(frame(base.copyOrIllness('green', '2026-05-20', 0.2)));
       expect(find.textContaining('normal range'), findsNothing);
-      expect(find.textContaining('Several nights'), findsNothing);
+      expect(find.textContaining('add up to a raised'), findsNothing);
     });
 
     testWidgets('no state at all is silent too — the CUSUM wants 7 nights',
@@ -471,13 +474,13 @@ void main() {
     // read as current. Older verdicts live in Observations, not on Home.
     testWidgets('a verdict older than yesterday stays off Home', (t) async {
       await t.pumpWidget(frame(base.copyOrIllness('red', '2026-05-16', 3.1)));
-      expect(find.textContaining('Several nights'), findsNothing);
+      expect(find.textContaining('add up to a raised'), findsNothing);
       expect(find.textContaining('normal range'), findsNothing);
     });
 
     testWidgets('an undated verdict renders nothing', (t) async {
       await t.pumpWidget(frame(base.copyOrIllness('red', null, 3.1)));
-      expect(find.textContaining('Several nights'), findsNothing);
+      expect(find.textContaining('add up to a raised'), findsNothing);
     });
 
     // A screen that stays mounted across midnight with no new sync keeps the
@@ -485,9 +488,9 @@ void main() {
     testWidgets('the card expires when the calendar moves on', (t) async {
       final d = base.copyOrIllness('red', '2026-05-19', 3.1);
       await t.pumpWidget(frame(d, now: DateTime(2026, 5, 20, 9)));
-      expect(find.textContaining('Several nights'), findsOneWidget);
+      expect(find.textContaining('add up to a raised'), findsOneWidget);
       await t.pumpWidget(frame(d, now: DateTime(2026, 5, 21, 9)));
-      expect(find.textContaining('Several nights'), findsNothing);
+      expect(find.textContaining('add up to a raised'), findsNothing);
     });
 
     testWidgets("yesterday's night is not called last night on a new day",
@@ -525,23 +528,25 @@ void main() {
 
     testWidgets('a red night yesterday shows', (t) async {
       await pump(t, '2026-05-19');
-      expect(find.textContaining('Several nights in a row'), findsOneWidget);
+      expect(find.textContaining('add up to a raised resting heart rate'), findsOneWidget);
+      expect(find.textContaining('in a row'), findsNothing);
+      expect(find.textContaining('running above'), findsNothing);
     });
 
     testWidgets('a red night four days back does not', (t) async {
       await pump(t, '2026-05-16');
-      expect(find.textContaining('Several nights in a row'), findsNothing);
+      expect(find.textContaining('add up to a raised resting heart rate'), findsNothing);
     });
 
     testWidgets('an undated verdict renders nothing', (t) async {
       await pump(t, null);
-      expect(find.textContaining('Several nights in a row'), findsNothing);
+      expect(find.textContaining('add up to a raised resting heart rate'), findsNothing);
     });
 
     testWidgets('the card expires when the calendar moves on', (t) async {
       // Same cached payload (built for the 20th), but it is now the 21st.
       await pump(t, '2026-05-19', now: DateTime(2026, 5, 21, 9));
-      expect(find.textContaining('Several nights in a row'), findsNothing);
+      expect(find.textContaining('add up to a raised resting heart rate'), findsNothing);
     });
 
     // "Last night" and the gate read the same clock: an amber verdict about

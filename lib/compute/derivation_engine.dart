@@ -5807,106 +5807,25 @@ class DerivationEngine {
       final cdRow = await LocalDb.baseline('crossday');
       final cd = _decodeBundle(cdRow?['payload_json']);
       if (cd == null) return;
-      final recent = cd['recent'];
-      // ANCHORED TO THE DAY THIS IS RUNNING ON, not to the newest DERIVED day.
-      //
-      // Every date in here is a day the rollup happened to see, which is not
-      // today whenever the newest data is old: import a back-catalogue
-      // (finalizeImport runs this straight after) or bump kAlgoVersion after a
-      // week off the wrist, and a critical, quiet-hours-overriding health
-      // alert goes out about nights from last November — in the present
-      // tense, with the irregular-rhythm copy saying "today".
-      //
-      // Yesterday still counts: before today's overnight settles (and just
-      // after midnight) the newest settled night IS yesterday's, and that
-      // finding is current. Anything older is history, and history does not
-      // interrupt. The gate is by CALENDAR label (`isRecentFindingDate`), so a
-      // DST transition cannot gate out a current night.
+      // The whole decision is `planExceptionNotices` (findings.dart), pure
+      // and tested; this only reads its inputs and emits what it returns.
       today ??= LocalDb.localDayLabelNow();
-      // ONE exception per day, not one per finding.
-      //
-      // These six signals are correlated by construction — an illness flag, an
-      // overnight anomaly and an elevated skin temperature are usually the same
-      // morning saying the same thing — and they used to fire as six separate
-      // notifications, two of them on the recovery channel. Under the
-      // three-class rule (alarm · exception · lookback) the day's findings are
-      // collected here and presented once, aggregated, so the user gets one
-      // buzz and the whole picture instead of six buzzes and a third of it.
-      //
-      // `medical` marks the DETECTION-class findings — the ones the design
-      // sanctions interrupting for. It only affects the dedupe key (below),
-      // never the wording.
-      // The SENTENCES live in findings.dart, with the log that reads the same
-      // six. They were inline here, which is exactly how a second surface for
-      // the same detector ends up quietly differently worded.
-      //
-      // The three overnight detectors are dated by THEIR OWN entry — the
-      // newest settled night — never by the newest row: that row is usually
-      // today's, still settling, and not the night the verdict is about.
-      final findings = <Finding>[...crossDayAlertFindings(cd)];
       final anchor = exceptionAnchor(cd);
-      if (anchor != null && isRecentFindingDate(anchor.date, today: today)) {
-        final date = anchor.date;
-        // 24/7 irregular-rhythm SCREEN (not a diagnosis).
-        final irregFlag =
-            await LocalDb.metricValueOn(date, 'irregular_rhythm_flag');
-        if (irregFlag == 1.0) {
-          findings.add(Finding(FindingKind.irregularRhythm, date));
-        }
-        // The headline readiness the ring shows and the findings log reads,
-        // not the glass-box score, which is a different model and can land on
-        // the other side of the threshold. The morning pin wins for its day,
-        // same as getToday and getChart: later re-derives rewrite
-        // metric_series, so the live value can drift across the line while
-        // the ring still reads the pin.
-        final pin = await LocalDb.frozenHeadline();
-        final score = pin != null && pin.day == date
-            ? pin.value.toDouble()
-            : await LocalDb.metricValueOn(date, 'readiness');
-        if (score != null && score < kLowReadiness) {
-          findings.add(Finding(FindingKind.lowReadiness, date));
-        }
+      final pin = await LocalDb.frozenHeadline();
+      final notices = planExceptionNotices(
+        cd,
+        today: today,
+        irregularFlag: anchor == null
+            ? null
+            : await LocalDb.metricValueOn(anchor.date, 'irregular_rhythm_flag'),
+        pin: pin == null ? null : (day: pin.day, value: pin.value),
+        storedReadiness: anchor == null
+            ? null
+            : await LocalDb.metricValueOn(anchor.date, 'readiness'),
+      );
 
-        // "Something changed" — online CUSUM on the recent resting-HR series.
-        // Only when the shift lands on the day this notification is STAMPED
-        // with (a fresh change, not old history we'd re-announce every pass).
-        //
-        // The dates travel with the values. `rhrSeries` is compacted — days
-        // with no nocturnal RHR are skipped, which is most days for some users
-        // — so `index == length - 1` meant "the most recent day that HAPPENED
-        // to have an rhr". With a few null days in between, a week-old shift
-        // satisfied it and went out at critical priority under today's date.
-        //
-        // `recent[].rhr` is written WITHOUT the `settled()` guard on purpose —
-        // the guard's comment names `recent` and "RHR trend" as things an
-        // unsettled day still feeds, and the trend chart is right to show it.
-        // A critical-priority ALERT is not: a night that is only half drained
-        // reads several bpm high, fires "your resting HR trend shifted", and
-        // then corrects an hour later with the day's dedupe key already
-        // claimed. So the trend keeps the raw value and this one consumer
-        // stands down until the day settles.
-        final rhrSeries = <double>[];
-        final rhrDates = <String?>[];
-        if (recent is List) {
-          for (final r in recent) {
-            if (r is Map && r['rhr'] is num) {
-              rhrSeries.add((r['rhr'] as num).toDouble());
-              rhrDates.add(r['date'] as String?);
-            }
-          }
-        }
-        if (!anchor.unsettled && rhrSeries.length >= 10) {
-          final dets = ana.cusumChangePoints(rhrSeries, h: 5.0);
-          if (dets.isNotEmpty && rhrDates[dets.last.index] == date) {
-            findings.add(Finding(FindingKind.rhrShift, date,
-                risen: dets.last.direction > 0));
-          }
-        }
-      }
-
-      // One notice per day the findings are ABOUT (`dueExceptionNotices`
-      // drops anything older than yesterday). The key's date is that day, so
-      // a night fires at most once however many passes see it.
+      // One notice per day the findings are ABOUT. The key's date is that
+      // day, so a night fires at most once however many passes see it.
       //
       // The key carries the day's HIGHEST severity class, not just the day.
       //
@@ -5925,7 +5844,7 @@ class DerivationEngine {
       // presented medical exception burns the day's plain slot as well —
       // only on a real present, or a medical one lost to quiet hours would
       // take the plain one down with it.
-      for (final notice in dueExceptionNotices(findings, today: today)) {
+      for (final notice in notices) {
         final fired = await NotificationCenter.instance.emit(
           NotificationEvent(
             dedupeKey: notice.dedupeKey,
