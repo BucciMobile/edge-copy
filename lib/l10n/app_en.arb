@@ -15466,5 +15466,199 @@
   "deviceUseSheetCancel": "Not now",
   "@deviceUseSheetCancel": {
     "description": "Confirmation sheet: cancel button."
+  },
+  "settingsReportIssueRowTitle": "Report an issue",
+  "@settingsReportIssueRowTitle": {
+    "description": "Settings row that opens the issue report screen."
+  },
+  "settingsReportIssueRowSub": "Sends what you choose to the maintainers, encrypted",
+  "@settingsReportIssueRowSub": {
+    "description": "Settings row subtitle for Report an issue."
+  },
+  "reportNavTitle": "Report an issue",
+  "@reportNavTitle": {
+    "description": "Issue report screen title."
+  },
+  "reportCategoryGroup": "What it's about",
+  "@reportCategoryGroup": {
+    "description": "Issue report: heading over the category choices."
+  },
+  "reportCategorySync": "Sync",
+  "@reportCategorySync": {
+    "description": "Issue report category."
+  },
+  "reportCategorySleep": "Sleep",
+  "@reportCategorySleep": {
+    "description": "Issue report category."
+  },
+  "reportCategoryRecovery": "Recovery",
+  "@reportCategoryRecovery": {
+    "description": "Issue report category."
+  },
+  "reportCategoryWorkout": "Workout",
+  "@reportCategoryWorkout": {
+    "description": "Issue report category."
+  },
+  "reportCategoryPairing": "Pairing",
+  "@reportCategoryPairing": {
+    "description": "Issue report category."
+  },
+  "reportCategoryOther": "Other",
+  "@reportCategoryOther": {
+    "description": "Issue report category."
+  },
+  "reportTitleLabel": "Title",
+  "@reportTitleLabel": {
+    "description": "Issue report: title field label."
+  },
+  "reportTitleHint": "One line on what went wrong",
+  "@reportTitleHint": {
+    "description": "Issue report: title field hint."
+  },
+  "reportDescriptionLabel": "What happened",
+  "@reportDescriptionLabel": {
+    "description": "Issue report: description field label."
+  },
+  "reportDescriptionHint": "What you did, what you expected, what you saw",
+  "@reportDescriptionHint": {
+    "description": "Issue report: description field hint."
+  },
+  "reportAttachGroup": "Attachments",
+  "@reportAttachGroup": {
+    "description": "Issue report: heading over screenshot and database options."
+  },
+  "reportScreenshotRow": "Add a screenshot",
+  "@reportScreenshotRow": {
+    "description": "Issue report: pick a screenshot."
+  },
+  "reportScreenshotRemove": "Remove the screenshot",
+  "@reportScreenshotRemove": {
+    "description": "Issue report: remove the picked screenshot."
+  },
+  "reportDatabaseRow": "Include my health database",
+  "@reportDatabaseRow": {
+    "description": "Issue report: switch to attach the database. Off by default."
+  },
+  "reportDatabaseWarning": "Your database holds your sleep, heart rate and other health data. It goes only if this is on, and the server deletes it after 14 days.",
+  "@reportDatabaseWarning": {
+    "description": "Issue report: plain warning under the database switch."
+  },
+  "reportIncludedGroup": "What's included",
+  "@reportIncludedGroup": {
+    "description": "Issue report: heading over the list of files in the report."
+  },
+  "reportIncludedNote": "The category, title and description travel unencrypted so we can track the report. Everything else is encrypted on this phone before it leaves, so only the maintainers can read it. Reports are deleted after 30 days.",
+  "@reportIncludedNote": {
+    "description": "Issue report: note under the file list."
+  },
+  "reportFileManifest": "This list of files",
+  "@reportFileManifest": {
+    "description": "Issue report file description: manifest.json."
+  },
+  "reportFileMeta": "App version, phone model, system version, language, time zone and a random install ID",
+  "@reportFileMeta": {
+    "description": "Issue report file description: meta.json."
+  },
+  "reportFileDevice": "Your paired band and sensors: type, connection, battery and when they last synced",
+  "@reportFileDevice": {
+    "description": "Issue report file description: device.json."
+  },
+  "reportFileState": "Sync and scoring status, and recent errors",
+  "@reportFileState": {
+    "description": "Issue report file description: state.json."
+  },
+  "reportFileSyncLog": "The app's recent sync log",
+  "@reportFileSyncLog": {
+    "description": "Issue report file description: logs/sync.log."
+  },
+  "reportFileTelemetry": "Errors and events this phone recorded in the last 7 days",
+  "@reportFileTelemetry": {
+    "description": "Issue report file description: logs/telemetry.json."
+  },
+  "reportFileUser": "Your category, title and description",
+  "@reportFileUser": {
+    "description": "Issue report file description: user.txt."
+  },
+  "reportFileScreenshot": "The screenshot you picked",
+  "@reportFileScreenshot": {
+    "description": "Issue report file description: the screenshot."
+  },
+  "reportFileDatabase": "Your full health database, compressed",
+  "@reportFileDatabase": {
+    "description": "Issue report file description: database.db.gz."
+  },
+  "reportSend": "Send",
+  "@reportSend": {
+    "description": "Issue report: send button."
+  },
+  "reportSaveInstead": "Save instead",
+  "@reportSaveInstead": {
+    "description": "Issue report: save the archive on the phone, nothing sent."
+  },
+  "reportNeedTitle": "Add a title first.",
+  "@reportNeedTitle": {
+    "description": "Issue report: shown when sending without a title."
+  },
+  "reportSentTitle": "Report sent",
+  "@reportSentTitle": {
+    "description": "Issue report: success card title."
+  },
+  "reportSentBody": "Your report ID is {id}. Quote it if you talk to us about this.",
+  "@reportSentBody": {
+    "description": "Issue report: success card body with the report ID.",
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "reportCopyId": "Copy ID",
+  "@reportCopyId": {
+    "description": "Issue report: copy the report ID."
+  },
+  "reportNotSentTitle": "Not sent",
+  "@reportNotSentTitle": {
+    "description": "Issue report: failure card title."
+  },
+  "reportTooLarge": "This report is too large to send. Turn off the database or remove the screenshot, or save it instead.",
+  "@reportTooLarge": {
+    "description": "Issue report: 413 or local size check."
+  },
+  "reportRateLimited": "You've sent 3 reports today. Try again tomorrow, or save this one instead.",
+  "@reportRateLimited": {
+    "description": "Issue report: 429."
+  },
+  "reportStorageFull": "The report server has no room for a database right now. You can send the report without it.",
+  "@reportStorageFull": {
+    "description": "Issue report: 507 storage full."
+  },
+  "reportSendWithoutDb": "Send without the database",
+  "@reportSendWithoutDb": {
+    "description": "Issue report: resend after 507."
+  },
+  "reportSendFailed": "Couldn't send the report. Check your connection, or save it instead.",
+  "@reportSendFailed": {
+    "description": "Issue report: network or server error."
+  },
+  "reportMyReportsGroup": "My reports",
+  "@reportMyReportsGroup": {
+    "description": "Issue report: heading over reports sent from this phone."
+  },
+  "reportMyReportsSub": "Tap to delete it now. Otherwise it's deleted on {date}",
+  "@reportMyReportsSub": {
+    "description": "Issue report: row subtitle for a sent report.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "reportDelete": "Delete",
+  "@reportDelete": {
+    "description": "Issue report: delete a sent report."
+  },
+  "reportDeleteFailed": "Couldn't delete it. Try again later.",
+  "@reportDeleteFailed": {
+    "description": "Issue report: delete failed."
   }
 }

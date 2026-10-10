@@ -1,6 +1,6 @@
 # Privacy Policy — Edge / OpenStrap
 
-_Last updated: August 18, 2026_
+_Last updated: October 11, 2026_
 
 Edge ("the App") is an independent, open-source project. It is not affiliated
 with, sponsored by, or endorsed by WHOOP, Inc.
@@ -16,7 +16,7 @@ Your health information is processed and stored entirely on your device. We do
 not upload it, we do not operate a backend that receives it, and we never see
 it — *unless you explicitly switch on health data contribution, or separately
 enable AI Coach or Health app integration, described below, which send specific
-data to services you configure.*
+data to services you configure, or attach your database to an issue report.*
 
 Health data contribution is **off by default**, and it is off unless you turn
 it on yourself in Settings › Privacy › "Contribute my health data". When it is
@@ -49,6 +49,25 @@ include the band's serial number or any other hardware identifier. This data is
 handled under Firebase's own privacy and security practices, not a system we
 built or operate ourselves — see Google's Firebase privacy & security
 documentation: https://firebase.google.com/support/privacy.
+
+**Issue reports**
+Settings › Privacy › "Report an issue" lets you send us a problem report. Nothing
+is sent until you tap Send, and the screen lists every file in the report
+before you do. A report holds your title and description, the app and phone
+details (app version, phone model, system version, language, time zone and a
+random install ID), your paired band and sensors with their battery and last
+sync, the app's recent sync log and error records, and a screenshot if you add
+one. It contains no health data unless you switch on "Include my health
+database", which is off every time and attaches a copy of your database (your
+sleep, heart rate and other health data).
+
+The report is encrypted on your phone before it leaves, with a key only the
+maintainers hold, so the service that stores it cannot read it. It is stored
+on Cloudflare. A report is deleted after 30 days, and an attached database
+after 14. The report's ID, category, title, description, app version, platform,
+system version and phone model are kept unencrypted so we can track it, and
+that record is deleted after 90 days. You can delete a report sooner at any time from "My reports" on the same
+screen. "Save instead" writes the same report to your phone and sends nothing.
 
 **Update checks**
 Because the App is distributed outside an app store, it can check our release
@@ -147,7 +166,8 @@ configure:
 **What we don't do**
 We do not sell your data. We do not send your health data to WHOOP, Inc. or
 any advertising network. We do not require a WHOOP account or credentials to
-use the App. We do not operate a backend that stores your health data.
+use the App. We do not operate a backend that stores your health data, except an issue
+report you choose to send with your database attached (see Issue reports).
 
 **Your controls**
 Every one of these is a row in Settings › Privacy, and each takes effect the
