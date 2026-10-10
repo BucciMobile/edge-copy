@@ -15547,7 +15547,7 @@
   "@reportIncludedGroup": {
     "description": "Issue report: heading over the list of files in the report."
   },
-  "reportIncludedNote": "The category, title, description, app version, platform, system version, phone model, install ID, and whether a database or screenshot is attached travel unencrypted so we can track the report, and are kept for 90 days. Everything else is encrypted on this phone before it leaves, so only the maintainers can read it, and is deleted after 30 days (14 for an attached database).",
+  "reportIncludedNote": "The category, title, description, app version, platform, system version, phone model, install ID, and whether a database or screenshot is attached travel unencrypted so we can track the report, and are kept for 90 days. Everything else is encrypted on this phone before it leaves, so only the maintainers can read it, and is deleted after 30 days, or after 14 days if your database is attached.",
   "@reportIncludedNote": {
     "description": "Issue report: note under the file list."
   },
@@ -15660,5 +15660,17 @@
   "reportDeleteFailed": "Couldn't delete it. Try again later.",
   "@reportDeleteFailed": {
     "description": "Issue report: delete failed."
+  },
+  "reportSaveFailedTitle": "Couldn't save the report",
+  "@reportSaveFailedTitle": {
+    "description": "Report screen: title of the card shown when building or sharing the local zip failed. Nothing was sent."
+  },
+  "reportSaveFailedBody": "Something went wrong while building or sharing the file. Nothing was sent.",
+  "@reportSaveFailedBody": {
+    "description": "Report screen: body of the save-failed card."
+  },
+  "reportSaveRetry": "Try again",
+  "@reportSaveRetry": {
+    "description": "Report screen: button that retries saving the report locally."
   }
 }

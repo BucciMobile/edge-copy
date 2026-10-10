@@ -37,7 +37,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   bool _db = false; // OFF by default: it is the user's whole health record
   bool _busy = false;
   SentReport? _sent;
-  int? _error; // HTTP status of a failed send, 0 = no answer, -1 = no title
+  int? _error; // HTTP status of a failed send, 0 = no answer, -1 = no title, -2 = save failed
   List<SentReport> _reports = const [];
 
   @override
@@ -112,7 +112,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       await Share.shareXFiles([XFile(f.path)],
           subject: 'OpenStrap issue report', sharePositionOrigin: origin);
     } catch (e) {
-      if (mounted) setState(() => _error = e is ReportSendError ? e.status : 0);
+      if (mounted) setState(() => _error = e is ReportSendError ? e.status : -2);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -276,13 +276,17 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                 ],
                 if (err != null) ...[
                   const SizedBox(height: S.x5),
-                  StatusCard(l.reportNotSentTitle, _why(l, err),
+                  StatusCard(
+                      err == -2 ? l.reportSaveFailedTitle : l.reportNotSentTitle,
+                      err == -2 ? l.reportSaveFailedBody : _why(l, err),
                       icon: LucideIcons.triangleAlert,
                       fix: err == -1
                           ? ''
-                          : err == 507
-                              ? l.reportSendWithoutDb
-                              : l.reportSaveInstead,
+                          : err == -2
+                              ? l.reportSaveRetry
+                              : err == 507
+                                  ? l.reportSendWithoutDb
+                                  : l.reportSaveInstead,
                       onFix: err == -1
                           ? null
                           : err == 507

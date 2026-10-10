@@ -63,8 +63,8 @@ sleep, heart rate and other health data).
 
 The report is encrypted on your phone before it leaves, with a key only the
 maintainers hold, so the service that stores it cannot read it. It is stored
-on Cloudflare. A report is deleted after 30 days, and an attached database
-after 14. The report's ID, your install ID, category, title, description, app version,
+on Cloudflare. A report is deleted after 30 days, or after 14 days if it
+includes your database. The report's ID, your install ID, category, title, description, app version,
 platform, system version, phone model, and whether a database or screenshot is
 attached are kept unencrypted so we can track it, and that record is deleted
 after 90 days. You can delete a report sooner at any time from "My reports" on the same
