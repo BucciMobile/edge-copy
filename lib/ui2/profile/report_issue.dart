@@ -99,7 +99,10 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
 
   Future<void> _save() async {
     final origin = shareOrigin(context);
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
       final r = await collectReport(context.read<AppState>(), _draft());
       final dir = await getTemporaryDirectory();
@@ -108,6 +111,8 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       await f.writeAsBytes(r.zip);
       await Share.shareXFiles([XFile(f.path)],
           subject: 'OpenStrap issue report', sharePositionOrigin: origin);
+    } catch (e) {
+      if (mounted) setState(() => _error = e is ReportSendError ? e.status : 0);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -122,11 +127,15 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   Future<void> _delete(SentReport r) async {
     final l = _l(context);
     final messenger = ScaffoldMessenger.of(context);
+    if (_busy) return;
+    setState(() => _busy = true);
     try {
       await deleteReport(r);
       await _reload();
     } catch (_) {
       messenger.showSnackBar(SnackBar(content: Text(l.reportDeleteFailed)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
   }
 

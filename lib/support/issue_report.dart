@@ -8,7 +8,6 @@
 
 import 'dart:convert';
 import 'dart:io';
-import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -235,8 +234,14 @@ Future<({Uint8List zip, Map<String, Object?> meta})> collectReport(
     // The existing export path: a VACUUM INTO snapshot, not a file copy.
     final path = await LocalDb.exportCopy(includeSubstrateArchive: false);
     try {
-      dbGz = await Isolate.run(() async =>
-          GZipEncoder().encodeBytes(await File(path).readAsBytes()));
+      // Streamed: the raw copy is never held in memory, and we stop as soon
+      // as the compressed bytes pass what the Worker would accept anyway.
+      final out = BytesBuilder(copy: false);
+      await for (final c in File(path).openRead().transform(gzip.encoder)) {
+        out.add(c);
+        if (out.length > kReportMaxBytesWithDb) throw const ReportSendError(413);
+      }
+      dbGz = out.takeBytes();
     } finally {
       try {
         await File(path).delete();
@@ -323,9 +328,12 @@ Future<SentReport> sendReport(Map<String, Object?> serverMeta, Uint8List blob,
       } catch (_) {}
       throw ReportSendError(res.statusCode, err);
     }
-    final j = jsonDecode(res.body) as Map<String, dynamic>;
-    final sent = SentReport.fromJson(j);
-    await _store([...await loadSentReports(), sent]);
+    final sent = SentReport.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+    // The Worker has the report: a local bookkeeping failure must not look
+    // like a failed send (a retry would burn another daily slot).
+    try {
+      await _store([...await loadSentReports(), sent]);
+    } catch (_) {}
     return sent;
   } on ReportSendError {
     rethrow;

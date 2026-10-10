@@ -102,13 +102,37 @@ async function createIssue(env: Env, id: string, m: Meta): Promise<string | null
   }
 }
 
+/** The request body, or null as soon as it passes [max] bytes. */
+async function readCapped(req: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!req.body) return new Uint8Array(0);
+  const reader = req.body.getReader();
+  const parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    n += value.length;
+    if (n > max) { await reader.cancel(); return null; }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let o = 0;
+  for (const p of parts) { out.set(p, o); o += p.length; }
+  return out;
+}
+
 async function postReport(req: Request, env: Env): Promise<Response> {
   const cl = Number(req.headers.get("content-length") ?? 0);
   if (cl > LIMITS.blobDb + 64 * 1024) return err(413, "too_large");
   if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("multipart/form-data")) return err(400, "bad_request");
 
+  // Count real bytes while reading: Content-Length can be absent (chunked) or wrong.
+  const raw = await readCapped(req, LIMITS.blobDb + 64 * 1024);
+  if (!raw) return err(413, "too_large");
   let form: FormData;
-  try { form = await req.formData(); } catch { return err(400, "bad_request"); }
+  try {
+    form = await new Response(raw, { headers: { "content-type": req.headers.get("content-type") ?? "" } }).formData();
+  } catch { return err(400, "bad_request"); }
   const metaStr = form.get("meta");
   const blob = form.get("blob");
   if (typeof metaStr !== "string" || metaStr.length > 16_000 || !blob || typeof blob === "string") return err(400, "bad_request");
@@ -124,14 +148,6 @@ async function postReport(req: Request, env: Env): Promise<Response> {
 
   const now = new Date();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
-  const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE install_id = ? AND created_at >= ?")
-    .bind(meta.installId, dayStart).first<{ n: number }>();
-  if ((used?.n ?? 0) >= LIMITS.perInstallPerDay) return err(429, "rate_limited");
-
-  if (meta.hasDatabase) {
-    const t = await env.DB.prepare("SELECT COALESCE(SUM(blob_bytes),0) AS b FROM reports").first<{ b: number }>();
-    if ((t?.b ?? 0) + bytes.length > LIMITS.ceilingBytes) return err(507, "storage_full");
-  }
 
   const deleteToken = hex(crypto.getRandomValues(new Uint8Array(16)));
   const tokenHash = hex(await sha256(deleteToken));
@@ -142,11 +158,21 @@ async function postReport(req: Request, env: Env): Promise<Response> {
     id = newId();
     key = `${meta.hasDatabase ? "db" : "logs"}/${id}`;
     try {
-      await env.DB.prepare(
+      // One statement checks the daily count and storage ceiling and inserts, so concurrent posts cannot both pass.
+      const ins = await env.DB.prepare(
         `INSERT INTO reports (id, install_id, created_at, category, title, description, meta, blob_key, blob_bytes, has_db, delete_token_hash)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+         SELECT ?,?,?,?,?,?,?,?,?,?,?
+         WHERE (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) < ?
+           AND (? = 0 OR (SELECT COALESCE(SUM(blob_bytes),0) FROM reports) + ? <= ?)`)
         .bind(id, meta.installId, createdAt, meta.category, meta.title, meta.description, JSON.stringify(meta),
-          key, bytes.length, meta.hasDatabase ? 1 : 0, tokenHash).run();
+          key, bytes.length, meta.hasDatabase ? 1 : 0, tokenHash,
+          meta.installId, dayStart, LIMITS.perInstallPerDay,
+          meta.hasDatabase ? 1 : 0, bytes.length, LIMITS.ceilingBytes).run();
+      if (!ins.meta.changes) {
+        const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE install_id = ? AND created_at >= ?")
+          .bind(meta.installId, dayStart).first<{ n: number }>();
+        return (used?.n ?? 0) >= LIMITS.perInstallPerDay ? err(429, "rate_limited") : err(507, "storage_full");
+      }
       break;
     } catch (e) {
       if (i === 4 || !/UNIQUE|constraint/i.test(String(e))) throw e; // id collision: retry
@@ -191,10 +217,14 @@ async function admin(req: Request, env: Env, url: URL): Promise<Response> {
   if (url.pathname === "/v1/admin/reports") {
     const since = url.searchParams.get("since");
     if (since && Number.isNaN(Date.parse(since))) return err(400, "bad_since");
+    // Tie-safe paging: pass the last row's created_at as `since` and its id as `after_id`.
+    const afterId = url.searchParams.get("after_id") ?? "";
+    const sinceIso = since ? new Date(since).toISOString() : "";
     const { results } = await env.DB.prepare(
       `SELECT id, install_id, created_at, category, title, description, meta, blob_key, blob_bytes, has_db, github_issue_url
-       FROM reports WHERE created_at > ? AND title != '' ORDER BY created_at LIMIT 1000`)
-      .bind(since ? new Date(since).toISOString() : "").all();
+       FROM reports WHERE title != '' AND (created_at > ? OR (created_at = ? AND id > ?))
+       ORDER BY created_at, id LIMIT 1000`)
+      .bind(sinceIso, sinceIso, afterId).all();
     return json({ reports: results });
   }
   return err(404, "not_found");

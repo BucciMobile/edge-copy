@@ -154,6 +154,19 @@ describe("admin + health", () => {
   });
 });
 
+describe("admin paging", () => {
+  it("does not skip rows that share a created_at", async () => {
+    const ts = "2031-01-01T00:00:00.000Z";
+    for (const id of ["OS-TIE001", "OS-TIE002"])
+      await e.DB.prepare(`INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_bytes,has_db,delete_token_hash)
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(id, "i", ts, "other", "t", "", "{}", 0, 0, "h").run();
+    const page = async (after: string) =>
+      ((await (await admin(`/v1/admin/reports?since=${ts}&after_id=${after}`)).json()) as any).reports.map((r: any) => r.id);
+    expect(await page("OS-TIE001")).toEqual(["OS-TIE002"]);
+    expect(await page("")).toEqual(["OS-TIE001", "OS-TIE002"]);
+  });
+});
+
 describe("cleanup cron", () => {
   it("expires db blobs at 14d, plain at 30d, rows at 90d, and keeps the bytes total honest", async () => {
     const ago = (d: number) => new Date(Date.now() - d * 864e5).toISOString();

@@ -57,11 +57,11 @@ python3 tools/fetch_report.py OS-XXXXXX      # writes OS-XXXXXX.zip
 
 Private key path: `REPORT_PRIVATE_KEY` (default `~/.openstrap-research/report-keys/report_private_key.pem`). Keep it out of every repo. `python3 tools/selfcheck.py` verifies the encrypt/decrypt round trip, including the real key pair when present.
 
-Admin API: `GET /v1/admin/reports?since=ISO` (metadata) and `GET /v1/admin/reports/<id>/blob`, both with `Authorization: Bearer $ADMIN_TOKEN`.
+Admin API: `GET /v1/admin/reports?since=ISO&after_id=ID` (metadata, 1000 per page, ordered by `created_at, id`) and `GET /v1/admin/reports/<id>/blob`, both with `Authorization: Bearer $ADMIN_TOKEN`.
 
 ## Metadata backup (Oracle/arm64 box, not deployed)
 
-`tools/backup_to_oracle.sh` pulls metadata (no blobs) into SQLite nightly. Needs `curl` and `python3`.
+`tools/backup_to_oracle.sh` mirrors metadata (no blobs) into SQLite nightly. Needs `python3`. Each run pages the admin list with a `(created_at, id)` cursor and replaces the whole table in one transaction, so a report the user deleted (the Worker scrubs it and stops listing it) or that passed 90 days is gone from the backup the next night; it also purges rows older than 90 days locally. The backup never holds data longer than the policy.
 
 ```sh
 sudo install -d /opt/openstrap-report-backup && sudo cp tools/backup_to_oracle.sh /opt/openstrap-report-backup/
