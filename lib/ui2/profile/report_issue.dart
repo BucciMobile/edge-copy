@@ -4,7 +4,7 @@
 // archive to the share sheet with no network and no size limit.
 
 import 'dart:io';
-import 'dart:isolate';
+import 'dart:async';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -17,7 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
 import '../../support/issue_report.dart';
-import '../../support/report_crypto.dart';
+import '../../sync/file_log.dart';
 import '../activity/share.dart' show shareOrigin;
 import '../ui2.dart';
 import 'profile.dart';
@@ -98,7 +98,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
           onStage: (st) => _setStep(_stageText(l, st)));
       final zip = r.zip;
       _setStep(l.reportStageEncrypting);
-      final blob = await Isolate.run(() => osr1Encrypt(zip));
+      final blob = await sealReport(zip);
       if (blob.length >
           (draft.includeDatabase ? kReportMaxBytesWithDb : kReportMaxBytes)) {
         throw const ReportSendError(413);
@@ -108,8 +108,11 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       if (mounted) setState(() => _sent = sent);
       await _reload();
     } on ReportSendError catch (e) {
+      unawaited(FileLog.write('[report] create ticket failed: $e'));
       if (mounted) setState(() => _error = e.status);
-    } catch (_) {
+    } catch (e, st) {
+      // Kept in the sync log, so the next report (or Share locally) carries it.
+      unawaited(FileLog.write('[report] create ticket failed: $e\n$st'));
       if (mounted) setState(() => _error = 0);
     } finally {
       if (mounted) {

@@ -68,6 +68,13 @@ void main() {
     });
   });
 
+  test('sealReport encrypts in a background isolate', () async {
+    final zip = Uint8List.fromList(List<int>.generate(4096, (i) => i % 251));
+    final blob = await sealReport(zip);
+    expect(String.fromCharCodes(blob.sublist(0, 4)), 'OSR1');
+    expect(blob.length, 4 + 65 + 12 + zip.length + 16);
+  });
+
   test('manifest lists exactly the files in the archive, same as the screen',
       () {
     for (final (shot, db) in [(false, false), (true, false), (true, true)]) {

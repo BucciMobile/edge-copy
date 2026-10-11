@@ -8,6 +8,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -21,6 +22,7 @@ import '../l10n/app_localizations.dart';
 import '../state/app_state.dart';
 import '../sync/file_log.dart';
 import '../telemetry/telemetry_service.dart';
+import 'report_crypto.dart';
 
 /// The report service. One constant; the Worker answers under /v1.
 const String kReportBaseUrl = 'https://reports.openstrap.site';
@@ -325,6 +327,11 @@ class ReportSendError implements Exception {
   @override
   String toString() => 'ReportSendError($status${error == null ? '' : ', $error'})';
 }
+
+/// Encrypt off the UI thread. Top-level on purpose: a closure created inside a
+/// widget's State can capture the State itself, which cannot cross an isolate
+/// boundary, and Isolate.run then throws before anything is sent.
+Future<Uint8List> sealReport(Uint8List zip) => Isolate.run(() => osr1Encrypt(zip));
 
 /// POST the sealed archive. Throws [ReportSendError] on anything but 201.
 Future<SentReport> sendReport(Map<String, Object?> serverMeta, Uint8List blob,
