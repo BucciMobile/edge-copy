@@ -390,28 +390,35 @@ Future<void> runOuraSpo2BackfillPass({
   required String cursor,
   required List<String> days,
   required Future<OuraSpo2ExportResult> Function(String date) exportDay,
-  required Future<String?> Function() getCursor,
   required Future<void> Function(String) setCursor,
 }) async {
   for (final date in days) {
     final result = await exportDay(date);
     final advance = ouraSpo2CursorAdvance(result);
     if (advance == null) return; // a genuine failure — retry this day
-    if (!advance) return; // gate closed — stop BEFORE consuming any day
-    await setCursor(date);
+    if (!advance) continue; // unsuitable day: skip WITHOUT consuming it
+    // MONOTONIC PROGRESS: a tail rewrite of an OLDER day never drags
+    // the cursor backwards — the frontier stays at the newest day this
+    // pass actually wrote above it, so a failure further up still
+    // leaves every older success durable.
+    await setCursor(date.compareTo(cursor) > 0 ? date : cursor);
+    cursor = date.compareTo(cursor) > 0 ? date : cursor;
   }
 }
 
 /// The cursor decision for one day's Oura-SpO2 export result, as ONE pure
 /// function both the pass and its tests read — never inline, never duplicated.
 ///
-/// * `written` -> true: the day is done, advance.
-/// * `notEligible` -> false: the gate is closed. STOP, consume nothing —
-///   a later release must find every day still behind the cursor.
-/// * `noData` -> false: same stop (cannot occur in the pass, which only
-///   enumerates days that have rows; mapped defensively).
-/// * `deleteFailed` / `writeFailed` -> null: a genuine failure. STOP AT
-///   this day; the next pass retries it, and the day is never skipped.
+/// The decision for one day's Oura-SpO2 export result:
+/// * `written` -> advance the cursor to this day.
+/// * `notEligible` (gate closed / interpretation unverified) ->
+///   SKIP WITHOUT CONSUMING: the pass moves on — an old unsuitable day
+///   must never wedge the newer, suitable days behind it — and the day
+///   stays where it is, so a later release still finds it.
+/// * `noData` (no still-paired candidate that day) -> same skip.
+/// * `deleteFailed` / `writeFailed` -> a genuine failure: STOP AT this
+///   day. The next pass retries it; nothing past it is attempted, and
+///   nothing anywhere is consumed by a failing day.
 @visibleForTesting
 bool? ouraSpo2CursorAdvance(OuraSpo2ExportResult result) => switch (result) {
       OuraSpo2ExportResult.written => true,
@@ -421,15 +428,6 @@ bool? ouraSpo2CursorAdvance(OuraSpo2ExportResult result) => switch (result) {
       OuraSpo2ExportResult.writeFailed => null,
     };
 
-/// The day label [days] local days before [cursor] — calendar-field
-/// arithmetic (never -86400s), the same DST-safety every other label walk
-/// here uses. An unparseable cursor (impossible from setCursor, defensive)
-/// yields '', which the caller's `date > ''` bound treats as "no tail".
-String _dayLabelMinus(String cursor, int days) {
-  final d = DateTime.tryParse(cursor);
-  if (d == null) return '';
-  return dayLabelOf(DateTime(d.year, d.month, d.day - days));
-}
 
 class HealthExportSingleFlight {
   Future<int>? _inFlight;
@@ -1568,57 +1566,54 @@ class HealthExporter {
   /// Until hardware validation flips `kOuraSpo2InterpretationVerified`
   /// this returns `notEligible` before touching the health store — the
   /// software path is wired, the release is that one constant.
+  /// Export one day's ATOMIC candidate (device + value + interval from
+  /// ONE query — see [LocalDb.ouraSpo2DayCandidate]). The candidate is
+  /// suitable by construction (still-paired Oura ring, its own rows);
+  /// `interpretationVerified` is the ONLY remaining gate and stays the
+  /// compile-time release constant.
+  ///
+  /// [deleteWindow] clears THIS DAY's own prior sample before the write,
+  /// independent of where the new interval sits — a shrunk, shifted or
+  /// re-owned candidate must not leave the old sample behind. The
+  /// platform API removes only OUR samples; foreign data is untouchable.
   static Future<OuraSpo2ExportResult> exportOuraSpo2Day({
-    required Future<({double meanPercent, int count, int firstTsMs, int lastTsMs})?>
-        Function() summaryFor,
+    required ({String deviceId, double meanPercent, int count,
+        int firstTsMs, int lastTsMs}) candidate,
     required Future<bool> Function(double value, DateTime start, DateTime end)
         write,
-    required Future<bool> Function(DateTime start, DateTime end) deleteOwn,
-    bool deviceSelected = true,
-    bool integrationEnabled = true,
+    required Future<bool> Function(DateTime start, DateTime end) deleteWindow,
     bool interpretationVerified = kOuraSpo2InterpretationVerified,
-    bool timeReferenceSuitable = true,
   }) async {
-    final summary = await summaryFor();
     final eligible = eligibleOuraSpo2Percent(
-      value: summary?.meanPercent,
+      value: candidate.meanPercent,
       unit: '%',
-      deviceSelected: deviceSelected,
-      integrationEnabled: integrationEnabled,
+      deviceSelected: true,
+      integrationEnabled: true,
       interpretationVerified: interpretationVerified,
-      timeReferenceSuitable: timeReferenceSuitable,
+      timeReferenceSuitable: true,
     );
-    if (summary == null || eligible == null) {
-      return OuraSpo2ExportResult.notEligible;
-    }
+    if (eligible == null) return OuraSpo2ExportResult.notEligible;
     // THE SAMPLE IS THE MEASURED INTERVAL, not a point at its first
     // second: a day's equal-weighted mean over [first .. last] measured
     // seconds is an AGGREGATE, and HealthKit models that as
     // startTime..endTime. Writing it at startTime == endTime would be a
     // point-sample claim — a measurement at one instant the ring never
     // made at that instant alone.
-    final start = DateTime.fromMillisecondsSinceEpoch(summary.firstTsMs);
-    final end = DateTime.fromMillisecondsSinceEpoch(summary.lastTsMs);
-    // Delete-then-write, idempotent on a re-export of the same day. The
-    // window is the observations' own measured span, and the delete only
-    // ever removes OUR samples — the Oura app's, the Apple Watch's and
-    // every other app's SpO2 rows are untouchable by the platform API.
-    if (!await deleteOwn(start, end.add(const Duration(milliseconds: 1000)))) {
+    final start = DateTime.fromMillisecondsSinceEpoch(candidate.firstTsMs);
+    final end = DateTime.fromMillisecondsSinceEpoch(candidate.lastTsMs);
+    // Day-window clear FIRST — see the doc: the prior sample of this day
+    // goes wherever the previous candidate put it, and only a
+    // day-relative clear can replace a MOVED interval.
+    if (!await deleteWindow(start, end)) {
       return OuraSpo2ExportResult.deleteFailed;
     }
-    return await write(summary.meanPercent, start, end)
+    return await write(candidate.meanPercent, start, end)
         ? OuraSpo2ExportResult.written
         : OuraSpo2ExportResult.writeFailed;
   }
 
 
 
-  /// How many days behind the cursor the pass re-examines EVERY time:
-  /// late-delivered nights and re-stated (re-anchored) days land behind a
-  /// day cursor, and delete-then-write makes the re-export idempotent. The
-  /// recent tail, not the whole history — the same mutable-tail shape the
-  /// main exporter uses for non-finalized days.
-  static const int _kOuraSpo2TailDays = 3;
 
   /// The SpO2 backfill cursor. SEPARATE from `health_export_through` because
   /// the ring's observations cover days the derive pipeline never ran on
@@ -1627,31 +1622,78 @@ class HealthExporter {
   /// finalized prefix, retry budget, give-up — belongs to the derived
   /// metrics, not to this type.
   ///
-  /// A date label (local day). The ONE rule that keeps a later release
-  /// reachable: the cursor advances ONLY on `written`, and the pass STOPS
-  /// on `notEligible` without consuming any day. A pass while the gate is
-  /// closed must leave the cursor untouched — advancing past days "because
-  /// nothing was owed" is exactly how a later release finds the whole
-  /// history already consumed and unrecoverable. `noData` cannot occur
-  /// here (the query enumerates days that HAVE rows); it is mapped to
-  /// stop-the-pass defensively rather than advance. A failed delete or
-  /// write also stops the pass at that day, so the next pass retries it.
+  /// A date label (local day). TWO rules together:
   ///
-  /// DELAYED AND CORRECTED DATA: a day cursor alone would skip rows that a
-  /// later sync appends BEHIND it (a ring delivering several nights late)
-  /// and re-stated days (a re-anchored replay writing different seconds).
-  /// The pass therefore always re-walks the RECENT TAIL behind the cursor
-  /// (see [_kOuraSpo2TailDays]) with delete-then-write idempotency, and
-  /// the query bound limits one pass's work. No general job framework, no
-  /// per-row bookkeeping — the same mutable-tail shape exportAll itself
-  /// uses for the non-finalized head.
+  /// 1. NO HEAD BLOCKING, NOTHING CONSUMED FOR FREE. `notEligible` and
+  ///    `noData` SKIP their day without consuming it — the pass moves on
+  ///    to the newer days, and an old unsuitable day never wedges the
+  ///    days behind it. `written` is the only result that moves the
+  ///    cursor; a day the gate held or the store refused stays exactly
+  ///    where it was, so a later release (or a re-paired ring) still
+  ///    finds it.
+  /// 2. MONOTONIC PROGRESS. A re-export of an OLDER day (the changed-day
+  ///    scope below) never drags the cursor backwards — the frontier is
+  ///    the newest day the walk actually wrote.
+  ///
+  /// A failed delete or write stops the pass AT that day; the next pass
+  /// retries it, and nothing past it is attempted.
+  ///
+  /// CHANGED DAYS BEHIND THE CURSOR: a day cursor alone would miss rows a
+  /// later sync appends BEHIND it (a ring delivering weeks late, an
+  /// anchor-corrected re-stamp). Every successful export watermarks the
+  /// day with its newest observation (`health_oura_spo2_done:<date>` in
+  /// `sync_cursor`, written only on success), and each pass re-walks the
+  /// past-cursor days whose observations are NEWER than their watermark —
+  /// bounded per pass by the day cap, no wholesale history rewrite, no
+  /// new table, no schema change.
+  ///
   static const String _kOuraSpo2Cursor = 'health_oura_spo2_through';
   static const int _kOuraSpo2DaysPerPass = 30;
 
   /// One pass of the Oura-SpO2 export, behind its own cursor and the same
   /// [_workoutLock] the caller already holds (exportAll runs under it, so
   /// concurrent passes are serialized here too). Never throws.
-  Future<void> _exportOuraSpo2BehindCursor() async {
+  /// The health-store seam the pass goes through — production wires the
+  /// real plugin, the integration test wires a stateful double. Nothing
+  /// else differs: enumeration, candidate, gate, cursor and retry are
+  /// the production code below.
+  @visibleForTesting
+  Future<OuraSpo2ExportResult> debugExportOuraSpo2Day(
+    String date,
+    Future<bool> Function(double value, DateTime start, DateTime end) write,
+    Future<bool> Function(DateTime start, DateTime end) deleteWindow,
+  ) =>
+      _exportOuraSpo2(date,
+          writeOverride: write, deleteWindowOverride: deleteWindow);
+
+  /// One production pass of the Oura-SpO2 export, behind its own cursor
+  /// and the same [_workoutLock] exportAll already holds. [write] and
+  /// [deleteWindow] exist ONLY for the integration test's stateful
+  /// store double; production calls this with no overrides and the real
+  /// plugin serves both. Never throws.
+  @visibleForTesting
+  Future<void> debugRunSpo2Pass({
+    Future<bool> Function(double value, DateTime start, DateTime end)?
+        write,
+    Future<bool> Function(DateTime start, DateTime end)? deleteWindow,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+  }) async {
+    try {
+      await _exportOuraSpo2BehindCursor(
+          writeOverride: write,
+          deleteWindowOverride: deleteWindow,
+          interpretationVerified: interpretationVerified);
+    } catch (e) {
+      debugPrint('[health] oura spo2 backfill: $e');
+    }
+  }
+
+  Future<void> _exportOuraSpo2BehindCursor({
+    Future<bool> Function(double value, DateTime start, DateTime end)?
+        writeOverride,
+    Future<bool> Function(DateTime start, DateTime end)? deleteWindowOverride,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+  }) async {
     try {
       final cursor = await LocalDb.getCursor(_kOuraSpo2Cursor) ?? '';
       final db = await LocalDb.instance;
@@ -1666,23 +1708,40 @@ class HealthExporter {
         'GROUP BY date ORDER BY date ASC LIMIT $_kOuraSpo2DaysPerPass',
         [cursor],
       )];
+      // The RE-EXPORT SCOPE behind the cursor — not a fixed 3-day window:
+      // every past-cursor day whose observations CHANGED since it was
+      // last exported. The sync_cursor table carries each day's last
+      // successful export verbatim (the walk sets
+      // `health_oura_spo2_done:<date>` on every `written`), and a day
+      // rejoins the walk when its newest row is newer than that vermark
+      // — a late delivery weeks later, an anchor-corrected re-stamp, or
+      // any other append behind the cursor. Bounded per pass by the
+      // same day cap; nothing is re-walked wholesale.
       final tail = cursor.isEmpty
           ? const <Map<String, Object?>>[]
           : await db.rawQuery(
-              "SELECT date "
-              'FROM observation '
-              "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
-              "AND unit = '%' AND value >= 70 AND value <= 100 "
-              'AND date <= ? AND date > ? '
-              'GROUP BY date ORDER BY date DESC LIMIT $_kOuraSpo2TailDays',
-              [cursor, _dayLabelMinus(cursor, _kOuraSpo2TailDays)],
+              'SELECT o.date AS date, MAX(o.ts_ms) AS newest '
+              'FROM observation o '
+              "LEFT JOIN sync_cursor c ON c.name = 'health_oura_spo2_done:' || o.date "
+              "WHERE o.vendor_key = 'spo2' AND o.source_kind = 'vendor' "
+              "AND o.unit = '%' AND o.value >= 70 AND o.value <= 100 "
+              'AND o.date <= ? '
+              'GROUP BY o.date '
+              'HAVING c.value IS NULL '
+              '   OR CAST(c.value AS INTEGER) < MAX(o.ts_ms) '
+              'ORDER BY o.date ASC LIMIT $_kOuraSpo2DaysPerPass',
+              [cursor],
             );
       await runOuraSpo2BackfillPass(
         cursor: cursor,
-        days: [for (final r in tail.reversed) r['date'] as String] +
+        days: [for (final r in tail) r['date'] as String] +
             [for (final r in above) r['date'] as String],
-        exportDay: _exportOuraSpo2,
-        getCursor: () async => LocalDb.getCursor(_kOuraSpo2Cursor),
+        exportDay: (date) => _exportOuraSpo2(
+          date,
+          writeOverride: writeOverride,
+          deleteWindowOverride: deleteWindowOverride,
+          interpretationVerified: interpretationVerified,
+        ),
         setCursor: (v) => LocalDb.setCursor(_kOuraSpo2Cursor, v),
       );
     } catch (e) {
@@ -1716,29 +1775,63 @@ class HealthExporter {
   ///    second, never a noon fallback. A future latest/on-demand path with
   ///    a weaker time contract must NOT default its way through this gate.
   ///  * `interpretationVerified` — the compile-time release constant.
-  Future<OuraSpo2ExportResult> _exportOuraSpo2(String date) async {
+  Future<OuraSpo2ExportResult> _exportOuraSpo2(
+    String date, {
+    Future<bool> Function(double value, DateTime start, DateTime end)?
+        writeOverride,
+    Future<bool> Function(DateTime start, DateTime end)? deleteWindowOverride,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+  }) async {
     try {
-      final device = await LocalDb.ouraSpo2DayDevice(date);
+      // ONE ATOMIC CANDIDATE: device, eligibility and value out of the
+      // same query — the gate can never approve ring B's eligibility
+      // while ring A's value is written. A forgotten ring does not rank.
+      final candidate = await LocalDb.ouraSpo2DayCandidate(date);
+      if (candidate == null) return OuraSpo2ExportResult.noData;
+      // THE DELETE WINDOW IS THE CANDIDATE'S OWN LOCAL DAY, not the new
+      // measured interval: this export writes exactly ONE sample per
+      // day-candidate, and a re-export must remove THIS DAY's own prior
+      // sample wherever the candidate's interval has since MOVED —
+      // late data shrinking it, an anchor correction shifting it, or an
+      // owner change relocating it. The day window is the smallest
+      // window that can hold any prior candidate of the same day, it
+      // removes only OUR samples (the platform API cannot touch the
+      // Oura app's or the Apple Watch's), and it is exactly the window
+      // `_exportDay` itself uses for every other rewritten type.
+      final dayStart = DateTime.tryParse('${date}T00:00:00');
+      if (dayStart == null) return OuraSpo2ExportResult.noData;
+      final dayEnd = DateTime(dayStart.year, dayStart.month, dayStart.day + 1);
+      final write = writeOverride ??
+          (value, start, end) => _health.writeHealthData(
+                value: value,
+                type: HealthDataType.BLOOD_OXYGEN,
+                startTime: start,
+                endTime: end,
+                unit: HealthDataUnit.PERCENT,
+              );
+      final deleteWindow = deleteWindowOverride ??
+          (start, end) =>
+              _deleteOwnSamples(HealthDataType.BLOOD_OXYGEN, start, end);
       final result = await exportOuraSpo2Day(
-        summaryFor: () => LocalDb.ouraSpo2DaySummary(date),
-        // The AGGREGATE's measured interval — see exportOuraSpo2Day's
-        // doc for why this is a span, never a single-point claim.
-        write: (value, start, end) => _health.writeHealthData(
-          value: value,
-          type: HealthDataType.BLOOD_OXYGEN,
-          startTime: start,
-          endTime: end,
-          unit: HealthDataUnit.PERCENT,
-        ),
-        deleteOwn: (start, end) =>
-            _deleteOwnSamples(HealthDataType.BLOOD_OXYGEN, start, end),
-        // A day whose owning ring's pairing row is gone stops exporting —
-        // not a failure, the same "forgotten device keeps its data but
-        // stops being a source" rule deleteDevice documents.
-        deviceSelected: device != null,
-        integrationEnabled: device != null,
+        candidate: candidate,
+        write: write,
+        deleteWindow: (start, end) => deleteWindow(dayStart, dayEnd),
+        interpretationVerified: interpretationVerified,
       );
       debugPrint('[health] oura spo2 $date: $result');
+      if (result == OuraSpo2ExportResult.written) {
+        // The day's CHANGE-DETECTION watermark: the newest observation
+        // row this export was built from. A later sync appending to this
+        // day (any date behind the cursor) makes the day rejoin the
+        // walk's re-export scope. Set ONLY on success — a failed write
+        // must leave the day pending.
+        // setCursor (not a raw insert): it fills sync_cursor's NOT NULL
+        // updated_at stamp the way every other cursor write does.
+        await LocalDb.setCursor(
+          'health_oura_spo2_done:$date',
+          '${candidate.lastTsMs}',
+        );
+      }
       return result;
     } catch (e) {
       debugPrint('[health] oura spo2 $date: $e');

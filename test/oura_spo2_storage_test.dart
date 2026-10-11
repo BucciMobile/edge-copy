@@ -120,25 +120,57 @@ void main() {
     expect(s.count, 10);
   });
 
-  test('the day owner is null when the owning ring was forgotten', () async {
-    await LocalDb.putObservations([
-      row(night, 96),
-    ], deviceId: 'oura-gone');
-    // No `device` row for 'oura-gone' — the ring was forgotten.
-    expect(await LocalDb.ouraSpo2DayDevice('2026-03-09'), isNull);
-    // The rows stay banked (the summary still reads them — display keeps
-    // history), but the export's device gate sees null.
+  test('#3 the atomic candidate: a forgotten ring with MANY samples never '
+      'ranks over a paired ring with FEW', () async {
+    final db = await LocalDb.instance;
+    // The PAIRED ring (adapter_id as OuraLink writes it), few samples.
+    await db.insert('device', {
+      'id': 'oura-paired',
+      'adapter_id': 'oura',
+      'first_seen': night.millisecondsSinceEpoch,
+      'last_seen': night.millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await LocalDb.putObservations(
+        [row(night, 95), row(night.add(const Duration(seconds: 1)), 95)],
+        deviceId: 'oura-paired');
+    // The FORGOTTEN ring: ten samples of 99, no device row.
+    await LocalDb.putObservations(
+        [for (var i = 0; i < 10; i++) row(night.add(Duration(seconds: i + 10)), 99)],
+        deviceId: 'oura-forgotten');
+    // The candidate is the PAIRED ring's value — never the forgotten
+    // ring's, however many samples it has.
+    final c = await LocalDb.ouraSpo2DayCandidate('2026-03-09');
+    expect(c, isNotNull);
+    expect(c!.deviceId, 'oura-paired');
+    expect(c.meanPercent, 95);
+    // Display keeps the forgotten ring's history banked.
     expect((await LocalDb.ouraSpo2DaySummary('2026-03-09')), isNotNull);
   });
 
-  test('the day owner is the still-paired ring with the most samples',
-      () async {
-    // Both rings have device rows; the summary's owner is ring-1 (most
-    // samples) — and only a JOINed row counts.
+  test('a device row WITHOUT the oura adapter_id never ranks — the unique '
+      'Oura data-path filter', () async {
+    final db = await LocalDb.instance;
+    // A paired device of ANOTHER family carrying spo2-keyed rows.
+    await db.insert('device', {
+      'id': 'other-band',
+      'adapter_id': 'whoop_gen4',
+      'first_seen': night.millisecondsSinceEpoch,
+      'last_seen': night.millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await LocalDb.putObservations(
+        [row(night, 91), row(night.add(const Duration(seconds: 1)), 91)],
+        deviceId: 'other-band');
+    // Registered, paired — but not an Oura ring: no candidate.
+    expect(await LocalDb.ouraSpo2DayCandidate('2026-03-09'), isNull);
+  });
+
+  test('the day owner among paired Oura rings is the one with the most '
+      'samples (deterministic tie-break)', () async {
     final db = await LocalDb.instance;
     for (final id in ['oura-ring-1', 'oura-ring-2']) {
       await db.insert('device', {
         'id': id,
+        'adapter_id': 'oura',
         'first_seen': night.millisecondsSinceEpoch,
         'last_seen': night.millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -150,7 +182,8 @@ void main() {
     await LocalDb.putObservations([
       row(night.add(const Duration(seconds: 2)), 100),
     ], deviceId: 'oura-ring-2');
-    expect(await LocalDb.ouraSpo2DayDevice('2026-03-09'), 'oura-ring-1');
+    final c = await LocalDb.ouraSpo2DayCandidate('2026-03-09');
+    expect(c!.deviceId, 'oura-ring-1');
   });
 
   test('unsuitable rows are outside the summary: wrong unit, wrong kind, '
