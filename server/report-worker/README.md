@@ -16,8 +16,8 @@ Cloudflare Worker behind "Report an issue" in the app. Contract: `~/.openstrap-r
 | Blob with DB | deleted after 14 days |
 | Metadata row | deleted after 90 days |
 | Blob size | 2 MB, or 15 MB when `hasDatabase` |
-| Rate limit | 3 reports per install id per UTC day (user-deleted reports still count) |
-| Storage ceiling | DB reports get `507 storage_full` when stored bytes would exceed 8 GB |
+| Rate limit | 3 reports per install id per UTC day (user-deleted reports still count), and 1000 per UTC day across all installs, since install ids are chosen by the client |
+| Storage ceiling | DB reports get `507 storage_full` above 8 GB stored; every report gets it above 9 GB, so R2 never leaves the free 10 GB |
 
 A daily cron (03:17 UTC) enforces expiry and zeroes `blob_bytes` for removed blobs, so `SUM(blob_bytes)` is the live total. R2 lifecycle rules (below) are a second line of defence for the blobs only.
 

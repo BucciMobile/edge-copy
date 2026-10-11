@@ -87,6 +87,25 @@ describe("POST /v1/reports", () => {
     expect((await post(meta())).status).toBe(201);
   });
 
+  it("refuses every report above the hard ceiling", async () => {
+    await e.DB.prepare(
+      `INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
+       VALUES ('OS-BBBBBB','z',?,'sync','t','d','{}','logs/OS-BBBBBB',?,0,'h')`)
+      .bind(new Date().toISOString(), LIMITS.hardCeilingBytes - 100).run();
+    const r = await post(meta(), blobOf(1000));
+    expect(r.status).toBe(507);
+  });
+
+  it("caps reports per day across all installs", async () => {
+    const now = new Date().toISOString();
+    const stmt = e.DB.prepare(
+      `INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
+       VALUES (?,?,?,'sync','t','d','{}','logs/x',0,0,'h')`);
+    await e.DB.batch(Array.from({ length: LIMITS.dailyTotal }, (_, i) => stmt.bind(`OS-T${String(i).padStart(5, "0")}`, `i${i}`, now)));
+    const r = await post(meta({ installId: "323e4567-e89b-42d3-a456-426614174000" }));
+    expect(r.status).toBe(429);
+  });
+
   it("creates a GitHub issue when configured, without blob contents; failure still gives 201", async () => {
     e.GITHUB_TOKEN = "t"; e.GITHUB_REPO = "OpenStrap/reports";
     const spy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

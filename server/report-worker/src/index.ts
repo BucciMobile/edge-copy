@@ -11,7 +11,9 @@ export const LIMITS = {
   blobNoDb: 2 * 1024 * 1024,
   blobDb: 15 * 1024 * 1024,
   perInstallPerDay: 3,
-  ceilingBytes: 8 * 1024 ** 3,
+  ceilingBytes: 8 * 1024 ** 3, // database attachments refused above this
+  hardCeilingBytes: 9 * 1024 ** 3, // every report refused above this: R2 free tier is 10 GB
+  dailyTotal: 1000, // all installs together; install ids are client-chosen, so this is the real spam cap
   blobTtlDays: 30,
   dbTtlDays: 14,
   rowTtlDays: 90,
@@ -163,15 +165,19 @@ async function postReport(req: Request, env: Env): Promise<Response> {
         `INSERT INTO reports (id, install_id, created_at, category, title, description, meta, blob_key, blob_bytes, has_db, delete_token_hash)
          SELECT ?,?,?,?,?,?,?,?,?,?,?
          WHERE (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) < ?
-           AND (? = 0 OR (SELECT COALESCE(SUM(blob_bytes),0) FROM reports) + ? <= ?)`)
+           AND (SELECT COUNT(*) FROM reports WHERE created_at >= ?) < ?
+           AND (SELECT COALESCE(SUM(blob_bytes),0) FROM reports) + ? <= ?`)
         .bind(id, meta.installId, createdAt, meta.category, meta.title, meta.description, JSON.stringify(meta),
           key, bytes.length, meta.hasDatabase ? 1 : 0, tokenHash,
           meta.installId, dayStart, LIMITS.perInstallPerDay,
-          meta.hasDatabase ? 1 : 0, bytes.length, LIMITS.ceilingBytes).run();
+          dayStart, LIMITS.dailyTotal,
+          bytes.length, meta.hasDatabase ? LIMITS.ceilingBytes : LIMITS.hardCeilingBytes).run();
       if (!ins.meta.changes) {
-        const used = await env.DB.prepare("SELECT COUNT(*) AS n FROM reports WHERE install_id = ? AND created_at >= ?")
-          .bind(meta.installId, dayStart).first<{ n: number }>();
-        return (used?.n ?? 0) >= LIMITS.perInstallPerDay ? err(429, "rate_limited") : err(507, "storage_full");
+        const used = await env.DB.prepare(
+          "SELECT (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) AS mine, (SELECT COUNT(*) FROM reports WHERE created_at >= ?) AS all_")
+          .bind(meta.installId, dayStart, dayStart).first<{ mine: number; all_: number }>();
+        return (used?.mine ?? 0) >= LIMITS.perInstallPerDay || (used?.all_ ?? 0) >= LIMITS.dailyTotal
+          ? err(429, "rate_limited") : err(507, "storage_full");
       }
       break;
     } catch (e) {
