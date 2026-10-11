@@ -8,8 +8,9 @@ export interface Env {
 
 const DAY = 86_400_000;
 export const LIMITS = {
-  blobNoDb: 2 * 1024 * 1024,
-  blobDb: 15 * 1024 * 1024,
+  blobNoDb: 5 * 1024 * 1024, // logs alone can pass 2 MB
+  blobDb: 95 * 1024 * 1024, // under the 100 MB request-body cap of the Workers free plan
+  metaHeader: 8 * 1024, // X-Report-Meta, base64url
   perInstallPerDay: 3,
   ceilingBytes: 8 * 1024 ** 3, // database attachments refused above this
   hardCeilingBytes: 9 * 1024 ** 3, // every report refused above this: R2 free tier is 10 GB
@@ -48,6 +49,8 @@ export interface Meta {
   v: 1; installId: string; category: string; title: string; description: string;
   appVersion: string; platform: "ios" | "android"; osVersion: string; deviceModel: string;
   hasDatabase: boolean; hasScreenshot: boolean;
+  /** Days of second-by-second data in the attached slice (1..14); absent when there is no database. */
+  rawDays?: number;
 }
 
 /** Returns a normalised Meta or null. Unknown fields are dropped. */
@@ -69,9 +72,12 @@ export function validateMeta(raw: unknown): Meta | null {
   if (!title || description === null || !appVersion || osVersion === null || deviceModel === null) return null;
   if (m.platform !== "ios" && m.platform !== "android") return null;
   if (typeof m.hasDatabase !== "boolean" || typeof m.hasScreenshot !== "boolean") return null;
+  const rawDays = m.rawDays;
+  if (rawDays !== undefined && !(Number.isInteger(rawDays) && (rawDays as number) >= 1 && (rawDays as number) <= 14)) return null;
   return {
     v: 1, installId: installId.toLowerCase(), category, title, description, appVersion,
     platform: m.platform, osVersion, deviceModel, hasDatabase: m.hasDatabase, hasScreenshot: m.hasScreenshot,
+    ...(rawDays !== undefined && { rawDays: rawDays as number }),
   };
 }
 
@@ -104,49 +110,37 @@ async function createIssue(env: Env, id: string, m: Meta): Promise<string | null
   }
 }
 
-/** The request body, or null as soon as it passes [max] bytes. */
-async function readCapped(req: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
-  if (!req.body) return new Uint8Array(0);
-  const reader = req.body.getReader();
-  const parts: Uint8Array[] = [];
-  let n = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    n += value.length;
-    if (n > max) { await reader.cancel(); return null; }
-    parts.push(value);
+/** X-Report-Meta: base64url(JSON). Null when missing, oversized or invalid. */
+function decodeMetaHeader(h: string | null): Meta | null {
+  if (!h || h.length > LIMITS.metaHeader) return null;
+  try {
+    const b64 = h.replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(b64 + "===".slice((b64.length + 3) % 4));
+    return validateMeta(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)))));
+  } catch {
+    return null;
   }
-  const out = new Uint8Array(n);
-  let o = 0;
-  for (const p of parts) { out.set(p, o); o += p.length; }
-  return out;
 }
 
+const MAGIC = [0x4f, 0x53, 0x52, 0x31]; // "OSR1"
+
+/**
+ * Body = raw OSR1 bytes, never buffered: everything is decided from the headers (Content-Length is the
+ * byte count for every cap), then the stream goes straight into R2 through a FixedLengthStream. A wrong
+ * prefix or a body that is shorter/longer than Content-Length fails the put and is rolled back.
+ */
 async function postReport(req: Request, env: Env): Promise<Response> {
-  const cl = Number(req.headers.get("content-length") ?? 0);
-  if (cl > LIMITS.blobDb + 64 * 1024) return err(413, "too_large");
-  if (!(req.headers.get("content-type") ?? "").toLowerCase().startsWith("multipart/form-data")) return err(400, "bad_request");
-
-  // Count real bytes while reading: Content-Length can be absent (chunked) or wrong.
-  const raw = await readCapped(req, LIMITS.blobDb + 64 * 1024);
-  if (!raw) return err(413, "too_large");
-  let form: FormData;
-  try {
-    form = await new Response(raw, { headers: { "content-type": req.headers.get("content-type") ?? "" } }).formData();
-  } catch { return err(400, "bad_request"); }
-  const metaStr = form.get("meta");
-  const blob = form.get("blob");
-  if (typeof metaStr !== "string" || metaStr.length > 16_000 || !blob || typeof blob === "string") return err(400, "bad_request");
-  let meta: Meta | null;
-  try { meta = validateMeta(JSON.parse(metaStr)); } catch { meta = null; }
+  const clHeader = req.headers.get("content-length");
+  if (clHeader === null) return err(411, "length_required");
+  if (!/^\d{1,12}$/.test(clHeader)) return err(400, "bad_request");
+  const cl = Number(clHeader);
+  if (cl > LIMITS.blobDb) return err(413, "too_large");
+  if ((req.headers.get("content-type") ?? "").toLowerCase().split(";")[0].trim() !== "application/octet-stream")
+    return err(400, "bad_request");
+  const meta = decodeMetaHeader(req.headers.get("x-report-meta"));
   if (!meta) return err(400, "bad_meta");
-
-  const file = blob as File;
-  if (file.size > (meta.hasDatabase ? LIMITS.blobDb : LIMITS.blobNoDb)) return err(413, "too_large");
-  if (file.size < MIN_BLOB) return err(400, "bad_blob");
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  if (new TextDecoder().decode(bytes.subarray(0, 4)) !== "OSR1") return err(400, "bad_blob");
+  if (cl > (meta.hasDatabase ? LIMITS.blobDb : LIMITS.blobNoDb)) return err(413, "too_large");
+  if (cl < MIN_BLOB || !req.body) return err(400, "bad_blob");
 
   const now = new Date();
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
@@ -175,11 +169,11 @@ async function postReport(req: Request, env: Env): Promise<Response> {
              AND COALESCE((SELECT v FROM stats WHERE k = ?), 0) < ?
              AND COALESCE((SELECT v FROM stats WHERE k = 'bytes'), 0) + ? <= ?`)
           .bind(id, meta.installId, createdAt, meta.category, meta.title, meta.description, JSON.stringify(meta),
-            key, bytes.length, meta.hasDatabase ? 1 : 0, tokenHash,
+            key, cl, meta.hasDatabase ? 1 : 0, tokenHash,
             meta.installId, dayStart, LIMITS.perInstallPerDay,
             dayKey, LIMITS.dailyTotal,
-            bytes.length, meta.hasDatabase ? LIMITS.ceilingBytes : LIMITS.hardCeilingBytes),
-        bump("bytes", bytes.length),
+            cl, meta.hasDatabase ? LIMITS.ceilingBytes : LIMITS.hardCeilingBytes),
+        bump("bytes", cl),
         bump(dayKey, 1),
       ]);
       if (!ins.meta.changes) {
@@ -194,15 +188,34 @@ async function postReport(req: Request, env: Env): Promise<Response> {
       if (i === 4 || !/UNIQUE|constraint/i.test(String(e))) throw e; // id collision: retry
     }
   }
-  try {
-    await env.BLOBS.put(key, bytes);
-  } catch (e) {
+  let seen = 0; // prefix bytes checked so far
+  let received = 0;
+  let badPrefix = false;
+  const check = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, c) {
+      for (let i = 0; seen < 4 && i < chunk.length; i++) {
+        if (chunk[i] !== MAGIC[seen]) { badPrefix = true; c.error(new Error("bad_prefix")); return; }
+        seen++;
+      }
+      received += chunk.length;
+      c.enqueue(chunk);
+    },
+  });
+  const fixed = new FixedLengthStream(cl);
+  const [put, pipe] = await Promise.allSettled([
+    env.BLOBS.put(key, fixed.readable),
+    req.body.pipeThrough(check).pipeTo(fixed.writable),
+  ]);
+  if (put.status === "rejected" || pipe.status === "rejected") {
     // Undo the insert and its byte count; the day counter keeps the attempt (conservative).
+    await env.BLOBS.delete(key).catch(() => {});
     await env.DB.batch([
-      env.DB.prepare("UPDATE stats SET v = v - ? WHERE k = 'bytes'").bind(bytes.length),
+      env.DB.prepare("UPDATE stats SET v = v - (SELECT blob_bytes FROM reports WHERE id = ?) WHERE k = 'bytes'").bind(id),
       env.DB.prepare("DELETE FROM reports WHERE id = ?").bind(id),
     ]);
-    throw e;
+    if (badPrefix) return err(400, "bad_blob");
+    if (received !== cl) return err(400, "length_mismatch"); // client aborted or lied about the length
+    throw put.status === "rejected" ? put.reason : (pipe as PromiseRejectedResult).reason;
   }
 
   const url = await createIssue(env, id, meta);

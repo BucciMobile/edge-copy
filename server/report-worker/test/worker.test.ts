@@ -15,12 +15,26 @@ const blobOf = (size = 200, magic = "OSR1") => {
   b.set(new TextEncoder().encode(magic));
   return b;
 };
-const post = (m: unknown, blob: Uint8Array | null = blobOf(), extra: HeadersInit = {}) => {
-  const f = new FormData();
-  f.set("meta", typeof m === "string" ? m : JSON.stringify(m));
-  if (blob) f.set("blob", new File([blob as BlobPart], "blob", { type: "application/octet-stream" }));
-  return worker.fetch(new Request("https://x/v1/reports", { method: "POST", body: f, headers: extra }), e);
-};
+const b64url = (s: string) =>
+  btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const metaHeader = (m: unknown) => b64url(typeof m === "string" ? m : JSON.stringify(m));
+const req = (headers: Record<string, string>, body: BodyInit | null) =>
+  worker.fetch(new Request("https://x/v1/reports", { method: "POST", body, headers }), e);
+const post = (m: unknown, blob: Uint8Array | null = blobOf(), extra: Record<string, string> = {}) =>
+  req({
+    "content-type": "application/octet-stream", "x-report-meta": metaHeader(m),
+    ...(blob ? { "content-length": String(blob.length) } : {}), ...extra,
+  }, blob as BodyInit | null);
+/** A body that arrives in [chunks] pieces and then either ends or errors (client gone). */
+const streamOf = (chunks: Uint8Array[], abort = false) =>
+  new ReadableStream<Uint8Array>({
+    async pull(c) {
+      const n = chunks.shift();
+      if (n) c.enqueue(n);
+      else if (abort) c.error(new Error("client gone"));
+      else c.close();
+    },
+  });
 const today = () => "day:" + new Date().toISOString().slice(0, 10);
 const stat = async (k: string) => (await e.DB.prepare("SELECT v FROM stats WHERE k=?").bind(k).first<{ v: number }>())?.v ?? 0;
 const sumBytes = async () => (await e.DB.prepare("SELECT COALESCE(SUM(blob_bytes),0) b FROM reports").first<any>()).b;
@@ -67,9 +81,69 @@ describe("POST /v1/reports", () => {
     expect((await post(meta({ description: "x".repeat(4001) }))).status).toBe(400);
     expect((await post(meta({ installId: "nope" }))).status).toBe(400);
     expect((await post("{not json")).status).toBe(400);
-    expect((await post(meta(), null)).status).toBe(400);
+    expect((await post(meta(), null)).status).toBe(411); // no body, no length
+    expect((await post(meta({ rawDays: 15 }))).status).toBe(400);
     expect((await post(meta(), blobOf(200, "XXXX"))).status).toBe(400);
-    expect((await worker.fetch(new Request("https://x/v1/reports", { method: "POST", body: "{}" }), e)).status).toBe(400);
+    expect((await post(meta(), blobOf(50))).status).toBe(400); // shorter than an empty OSR1 blob
+    expect((await post(meta(), blobOf(), { "content-type": "multipart/form-data; boundary=x" })).status).toBe(400);
+    expect((await post(meta(), blobOf(), { "x-report-meta": "x".repeat(LIMITS.metaHeader + 1) })).status).toBe(400);
+    expect((await req({ "content-type": "application/octet-stream", "content-length": "200" }, blobOf())).status).toBe(400);
+  });
+
+  it("keeps rawDays in the stored meta", async () => {
+    const j = (await (await post(meta({ hasDatabase: true, rawDays: 7 }))).json()) as any;
+    const row = await e.DB.prepare("SELECT meta FROM reports WHERE id=?").bind(j.id).first<any>();
+    expect(JSON.parse(row.meta).rawDays).toBe(7);
+  });
+
+  it("requires Content-Length and refuses oversized ones before reading the body", async () => {
+    const h = { "content-type": "application/octet-stream", "x-report-meta": metaHeader(meta()) };
+    expect((await req(h, streamOf([blobOf()]))).status).toBe(411);
+    const r = await req({ ...h, "content-length": String(LIMITS.blobDb + 1) }, streamOf([blobOf()]));
+    expect(r.status).toBe(413);
+    expect(await stat("bytes")).toBe(0);
+  });
+
+  it("streams a chunked body into R2 byte-for-byte", async () => {
+    const b = blobOf(300_000);
+    for (let i = 4; i < b.length; i++) b[i] = i & 255;
+    const parts = [b.subarray(0, 2), b.subarray(2, 70_000), b.subarray(70_000)];
+    const r = await req({ "content-type": "application/octet-stream", "content-length": String(b.length),
+      "x-report-meta": metaHeader(meta({ hasDatabase: true })) }, streamOf(parts));
+    expect(r.status).toBe(201);
+    const j = (await r.json()) as any;
+    const got = new Uint8Array(await (await e.BLOBS.get(`db/${j.id}`))!.arrayBuffer());
+    expect(got).toEqual(b);
+    expect(await stat("bytes")).toBe(b.length);
+  });
+
+  const cleanAfterFailure = async () => {
+    expect((await e.BLOBS.list()).objects).toHaveLength(0);
+    expect(await e.DB.prepare("SELECT COUNT(*) n FROM reports").first<any>()).toEqual({ n: 0 });
+    expect(await stat("bytes")).toBe(0);
+  };
+
+  it("rolls back a bad prefix that arrives split across chunks", async () => {
+    const b = blobOf(200, "OSRX");
+    const r = await req({ "content-type": "application/octet-stream", "content-length": "200",
+      "x-report-meta": metaHeader(meta()) }, streamOf([b.subarray(0, 3), b.subarray(3)]));
+    expect(r.status).toBe(400);
+    expect(await r.json()).toEqual({ error: "bad_blob" });
+    await cleanAfterFailure();
+  });
+
+  it("rolls back a body shorter or longer than Content-Length, or one the client aborts", async () => {
+    const h = (n: number) => ({ "content-type": "application/octet-stream", "content-length": String(n),
+      "x-report-meta": metaHeader(meta()) });
+    for (const [n, body] of [
+      [300, streamOf([blobOf(200)])],
+      [200, streamOf([blobOf(200), new Uint8Array(50)])],
+      [400, streamOf([blobOf(200)], true)],
+    ] as const) {
+      const r = await req(h(n), body);
+      expect(r.status).toBe(400);
+      await cleanAfterFailure();
+    }
   });
 
   it("enforces size limits by hasDatabase", async () => {

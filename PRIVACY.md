@@ -57,16 +57,23 @@ before you do. A report holds your title and description, the app and phone
 details (app version, phone model, system version, language, time zone and a
 random install ID), your paired band and sensors with their battery and last
 sync, the app's recent sync log and error records, and a screenshot if you add
-one. It contains no health data unless you switch on "Include my health
-database", which is off every time and attaches a copy of your database (your
-sleep, heart rate and other health data).
+one. It contains no health data unless you switch on "Include the last 2 weeks
+of health data", which is off every time and attaches a copy of your database
+cut down to the last 14 days of health data (your sleep, heart rate and other
+health data), plus your daily scores and settings. If that would make the
+report too big to upload (the limit is 95 MB), the second-by-second data
+covers fewer days (7, 3 or 1) and everything else keeps 14. A separate switch, "Full
+health database (share locally only)", also off every time, puts your whole
+database in the report instead; it turns Create ticket off, so the full
+database is never uploaded and only goes where you send it with "Share
+locally".
 
 The report is encrypted on your phone before it leaves, with a key only the
 maintainers hold, so the service that stores it cannot read it. It is stored
 on Cloudflare. A report is deleted after 30 days, or after 14 days if it
-includes your database. The report's ID, your install ID, category, title, description, app version,
+includes health data. The report's ID, your install ID, category, title, description, app version,
 platform, system version, phone model, and whether a database or screenshot is
-attached are kept unencrypted so we can track it, and that record is deleted
+attached (and how many days of second-by-second data the database covers) are kept unencrypted so we can track it, and that record is deleted
 after 90 days. You can delete a report sooner at any time from "My reports" on the same
 screen. "Share locally" hands the report to your phone's share sheet and uploads nothing; that ZIP is not encrypted.
 

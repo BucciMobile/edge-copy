@@ -8,6 +8,10 @@ Cloudflare Worker behind "Report an issue" in the app. Contract: `~/.openstrap-r
 - R2: one encrypted blob per report (`OSR1`: ECDH P-256 + HKDF + AES-256-GCM, only our private key opens it). Keys `logs/<id>` (no database) or `db/<id>` (database attached).
 - The delete token is never stored, only its hash. Blob contents never go to GitHub.
 
+## Upload format
+
+`POST /v1/reports` with the raw OSR1 bytes as the body (`Content-Type: application/octet-stream`, `Content-Length` required) and the meta JSON in `X-Report-Meta` as base64url (max 8 KB). Every cap is decided from the headers before the body is read; the body then streams straight into R2 (the Worker never holds it, so 95 MB fits in the 128 MB isolate). A body whose first bytes are not `OSR1`, or whose length differs from `Content-Length`, is rolled back (`400 bad_blob` / `400 length_mismatch`). Missing length is `411`, too large `413`.
+
 ## Expiry and limits
 
 | Thing | Rule |
@@ -15,7 +19,7 @@ Cloudflare Worker behind "Report an issue" in the app. Contract: `~/.openstrap-r
 | Blob without DB | deleted after 30 days |
 | Blob with DB | deleted after 14 days |
 | Metadata row | deleted after 90 days |
-| Blob size | 2 MB, or 15 MB when `hasDatabase` |
+| Blob size | 5 MB, or 95 MB when `hasDatabase` (the free plan caps request bodies at 100 MB) |
 | Rate limit | 3 reports per install id per UTC day (user-deleted reports still count), and 1000 per UTC day across all installs, since install ids are chosen by the client |
 | Storage ceiling | DB reports get `507 storage_full` above 8 GB stored; every report gets it above 9 GB, so R2 never leaves the free 10 GB |
 

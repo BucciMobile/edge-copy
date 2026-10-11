@@ -11,6 +11,7 @@
 // Pure Dart, no Flutter: the tests run it directly.
 
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -59,9 +60,12 @@ Uint8List _gcm(bool encrypt, Uint8List key, Uint8List nonce, Uint8List data) {
   return c.process(data);
 }
 
-/// Seal [plain] for the holder of the private key matching [publicKeyB64].
-Uint8List osr1Encrypt(Uint8List plain,
-    {String publicKeyB64 = kReportPublicKeyB64}) {
+/// Bytes OSR1 adds to the plaintext: magic, ephemeral key, nonce, GCM tag.
+const int kOsr1Overhead = 4 + 65 + 12 + 16;
+
+/// A fresh ephemeral key and nonce: the blob header, and a GCM cipher ready
+/// to encrypt the body that follows it.
+(Uint8List, GCMBlockCipher) _seal(String publicKeyB64) {
   final rnd = _random();
   final recipient = ECPublicKey(
       _p256.curve.decodePoint(base64Decode(publicKeyB64)), _p256);
@@ -73,8 +77,45 @@ Uint8List osr1Encrypt(Uint8List plain,
   final shared = (ECDHBasicAgreement()..init(ephPriv))
       .calculateAgreement(recipient);
   final nonce = rnd.nextBytes(12);
-  final sealed = _gcm(true, _key(shared, ephPub), nonce, plain);
-  return Uint8List.fromList([...kOsr1Magic, ...ephPub, ...nonce, ...sealed]);
+  final cipher = GCMBlockCipher(AESEngine())
+    ..init(true,
+        AEADParameters(KeyParameter(_key(shared, ephPub)), 128, nonce, Uint8List(0)));
+  return (
+    (BytesBuilder(copy: false)..add(kOsr1Magic)..add(ephPub)..add(nonce))
+        .takeBytes(),
+    cipher
+  );
+}
+
+/// Seal [plain] for the holder of the private key matching [publicKeyB64].
+Uint8List osr1Encrypt(Uint8List plain,
+    {String publicKeyB64 = kReportPublicKeyB64}) {
+  final (header, cipher) = _seal(publicKeyB64);
+  return (BytesBuilder(copy: false)..add(header)..add(cipher.process(plain)))
+      .takeBytes();
+}
+
+/// [osr1Encrypt] from file to file, 1 MB at a time: a 95 MB report never sits
+/// in memory. Synchronous on purpose; run it in an isolate.
+void osr1EncryptFile(String inPath, String outPath,
+    {String publicKeyB64 = kReportPublicKeyB64}) {
+  final (header, cipher) = _seal(publicKeyB64);
+  final src = File(inPath).openSync();
+  final dst = File(outPath).openSync(mode: FileMode.writeOnly);
+  try {
+    dst.writeFromSync(header);
+    final inBuf = Uint8List(1 << 20);
+    final outBuf = Uint8List((1 << 20) + 32);
+    for (;;) {
+      final n = src.readIntoSync(inBuf);
+      if (n == 0) break;
+      dst.writeFromSync(outBuf, 0, cipher.processBytes(inBuf, 0, n, outBuf, 0));
+    }
+    dst.writeFromSync(outBuf, 0, cipher.doFinal(outBuf, 0));
+  } finally {
+    src.closeSync();
+    dst.closeSync();
+  }
 }
 
 /// The inverse, for tests and tooling. Throws on a bad tag or layout.

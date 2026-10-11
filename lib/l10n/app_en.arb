@@ -15535,11 +15535,11 @@
   "@reportScreenshotRemove": {
     "description": "Issue report: remove the picked screenshot."
   },
-  "reportDatabaseRow": "Include my health database",
+  "reportDatabaseRow": "Include the last 2 weeks of health data",
   "@reportDatabaseRow": {
     "description": "Issue report: switch to attach the database. Off by default."
   },
-  "reportDatabaseWarning": "Your database holds your sleep, heart rate and other health data. It goes only if this is on, and the server deletes it after 14 days.",
+  "reportDatabaseWarning": "Your sleep, heart rate and other health data from the last 14 days (fewer days of second-by-second data if the ticket would be too big), plus your daily scores and settings. It goes only if this is on, and the server deletes it after 14 days. A ticket with health data can be up to 95 MB, so use Wi-Fi if you can.",
   "@reportDatabaseWarning": {
     "description": "Issue report: plain warning under the database switch."
   },
@@ -15587,6 +15587,30 @@
   "@reportFileDatabase": {
     "description": "Issue report file description: database.db.gz."
   },
+  "reportFileDatabaseSlice": "Last 14 days of health data, plus daily scores and settings, compressed",
+  "@reportFileDatabaseSlice": {
+    "description": "Issue report file description: database_14d.db.gz."
+  },
+  "reportFullDatabaseRow": "Full health database (share locally only)",
+  "@reportFullDatabaseRow": {
+    "description": "Issue report: switch to put the whole database in the locally shared file. Off by default; never uploaded."
+  },
+  "reportFullDatabaseWarning": "Your whole health record. It only goes in the file Share locally makes, never to our server.",
+  "@reportFullDatabaseWarning": {
+    "description": "Issue report: plain line under the full database switch."
+  },
+  "reportFullDatabaseNoUpload": "The full database is too big to upload. Use Share locally and send the file to us.",
+  "@reportFullDatabaseNoUpload": {
+    "description": "Issue report: shown under Create ticket while the full database switch is on (Create ticket is disabled)."
+  },
+  "reportDatabaseCovered": "Covered by the full database below.",
+  "@reportDatabaseCovered": {
+    "description": "Issue report: line under the 2-week switch while the full database switch is on."
+  },
+  "reportStageSlice": "Preparing last 2 weeks\u2026",
+  "@reportStageSlice": {
+    "description": "Report screen: progress text inside the busy button while the 2-week database is built."
+  },
   "reportSend": "Create ticket",
   "@reportSend": {
     "description": "Issue report: send button."
@@ -15620,7 +15644,7 @@
   "@reportNotSentTitle": {
     "description": "Issue report: failure card title."
   },
-  "reportTooLarge": "This ticket is too large to upload. Turn off the database or remove the screenshot, or share it locally instead.",
+  "reportTooLarge": "This ticket is too large to upload. Use Share locally and send the file to us, or turn off the health data or remove the screenshot.",
   "@reportTooLarge": {
     "description": "Issue report: 413 or local size check."
   },
@@ -15693,9 +15717,14 @@
   "@reportStageEncrypting": {
     "description": "Report screen: progress text inside the busy button."
   },
-  "reportStageUploading": "Uploading…",
+  "reportStageUploading": "Uploading {size} MB…",
   "@reportStageUploading": {
-    "description": "Report screen: progress text inside the busy button."
+    "description": "Report screen: progress text inside the busy button, with the ticket size in megabytes (e.g. 64 or 0.4).",
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
   },
   "reportStageSharing": "Preparing to share…",
   "@reportStageSharing": {

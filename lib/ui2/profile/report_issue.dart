@@ -12,7 +12,6 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:path_provider/path_provider.dart';
 
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
@@ -34,7 +33,8 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   final _body = TextEditingController();
   ReportCategory _category = ReportCategory.other;
   String? _shot;
-  bool _db = false; // OFF by default: it is the user's whole health record
+  bool _db = false; // OFF by default: 2 weeks of the user's health record
+  bool _full = false; // whole database, Share locally only; OFF by default
   bool _busy = false;
   String? _step; // what the tapped button says while it works
   bool _ticketBusy = false; // which button is the busy one
@@ -66,11 +66,13 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
         description: _body.text.trim(),
         screenshotPath: _shot,
         includeDatabase: _db,
+        fullDatabase: _full,
       );
 
   String _stageText(AppLocalizations l, ReportStage s) => switch (s) {
         ReportStage.collecting => l.reportStageCollecting,
         ReportStage.logs => l.reportStageLogs,
+        ReportStage.slice => l.reportStageSlice,
         ReportStage.database => l.reportStageDatabase,
         ReportStage.packing => l.reportStagePacking,
       };
@@ -80,6 +82,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   }
 
   Future<void> _send() async {
+    if (_full) return; // the full database is never uploaded
     if (_title.text.trim().isEmpty) {
       setState(() => _error = -1);
       return;
@@ -92,18 +95,22 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       _error = null;
       _sent = null;
     });
+    final files = <File>[];
     try {
       final draft = _draft();
+      // Too big even with 1 day of second-by-second data: 413, which points
+      // to Share locally.
       final r = await collectReport(context.read<AppState>(), draft,
-          onStage: (st) => _setStep(_stageText(l, st)));
-      final zip = r.zip;
+          onStage: (st) => _setStep(_stageText(l, st)),
+          maxBytes:
+              draft.includeDatabase ? kReportMaxBytesWithDb : kReportMaxBytes);
+      files.add(r.zip);
       _setStep(l.reportStageEncrypting);
-      final blob = await sealReport(zip);
-      if (blob.length >
-          (draft.includeDatabase ? kReportMaxBytesWithDb : kReportMaxBytes)) {
-        throw const ReportSendError(413);
-      }
-      _setStep(l.reportStageUploading);
+      final blob = await sealReport(r.zip);
+      files.add(blob);
+      final mb = blob.lengthSync() / (1024 * 1024);
+      _setStep(l.reportStageUploading(
+          mb >= 10 ? '${mb.round()}' : mb.toStringAsFixed(1)));
       final sent = await sendReport(reportServerMeta(draft, r.meta), blob);
       if (mounted) setState(() => _sent = sent);
       await _reload();
@@ -115,6 +122,11 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       unawaited(FileLog.write('[report] create ticket failed: $e\n$st'));
       if (mounted) setState(() => _error = 0);
     } finally {
+      for (final f in files) {
+        try {
+          await f.delete();
+        } catch (_) {}
+      }
       if (mounted) {
         setState(() {
           _busy = false;
@@ -137,11 +149,7 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
       final r = await collectReport(context.read<AppState>(), _draft(),
           onStage: (st) => _setStep(_stageText(l, st)));
       _setStep(l.reportStageSharing);
-      final dir = await getTemporaryDirectory();
-      final f = File(
-          '${dir.path}/openstrap_report_${DateTime.now().millisecondsSinceEpoch}.zip');
-      await f.writeAsBytes(r.zip);
-      await Share.shareXFiles([XFile(f.path)],
+      await Share.shareXFiles([XFile(r.zip.path)],
           subject: 'OpenStrap issue report', sharePositionOrigin: origin);
     } catch (e) {
       if (mounted) setState(() => _error = e is ReportSendError ? e.status : -2);
@@ -275,19 +283,34 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                               ? _pickShot
                               : () => setState(() => _shot = null)),
                   SetRow(LucideIcons.database, C.red, l.reportDatabaseRow,
-                      sub: l.reportDatabaseWarning,
+                      sub: _full
+                          ? l.reportDatabaseCovered
+                          : l.reportDatabaseWarning,
                       trailing: Switch(
-                          value: _db,
-                          onChanged:
-                              _busy ? null : (v) => setState(() => _db = v)),
+                          value: _db || _full,
+                          onChanged: _busy || _full
+                              ? null
+                              : (v) => setState(() => _db = v)),
                       chevron: false,
-                      onTap: _busy ? null : () => setState(() => _db = !_db)),
+                      onTap: _busy || _full
+                          ? null
+                          : () => setState(() => _db = !_db)),
+                  SetRow(LucideIcons.database, C.red, l.reportFullDatabaseRow,
+                      sub: l.reportFullDatabaseWarning,
+                      trailing: Switch(
+                          value: _full,
+                          onChanged:
+                              _busy ? null : (v) => setState(() => _full = v)),
+                      chevron: false,
+                      onTap:
+                          _busy ? null : () => setState(() => _full = !_full)),
                 ]),
                 const SizedBox(height: S.x5),
                 settingsGroup(c, l.reportIncludedGroup, [
                   for (final path in reportPaths(
                       screenshotExt: draft.screenshotExt,
-                      database: draft.includeDatabase))
+                      database: draft.includeDatabase,
+                      fullDatabase: draft.fullDatabase))
                     SetRow(LucideIcons.fileText, C.n500, path,
                         sub: describeReportFile(l, path), chevron: false),
                 ]),
@@ -295,11 +318,19 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                 Text(l.reportIncludedNote,
                     style: F.cap.copyWith(color: p.ink2, height: 1.5)),
                 const SizedBox(height: S.x5),
-                BigButton(
-                    _step != null && _ticketBusy ? _step! : l.reportSend,
-                    icon: LucideIcons.send,
-                    busy: _step != null && _ticketBusy,
-                    onTap: _busy ? null : _send),
+                Opacity(
+                  opacity: _full ? 0.4 : 1,
+                  child: BigButton(
+                      _step != null && _ticketBusy ? _step! : l.reportSend,
+                      icon: LucideIcons.send,
+                      busy: _step != null && _ticketBusy,
+                      onTap: _busy || _full ? null : _send),
+                ),
+                if (_full) ...[
+                  const SizedBox(height: S.x2),
+                  Text(l.reportFullDatabaseNoUpload,
+                      style: F.cap.copyWith(color: p.ink2, height: 1.5)),
+                ],
                 const SizedBox(height: S.x3),
                 BigButton(
                     _step != null && !_ticketBusy
