@@ -58,7 +58,7 @@ details (app version, phone model, system version, language, time zone and a
 random install ID), your paired band and sensors with their battery and last
 sync, the app's recent sync log and error records, and a screenshot if you add
 one. It contains no health data unless you switch on "Include the last 2 weeks
-of health data", which is off every time and attaches a copy of your database
+of health data" or the screenshot you add shows some. That option is off every time and attaches a copy of your database
 cut down to the last 14 days of health data (your sleep, heart rate and other
 health data), plus your daily scores and settings. If that would make the
 report too big to upload (the limit is 95 MB), the second-by-second data

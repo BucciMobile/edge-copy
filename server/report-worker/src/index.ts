@@ -10,7 +10,7 @@ const DAY = 86_400_000;
 export const LIMITS = {
   blobNoDb: 5 * 1024 * 1024, // logs alone can pass 2 MB
   blobDb: 95 * 1024 * 1024, // under the 100 MB request-body cap of the Workers free plan
-  metaHeader: 8 * 1024, // X-Report-Meta, base64url
+  metaHeader: 36 * 1024, // X-Report-Meta, base64url; worst valid meta (every char a 6-byte JSON escape) is ~35.3 KB
   perInstallPerDay: 3,
   ceilingBytes: 8 * 1024 ** 3, // database attachments refused above this
   hardCeilingBytes: 9 * 1024 ** 3, // every report refused above this: R2 free tier is 10 GB

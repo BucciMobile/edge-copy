@@ -87,6 +87,11 @@ describe("POST /v1/reports", () => {
     expect((await post(meta(), blobOf(50))).status).toBe(400); // shorter than an empty OSR1 blob
     expect((await post(meta(), blobOf(), { "content-type": "multipart/form-data; boundary=x" })).status).toBe(400);
     expect((await post(meta(), blobOf(), { "x-report-meta": "x".repeat(LIMITS.metaHeader + 1) })).status).toBe(400);
+    // Largest valid meta: every char of every field is a 6-byte JSON escape; plus a 3-byte UTF-8 description.
+    const big = meta({ title: "\u0001".repeat(120), description: "\u0001".repeat(4000), deviceModel: "\u0001".repeat(64), osVersion: "\u0001".repeat(64) });
+    expect(metaHeader(big).length).toBeLessThanOrEqual(LIMITS.metaHeader);
+    expect((await post(big)).status).toBe(201);
+    expect((await post(meta({ description: "я".repeat(4000) }))).status).toBe(201);
     expect((await req({ "content-type": "application/octet-stream", "content-length": "200" }, blobOf())).status).toBe(400);
   });
 
