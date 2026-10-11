@@ -15587,11 +15587,11 @@
   "@reportFileDatabase": {
     "description": "Issue report file description: database.db.gz."
   },
-  "reportSend": "Send",
+  "reportSend": "Create ticket",
   "@reportSend": {
     "description": "Issue report: send button."
   },
-  "reportSaveInstead": "Save instead",
+  "reportSaveInstead": "Share locally",
   "@reportSaveInstead": {
     "description": "Issue report: save the archive on the phone, nothing sent."
   },
@@ -15599,11 +15599,11 @@
   "@reportNeedTitle": {
     "description": "Issue report: shown when sending without a title."
   },
-  "reportSentTitle": "Report sent",
+  "reportSentTitle": "Ticket created",
   "@reportSentTitle": {
     "description": "Issue report: success card title."
   },
-  "reportSentBody": "Your report ID is {id}. Quote it if you talk to us about this.",
+  "reportSentBody": "Your ticket ID is {id}. Quote it if you talk to us about this.",
   "@reportSentBody": {
     "description": "Issue report: success card body with the report ID.",
     "placeholders": {
@@ -15616,27 +15616,27 @@
   "@reportCopyId": {
     "description": "Issue report: copy the report ID."
   },
-  "reportNotSentTitle": "Not sent",
+  "reportNotSentTitle": "Ticket not created",
   "@reportNotSentTitle": {
     "description": "Issue report: failure card title."
   },
-  "reportTooLarge": "This report is too large to send. Turn off the database or remove the screenshot, or save it instead.",
+  "reportTooLarge": "This ticket is too large to upload. Turn off the database or remove the screenshot, or share it locally instead.",
   "@reportTooLarge": {
     "description": "Issue report: 413 or local size check."
   },
-  "reportRateLimited": "You've sent 3 reports today. Try again tomorrow, or save this one instead.",
+  "reportRateLimited": "You've created 3 tickets today. Try again tomorrow, or share this one locally instead.",
   "@reportRateLimited": {
     "description": "Issue report: 429."
   },
-  "reportStorageFull": "The report server has no room for a database right now. You can send the report without it.",
+  "reportStorageFull": "The report server has no room for a database right now. You can create the ticket without it.",
   "@reportStorageFull": {
     "description": "Issue report: 507 storage full."
   },
-  "reportSendWithoutDb": "Send without the database",
+  "reportSendWithoutDb": "Create ticket without the database",
   "@reportSendWithoutDb": {
     "description": "Issue report: resend after 507."
   },
-  "reportSendFailed": "Couldn't send the report. Check your connection, or save it instead.",
+  "reportSendFailed": "Couldn't create the ticket. Check your connection, or share it locally instead.",
   "@reportSendFailed": {
     "description": "Issue report: network or server error."
   },
@@ -15661,16 +15661,44 @@
   "@reportDeleteFailed": {
     "description": "Issue report: delete failed."
   },
-  "reportSaveFailedTitle": "Couldn't save the report",
+  "reportSaveFailedTitle": "Couldn't share the report",
   "@reportSaveFailedTitle": {
     "description": "Report screen: title of the card shown when building or sharing the local zip failed. Nothing was sent."
   },
-  "reportSaveFailedBody": "Something went wrong while building or sharing the file. Nothing was sent.",
+  "reportSaveFailedBody": "Something went wrong while building or sharing the file. No ticket was created.",
   "@reportSaveFailedBody": {
     "description": "Report screen: body of the save-failed card."
   },
   "reportSaveRetry": "Try again",
   "@reportSaveRetry": {
     "description": "Report screen: button that retries saving the report locally."
+  },
+  "reportStageCollecting": "Collecting app info…",
+  "@reportStageCollecting": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageLogs": "Reading logs…",
+  "@reportStageLogs": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageDatabase": "Compressing database…",
+  "@reportStageDatabase": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStagePacking": "Packing files…",
+  "@reportStagePacking": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageEncrypting": "Encrypting…",
+  "@reportStageEncrypting": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageUploading": "Uploading…",
+  "@reportStageUploading": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageSharing": "Preparing to share…",
+  "@reportStageSharing": {
+    "description": "Report screen: progress text inside the busy button."
   }
 }

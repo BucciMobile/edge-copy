@@ -52,7 +52,7 @@ documentation: https://firebase.google.com/support/privacy.
 
 **Issue reports**
 Settings › Privacy › "Report an issue" lets you send us a problem report. Nothing
-is sent until you tap Send, and the screen lists every file in the report
+is sent until you tap Create ticket, and the screen lists every file in the report
 before you do. A report holds your title and description, the app and phone
 details (app version, phone model, system version, language, time zone and a
 random install ID), your paired band and sensors with their battery and last
@@ -68,7 +68,7 @@ includes your database. The report's ID, your install ID, category, title, descr
 platform, system version, phone model, and whether a database or screenshot is
 attached are kept unencrypted so we can track it, and that record is deleted
 after 90 days. You can delete a report sooner at any time from "My reports" on the same
-screen. "Save instead" writes the same report to your phone and sends nothing.
+screen. "Share locally" hands the same report to your phone's share sheet and uploads nothing.
 
 **Update checks**
 Because the App is distributed outside an app store, it can check our release

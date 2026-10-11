@@ -1,7 +1,7 @@
 // Report an issue: category, title, what happened, an optional screenshot and
-// an optional database. Sent only when the user taps Send, sealed on the phone
-// (lib/support/report_crypto.dart). "Save instead" writes the same archive to
-// the share sheet with no network at all.
+// an optional database. Uploaded only when the user taps Create ticket, sealed
+// on the phone (lib/support/report_crypto.dart). "Share locally" hands the same
+// archive to the share sheet with no network and no size limit.
 
 import 'dart:io';
 import 'dart:isolate';
@@ -36,6 +36,8 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
   String? _shot;
   bool _db = false; // OFF by default: it is the user's whole health record
   bool _busy = false;
+  String? _step; // what the tapped button says while it works
+  bool _ticketBusy = false; // which button is the busy one
   SentReport? _sent;
   int? _error; // HTTP status of a failed send, 0 = no answer, -1 = no title, -2 = save failed
   List<SentReport> _reports = const [];
@@ -66,25 +68,42 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
         includeDatabase: _db,
       );
 
+  String _stageText(AppLocalizations l, ReportStage s) => switch (s) {
+        ReportStage.collecting => l.reportStageCollecting,
+        ReportStage.logs => l.reportStageLogs,
+        ReportStage.database => l.reportStageDatabase,
+        ReportStage.packing => l.reportStagePacking,
+      };
+
+  void _setStep(String s) {
+    if (mounted) setState(() => _step = s);
+  }
+
   Future<void> _send() async {
     if (_title.text.trim().isEmpty) {
       setState(() => _error = -1);
       return;
     }
+    final l = _l(context);
     setState(() {
+      _ticketBusy = true;
+      _step = l.reportStageCollecting;
       _busy = true;
       _error = null;
       _sent = null;
     });
     try {
       final draft = _draft();
-      final r = await collectReport(context.read<AppState>(), draft);
+      final r = await collectReport(context.read<AppState>(), draft,
+          onStage: (st) => _setStep(_stageText(l, st)));
       final zip = r.zip;
+      _setStep(l.reportStageEncrypting);
       final blob = await Isolate.run(() => osr1Encrypt(zip));
       if (blob.length >
           (draft.includeDatabase ? kReportMaxBytesWithDb : kReportMaxBytes)) {
         throw const ReportSendError(413);
       }
+      _setStep(l.reportStageUploading);
       final sent = await sendReport(reportServerMeta(draft, r.meta), blob);
       if (mounted) setState(() => _sent = sent);
       await _reload();
@@ -93,18 +112,28 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     } catch (_) {
       if (mounted) setState(() => _error = 0);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _step = null;
+        });
+      }
     }
   }
 
   Future<void> _save() async {
     final origin = shareOrigin(context);
+    final l = _l(context);
     setState(() {
+      _ticketBusy = false;
+      _step = l.reportStageCollecting;
       _busy = true;
       _error = null;
     });
     try {
-      final r = await collectReport(context.read<AppState>(), _draft());
+      final r = await collectReport(context.read<AppState>(), _draft(),
+          onStage: (st) => _setStep(_stageText(l, st)));
+      _setStep(l.reportStageSharing);
       final dir = await getTemporaryDirectory();
       final f = File(
           '${dir.path}/openstrap_report_${DateTime.now().millisecondsSinceEpoch}.zip');
@@ -114,7 +143,12 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = e is ReportSendError ? e.status : -2);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _step = null;
+        });
+      }
     }
   }
 
@@ -239,7 +273,10 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                               : () => setState(() => _shot = null)),
                   SetRow(LucideIcons.database, C.red, l.reportDatabaseRow,
                       sub: l.reportDatabaseWarning,
-                      value: _db ? l.stateOn : l.stateOff,
+                      trailing: Switch(
+                          value: _db,
+                          onChanged:
+                              _busy ? null : (v) => setState(() => _db = v)),
                       chevron: false,
                       onTap: _busy ? null : () => setState(() => _db = !_db)),
                 ]),
@@ -255,17 +292,20 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
                 Text(l.reportIncludedNote,
                     style: F.cap.copyWith(color: p.ink2, height: 1.5)),
                 const SizedBox(height: S.x5),
-                BigButton(l.reportSend,
-                    icon: LucideIcons.send, onTap: _busy ? null : _send),
+                BigButton(
+                    _step != null && _ticketBusy ? _step! : l.reportSend,
+                    icon: LucideIcons.send,
+                    busy: _step != null && _ticketBusy,
+                    onTap: _busy ? null : _send),
                 const SizedBox(height: S.x3),
-                BigButton(l.reportSaveInstead,
-                    icon: LucideIcons.download,
+                BigButton(
+                    _step != null && !_ticketBusy
+                        ? _step!
+                        : l.reportSaveInstead,
+                    icon: LucideIcons.share2,
                     soft: true,
+                    busy: _step != null && !_ticketBusy,
                     onTap: _busy ? null : _save),
-                if (_busy) ...[
-                  const SizedBox(height: S.x6),
-                  Center(child: CircularProgressIndicator(color: p.on(C.blue))),
-                ],
                 if (sent != null) ...[
                   const SizedBox(height: S.x5),
                   StatusCard(l.reportSentTitle, l.reportSentBody(sent.id),

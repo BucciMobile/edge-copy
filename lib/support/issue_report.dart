@@ -25,7 +25,8 @@ import '../telemetry/telemetry_service.dart';
 /// The report service. One constant; the Worker answers under /v1.
 const String kReportBaseUrl = 'https://reports.openstrap.site';
 
-/// Server limits (bytes of the sealed blob).
+/// Server limits (bytes of the sealed blob). UPLOAD limits only: a local
+/// share has no size cap.
 const int kReportMaxBytes = 2 * 1024 * 1024;
 const int kReportMaxBytesWithDb = 15 * 1024 * 1024;
 
@@ -147,12 +148,30 @@ String _clip(String s, int n) => s.length <= n ? s : s.substring(0, n);
 
 String? _iso(DateTime? t) => t?.toUtc().toIso8601String();
 
-/// Gather everything from the running app and build the archive.
+/// The steps [collectReport] reports, in order (the database step only runs
+/// when it is attached).
+enum ReportStage { collecting, logs, database, packing }
+
+/// Gzip [path], reading it from disk in chunks (the raw file is never held in
+/// memory). No size cap: callers that upload check the result themselves.
+Future<Uint8List> gzipFile(String path) async {
+  final out = BytesBuilder(copy: false);
+  await for (final c in File(path).openRead().transform(gzip.encoder)) {
+    out.add(c);
+  }
+  return out.takeBytes();
+}
+
+/// Gather everything from the running app and build the archive. No size
+/// limit here; the upload path enforces [kReportMaxBytes] and
+/// [kReportMaxBytesWithDb].
 ///
-/// ponytail: the database is read and gzipped in memory; a multi-hundred-MB
-/// database would need a streamed gzip to a temp file instead.
+/// ponytail: the compressed database and the zip are held in memory; a
+/// multi-hundred-MB database would need a streamed zip to a temp file.
 Future<({Uint8List zip, Map<String, Object?> meta})> collectReport(
-    AppState app, ReportDraft draft) async {
+    AppState app, ReportDraft draft,
+    {void Function(ReportStage)? onStage}) async {
+  onStage?.call(ReportStage.collecting);
   final t = TelemetryService.instance;
   final s = await t.staticDevice();
   final now = DateTime.now();
@@ -226,34 +245,31 @@ Future<({Uint8List zip, Map<String, Object?> meta})> collectReport(
         if (r['kind'] == 'error' || r['kind'] == 'crash') r
     ].reversed.take(20).toList(),
   };
+  onStage?.call(ReportStage.logs);
+  final syncLog = await _recentLog();
   final shot = draft.screenshotPath == null
       ? null
       : await File(draft.screenshotPath!).readAsBytes();
   Uint8List? dbGz;
   if (draft.includeDatabase) {
+    onStage?.call(ReportStage.database);
     // The existing export path: a VACUUM INTO snapshot, not a file copy.
     final path = await LocalDb.exportCopy(includeSubstrateArchive: false);
     try {
-      // Streamed: the raw copy is never held in memory, and we stop as soon
-      // as the compressed bytes pass what the Worker would accept anyway.
-      final out = BytesBuilder(copy: false);
-      await for (final c in File(path).openRead().transform(gzip.encoder)) {
-        out.add(c);
-        if (out.length > kReportMaxBytesWithDb) throw const ReportSendError(413);
-      }
-      dbGz = out.takeBytes();
+      dbGz = await gzipFile(path);
     } finally {
       try {
         await File(path).delete();
       } catch (_) {}
     }
   }
+  onStage?.call(ReportStage.packing);
   final zip = buildReportZip(
     draft: draft,
     meta: meta,
     device: device,
     state: state,
-    syncLog: await _recentLog(),
+    syncLog: syncLog,
     telemetry: records,
     screenshot: shot,
     databaseGz: dbGz,

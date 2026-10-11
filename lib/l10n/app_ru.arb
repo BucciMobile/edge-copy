@@ -7445,11 +7445,11 @@
   "reportFileUser": "Ваши категория, заголовок и описание",
   "reportFileScreenshot": "Выбранный вами снимок экрана",
   "reportFileDatabase": "Ваша полная база данных о здоровье в сжатом виде",
-  "reportSend": "Отправить",
-  "reportSaveInstead": "Сохранить вместо отправки",
+  "reportSend": "Создать тикет",
+  "reportSaveInstead": "Поделиться локально",
   "reportNeedTitle": "Сначала добавьте заголовок.",
-  "reportSentTitle": "Сообщение отправлено",
-  "reportSentBody": "Номер вашего сообщения: {id}. Укажите его, если будете писать нам об этом.",
+  "reportSentTitle": "Тикет создан",
+  "reportSentBody": "Номер вашего тикета: {id}. Укажите его, если будете писать нам об этом.",
   "@reportSentBody": {
     "placeholders": {
       "id": {
@@ -7458,12 +7458,12 @@
     }
   },
   "reportCopyId": "Скопировать номер",
-  "reportNotSentTitle": "Не отправлено",
-  "reportTooLarge": "Сообщение слишком большое для отправки. Отключите базу данных или уберите снимок экрана либо сохраните его.",
-  "reportRateLimited": "Сегодня вы уже отправили 3 сообщения. Попробуйте завтра или сохраните это.",
-  "reportStorageFull": "Сейчас на сервере нет места для базы данных. Можно отправить сообщение без неё.",
-  "reportSendWithoutDb": "Отправить без базы данных",
-  "reportSendFailed": "Не удалось отправить сообщение. Проверьте соединение или сохраните его.",
+  "reportNotSentTitle": "Тикет не создан",
+  "reportTooLarge": "Тикет слишком большой для загрузки. Отключите базу данных или уберите снимок экрана либо поделитесь им локально.",
+  "reportRateLimited": "Сегодня вы уже создали 3 тикета. Попробуйте завтра или поделитесь этим локально.",
+  "reportStorageFull": "Сейчас на сервере нет места для базы данных. Можно создать тикет без неё.",
+  "reportSendWithoutDb": "Создать тикет без базы данных",
+  "reportSendFailed": "Не удалось создать тикет. Проверьте соединение или поделитесь им локально.",
   "reportMyReportsGroup": "Мои сообщения",
   "reportMyReportsSub": "Нажмите, чтобы удалить сейчас. Иначе оно будет удалено {date}",
   "@reportMyReportsSub": {
@@ -7475,7 +7475,14 @@
   },
   "reportDelete": "Удалить",
   "reportDeleteFailed": "Не удалось удалить. Попробуйте позже.",
-  "reportSaveFailedTitle": "Не удалось сохранить сообщение",
-  "reportSaveFailedBody": "Не удалось собрать или поделиться файлом. Ничего не отправлено.",
-  "reportSaveRetry": "Повторить"
+  "reportSaveFailedTitle": "Не удалось поделиться сообщением",
+  "reportSaveFailedBody": "Не удалось собрать или передать файл. Тикет не создан.",
+  "reportSaveRetry": "Повторить",
+  "reportStageCollecting": "Сбор данных приложения…",
+  "reportStageLogs": "Чтение журналов…",
+  "reportStageDatabase": "Сжатие базы данных…",
+  "reportStagePacking": "Упаковка файлов…",
+  "reportStageEncrypting": "Шифрование…",
+  "reportStageUploading": "Загрузка…",
+  "reportStageSharing": "Подготовка к отправке…"
 }

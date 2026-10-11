@@ -2,6 +2,8 @@
 // defaults.
 
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
@@ -13,6 +15,17 @@ import 'package:openstrap_edge/ui2/profile/report_issue.dart';
 import 'package:openstrap_edge/ui2/ui2.dart';
 import 'package:pointycastle/export.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+Uint8List _zipWith(Uint8List gz) => buildReportZip(
+      draft: const ReportDraft(
+          category: ReportCategory.sync, title: 't', description: 'd', includeDatabase: true),
+      meta: {'installId': 'x'},
+      device: {'band': {}},
+      state: {},
+      syncLog: '',
+      telemetry: const [],
+      databaseGz: gz,
+    );
 
 Uint8List _zip({bool shot = false, bool db = false}) => buildReportZip(
       draft: ReportDraft(
@@ -88,8 +101,9 @@ void main() {
         home: const ReportIssueScreen()));
     await tester.pumpAndSettle();
     expect(find.text('Include my health database'), findsOneWidget);
-    expect(find.text('Off'), findsOneWidget);
-    expect(find.text('On'), findsNothing);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+    expect(find.text('Create ticket'), findsOneWidget);
+    expect(find.text('Share locally'), findsOneWidget);
     for (final path in reportPaths()) {
       expect(find.text(path), findsOneWidget, reason: path);
     }
@@ -97,7 +111,21 @@ void main() {
 
     await tester.tap(find.text('Include my health database'));
     await tester.pumpAndSettle();
-    expect(find.text('On'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
     expect(find.text('database.db.gz'), findsOneWidget);
+  });
+
+  test('local path has no size cap: a gzip past the upload limit builds a zip',
+      () async {
+    final dir = await Directory.systemTemp.createTemp('gz');
+    addTearDown(() => dir.delete(recursive: true));
+    final rnd = Random(1);
+    final f = File('${dir.path}/db');
+    await f.writeAsBytes(Uint8List.fromList(
+        List.generate(kReportMaxBytesWithDb + 1024 * 1024, (_) => rnd.nextInt(256))));
+    final gz = await gzipFile(f.path);
+    expect(gz.length, greaterThan(kReportMaxBytesWithDb));
+    final zip = _zipWith(gz);
+    expect(zip.length, greaterThan(kReportMaxBytesWithDb));
   });
 }
