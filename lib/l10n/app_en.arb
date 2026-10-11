@@ -15547,7 +15547,7 @@
   "@reportIncludedGroup": {
     "description": "Issue report: heading over the list of files in the report."
   },
-  "reportIncludedNote": "The category, title, description, app version, platform, system version, phone model, install ID, and whether a database or screenshot is attached travel unencrypted so we can track the report, and are kept for 90 days. Everything else is encrypted on this phone before it leaves, so only the maintainers can read it, and is deleted after 30 days, or after 14 days if your database is attached.",
+  "reportIncludedNote": "The category, title, description, app version, platform, system version, phone model, install ID, and whether a database or screenshot is attached travel unencrypted so we can track the report, and are kept for 90 days. Everything else is encrypted on this phone before it leaves, so only the maintainers can read it, and is deleted after 30 days, or after 14 days if your database is attached. “Share locally” is different: the ZIP it hands to the share sheet is not encrypted.",
   "@reportIncludedNote": {
     "description": "Issue report: note under the file list."
   },

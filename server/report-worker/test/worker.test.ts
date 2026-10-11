@@ -21,12 +21,18 @@ const post = (m: unknown, blob: Uint8Array | null = blobOf(), extra: HeadersInit
   if (blob) f.set("blob", new File([blob as BlobPart], "blob", { type: "application/octet-stream" }));
   return worker.fetch(new Request("https://x/v1/reports", { method: "POST", body: f, headers: extra }), e);
 };
+const today = () => "day:" + new Date().toISOString().slice(0, 10);
+const stat = async (k: string) => (await e.DB.prepare("SELECT v FROM stats WHERE k=?").bind(k).first<{ v: number }>())?.v ?? 0;
+const sumBytes = async () => (await e.DB.prepare("SELECT COALESCE(SUM(blob_bytes),0) b FROM reports").first<any>()).b;
+const setStat = (k: string, v: number) => e.DB.prepare("INSERT OR REPLACE INTO stats (k, v) VALUES (?, ?)").bind(k, v).run();
 const admin = (path: string, token = "test-admin") =>
   worker.fetch(new Request("https://x" + path, { headers: { authorization: `Bearer ${token}` } }), e);
 
 beforeAll(() => applyD1Migrations(e.DB, e.MIGRATIONS));
 beforeEach(async () => {
   await e.DB.exec("DELETE FROM reports");
+  await e.DB.exec("DELETE FROM stats");
+  await e.DB.exec("INSERT INTO stats (k, v) VALUES ('bytes', 0)");
   const l = await e.BLOBS.list();
   await Promise.all(l.objects.map((o) => e.BLOBS.delete(o.key)));
   delete e.GITHUB_TOKEN; delete e.GITHUB_REPO;
@@ -35,6 +41,8 @@ beforeEach(async () => {
 describe("POST /v1/reports", () => {
   it("happy path stores blob under logs/ and hashes the token", async () => {
     const r = await post(meta());
+    expect(await stat("bytes")).toBe(200);
+    expect(await stat(today())).toBe(1);
     expect(r.status).toBe(201);
     const j = (await r.json()) as any;
     expect(j.id).toMatch(/^OS-[0-9A-HJKMNP-TV-Z]{6}$/);
@@ -81,6 +89,7 @@ describe("POST /v1/reports", () => {
       `INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
        VALUES ('OS-AAAAAA','z',?,'sync','t','d','{}','db/OS-AAAAAA',?,1,'h')`)
       .bind(new Date().toISOString(), LIMITS.ceilingBytes - 100).run();
+    await setStat("bytes", LIMITS.ceilingBytes - 100);
     const r = await post(meta({ hasDatabase: true }), blobOf(1000));
     expect(r.status).toBe(507);
     expect(await r.json()).toEqual({ error: "storage_full" });
@@ -92,6 +101,7 @@ describe("POST /v1/reports", () => {
       `INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
        VALUES ('OS-BBBBBB','z',?,'sync','t','d','{}','logs/OS-BBBBBB',?,0,'h')`)
       .bind(new Date().toISOString(), LIMITS.hardCeilingBytes - 100).run();
+    await setStat("bytes", LIMITS.hardCeilingBytes - 100);
     const r = await post(meta(), blobOf(1000));
     expect(r.status).toBe(507);
   });
@@ -102,6 +112,7 @@ describe("POST /v1/reports", () => {
       `INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
        VALUES (?,?,?,'sync','t','d','{}','logs/x',0,0,'h')`);
     await e.DB.batch(Array.from({ length: LIMITS.dailyTotal }, (_, i) => stmt.bind(`OS-T${String(i).padStart(5, "0")}`, `i${i}`, now)));
+    await setStat(today(), LIMITS.dailyTotal);
     const r = await post(meta({ installId: "323e4567-e89b-42d3-a456-426614174000" }));
     expect(r.status).toBe(429);
   });
@@ -139,8 +150,9 @@ describe("DELETE /v1/reports/:id", () => {
     expect((await del(j.id, j.deleteToken)).status).toBe(204);
     expect(await e.BLOBS.head(`logs/${j.id}`)).toBeNull();
     expect((await del(j.id, j.deleteToken)).status).toBe(404);
-    const t = await e.DB.prepare("SELECT SUM(blob_bytes) b FROM reports").first<any>();
-    expect(t.b).toBe(0);
+    expect(await sumBytes()).toBe(0);
+    expect(await stat("bytes")).toBe(0);
+    expect(await stat(today())).toBe(1); // deleting does not free a daily slot
     await post(meta()); await post(meta());
     expect((await post(meta())).status).toBe(429);
   });
@@ -195,6 +207,7 @@ describe("cleanup cron", () => {
       await e.DB.prepare(`INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
         VALUES (?,?,?,'sync','t','d','{}',?,10,?,'h')`).bind(id, "i", ago(days), key, db).run();
     };
+    await setStat("bytes", 40);
     await ins("OS-DB0001", 15, 1);   // expired
     await ins("OS-DB0002", 10, 1);   // kept
     await ins("OS-LG0001", 31, 0);   // expired
@@ -206,7 +219,27 @@ describe("cleanup cron", () => {
     expect(await e.BLOBS.head("db/OS-DB0001")).toBeNull();
     expect(await e.BLOBS.head("db/OS-DB0002")).not.toBeNull();
     expect(await e.BLOBS.head("logs/OS-LG0001")).toBeNull();
-    const t = await e.DB.prepare("SELECT SUM(blob_bytes) b FROM reports").first<any>();
-    expect(t.b).toBe(20);
+    expect(await sumBytes()).toBe(20);
+    expect(await stat("bytes")).toBe(20);
+    expect(await stat("bytes")).toBe(await sumBytes());
+  });
+
+  it("drops stale day counters and subtracts bytes of rows deleted at 90d", async () => {
+    await setStat("day:2000-01-01", 5);
+    await setStat(today(), 7);
+    await setStat("bytes", 10);
+    await e.DB.prepare(`INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
+      VALUES ('OS-OLD002','i',?,'sync','t','d','{}','logs/OS-OLD002',10,0,'h')`).bind(new Date(Date.now() - 91 * 864e5).toISOString()).run();
+    await cleanup(e);
+    expect(await stat("bytes")).toBe(0);
+    expect(await stat("day:2000-01-01")).toBe(0);
+    expect(await stat(today())).toBe(7);
+  });
+
+  it("concurrent posts cannot both pass the byte ceiling", async () => {
+    await setStat("bytes", LIMITS.hardCeilingBytes - 300);
+    const rs = await Promise.all([post(meta({ installId: "423e4567-e89b-42d3-a456-426614174000" })), post(meta({ installId: "523e4567-e89b-42d3-a456-426614174000" }))]);
+    expect(rs.map((r) => r.status).sort()).toEqual([201, 507]);
+    expect(await stat("bytes")).toBe(LIMITS.hardCeilingBytes - 100);
   });
 });

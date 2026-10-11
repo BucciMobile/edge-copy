@@ -68,7 +68,7 @@ includes your database. The report's ID, your install ID, category, title, descr
 platform, system version, phone model, and whether a database or screenshot is
 attached are kept unencrypted so we can track it, and that record is deleted
 after 90 days. You can delete a report sooner at any time from "My reports" on the same
-screen. "Share locally" hands the same report to your phone's share sheet and uploads nothing.
+screen. "Share locally" hands the report to your phone's share sheet and uploads nothing; that ZIP is not encrypted.
 
 **Update checks**
 Because the App is distributed outside an app store, it can check our release

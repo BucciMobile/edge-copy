@@ -9,13 +9,17 @@ export BACKUP_DB="${BACKUP_DB:-/var/lib/openstrap-reports/meta.sqlite}"
 : "${REPORT_ADMIN_TOKEN:?set REPORT_ADMIN_TOKEN}"
 mkdir -p "$(dirname "$BACKUP_DB")"
 python3 - <<'PY'
-import json, os, sqlite3, urllib.parse, urllib.request
+import json, os, sqlite3, urllib.error, urllib.parse, urllib.request
 url, db, tok = os.environ["REPORT_URL"], os.environ["BACKUP_DB"], os.environ["REPORT_ADMIN_TOKEN"]
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(req.full_url, code, msg, headers, fp)  # never forward the admin token
+opener = urllib.request.build_opener(_NoRedirect)
 rows, since, after = [], "1970-01-01T00:00:00Z", ""
 while True:  # cursor = (created_at, id): rows sharing a timestamp are never skipped
     q = urllib.parse.urlencode({"since": since, "after_id": after})
     req = urllib.request.Request(f"{url}/v1/admin/reports?{q}", headers={"Authorization": f"Bearer {tok}", "User-Agent": "openstrap-report-tools/1"})
-    page = json.load(urllib.request.urlopen(req, timeout=60))["reports"]
+    page = json.load(opener.open(req, timeout=60))["reports"]
     rows += page
     if len(page) < 1000:
         break

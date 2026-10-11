@@ -160,22 +160,32 @@ async function postReport(req: Request, env: Env): Promise<Response> {
     id = newId();
     key = `${meta.hasDatabase ? "db" : "logs"}/${id}`;
     try {
-      // One statement checks the daily count and storage ceiling and inserts, so concurrent posts cannot both pass.
-      const ins = await env.DB.prepare(
-        `INSERT INTO reports (id, install_id, created_at, category, title, description, meta, blob_key, blob_bytes, has_db, delete_token_hash)
-         SELECT ?,?,?,?,?,?,?,?,?,?,?
-         WHERE (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) < ?
-           AND (SELECT COUNT(*) FROM reports WHERE created_at >= ?) < ?
-           AND (SELECT COALESCE(SUM(blob_bytes),0) FROM reports) + ? <= ?`)
-        .bind(id, meta.installId, createdAt, meta.category, meta.title, meta.description, JSON.stringify(meta),
-          key, bytes.length, meta.hasDatabase ? 1 : 0, tokenHash,
-          meta.installId, dayStart, LIMITS.perInstallPerDay,
-          dayStart, LIMITS.dailyTotal,
-          bytes.length, meta.hasDatabase ? LIMITS.ceilingBytes : LIMITS.hardCeilingBytes).run();
+      // One atomic batch: the first statement checks the caps against O(1) counters (stats rows and the
+      // (install_id, created_at) index) and inserts; the counter bumps only apply if that insert landed.
+      const dayKey = "day:" + dayStart.slice(0, 10);
+      const bump = (k: string, n: number) =>
+        env.DB.prepare(
+          `INSERT INTO stats (k, v) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM reports WHERE id = ?)
+           ON CONFLICT (k) DO UPDATE SET v = v + excluded.v`).bind(k, n, id);
+      const [ins] = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO reports (id, install_id, created_at, category, title, description, meta, blob_key, blob_bytes, has_db, delete_token_hash)
+           SELECT ?,?,?,?,?,?,?,?,?,?,?
+           WHERE (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) < ?
+             AND COALESCE((SELECT v FROM stats WHERE k = ?), 0) < ?
+             AND COALESCE((SELECT v FROM stats WHERE k = 'bytes'), 0) + ? <= ?`)
+          .bind(id, meta.installId, createdAt, meta.category, meta.title, meta.description, JSON.stringify(meta),
+            key, bytes.length, meta.hasDatabase ? 1 : 0, tokenHash,
+            meta.installId, dayStart, LIMITS.perInstallPerDay,
+            dayKey, LIMITS.dailyTotal,
+            bytes.length, meta.hasDatabase ? LIMITS.ceilingBytes : LIMITS.hardCeilingBytes),
+        bump("bytes", bytes.length),
+        bump(dayKey, 1),
+      ]);
       if (!ins.meta.changes) {
         const used = await env.DB.prepare(
-          "SELECT (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) AS mine, (SELECT COUNT(*) FROM reports WHERE created_at >= ?) AS all_")
-          .bind(meta.installId, dayStart, dayStart).first<{ mine: number; all_: number }>();
+          "SELECT (SELECT COUNT(*) FROM reports WHERE install_id = ? AND created_at >= ?) AS mine, COALESCE((SELECT v FROM stats WHERE k = ?), 0) AS all_")
+          .bind(meta.installId, dayStart, dayKey).first<{ mine: number; all_: number }>();
         return (used?.mine ?? 0) >= LIMITS.perInstallPerDay || (used?.all_ ?? 0) >= LIMITS.dailyTotal
           ? err(429, "rate_limited") : err(507, "storage_full");
       }
@@ -187,7 +197,11 @@ async function postReport(req: Request, env: Env): Promise<Response> {
   try {
     await env.BLOBS.put(key, bytes);
   } catch (e) {
-    await env.DB.prepare("DELETE FROM reports WHERE id = ?").bind(id).run();
+    // Undo the insert and its byte count; the day counter keeps the attempt (conservative).
+    await env.DB.batch([
+      env.DB.prepare("UPDATE stats SET v = v - ? WHERE k = 'bytes'").bind(bytes.length),
+      env.DB.prepare("DELETE FROM reports WHERE id = ?").bind(id),
+    ]);
     throw e;
   }
 
@@ -204,9 +218,13 @@ async function deleteReport(req: Request, env: Env, id: string): Promise<Respons
   if (!(await safeEqual(hex(await sha256(token)), row.delete_token_hash))) return err(403, "forbidden");
   if (row.blob_key) await env.BLOBS.delete(row.blob_key);
   // Scrub but keep the row so the per-day rate limit still counts it; the cron removes it at 90 days.
-  await env.DB.prepare(
-    `UPDATE reports SET blob_key=NULL, blob_bytes=0, title='', description='', meta='{}', delete_token_hash='' WHERE id = ?`)
-    .bind(id).run();
+  // Stats first: it reads the row's blob_bytes before the scrub zeroes it (a repeat delete subtracts 0).
+  await env.DB.batch([
+    env.DB.prepare("UPDATE stats SET v = v - (SELECT blob_bytes FROM reports WHERE id = ?) WHERE k = 'bytes'").bind(id),
+    env.DB.prepare(
+      `UPDATE reports SET blob_key=NULL, blob_bytes=0, title='', description='', meta='{}', delete_token_hash='' WHERE id = ?`)
+      .bind(id),
+  ]);
   return new Response(null, { status: 204 });
 }
 
@@ -244,9 +262,17 @@ export async function cleanup(env: Env, now = new Date()): Promise<{ blobs: numb
     .bind(cut(LIMITS.dbTtlDays), cut(LIMITS.blobTtlDays)).all<{ id: string; blob_key: string }>();
   for (const r of results) {
     await env.BLOBS.delete(r.blob_key);
-    await env.DB.prepare("UPDATE reports SET blob_key=NULL, blob_bytes=0 WHERE id = ?").bind(r.id).run();
+    await env.DB.batch([
+      env.DB.prepare("UPDATE stats SET v = v - (SELECT blob_bytes FROM reports WHERE id = ?) WHERE k = 'bytes'").bind(r.id),
+      env.DB.prepare("UPDATE reports SET blob_key=NULL, blob_bytes=0 WHERE id = ?").bind(r.id),
+    ]);
   }
-  const rows = await env.DB.prepare("DELETE FROM reports WHERE created_at < ?").bind(cut(LIMITS.rowTtlDays)).run();
+  // Rows past retention should already be blob-free; subtract any stragglers so the counter cannot drift.
+  const [, rows] = await env.DB.batch([
+    env.DB.prepare("UPDATE stats SET v = v - COALESCE((SELECT SUM(blob_bytes) FROM reports WHERE created_at < ?), 0) WHERE k = 'bytes'").bind(cut(LIMITS.rowTtlDays)),
+    env.DB.prepare("DELETE FROM reports WHERE created_at < ?").bind(cut(LIMITS.rowTtlDays)),
+    env.DB.prepare("DELETE FROM stats WHERE k LIKE 'day:%' AND k < ?").bind("day:" + cut(2).slice(0, 10)),
+  ]);
   return { blobs: results.length, rows: rows.meta.changes ?? 0 };
 }
 
