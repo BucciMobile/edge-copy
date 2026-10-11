@@ -2,8 +2,8 @@ name = "openstrap-reports"
 main = "src/index.ts"
 compatibility_date = "2026-10-01"
 
-# Custom domain: reports.openstrap.wtf (attach in the dashboard or uncomment).
-# routes = [{ pattern = "reports.openstrap.wtf", custom_domain = true }]
+# Custom domain: reports.openstrap.site (attach in the dashboard or uncomment).
+routes = [{ pattern = "reports.openstrap.site", custom_domain = true }]
 
 [[r2_buckets]]
 binding = "BLOBS"
@@ -12,7 +12,7 @@ bucket_name = "openstrap-reports"
 [[d1_databases]]
 binding = "DB"
 database_name = "openstrap-reports"
-database_id = "REPLACE_WITH_ID_FROM_wrangler_d1_create"
+database_id = "5fe4e352-1b24-4021-99db-23742c833d1b"
 migrations_dir = "migrations"
 
 [triggers]

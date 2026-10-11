@@ -23,7 +23,7 @@ import '../sync/file_log.dart';
 import '../telemetry/telemetry_service.dart';
 
 /// The report service. One constant; the Worker answers under /v1.
-const String kReportBaseUrl = 'https://reports.openstrap.wtf';
+const String kReportBaseUrl = 'https://reports.openstrap.site';
 
 /// Server limits (bytes of the sealed blob).
 const int kReportMaxBytes = 2 * 1024 * 1024;

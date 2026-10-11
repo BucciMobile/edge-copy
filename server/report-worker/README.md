@@ -45,7 +45,7 @@ npx wrangler secret put GITHUB_REPO               # OpenStrap/reports
 npx wrangler deploy
 ```
 
-Custom domain: Workers & Pages > openstrap-reports > Settings > Domains > add `reports.openstrap.wtf` (zone must be on Cloudflare), or uncomment `routes` in `wrangler.toml` and redeploy. Check `curl https://reports.openstrap.wtf/v1/health`.
+Custom domain: Workers & Pages > openstrap-reports > Settings > Domains > add `reports.openstrap.site` (zone must be on Cloudflare), or uncomment `routes` in `wrangler.toml` and redeploy. Check `curl https://reports.openstrap.site/v1/health`.
 
 ## Fetch and decrypt a report
 

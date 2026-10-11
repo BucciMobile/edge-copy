@@ -4,7 +4,7 @@
 # transaction, so a report the user deleted or that passed 90 days disappears here too.
 # Config in /etc/openstrap-report-backup.env: REPORT_ADMIN_TOKEN=..., optional REPORT_URL, BACKUP_DB.
 set -euo pipefail
-export REPORT_URL="${REPORT_URL:-https://reports.openstrap.wtf}"
+export REPORT_URL="${REPORT_URL:-https://reports.openstrap.site}"
 export BACKUP_DB="${BACKUP_DB:-/var/lib/openstrap-reports/meta.sqlite}"
 : "${REPORT_ADMIN_TOKEN:?set REPORT_ADMIN_TOKEN}"
 mkdir -p "$(dirname "$BACKUP_DB")"
@@ -14,7 +14,7 @@ url, db, tok = os.environ["REPORT_URL"], os.environ["BACKUP_DB"], os.environ["RE
 rows, since, after = [], "1970-01-01T00:00:00Z", ""
 while True:  # cursor = (created_at, id): rows sharing a timestamp are never skipped
     q = urllib.parse.urlencode({"since": since, "after_id": after})
-    req = urllib.request.Request(f"{url}/v1/admin/reports?{q}", headers={"Authorization": f"Bearer {tok}"})
+    req = urllib.request.Request(f"{url}/v1/admin/reports?{q}", headers={"Authorization": f"Bearer {tok}", "User-Agent": "openstrap-report-tools/1"})
     page = json.load(urllib.request.urlopen(req, timeout=60))["reports"]
     rows += page
     if len(page) < 1000:
