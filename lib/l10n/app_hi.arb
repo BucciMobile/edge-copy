@@ -2454,5 +2454,25 @@
   "tabHealth": "स्वास्थ्य",
   "tabNutrition": "पोषण",
   "tabWorkout": "वर्कआउट",
-  "tabWellness": "वेलनेस"
+  "tabWellness": "वेलनेस",
+  "dayTimelineOuraSpo2Title": "ब्लड ऑक्सीजन · Oura",
+  "@dayTimelineOuraSpo2Title": {
+    "description": "Oura रिंग के रक्त-ऑक्सीजन सारांश के लिए टाइमलाइन क्षण का शीर्षक।"
+  },
+  "dayTimelineOuraSpo2Detail": "{value}% · {count,plural, =1{1 माप} other{{count} माप}}",
+  "@dayTimelineOuraSpo2Detail": {
+    "description": "विवरण: सभी संग्रहीत प्रति-सेकंड नमूनों का समान-भारित औसत, नमूना संख्या के साथ।",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dayTimelineOuraSpo2Experimental": "प्रायोगिक व्याख्या",
+  "@dayTimelineOuraSpo2Experimental": {
+    "description": "जब तक Oura SpO2 डिकोडिंग हार्डवेयर पर सत्यापित नहीं हो जाता, तब तक का क्वालिफायर।"
+  }
 }

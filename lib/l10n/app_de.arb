@@ -2573,5 +2573,25 @@
   "tabHealth": "Gesundheit",
   "tabNutrition": "Ernährung",
   "tabWorkout": "Training",
-  "tabWellness": "Wohlbefinden"
+  "tabWellness": "Wohlbefinden",
+  "dayTimelineOuraSpo2Title": "Blutsauerstoff · Oura",
+  "@dayTimelineOuraSpo2Title": {
+    "description": "Timeline-Moment-Titel für die eigene Blutsauerstoff-Tageszusammenfassung des Oura-Rings."
+  },
+  "dayTimelineOuraSpo2Detail": "{value}% über {count,plural, =1{1 Messung} other{{count} Messungen}}",
+  "@dayTimelineOuraSpo2Detail": {
+    "description": "Timeline-Moment-Detail: der gleichgewichtete Mittelwert aller gespeicherten Sekundenwerte mit Stichprobenzahl, damit ein kurzes Fragment nicht als Nachtmittelwert liest.",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dayTimelineOuraSpo2Experimental": "experimentelle Interpretation",
+  "@dayTimelineOuraSpo2Experimental": {
+    "description": "Timeline-Zusatz, solange die Oura-SpO2-Decodierung hardwareseitig unverifiziert ist."
+  }
 }

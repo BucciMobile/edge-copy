@@ -2483,5 +2483,25 @@
   "tabHealth": "Salud",
   "tabNutrition": "Nutrición",
   "tabWorkout": "Entrenamiento",
-  "tabWellness": "Bienestar"
+  "tabWellness": "Bienestar",
+  "dayTimelineOuraSpo2Title": "Oxígeno en sangre · Oura",
+  "@dayTimelineOuraSpo2Title": {
+    "description": "Título del momento del resumen de oxígeno en sangre del anillo Oura."
+  },
+  "dayTimelineOuraSpo2Detail": "{value}% en {count,plural, =1{1 medición} other{{count} mediciones}}",
+  "@dayTimelineOuraSpo2Detail": {
+    "description": "Detalle del momento: media ponderada por igual de todas las muestras por segundo almacenadas, con el número de muestras.",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dayTimelineOuraSpo2Experimental": "interpretación experimental",
+  "@dayTimelineOuraSpo2Experimental": {
+    "description": "Calificador mientras la decodificación de SpO2 del Oura no esté verificada en hardware."
+  }
 }

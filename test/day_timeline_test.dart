@@ -15,6 +15,87 @@ import 'package:openstrap_edge/ui2/ui2.dart';
 final int _day = DateTime(2026, 8, 14).millisecondsSinceEpoch ~/ 1000;
 int _at(int h, [int m = 0]) => _day + h * 3600 + m * 60;
 
+
+void _ouraSpo2Tests() {
+  final firstMs = DateTime(2026, 8, 14, 2, 0, 0).millisecondsSinceEpoch;
+  final lastMs = DateTime(2026, 8, 14, 2, 0, 2).millisecondsSinceEpoch;
+
+  test('one moment at the first measured second, mean and count in the detail',
+      () {
+    final m = dayMoments(
+      timeline: {'day_start': DateTime(2026, 8, 14).millisecondsSinceEpoch ~/ 1000},
+      ouraSpo2: [
+        (
+          meanPercent: (90 + 90 + 100) / 3,
+          count: 3,
+          firstTsMs: firstMs,
+          lastTsMs: lastMs,
+        ),
+      ],
+    );
+    expect(m, hasLength(1));
+    expect(m.first.at, firstMs ~/ 1000);
+    expect(m.first.until, lastMs ~/ 1000);
+    expect(m.first.title, contains('Oura'));
+    expect(m.first.detail, contains('93.3'));
+    expect(m.first.detail, contains('3'));
+    // UNVERIFIED decode: the experimental qualifier rides the detail, and
+    // disappears when the gate opens (the same constant production reads).
+    expect(m.first.detail,
+        contains('experimental'),
+        reason: 'kOuraSpo2InterpretationVerified is false today — the '
+            'moment must not read as a settled measurement');
+    // MEASURED time, not a load or sync time: the moment's clock placement
+    // IS the first measured second.
+    expect(m.first.at, firstMs ~/ 1000);
+  });
+
+  test('no summary, no moment — the card deletes itself', () {
+    final m = dayMoments(timeline: {'day_start': 0});
+    expect(m.where((x) => x.title.contains('Oura')), isEmpty);
+  });
+
+  test('a whole-number mean renders without a decimal', () {
+    final m = dayMoments(
+      timeline: {'day_start': 0},
+      ouraSpo2: [
+        (
+          meanPercent: 97.0,
+          count: 1,
+          firstTsMs: firstMs,
+          lastTsMs: firstMs,
+        ),
+      ],
+    );
+    expect(m.first.detail, contains('97'));
+    expect(m.first.detail, isNot(contains('97.0')));
+  });
+
+  test('two summaries are two moments, sorted by their own stamps', () {
+    final m = dayMoments(
+      timeline: {'day_start': 0},
+      ouraSpo2: [
+        (
+          meanPercent: 96,
+          count: 2,
+          firstTsMs: DateTime(2026, 8, 14, 4).millisecondsSinceEpoch,
+          lastTsMs: DateTime(2026, 8, 14, 4).millisecondsSinceEpoch + 1000,
+        ),
+        (
+          meanPercent: 98,
+          count: 1,
+          firstTsMs: firstMs,
+          lastTsMs: firstMs,
+        ),
+      ],
+    );
+    final oura = m.where((x) => x.title.contains('Oura')).toList()
+      ..sort((a, b) => a.at.compareTo(b.at));
+    expect(oura, hasLength(2));
+    expect(oura.first.at, lessThan(oura.last.at));
+  });
+}
+
 void main() {
   group('the day timeline places only what carries a clock', () {
     test('everything is ordered by time and nothing else', () {
@@ -167,6 +248,7 @@ void main() {
     });
   });
 
+  _ouraSpo2Tests();
   _graphTests();
 }
 

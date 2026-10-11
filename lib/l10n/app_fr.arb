@@ -2454,5 +2454,25 @@
   "tabHealth": "Santé",
   "tabNutrition": "Nutrition",
   "tabWorkout": "Entraînement",
-  "tabWellness": "Bien-être"
+  "tabWellness": "Bien-être",
+  "dayTimelineOuraSpo2Title": "Oxygène sanguin · Oura",
+  "@dayTimelineOuraSpo2Title": {
+    "description": "Titre du moment pour le récapitulatif d'oxygène sanguin du porteur Oura."
+  },
+  "dayTimelineOuraSpo2Detail": "{value}% sur {count,plural, =1{1 mesure} other{{count} mesures}}",
+  "@dayTimelineOuraSpo2Detail": {
+    "description": "Détail du moment : moyenne pondérée de toutes les mesures par seconde stockées, avec leur nombre.",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dayTimelineOuraSpo2Experimental": "interprétation expérimentale",
+  "@dayTimelineOuraSpo2Experimental": {
+    "description": "Qualificatif tant que le décodage SpO2 de l'Oura n'est pas vérifié sur le matériel."
+  }
 }

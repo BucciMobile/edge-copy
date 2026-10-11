@@ -28,6 +28,8 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
 
 import '../../ble/adapters/signals.dart' show InputSignal;
+import '../../ble/adapters/oura_spo2.dart'
+    show kOuraSpo2InterpretationVerified;
 import '../../data/day_label.dart' show localDayEndSec;
 import '../../data/db.dart';
 import '../../data/journal_fields.dart';
@@ -124,9 +126,39 @@ List<Moment> dayMoments({
   Map<String, JournalMetricValue> journal = const {},
   List<JournalFieldSpec> fields = const [],
   AppLocalizations? l,
+  List<({double meanPercent, int count, int firstTsMs, int lastTsMs})>
+      ouraSpo2 = const [],
 }) {
   final out = <Moment>[];
   int? asInt(Object? v) => (v as num?)?.toInt();
+  // The Oura ring's own blood oxygen for this day: ONE moment at the first
+  // measured second, carrying the equal-weighted mean of every stored
+  // per-second sample and the sample count — never a "night average"
+  // (the rows are whatever the ring handed over, window-agnostic) and
+  // never a live reading (the rows are history). Attribution rides the
+  // title; the count rides the detail so a one-second fragment can't
+  // dress up as a night. FRESHNESS is the timestamp itself, shown as a
+  // clock time like every other moment on this line.
+  for (final s in ouraSpo2) {
+    final mean = s.meanPercent;
+    final shown = mean == mean.roundToDouble()
+        ? mean.round().toString()
+        : mean.toStringAsFixed(1);
+    out.add(Moment(
+      at: s.firstTsMs ~/ 1000,
+      until: s.count > 1 ? s.lastTsMs ~/ 1000 : null,
+      title: l?.dayTimelineOuraSpo2Title ?? 'Blood oxygen · Oura',
+      // The MEASURED time rides the moment's clock placement (FRESHNESS is
+      // the stamp, never the load or a sync time — a three-day-old reading
+      // stays three days old no matter when it arrived). While the decode
+      // is unverified on hardware the detail says so — the ring's number,
+      // experimentally read, is not a settled health measurement.
+      detail: '${l?.dayTimelineOuraSpo2Detail(shown, s.count) ?? '$shown% over ${s.count} measurement${s.count == 1 ? '' : 's'}'}'
+          '${kOuraSpo2InterpretationVerified ? '' : ' · ${l?.dayTimelineOuraSpo2Experimental ?? 'experimental'}'}',
+      icon: LucideIcons.droplet,
+      color: C.pink,
+    ));
+  }
 
   // Sleep. The onset normally sits in the PREVIOUS calendar day — a day's
   // sleep is the night that ended that morning — so it sorts to the top and
@@ -603,6 +635,9 @@ class TimelineData {
         journal: journal,
         fields: fields,
         l: l,
+        ouraSpo2: [
+          ?await LocalDb.ouraSpo2DaySummary(day),
+        ],
       ),
       notes: [
         ...dayNotes(

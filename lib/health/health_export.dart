@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ble/adapters/oura_spo2.dart';
 import '../data/day_label.dart';
 import '../data/db.dart';
 import '../data/series_codec.dart';
@@ -33,6 +34,30 @@ import 'health_heart_rate_batch.dart';
 import 'health_sleep_session.dart';
 
 /// What we can do with the health store right now.
+/// The outcome of one day's Oura-SpO2 export attempt. Logically distinct
+/// states, never collapsed: `notEligible` is the gate holding (no data was
+/// refused — nothing was owed), `noData` is a day the ring has no rows for,
+/// and only the last three are failures a retry should revisit.
+enum OuraSpo2ExportResult {
+  /// The eligibility gate held — unverified interpretation, device not
+  /// selected, integration off, or unsuitable time reference. NOTHING was
+  /// written and nothing is owed.
+  notEligible,
+
+  /// No suitable rows for this day. Not a failure.
+  noData,
+
+  /// The delete-before-write did not clear the window (store hung, or a
+  /// genuine delete failure). Retried on the next pass.
+  deleteFailed,
+
+  /// The write call failed or was refused. Retried on the next pass.
+  writeFailed,
+
+  /// Written.
+  written,
+}
+
 enum HealthLinkState {
   unknown,
   ready, // permission granted, can write
@@ -347,6 +372,65 @@ String? healthExportCursorBefore(String cursor, String date) {
   return dayLabelOf(DateTime(d.year, d.month, d.day - 1));
 }
 
+/// One Oura-SpO2 backfill pass over [days], behind [cursor]. THE walk both
+/// production (`_exportOuraSpo2BehindCursor`) and the integration test run —
+/// there is no second implementation anywhere. The caller owns day
+/// enumeration and persistence; this function owns ONLY the per-day
+/// decision order: export, then [ouraSpo2CursorAdvance], advance on true,
+/// stop on false/null WITHOUT consuming the day.
+///
+/// A stopped pass (gate closed, or a genuine failure at one day) never
+/// blocks later days FOREVER: the next pass re-enumerates from the
+/// cursor, and a day that fails simply fails again at the front — an old
+/// unsuitable day can never wedge newer, suitable days behind it,
+/// because the enumeration is by DATE and the cursor only advances past
+/// days that were actually written.
+@visibleForTesting
+Future<void> runOuraSpo2BackfillPass({
+  required String cursor,
+  required List<String> days,
+  required Future<OuraSpo2ExportResult> Function(String date) exportDay,
+  required Future<String?> Function() getCursor,
+  required Future<void> Function(String) setCursor,
+}) async {
+  for (final date in days) {
+    final result = await exportDay(date);
+    final advance = ouraSpo2CursorAdvance(result);
+    if (advance == null) return; // a genuine failure — retry this day
+    if (!advance) return; // gate closed — stop BEFORE consuming any day
+    await setCursor(date);
+  }
+}
+
+/// The cursor decision for one day's Oura-SpO2 export result, as ONE pure
+/// function both the pass and its tests read — never inline, never duplicated.
+///
+/// * `written` -> true: the day is done, advance.
+/// * `notEligible` -> false: the gate is closed. STOP, consume nothing —
+///   a later release must find every day still behind the cursor.
+/// * `noData` -> false: same stop (cannot occur in the pass, which only
+///   enumerates days that have rows; mapped defensively).
+/// * `deleteFailed` / `writeFailed` -> null: a genuine failure. STOP AT
+///   this day; the next pass retries it, and the day is never skipped.
+@visibleForTesting
+bool? ouraSpo2CursorAdvance(OuraSpo2ExportResult result) => switch (result) {
+      OuraSpo2ExportResult.written => true,
+      OuraSpo2ExportResult.notEligible => false,
+      OuraSpo2ExportResult.noData => false,
+      OuraSpo2ExportResult.deleteFailed => null,
+      OuraSpo2ExportResult.writeFailed => null,
+    };
+
+/// The day label [days] local days before [cursor] — calendar-field
+/// arithmetic (never -86400s), the same DST-safety every other label walk
+/// here uses. An unparseable cursor (impossible from setCursor, defensive)
+/// yields '', which the caller's `date > ''` bound treats as "no tail".
+String _dayLabelMinus(String cursor, int days) {
+  final d = DateTime.tryParse(cursor);
+  if (d == null) return '';
+  return dayLabelOf(DateTime(d.year, d.month, d.day - days));
+}
+
 class HealthExportSingleFlight {
   Future<int>? _inFlight;
 
@@ -518,6 +602,13 @@ class HealthExporter {
 
   List<HealthDataType> get _types => [
     HealthDataType.RESTING_HEART_RATE,
+    // The Oura ring's own SpO2 day summary (one sample per day, behind the
+    // eligibility gate — see exportOuraSpo2Day). Requested for WRITE SCOPE
+    // only; deliberately NOT in the delete-then-write loop (_rewriteTypes),
+    // which is owned by the derived metrics: its per-day window and success
+    // accounting belong to the main export, and this type clears its own
+    // measured span inside exportOuraSpo2Day.
+    HealthDataType.BLOOD_OXYGEN,
     _hrvType,
     HealthDataType.RESPIRATORY_RATE,
     HealthDataType.HEART_RATE,
@@ -1087,6 +1178,7 @@ class HealthExporter {
         debugPrint(
           '[health] exported $done day(s); finalized-cursor=$newCursor',
         );
+        await _exportOuraSpo2BehindCursor();
         return done;
       };
 
@@ -1456,6 +1548,202 @@ class HealthExporter {
       }
     }
     return success;
+  }
+
+  /// The Oura ring's own blood-oxygen day summary, exported as ONE
+  /// `BLOOD_OXYGEN` sample at the day's FIRST measured second — the only
+  /// instant in the contract that is a real measurement time, never a noon
+  /// fallback or a receive time.
+  ///
+  /// WHY A SEPARATE RESULT, NOT `success`: a refused SpO2 write permission
+  /// must never block the day's sleep/HR/workout export (the plugin
+  /// silently no-ops an ungranted type, and `writeHealthData` returning
+  /// false for it would otherwise flip the whole day to not-exported and
+  /// stall the main cursor on a partial grant forever). The main cursor
+  /// advances on the main types; this result only feeds the SpO2-specific
+  /// cursor in `_exportOuraSpo2`.
+  ///
+  /// WHY THE GATE IS HERE AND NOT IN THE CALLER: the eligibility function
+  /// is the ONE place that decides, so no background path can bypass it.
+  /// Until hardware validation flips `kOuraSpo2InterpretationVerified`
+  /// this returns `notEligible` before touching the health store — the
+  /// software path is wired, the release is that one constant.
+  static Future<OuraSpo2ExportResult> exportOuraSpo2Day({
+    required Future<({double meanPercent, int count, int firstTsMs, int lastTsMs})?>
+        Function() summaryFor,
+    required Future<bool> Function(double value, DateTime start, DateTime end)
+        write,
+    required Future<bool> Function(DateTime start, DateTime end) deleteOwn,
+    bool deviceSelected = true,
+    bool integrationEnabled = true,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+    bool timeReferenceSuitable = true,
+  }) async {
+    final summary = await summaryFor();
+    final eligible = eligibleOuraSpo2Percent(
+      value: summary?.meanPercent,
+      unit: '%',
+      deviceSelected: deviceSelected,
+      integrationEnabled: integrationEnabled,
+      interpretationVerified: interpretationVerified,
+      timeReferenceSuitable: timeReferenceSuitable,
+    );
+    if (summary == null || eligible == null) {
+      return OuraSpo2ExportResult.notEligible;
+    }
+    // THE SAMPLE IS THE MEASURED INTERVAL, not a point at its first
+    // second: a day's equal-weighted mean over [first .. last] measured
+    // seconds is an AGGREGATE, and HealthKit models that as
+    // startTime..endTime. Writing it at startTime == endTime would be a
+    // point-sample claim — a measurement at one instant the ring never
+    // made at that instant alone.
+    final start = DateTime.fromMillisecondsSinceEpoch(summary.firstTsMs);
+    final end = DateTime.fromMillisecondsSinceEpoch(summary.lastTsMs);
+    // Delete-then-write, idempotent on a re-export of the same day. The
+    // window is the observations' own measured span, and the delete only
+    // ever removes OUR samples — the Oura app's, the Apple Watch's and
+    // every other app's SpO2 rows are untouchable by the platform API.
+    if (!await deleteOwn(start, end.add(const Duration(milliseconds: 1000)))) {
+      return OuraSpo2ExportResult.deleteFailed;
+    }
+    return await write(summary.meanPercent, start, end)
+        ? OuraSpo2ExportResult.written
+        : OuraSpo2ExportResult.writeFailed;
+  }
+
+
+
+  /// How many days behind the cursor the pass re-examines EVERY time:
+  /// late-delivered nights and re-stated (re-anchored) days land behind a
+  /// day cursor, and delete-then-write makes the re-export idempotent. The
+  /// recent tail, not the whole history — the same mutable-tail shape the
+  /// main exporter uses for non-finalized days.
+  static const int _kOuraSpo2TailDays = 3;
+
+  /// The SpO2 backfill cursor. SEPARATE from `health_export_through` because
+  /// the ring's observations cover days the derive pipeline never ran on
+  /// (a ring-only day has no `day_result`, so the main enumeration never
+  /// sees it), and because the main cursor's contract — contiguous
+  /// finalized prefix, retry budget, give-up — belongs to the derived
+  /// metrics, not to this type.
+  ///
+  /// A date label (local day). The ONE rule that keeps a later release
+  /// reachable: the cursor advances ONLY on `written`, and the pass STOPS
+  /// on `notEligible` without consuming any day. A pass while the gate is
+  /// closed must leave the cursor untouched — advancing past days "because
+  /// nothing was owed" is exactly how a later release finds the whole
+  /// history already consumed and unrecoverable. `noData` cannot occur
+  /// here (the query enumerates days that HAVE rows); it is mapped to
+  /// stop-the-pass defensively rather than advance. A failed delete or
+  /// write also stops the pass at that day, so the next pass retries it.
+  ///
+  /// DELAYED AND CORRECTED DATA: a day cursor alone would skip rows that a
+  /// later sync appends BEHIND it (a ring delivering several nights late)
+  /// and re-stated days (a re-anchored replay writing different seconds).
+  /// The pass therefore always re-walks the RECENT TAIL behind the cursor
+  /// (see [_kOuraSpo2TailDays]) with delete-then-write idempotency, and
+  /// the query bound limits one pass's work. No general job framework, no
+  /// per-row bookkeeping — the same mutable-tail shape exportAll itself
+  /// uses for the non-finalized head.
+  static const String _kOuraSpo2Cursor = 'health_oura_spo2_through';
+  static const int _kOuraSpo2DaysPerPass = 30;
+
+  /// One pass of the Oura-SpO2 export, behind its own cursor and the same
+  /// [_workoutLock] the caller already holds (exportAll runs under it, so
+  /// concurrent passes are serialized here too). Never throws.
+  Future<void> _exportOuraSpo2BehindCursor() async {
+    try {
+      final cursor = await LocalDb.getCursor(_kOuraSpo2Cursor) ?? '';
+      final db = await LocalDb.instance;
+      // A COPY: sqflite hands back a read-only list, and the tail below
+      // prepends to it.
+      final above = <Map<String, Object?>>[...await db.rawQuery(
+        "SELECT date "
+        'FROM observation '
+        "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
+        "AND unit = '%' AND value >= 70 AND value <= 100 "
+        'AND date > ? '
+        'GROUP BY date ORDER BY date ASC LIMIT $_kOuraSpo2DaysPerPass',
+        [cursor],
+      )];
+      final tail = cursor.isEmpty
+          ? const <Map<String, Object?>>[]
+          : await db.rawQuery(
+              "SELECT date "
+              'FROM observation '
+              "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
+              "AND unit = '%' AND value >= 70 AND value <= 100 "
+              'AND date <= ? AND date > ? '
+              'GROUP BY date ORDER BY date DESC LIMIT $_kOuraSpo2TailDays',
+              [cursor, _dayLabelMinus(cursor, _kOuraSpo2TailDays)],
+            );
+      await runOuraSpo2BackfillPass(
+        cursor: cursor,
+        days: [for (final r in tail.reversed) r['date'] as String] +
+            [for (final r in above) r['date'] as String],
+        exportDay: _exportOuraSpo2,
+        getCursor: () async => LocalDb.getCursor(_kOuraSpo2Cursor),
+        setCursor: (v) => LocalDb.setCursor(_kOuraSpo2Cursor, v),
+      );
+    } catch (e) {
+      debugPrint('[health] oura spo2 backfill: $e');
+    }
+  }
+
+  /// Wire [exportOuraSpo2Day] into the export pass. Deliberately OUTSIDE
+  /// the day's `success` accounting — see the method doc for why a partial
+  /// SpO2 grant must not stall the main export cursor. Never throws.
+  ///
+  /// THE GATE'S PRODUCTION SOURCES, not blanket `true`s:
+  ///  * `integrationEnabled` — the ring's `device` row still exists.
+  ///    REGISTRIERT and AKTIVIERT are the same fact in this fork: there
+  ///    is no separate Oura on/off switch anywhere — `OuraLink.sync`
+  ///    itself decides whether to connect on the same row, so the export
+  ///    cannot be stricter than the sync. A future activation switch
+  ///    would be its own product decision; when one lands, THIS is the
+  ///    parameter it feeds. (Writer: `upsertDevice` on pairing; deleter:
+  ///    `deleteDevice`, which the forget dialog documents as "removes
+  ///    the source, not the data".)
+  ///  * `deviceSelected` — same row: the summary below already selected
+  ///    the day's owning device BY ROW (`ouraSpo2DaySummaries`, most
+  ///    samples first), so a row existing here means the day's own device
+  ///    was selected, and two rings on one day export the OWNER's value,
+  ///    never a blend.
+  ///  * `timeReferenceSuitable` — always true ON THIS PATH, structurally:
+  ///    the summary is built from adapter rows that only exist with a
+  ///    decoded ring stamp (no anchor = no row, no arrival-time fallback
+  ///    anywhere in the adapter), and the write goes to the first measured
+  ///    second, never a noon fallback. A future latest/on-demand path with
+  ///    a weaker time contract must NOT default its way through this gate.
+  ///  * `interpretationVerified` — the compile-time release constant.
+  Future<OuraSpo2ExportResult> _exportOuraSpo2(String date) async {
+    try {
+      final device = await LocalDb.ouraSpo2DayDevice(date);
+      final result = await exportOuraSpo2Day(
+        summaryFor: () => LocalDb.ouraSpo2DaySummary(date),
+        // The AGGREGATE's measured interval — see exportOuraSpo2Day's
+        // doc for why this is a span, never a single-point claim.
+        write: (value, start, end) => _health.writeHealthData(
+          value: value,
+          type: HealthDataType.BLOOD_OXYGEN,
+          startTime: start,
+          endTime: end,
+          unit: HealthDataUnit.PERCENT,
+        ),
+        deleteOwn: (start, end) =>
+            _deleteOwnSamples(HealthDataType.BLOOD_OXYGEN, start, end),
+        // A day whose owning ring's pairing row is gone stops exporting —
+        // not a failure, the same "forgotten device keeps its data but
+        // stops being a source" rule deleteDevice documents.
+        deviceSelected: device != null,
+        integrationEnabled: device != null,
+      );
+      debugPrint('[health] oura spo2 $date: $result');
+      return result;
+    } catch (e) {
+      debugPrint('[health] oura spo2 $date: $e');
+      return OuraSpo2ExportResult.writeFailed;
+    }
   }
 
   /// The actual `writeWorkoutData` call, shared by [_exportDay]'s per-day loop

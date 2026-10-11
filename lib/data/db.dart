@@ -2786,6 +2786,98 @@ class LocalDb {
     );
   }
 
+  /// The Oura ring's own blood-oxygen summary for one LOCAL calendar day,
+  /// as `(meanPercent, sampleCount, firstTsMs, lastTsMs)` — or null when the
+  /// day has no suitable rows.
+  ///
+  /// THE MEAN IS OVER EVERY STORED PER-SECOND SAMPLE OF THE DAY, never over
+  /// batch means: a BLE batch is a transport boundary, and the rows this
+  /// reads are already batch-independent (one per measured second, identity-
+  /// deduplicated), so the SQL average is the equal-weighted mean the sample
+  /// count belongs to. A night split over midnight contributes its pre- and
+  /// post-midnight seconds to their own LOCAL days, matching how every other
+  /// table here is day-keyed.
+  ///
+  /// SUITABLE ROWS ONLY, and the filter encodes the data contract rather than
+  /// trusting it: `vendor_key = 'spo2'` (the ring's own name, never our
+  /// `key`), `source_kind = 'vendor'`, `unit = '%'` and the 70-100 adapter
+  /// floor. A row outside that set is someone else's number and is not
+  /// summarised here.
+  ///
+  /// Same display-only posture as [observationsForDay]: a caller reads this
+  /// to SHOW or (behind the eligibility gate) to export the vendor's number,
+  /// never as an input to a derivation.
+  static Future<({double meanPercent, int count, int firstTsMs, int lastTsMs})?>
+      ouraSpo2DaySummary(String date) async {
+    final perDevice = await ouraSpo2DaySummaries(date);
+    if (perDevice.isEmpty) return null;
+    return perDevice.values.first;
+  }
+
+  /// The same day's summaries PER DEVICE, most samples first. Two rings on
+  /// one day are two measurements of the same quantity by different
+  /// instruments, and averaging across them is exactly the systematic
+  /// blending this project refuses everywhere else — a Ring Gen4's and a
+  /// Ring 5's percentages are different calibrations even when they agree.
+  ///
+  /// The ORDER is the selection rule for callers that need one number
+  /// (display, export): the device that measured the most seconds of the
+  /// day owns the day. Most-samples, NOT newest-stamp — a ring syncing a
+  /// week late must not displace the ring that measured the whole night
+  /// with three fresher seconds.
+  ///
+  /// Per-day only: nights are not merged across days (a night over
+  /// midnight belongs to its own local days), and neither are different
+  /// paths (only `vendor_key='spo2'` rows the adapter wrote — a future
+  /// latest/on-demand path stores under its own identity and never lands
+  /// in this summary).
+  static Future<
+          Map<String, ({double meanPercent, int count, int firstTsMs, int lastTsMs})>>
+      ouraSpo2DaySummaries(String date) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT device_id, COUNT(*) AS n, AVG(value) AS mean, '
+      'MIN(ts_ms) AS first_ms, MAX(ts_ms) AS last_ms '
+      'FROM observation '
+      "WHERE date = ? AND vendor_key = 'spo2' "
+      "AND source_kind = 'vendor' AND unit = '%' "
+      'AND value >= 70 AND value <= 100 '
+      'GROUP BY device_id '
+      'ORDER BY n DESC, device_id ASC',
+      [date],
+    );
+    return {
+      for (final r in rows)
+        r['device_id'] as String: (
+          meanPercent: (r['mean'] as num).toDouble(),
+          count: (r['n'] as num).toInt(),
+          firstTsMs: (r['first_ms'] as num).toInt(),
+          lastTsMs: (r['last_ms'] as num).toInt(),
+        ),
+    };
+  }
+
+  /// The device that OWNS the day's Oura-SpO2 rows (most samples, same
+  /// rule as [ouraSpo2DaySummaries]), or null when the day has no rows OR
+  /// the owning ring's `device` row no longer exists (a forgotten ring:
+  /// its measurements stay banked but it stops being an export source).
+  static Future<String?> ouraSpo2DayDevice(String date) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT o.device_id AS did, COUNT(*) AS n '
+      'FROM observation o '
+      "JOIN device d ON d.id = o.device_id "
+      "WHERE o.date = ? AND o.vendor_key = 'spo2' "
+      "AND o.source_kind = 'vendor' AND o.unit = '%' "
+      'AND o.value >= 70 AND o.value <= 100 '
+      'GROUP BY o.device_id '
+      'ORDER BY n DESC, o.device_id ASC LIMIT 1',
+      [date],
+    );
+    if (rows.isEmpty) return null;
+    return rows.first['did'] as String;
+  }
+
   // ── IMPORTED WORKOUTS (Apple Health / Health Connect) ──────────────────────
   /// A workout some OTHER app recorded, held in its own table for the same
   /// reason `imported_measurement` is: so that it CANNOT become one of ours.
