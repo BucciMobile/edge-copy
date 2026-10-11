@@ -229,7 +229,7 @@ describe("cleanup cron", () => {
     await setStat(today(), 7);
     await setStat("bytes", 10);
     await e.DB.prepare(`INSERT INTO reports (id,install_id,created_at,category,title,description,meta,blob_key,blob_bytes,has_db,delete_token_hash)
-      VALUES ('OS-OLD002','i',?,'sync','t','d','{}','logs/OS-OLD002',10,0,'h')`).bind(new Date(Date.now() - 91 * 864e5).toISOString()).run();
+      VALUES ('OS-OLD002','i',?,'sync','t','d','{}',NULL,10,0,'h')`).bind(new Date(Date.now() - 91 * 864e5).toISOString()).run();
     await cleanup(e);
     expect(await stat("bytes")).toBe(0);
     expect(await stat("day:2000-01-01")).toBe(0);
