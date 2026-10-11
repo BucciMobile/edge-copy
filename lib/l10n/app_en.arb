@@ -15466,5 +15466,268 @@
   "deviceUseSheetCancel": "Not now",
   "@deviceUseSheetCancel": {
     "description": "Confirmation sheet: cancel button."
+  },
+  "settingsReportIssueRowTitle": "Report an issue",
+  "@settingsReportIssueRowTitle": {
+    "description": "Settings row that opens the issue report screen."
+  },
+  "settingsReportIssueRowSub": "Sends what you choose to the maintainers, encrypted",
+  "@settingsReportIssueRowSub": {
+    "description": "Settings row subtitle for Report an issue."
+  },
+  "reportNavTitle": "Report an issue",
+  "@reportNavTitle": {
+    "description": "Issue report screen title."
+  },
+  "reportCategoryGroup": "What it's about",
+  "@reportCategoryGroup": {
+    "description": "Issue report: heading over the category choices."
+  },
+  "reportCategorySync": "Sync",
+  "@reportCategorySync": {
+    "description": "Issue report category."
+  },
+  "reportCategorySleep": "Sleep",
+  "@reportCategorySleep": {
+    "description": "Issue report category."
+  },
+  "reportCategoryRecovery": "Recovery",
+  "@reportCategoryRecovery": {
+    "description": "Issue report category."
+  },
+  "reportCategoryWorkout": "Workout",
+  "@reportCategoryWorkout": {
+    "description": "Issue report category."
+  },
+  "reportCategoryPairing": "Pairing",
+  "@reportCategoryPairing": {
+    "description": "Issue report category."
+  },
+  "reportCategoryOther": "Other",
+  "@reportCategoryOther": {
+    "description": "Issue report category."
+  },
+  "reportTitleLabel": "Title",
+  "@reportTitleLabel": {
+    "description": "Issue report: title field label."
+  },
+  "reportTitleHint": "One line on what went wrong",
+  "@reportTitleHint": {
+    "description": "Issue report: title field hint."
+  },
+  "reportDescriptionLabel": "What happened",
+  "@reportDescriptionLabel": {
+    "description": "Issue report: description field label."
+  },
+  "reportDescriptionHint": "What you did, what you expected, what you saw",
+  "@reportDescriptionHint": {
+    "description": "Issue report: description field hint."
+  },
+  "reportAttachGroup": "Attachments",
+  "@reportAttachGroup": {
+    "description": "Issue report: heading over screenshot and database options."
+  },
+  "reportScreenshotRow": "Add a screenshot",
+  "@reportScreenshotRow": {
+    "description": "Issue report: pick a screenshot."
+  },
+  "reportScreenshotRemove": "Remove the screenshot",
+  "@reportScreenshotRemove": {
+    "description": "Issue report: remove the picked screenshot."
+  },
+  "reportDatabaseRow": "Include the last 2 weeks of health data",
+  "@reportDatabaseRow": {
+    "description": "Issue report: switch to attach the database. Off by default."
+  },
+  "reportDatabaseWarning": "Your sleep, heart rate and other health data from the last 14 days (fewer days of second-by-second data if the ticket would be too big), plus your daily scores and settings. It goes only if this is on, and the server deletes it after 14 days. A ticket with health data can be up to 95 MB, so use Wi-Fi if you can.",
+  "@reportDatabaseWarning": {
+    "description": "Issue report: plain warning under the database switch."
+  },
+  "reportIncludedGroup": "What's included",
+  "@reportIncludedGroup": {
+    "description": "Issue report: heading over the list of files in the report."
+  },
+  "reportIncludedNote": "The category, title, description, app version, platform, system version, phone model, install ID, and whether a database or screenshot is attached travel unencrypted so we can track the report, and are kept for 90 days. Everything else is encrypted on this phone before it leaves, so only the maintainers can read it, and is deleted after 30 days, or after 14 days if your database is attached. “Share locally” is different: the ZIP it hands to the share sheet is not encrypted.",
+  "@reportIncludedNote": {
+    "description": "Issue report: note under the file list."
+  },
+  "reportFileManifest": "This list of files",
+  "@reportFileManifest": {
+    "description": "Issue report file description: manifest.json."
+  },
+  "reportFileMeta": "App version, phone model, system version, language, time zone and a random install ID",
+  "@reportFileMeta": {
+    "description": "Issue report file description: meta.json."
+  },
+  "reportFileDevice": "Your paired band and sensors: type, connection, battery and when they last synced",
+  "@reportFileDevice": {
+    "description": "Issue report file description: device.json."
+  },
+  "reportFileState": "Sync and scoring status, and recent errors",
+  "@reportFileState": {
+    "description": "Issue report file description: state.json."
+  },
+  "reportFileSyncLog": "The app's recent sync log",
+  "@reportFileSyncLog": {
+    "description": "Issue report file description: logs/sync.log."
+  },
+  "reportFileTelemetry": "Errors and events this phone recorded in the last 7 days",
+  "@reportFileTelemetry": {
+    "description": "Issue report file description: logs/telemetry.json."
+  },
+  "reportFileUser": "Your category, title and description",
+  "@reportFileUser": {
+    "description": "Issue report file description: user.txt."
+  },
+  "reportFileScreenshot": "The screenshot you picked",
+  "@reportFileScreenshot": {
+    "description": "Issue report file description: the screenshot."
+  },
+  "reportFileDatabase": "Your full health database, compressed",
+  "@reportFileDatabase": {
+    "description": "Issue report file description: database.db.gz."
+  },
+  "reportFileDatabaseSlice": "Last 14 days of health data, plus daily scores and settings, compressed",
+  "@reportFileDatabaseSlice": {
+    "description": "Issue report file description: database_14d.db.gz."
+  },
+  "reportFullDatabaseRow": "Full health database (share locally only)",
+  "@reportFullDatabaseRow": {
+    "description": "Issue report: switch to put the whole database in the locally shared file. Off by default; never uploaded."
+  },
+  "reportFullDatabaseWarning": "Your whole health record. It only goes in the file Share locally makes, never to our server.",
+  "@reportFullDatabaseWarning": {
+    "description": "Issue report: plain line under the full database switch."
+  },
+  "reportFullDatabaseNoUpload": "The full database is too big to upload. Use Share locally and send the file to us.",
+  "@reportFullDatabaseNoUpload": {
+    "description": "Issue report: shown under Create ticket while the full database switch is on (Create ticket is disabled)."
+  },
+  "reportDatabaseCovered": "Covered by the full database below.",
+  "@reportDatabaseCovered": {
+    "description": "Issue report: line under the 2-week switch while the full database switch is on."
+  },
+  "reportStageSlice": "Preparing last 2 weeks\u2026",
+  "@reportStageSlice": {
+    "description": "Report screen: progress text inside the busy button while the 2-week database is built."
+  },
+  "reportSend": "Create ticket",
+  "@reportSend": {
+    "description": "Issue report: send button."
+  },
+  "reportSaveInstead": "Share locally",
+  "@reportSaveInstead": {
+    "description": "Issue report: save the archive on the phone, nothing sent."
+  },
+  "reportNeedTitle": "Add a title first.",
+  "@reportNeedTitle": {
+    "description": "Issue report: shown when sending without a title."
+  },
+  "reportSentTitle": "Ticket created",
+  "@reportSentTitle": {
+    "description": "Issue report: success card title."
+  },
+  "reportSentBody": "Your ticket ID is {id}. Quote it if you talk to us about this.",
+  "@reportSentBody": {
+    "description": "Issue report: success card body with the report ID.",
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "reportCopyId": "Copy ID",
+  "@reportCopyId": {
+    "description": "Issue report: copy the report ID."
+  },
+  "reportNotSentTitle": "Ticket not created",
+  "@reportNotSentTitle": {
+    "description": "Issue report: failure card title."
+  },
+  "reportTooLarge": "This ticket is too large to upload. Use Share locally and send the file to us, or turn off the health data or remove the screenshot.",
+  "@reportTooLarge": {
+    "description": "Issue report: 413 or local size check."
+  },
+  "reportRateLimited": "You've created 3 tickets today. Try again tomorrow, or share this one locally instead.",
+  "@reportRateLimited": {
+    "description": "Issue report: 429."
+  },
+  "reportStorageFull": "The report server has no room for a database right now. You can create the ticket without it.",
+  "@reportStorageFull": {
+    "description": "Issue report: 507 storage full."
+  },
+  "reportSendWithoutDb": "Create ticket without the database",
+  "@reportSendWithoutDb": {
+    "description": "Issue report: resend after 507."
+  },
+  "reportSendFailed": "Couldn't create the ticket. Check your connection, or share it locally instead.",
+  "@reportSendFailed": {
+    "description": "Issue report: network or server error."
+  },
+  "reportMyReportsGroup": "My reports",
+  "@reportMyReportsGroup": {
+    "description": "Issue report: heading over reports sent from this phone."
+  },
+  "reportMyReportsSub": "Tap to delete it now. Otherwise it's deleted on {date}",
+  "@reportMyReportsSub": {
+    "description": "Issue report: row subtitle for a sent report.",
+    "placeholders": {
+      "date": {
+        "type": "String"
+      }
+    }
+  },
+  "reportDelete": "Delete",
+  "@reportDelete": {
+    "description": "Issue report: delete a sent report."
+  },
+  "reportDeleteFailed": "Couldn't delete it. Try again later.",
+  "@reportDeleteFailed": {
+    "description": "Issue report: delete failed."
+  },
+  "reportSaveFailedTitle": "Couldn't share the report",
+  "@reportSaveFailedTitle": {
+    "description": "Report screen: title of the card shown when building or sharing the local zip failed. Nothing was sent."
+  },
+  "reportSaveFailedBody": "Something went wrong while building or sharing the file. No ticket was created.",
+  "@reportSaveFailedBody": {
+    "description": "Report screen: body of the save-failed card."
+  },
+  "reportSaveRetry": "Try again",
+  "@reportSaveRetry": {
+    "description": "Report screen: button that retries saving the report locally."
+  },
+  "reportStageCollecting": "Collecting app info…",
+  "@reportStageCollecting": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageLogs": "Reading logs…",
+  "@reportStageLogs": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageDatabase": "Compressing database…",
+  "@reportStageDatabase": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStagePacking": "Packing files…",
+  "@reportStagePacking": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageEncrypting": "Encrypting…",
+  "@reportStageEncrypting": {
+    "description": "Report screen: progress text inside the busy button."
+  },
+  "reportStageUploading": "Uploading {size} MB…",
+  "@reportStageUploading": {
+    "description": "Report screen: progress text inside the busy button, with the ticket size in megabytes (e.g. 64 or 0.4).",
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "reportStageSharing": "Preparing to share…",
+  "@reportStageSharing": {
+    "description": "Report screen: progress text inside the busy button."
   }
 }

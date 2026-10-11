@@ -2105,6 +2105,9 @@ class BigButton extends StatelessWidget {
   final IconData? icon;
   final Color color;
   final bool soft;
+
+  /// Shows a small spinner in place of [icon] (work in progress).
+  final bool busy;
   final VoidCallback? onTap;
 
   const BigButton(
@@ -2113,6 +2116,7 @@ class BigButton extends StatelessWidget {
     this.icon,
     this.color = C.green,
     this.soft = false,
+    this.busy = false,
     this.onTap,
   });
 
@@ -2138,7 +2142,12 @@ class BigButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (icon != null) ...[
+            if (busy) ...[
+              SizedBox.square(
+                  dimension: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: ink)),
+              const SizedBox(width: S.x2),
+            ] else if (icon != null) ...[
               Icon(icon, size: 18, color: ink),
               const SizedBox(width: S.x2),
             ],

@@ -41,6 +41,7 @@ import 'data.dart';
 import 'gallery.dart';
 import 'gestures.dart';
 import 'profile.dart';
+import 'report_issue.dart';
 import 'wearable_numbers.dart' show WearableDisplay, wearableSettingsGroup;
 
 /// Unwind the profile stack back to the gate.
@@ -753,6 +754,11 @@ class MoreSettingsView extends StatelessWidget {
                           'Nothing is sent until you say so',
                       value: telemetry ? on : off,
                       onTap: onToggleTelemetry),
+                  SetRow(LucideIcons.messageSquareWarning, C.orange,
+                      l?.settingsReportIssueRowTitle ?? 'Report an issue',
+                      sub: l?.settingsReportIssueRowSub ??
+                          'Sends what you choose to the maintainers, encrypted',
+                      onTap: () => goto(c, const ReportIssueScreen())),
                   // The food log's one outbound call. Named by what it sends,
                   // not by the feature it powers — a scan is the only thing
                   // that triggers it and the barcode is the whole payload.

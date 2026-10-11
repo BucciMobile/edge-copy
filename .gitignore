@@ -54,6 +54,7 @@ ios/Config/Signing.xcconfig
 # stray dumps / archives never belong in assets
 *.gz
 *.sql
+!server/report-worker/migrations/*.sql
 *.dump
 assets/**/*.gz
 

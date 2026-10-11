@@ -22,7 +22,7 @@
   <main>
 
     <h1>Privacy Policy — Edge / OpenStrap</h1>
-    <p class="updated">Last updated: August 18, 2026</p>
+    <p class="updated">Last updated: October 11, 2026</p>
 
     <p>Edge ("the App") is an independent, open-source project. It is not affiliated
       with, sponsored by, or endorsed by WHOOP, Inc.</p>
@@ -36,7 +36,7 @@
       explicitly choose to install a GitHub release that has health data
       contribution enabled, or separately enable AI Coach or Health app
       integration, described below, which send specific data to services you
-      configure.</em></p>
+      configure, or attach your database to an issue report.</em></p>
 
     <p>Edge is open source. The underlying code contains an off-by-default,
       compile-time flag (<code>kHealthDataContributionEnabled</code>) that an
@@ -65,6 +65,34 @@
       security practices, not a system we built or operate ourselves — see
       Google's Firebase privacy &amp; security documentation:
       <a href="https://firebase.google.com/support/privacy">firebase.google.com/support/privacy</a>.</p>
+
+    <h2>Issue reports</h2>
+    <p>Settings › Privacy › “Report an issue” lets you send us a problem report.
+      Nothing is sent until you tap Create ticket, and the screen lists every file in the
+      report before you do. A report holds your title and description, the app
+      and phone details (app version, phone model, system version, language, time
+      zone and a random install ID), your paired band and sensors with their
+      battery and last sync, the app’s recent sync log and error records, and a
+      screenshot if you add one. It contains no health data unless you switch on
+      “Include the last 2 weeks of health data” or the screenshot you add shows
+      some. That option is off every time and
+      attaches a copy of your database cut down to the last 14 days of health
+      data (your sleep, heart rate and other health data), plus your daily
+      scores and settings. If that would make the report too big to upload
+      (the limit is 95 MB), the second-by-second data covers fewer days (7, 3
+      or 1) and everything else keeps 14. A separate switch, “Full health database (share
+      locally only)”, also off every time, puts your whole database in the
+      report instead; it turns Create ticket off, so the full database is never
+      uploaded and only goes where you send it with “Share locally”.</p>
+    <p>The report is encrypted on your phone before it leaves, with a key only
+      the maintainers hold, so the service that stores it cannot read it. It is
+      stored on Cloudflare. A report is deleted after 30 days, or after 14
+      days if it includes health data. The report’s ID, your install ID, category, title,
+      description, app version, platform, system version, phone model, and
+      whether a database or screenshot is attached (and how many days of second-by-second data the database covers) are kept unencrypted so we
+      can track it, and that record is deleted after 90 days. You can delete a report sooner at any time from “My
+      reports” on the same screen. “Share locally” hands the report to your
+      phone’s share sheet and uploads nothing; that ZIP is not encrypted.</p>
 
     <h2>Barcode lookup for food logging</h2>
     <p>The food log can read a barcode with the camera and fill in the nutrition
@@ -157,7 +185,9 @@
     <h2>What we don't do</h2>
     <p>We do not sell your data. We do not send your health data to WHOOP, Inc. or any
       advertising network. We do not require a WHOOP account or credentials to use the
-      App. We do not operate a backend that stores your health data.</p>
+      App. We do not operate a backend that stores your health data,
+      except an issue report you choose to send with your database attached (see
+      Issue reports).</p>
 
     <h2>Your controls</h2>
     <p>Turn off anonymous diagnostics at any time in your profile — this stops any

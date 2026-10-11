@@ -33,6 +33,9 @@ class SetRow extends StatelessWidget {
   final bool danger, chevron;
   final VoidCallback? onTap;
 
+  /// Replaces the value and chevron (e.g. a [Switch]).
+  final Widget? trailing;
+
   /// A brand mark in place of [icon] — Lucide has no GitHub/Discord/Reddit
   /// logo, and a generic glyph standing in for one of those is worse than
   /// the extra param. Sized and tinted the same as the [Icon] it replaces.
@@ -44,6 +47,7 @@ class SetRow extends StatelessWidget {
       this.value = '',
       this.danger = false,
       this.chevron = true,
+      this.trailing,
       this.onTap})
       : glyph = null;
 
@@ -54,7 +58,8 @@ class SetRow extends StatelessWidget {
       this.danger = false,
       this.chevron = true,
       this.onTap})
-      : icon = null;
+      : icon = null,
+        trailing = null;
 
   @override
   Widget build(BuildContext c) {
@@ -96,11 +101,15 @@ class SetRow extends StatelessWidget {
           // The value moves UNDER the title at accessibility sizes instead —
           // "2026-08-16 04:12" is arbitrary-length, and at 3.1× it pushed
           // itself and the chevron off the right of every settings screen.
-          if (value.isNotEmpty && !bigText(c)) ...[
+          if (trailing != null) ...[
+            const SizedBox(width: S.x2),
+            trailing!,
+          ],
+          if (trailing == null && value.isNotEmpty && !bigText(c)) ...[
             const SizedBox(width: S.x2),
             Text(value, style: F.cap.copyWith(color: p.ink3)),
           ],
-          if (chevron && !danger) ...[
+          if (trailing == null && chevron && !danger) ...[
             const SizedBox(width: S.x2),
             Icon(LucideIcons.chevronRight, size: 17, color: p.ink3),
           ],

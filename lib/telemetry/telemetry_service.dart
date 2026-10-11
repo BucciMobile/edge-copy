@@ -406,6 +406,12 @@ class TelemetryService {
 
   // ── device snapshot ───────────────────────────────────────────────────────────
 
+  /// What "Report an issue" bundles: the local records as they stand (sent or
+  /// not), and the OEM/model/OS/app facts the batches already carry.
+  List<Map<String, dynamic>> get outboxSnapshot => List.of(_outbox);
+  Future<Map<String, dynamic>> staticDevice() async =>
+      Map.of(_staticDevice ??= await _collectStatic());
+
   Future<Map<String, dynamic>> _deviceSnapshot() async {
     final s = _staticDevice ??= await _collectStatic();
     final snap = Map<String, dynamic>.from(s);
