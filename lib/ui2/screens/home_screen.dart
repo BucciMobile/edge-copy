@@ -1814,10 +1814,14 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     final isToday = _day == null || _day == todayLabel();
 
     // Until recovery can score for the first time: what arrives when.
+    // Also while the readiness note still counts nights: missed nights push
+    // the first score past the day-15 the count alone would show.
+    final recoveryNightsLeft = needMoreNightsFromNote(d.readiness.note);
     final firstWeeks = isToday &&
         widget.data == null &&
         d.readiness.isEmpty &&
-        _days.length <= readinessCompositeMinBaseline;
+        (_days.length <= readinessCompositeMinBaseline ||
+            recoveryNightsLeft != null);
 
     final stale = staleInsightsCard(d.insightsStale, syncOf(c), l);
     // Above the greeting, not below it: if the app had to rebuild the database
@@ -1917,7 +1921,10 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         // loudest.
         if (firstWeeks) ...[
           const SizedBox(height: S.x3),
-          firstWeekCard(c, days: _days.length, strainScored: false),
+          firstWeekCard(c,
+              days: _days.length,
+              strainScored: false,
+              recoveryNightsLeft: recoveryNightsLeft),
         ],
       ] else ...[
         // ── the three rings ──
@@ -1979,10 +1986,6 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           }),
 
         const SizedBox(height: S.x3),
-        if (firstWeeks) ...[
-          firstWeekCard(c, days: _days.length, strainScored: !d.strain.isEmpty),
-          const SizedBox(height: S.x3),
-        ],
         const DetectedActivitiesCard(),
         const CommunityNudge(),
 
@@ -1990,8 +1993,18 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         if (stale != null) ...[const SizedBox(height: S.x3), stale],
 
         // ── at a glance ──
+        // First, in the first weeks too: resting HR, steps and the night's
+        // sleep are real from night one, so they lead and the "what arrives
+        // when" card follows them.
         Section(l?.homeAtAGlance ?? 'At a glance',
             _glance(c, d, isToday: isToday)),
+        if (firstWeeks) ...[
+          const SizedBox(height: S.x3),
+          firstWeekCard(c,
+              days: _days.length,
+              strainScored: !d.strain.isEmpty,
+              recoveryNightsLeft: recoveryNightsLeft),
+        ],
 
         // ── today's plan: only what the app can actually stand behind ──
         // Skipped on a past day — "3,000 steps left" or "aim for 11.4
@@ -2434,7 +2447,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
 /// earlier nights give it a normal range. Read from the analytics constants so
 /// the card cannot drift from the gate.
 Widget firstWeekCard(BuildContext c,
-    {required int days, required bool strainScored}) {
+    {required int days, required bool strainScored, int? recoveryNightsLeft}) {
   final p = P.of(c);
   final l = AppLocalizations.of(c);
   final strainDay = quietHrrMinDays + 1;
@@ -2464,9 +2477,15 @@ Widget firstWeekCard(BuildContext c,
           l?.homeFirstWeekSleep ?? 'Sleep: the morning after your first night'),
       step(strainScored,
           l?.homeFirstWeekStrain(strainDay) ?? 'Strain: from day $strainDay'),
-      step(false,
-          l?.homeFirstWeekRecovery(recoveryNight) ??
-              'Recovery: from night $recoveryNight, once it knows your normal'),
+      // The live countdown when the pipeline says how many nights are left;
+      // the static "from night N" only before it has said anything.
+      step(
+          false,
+          recoveryNightsLeft != null
+              ? (l?.homeRecoveryStartsIn(recoveryNightsLeft) ??
+                  'Recovery starts in $recoveryNightsLeft nights')
+              : (l?.homeFirstWeekRecovery(recoveryNight) ??
+                  'Recovery: from night $recoveryNight, once it knows your normal')),
       const SizedBox(height: S.x1),
       Text(l?.homeFirstWeekSoFar(days) ?? '$days days recorded so far',
           style: F.cap.copyWith(color: p.ink3)),
