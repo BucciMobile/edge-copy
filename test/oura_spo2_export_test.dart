@@ -268,6 +268,42 @@ void main() {
             'same broken days cannot block older healthy days forever');
   });
 
+  test('global hold: first stop holds nothing, growth and cap', () {
+    const now = 1000000000000;
+    // attempts 0 and 1 (the first stop) hold NOTHING.
+    expect(ouraSpo2GlobalHold(attempts: 0, lastMs: now, nowMs: now),
+        isFalse);
+    expect(ouraSpo2GlobalHold(attempts: 1, lastMs: now, nowMs: now),
+        isFalse);
+    // attempts 3 -> 5 * 2 = 10 minutes (hand-computed).
+    expect(
+        ouraSpo2GlobalHold(
+            attempts: 3, lastMs: now, nowMs: now + 9 * 60000),
+        isTrue);
+    expect(
+        ouraSpo2GlobalHold(
+            attempts: 3, lastMs: now, nowMs: now + 10 * 60000),
+        isFalse);
+    // attempts 100 -> 5 * 99 clamped to 60 minutes.
+    expect(
+        ouraSpo2GlobalHold(
+            attempts: 100, lastMs: now, nowMs: now + 59 * 60000),
+        isTrue);
+    expect(
+        ouraSpo2GlobalHold(
+            attempts: 100, lastMs: now, nowMs: now + 60 * 60000),
+        isFalse);
+  });
+
+  test('global hold: a clock that went backwards never holds', () {
+    const now = 1000000000000;
+    // The stamp sits 3 h in the FUTURE (clock went back): no hold.
+    expect(
+        ouraSpo2GlobalHold(
+            attempts: 5, lastMs: now + 3 * 3600000, nowMs: now),
+        isFalse);
+  });
+
   test('the health package contract: BLOOD_OXYGEN maps to PERCENT', () {
     expect(
       const {

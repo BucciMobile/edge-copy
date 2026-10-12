@@ -417,6 +417,23 @@ enum OuraSpo2DayOutcome {
   failed,
 }
 
+/// Whether the GLOBAL failure backoff still holds the pass back.
+/// The first stop (attempts <= 1) holds nothing: the flat day counters
+/// carry the pacing. From the second stop the hold grows by 5 minutes
+/// per attempt, capped at an hour. A clock that went backwards
+/// (elapsed < 0) never holds — the same rule as the day backoff.
+@visibleForTesting
+bool ouraSpo2GlobalHold({
+  required int attempts,
+  required int lastMs,
+  required int nowMs,
+}) {
+  if (attempts <= 1) return false;
+  final minutes = (5 * (attempts - 1)).clamp(0, 60);
+  final elapsed = nowMs - lastMs;
+  return elapsed >= 0 && elapsed < minutes * 60000;
+}
+
 /// Whether a day's retry backoff has elapsed. Exponential from 5 minutes
 /// (5, 10, 20 ...), with the doubling clamped at 2^8 — so the backoff
 /// tops out at 5 * 256 = 1280 minutes (~21.3 h), and a clock that went
@@ -437,6 +454,18 @@ bool ouraSpo2RetryDue({
 /// that can affect a day's export marks the day dirty AT ITS WRITE POINT
 /// (`LocalDb.markOuraSpo2Dirty*`); this pass works only that set, newest
 /// first, bounded. Per day: retry-due check, process, then
+/// Whether an outcome TOUCHED the health store — the only outcomes that
+/// prove the store works: they may reset the failure streak and clear
+/// the global fail marker. `unchanged` and `nothingToDo` made no
+/// contact and may do neither.
+@visibleForTesting
+bool ouraSpo2OutcomeTouchedStore(OuraSpo2DayOutcome o) =>
+    o == OuraSpo2DayOutcome.exported || o == OuraSpo2DayOutcome.cleanedUp;
+
+/// One pass over the DIRTY SET — the whole export model. Every change
+/// that can affect a day's export marks the day dirty AT ITS WRITE POINT
+/// (`LocalDb.markOuraSpo2Dirty*`); this pass works only that set, newest
+/// first, bounded. Per day: retry-due check, process, then
 /// compare-and-clear — a day that changed DURING the pass keeps its
 /// (newer) marker for the next one.
 ///
@@ -446,9 +475,6 @@ bool ouraSpo2RetryDue({
 /// points at a global cause (permission denied, store hung), not at the
 /// days themselves.
 @visibleForTesting
-bool ouraSpo2OutcomeTouchedStore(OuraSpo2DayOutcome o) =>
-    o == OuraSpo2DayOutcome.exported || o == OuraSpo2DayOutcome.cleanedUp;
-
 Future<void> runOuraSpo2DirtyPass({
   required Future<List<({String date, String token})>> Function()
       dirtyDays,
@@ -1715,24 +1741,13 @@ class HealthExporter {
       // again — cleared on the first success, the health-sync toggle,
       // a permission change or an explicit user export.
       final g = await LocalDb.ouraSpo2GlobalFail();
-      if (g.attempts > 0) {
-        // BOUNDED AND OFF-BY-ONE ON PURPOSE: 5 * (attempts - 1)
-        // minutes, clamped to an hour. The FIRST consecutive-failure
-        // stop holds NOTHING (attempts == 1 -> 0 minutes) — the flat
-        // day counters are what keep the newest broken days from
-        // failing again on the very next pass, and if this marker held
-        // the same five minutes they hold, there would be NO window in
-        // which the pass runs while the broken days skip: global and
-        // day deadlines run from the same stamp, so older healthy days
-        // would be starved forever. From the SECOND stop the marker
-        // holds 5 * (attempts - 1) minutes — real backoff for a cause
-        // that survived a store-working pass, still capped at an hour.
-        final minutes = (5 * (g.attempts - 1)).clamp(0, 60);
-        if (minutes > 0 && clock() - g.lastMs < minutes * 60000) {
-          debugPrint('[health] oura spo2 pass: global backoff holds '
-              '(${minutes}min)');
-          return;
-        }
+      // THE GLOBAL GATE: a consecutive-failure stop may hold the pass —
+      // see `ouraSpo2GlobalHold` for the full reasoning (first stop
+      // holds nothing, growth capped, backwards clock never holds).
+      if (ouraSpo2GlobalHold(
+          attempts: g.attempts, lastMs: g.lastMs, nowMs: clock())) {
+        debugPrint('[health] oura spo2 pass: global backoff holds');
+        return;
       }
       await runOuraSpo2DirtyPass(
         // Over-fetch: days in retry backoff must not starve the rest.
@@ -1755,11 +1770,14 @@ class HealthExporter {
         noteDayFailures: (dates, {required bool flat}) async {
           for (final d in dates) {
             final r = await LocalDb.ouraSpo2Retry(d);
-            // FLAT on a global stop: attempts stays 1 (a 5-minute
-            // backoff) so the newest broken days cannot block the older
-            // healthy ones forever and re-try soon after the cause is
-            // fixed. Real escalation only for day-scoped failures.
-            final attempts = flat ? 1 : r.attempts + 1;
+            // FLAT on a global stop means "do not grow", NOT "reset":
+            // a day with a real (day-scoped) escalation keeps it —
+            // otherwise it would be retried every 5 minutes forever.
+            // Never below 1 (a 5-minute backoff) so a fresh failure
+            // still paces the next pass; real growth only without the
+            // global stop.
+            final attempts =
+                flat ? (r.attempts > 1 ? r.attempts : 1) : r.attempts + 1;
             await LocalDb.setCursor(
               '$kOuraSpo2RetryPrefix$d',
               '$attempts|${clock()}',

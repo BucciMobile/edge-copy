@@ -696,6 +696,15 @@ class AppState extends ChangeNotifier {
   /// health-store permission in OS Settings while the app was
   /// backgrounded, and a stale backoff would keep waiting out a cause
   /// that no longer exists.
+  ///
+  /// TRADEOFF, accepted deliberately: this also drops the LEGITIMATE
+  /// day backoff of a genuinely broken day (a bad day that had earned,
+  /// say, a 160-minute escalation gets retried). That is acceptable
+  /// because an attempt is CHEAP — one candidate query and at most one
+  /// store write — so a broken day is re-tried at most once per
+  /// 15-minute resume window instead of being stranded behind the
+  /// throttle. The reverse (keeping the stale global marker after a
+  /// permission grant) would block every healthy day for nothing.
   Future<void> maybeResetOuraSpo2FailureState() async {
     final now = DateTime.now();
     final last = _lastOuraSpo2FailReset;

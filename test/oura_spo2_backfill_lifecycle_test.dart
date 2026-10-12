@@ -750,6 +750,57 @@ void main() {
             'defeat compare-and-clear');
   });
 
+  test('pass: a global marker with a FUTURE stamp does not block '
+      '(backwards clock never holds)', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    final t0 = DateTime.now().millisecondsSinceEpoch;
+    // A global marker stamped 3 h in the future (the clock went back):
+    // under the pre-fix pass this held until the clock caught up with
+    // the stamp; the day backoff treats the same case as due.
+    await LocalDb.setCursor(
+        'health_oura_spo2_global_fail', '5|${t0 + 3 * 3600000}');
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => t0,
+    );
+    expect(store.samplesOf('2026-03-09'), hasLength(1),
+        reason: 'the pass ran despite the future-stamped marker');
+  });
+
+  test('flat counters KEEP an existing escalation (no reset to 1)', () async {
+    final store = StatefulSpo2Store();
+    // Three newest days failing on DELETE (the store's clear window).
+    for (final d in [10, 11, 12]) {
+      store.refuseDeletes.add(_dayLabel(DateTime(2026, 3, d)));
+    }
+    await pairRing('ring-1');
+    for (final d in [9, 10, 11, 12]) {
+      await putRows(DateTime(2026, 3, d, 1), [95, 96], 'ring-1');
+    }
+    final t0 = DateTime.now().millisecondsSinceEpoch;
+    // 03-12 already carries a REAL day-scoped escalation (attempt 6 =
+    // 160-minute backoff) and its stamp is old enough to be retry-due
+    // again (5 << 5 = 160 minutes; the stamp is 200 minutes old).
+    await LocalDb.setCursor(
+        'health_oura_spo2_retry:2026-03-12', '6|${t0 - 200 * 60000}');
+    // This pass: 03-12 is retry-DUE (200 > 160), fails; 03-11 and
+    // 03-10 fail after it -> global stop with FLAT counters.
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => t0,
+    );
+    final r12 = await LocalDb.ouraSpo2Retry('2026-03-12');
+    final r11 = await LocalDb.ouraSpo2Retry('2026-03-11');
+    expect(r12.attempts, 6,
+        reason: 'the escalation was KEPT, not reset to 1');
+    expect(r12.lastMs, t0, reason: 'but the stamp is fresh');
+    expect(r11.attempts, 1, reason: 'a fresh failure starts at 1');
+  });
+
   test('no legacy keys are ever written by the new pass', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
