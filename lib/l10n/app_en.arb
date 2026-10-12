@@ -15738,5 +15738,9 @@
         "type": "int"
       }
     }
+  },
+  "healthWellbeingAllSub": "Breathing, mood, the journal, habits and medication",
+  "@healthWellbeingAllSub": {
+    "description": "Health tab: subtitle of the single door into the wellness screen (mind, habits, medication, cycle tabs)."
   }
 }

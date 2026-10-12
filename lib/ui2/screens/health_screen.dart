@@ -925,36 +925,18 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       // Naps moved to the Sleep tab, beside the night (the Naps door there).
 
       // What used to be the Wellness tab: the things you tell the app back.
-      // One door each, onto the same screen, so the catalogue above stays the
-      // first thing on this tab.
+      // ONE door now, not one per tab: in the contributed data breathing,
+      // medication and cycle were each used by a handful of people, so they
+      // share a row and the screen behind it keeps its own tabs.
       Section(
         l?.healthWellbeingTitle ?? 'Mind, habits and medication',
-        Builder(builder: (c) {
-          final cycle = cycleTrackingOf(c);
-          Widget door(IconData icon, String title, String sub, int tab) =>
-              Padding(
-                padding: const EdgeInsets.only(bottom: S.x3),
-                child: detailLinkRow(c, icon, title, sub,
-                    () => go(c, WellnessScreen(initialTab: tab))),
-              );
-          return Column(children: [
-            door(LucideIcons.wind, l?.wellnessTabMind ?? 'Mind',
-                l?.healthWellbeingMindSub ?? 'Breathing, mood and the journal',
-                0),
-            door(LucideIcons.listChecks, l?.wellnessTabHabits ?? 'Habits',
-                l?.healthWellbeingHabitsSub ??
-                    'Daily habits, counted as days kept',
-                2),
-            door(LucideIcons.pill, l?.wellnessTabMedication ?? 'Medication',
-                l?.healthWellbeingMedsSub ?? 'Today\'s doses and the last week',
-                WellnessScreen.medsTab),
-            if (cycle)
-              door(LucideIcons.droplet, l?.wellnessTabCycle ?? 'Cycle',
-                  l?.healthWellbeingCycleSub ??
-                      'Log your period and see where you are in the cycle',
-                  4),
-          ]);
-        }),
+        detailLinkRow(
+            c,
+            LucideIcons.wind,
+            l?.wellnessTabMind ?? 'Mind',
+            l?.healthWellbeingAllSub ??
+                'Breathing, mood, the journal, habits and medication',
+            () => go(c, const WellnessScreen(initialTab: 0))),
       ),
 
       // THERE IS NO "BODY COMPOSITION" SECTION, AND THE NEXT PERSON SHOULD NOT

@@ -100,23 +100,35 @@ class ActivityStore {
     }
   }
 
-  Future<List<ActivitySuggestion>> pending() async {
+  /// How long an unanswered suggestion stays in the review list. Nearly half
+  /// of all suggestions were never answered and piled up; past a week nobody
+  /// remembers whether a bout was a workout. The rows stay, unchanged.
+  static const int pendingShownForSec = 7 * 86400;
+
+  static int _pendingFloorTs([int? nowTs]) =>
+      (nowTs ?? DateTime.now().millisecondsSinceEpoch ~/ 1000) -
+      pendingShownForSec;
+
+  Future<List<ActivitySuggestion>> pending({int? nowTs}) async {
     await migrateLegacy();
     return [
       for (final r in await db.query(
         'activity_suggestions',
-        where: "status = 'pending'",
+        where: "status = 'pending' AND end_ts >= ?",
+        whereArgs: [_pendingFloorTs(nowTs)],
         orderBy: 'start_ts DESC, id ASC',
       ))
         ActivitySuggestion.fromRow(r),
     ];
   }
 
-  Future<int> pendingCount() async {
+  Future<int> pendingCount({int? nowTs}) async {
     await migrateLegacy();
     return Sqflite.firstIntValue(
           await db.rawQuery(
-            "SELECT COUNT(*) FROM activity_suggestions WHERE status = 'pending'",
+            "SELECT COUNT(*) FROM activity_suggestions "
+            "WHERE status = 'pending' AND end_ts >= ?",
+            [_pendingFloorTs(nowTs)],
           ),
         ) ??
         0;

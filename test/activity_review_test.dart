@@ -172,6 +172,15 @@ void main() {
     expect(await store.pending(), hasLength(1));
   });
 
+  test('an unanswered suggestion leaves the review list after a week',
+      () async {
+    await detectNap();
+    expect(await store.pending(nowTs: now), hasLength(1));
+    final later = now + ActivityStore.pendingShownForSec + 7200;
+    expect(await store.pending(nowTs: later), isEmpty);
+    expect(await store.pendingCount(nowTs: later), 0);
+  });
+
   test(
     'review refresh replaces a same-day cached input and survives failure',
     () async {
