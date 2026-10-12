@@ -2,7 +2,7 @@
  "day_result": [
   {
    "day_id": "2026-07-13",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "date": "2026-07-13",
     "day_confidence": 0.6,
@@ -23017,6 +23017,7 @@
      "resp_rate": 13.51304972588547,
      "skin_temp_z": 3.8090587513754603,
      "skin_temp_adc": 30406.0,
+     "skin_temp_dev_c": 0.11,
      "skin_temp_coverage_frac": 1.0,
      "skin_temp_settled_frac": null,
      "sdnn": 77.77577302925846,
@@ -25075,11 +25076,11 @@
    "readiness": 72.95885235383324,
    "skipped": 0,
    "partial": 0,
-   "payload_sha256": "d772939fa2bc61410f2c1b6592706ddac487fa906474af716a6bf58021e10154"
+   "payload_sha256": "123df037199b6fbdfe0cb1298838389c45534d672ba2df685d019a3e2b93e047"
   },
   {
    "day_id": "2026-07-14",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "date": "2026-07-14",
     "day_confidence": 0.6,
@@ -47914,6 +47915,7 @@
      "resp_rate": 13.51304972588547,
      "skin_temp_z": 2.5820748428079483,
      "skin_temp_adc": 30406.000332864856,
+     "skin_temp_dev_c": 0.11,
      "skin_temp_coverage_frac": 1.0,
      "skin_temp_settled_frac": null,
      "sdnn": 77.77577302925846,
@@ -49940,11 +49942,11 @@
    "readiness": 72.95885235383324,
    "skipped": 0,
    "partial": 0,
-   "payload_sha256": "f380fa84d145643d11aa5c0643d73506e82829176428c6c0ed25dcc628fa77f4"
+   "payload_sha256": "56e0e7b112441f73b1849430ffdf15fb10beeced9ef19d505ffb9359afb45262"
   },
   {
    "day_id": "2026-07-15",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "date": "2026-07-15",
     "day_confidence": 0.6,
@@ -71395,6 +71397,7 @@
      "resp_rate": 13.51304972588547,
      "skin_temp_z": 2.083348400888466,
      "skin_temp_adc": 30406.00018492492,
+     "skin_temp_dev_c": 0.1,
      "skin_temp_coverage_frac": 1.0,
      "skin_temp_settled_frac": null,
      "sdnn": 77.77577302925846,
@@ -73227,7 +73230,7 @@
    "readiness": 61.79377627786914,
    "skipped": 0,
    "partial": 0,
-   "payload_sha256": "2f42fc8b32eb0bf25226cbeb0d3711293a4cd14d2e56ac236eb18fe65b403b14"
+   "payload_sha256": "3d0fc39b9ecb2646dec22203f8d82e2b3b035486921a383e012bdca3a8a6fb9f"
   }
  ],
  "metric_series": [
@@ -73865,7 +73868,7 @@
  "metric_series_version": [
   {
    "date": "2026-07-13",
-   "algo_version": 112,
+   "algo_version": 113,
    "source": "band",
    "device_family": "gen5",
    "coverage_devices": "",
@@ -73873,7 +73876,7 @@
   },
   {
    "date": "2026-07-14",
-   "algo_version": 112,
+   "algo_version": 113,
    "source": "band",
    "device_family": "gen5",
    "coverage_devices": "",
@@ -73881,7 +73884,7 @@
   },
   {
    "date": "2026-07-15",
-   "algo_version": 112,
+   "algo_version": 113,
    "source": "band",
    "device_family": "gen5",
    "coverage_devices": "",
@@ -73891,7 +73894,7 @@
  "wake_day_features": [
   {
    "day_id": "2026-07-13",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "day_id": "2026-07-13",
     "active_min": 90,
@@ -75099,7 +75102,7 @@
   },
   {
    "day_id": "2026-07-14",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "day_id": "2026-07-14",
     "active_min": 240,
@@ -76307,7 +76310,7 @@
   },
   {
    "day_id": "2026-07-15",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "day_id": "2026-07-15",
     "active_min": 40,

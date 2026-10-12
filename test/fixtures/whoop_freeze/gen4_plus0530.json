@@ -2,7 +2,7 @@
  "day_result": [
   {
    "day_id": "2026-07-13",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "date": "2026-07-13",
     "day_confidence": 0.6,
@@ -23050,6 +23050,7 @@
      "sol_min": null,
      "midsleep_sec": -3589.0,
      "sleep_onset_sec": -17108.0,
+     "skin_temp_ambient_r": null,
      "active_min": 90.0,
      "quiet_hrr": 0.17628907637111685,
      "trimp_net": null,
@@ -24897,11 +24898,11 @@
    "readiness": 27.03382323567632,
    "skipped": 0,
    "partial": 0,
-   "payload_sha256": "60dc25a126260e2d36683ca57322e96d5f0cc389ac50849d29c8ae2c31e18ef3"
+   "payload_sha256": "6af3a3dd03487fb00e59cee8fc3b80d13d8b3df613625f0e53e6b354b3beacae"
   },
   {
    "day_id": "2026-07-14",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "date": "2026-07-14",
     "day_confidence": 0.6,
@@ -47769,6 +47770,7 @@
      "sol_min": null,
      "midsleep_sec": -3589.0,
      "sleep_onset_sec": -17108.0,
+     "skin_temp_ambient_r": null,
      "active_min": 240.0,
      "quiet_hrr": 0.174452349174085,
      "trimp_net": null,
@@ -49589,11 +49591,11 @@
    "readiness": 27.033601802905416,
    "skipped": 0,
    "partial": 0,
-   "payload_sha256": "3b87013e0141707e5ce9c0a7ee315b72d4567d24d8e4f59a21704dec370b60ff"
+   "payload_sha256": "1a10d8277390720929818867fe39e2a3ae139149d0d93057c2ca4f1776cae03b"
   },
   {
    "day_id": "2026-07-15",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "date": "2026-07-15",
     "day_confidence": 0.6,
@@ -71083,6 +71085,7 @@
      "sol_min": null,
      "midsleep_sec": -3589.0,
      "sleep_onset_sec": -17108.0,
+     "skin_temp_ambient_r": null,
      "active_min": 40.0,
      "quiet_hrr": 0.18057477316419124,
      "trimp_net": null,
@@ -72714,7 +72717,7 @@
    "readiness": 66.1155535435143,
    "skipped": 0,
    "partial": 0,
-   "payload_sha256": "21ae11a5dfab83cf051a74c64031dd68776921f8a772b21e2d39d9afab4d2675"
+   "payload_sha256": "180be6438701ff7edef6abd47022db857f820e5821842d48daad59504205106f"
   }
  ],
  "metric_series": [
@@ -73352,7 +73355,7 @@
  "metric_series_version": [
   {
    "date": "2026-07-13",
-   "algo_version": 112,
+   "algo_version": 113,
    "source": "band",
    "device_family": "gen4",
    "coverage_devices": "",
@@ -73360,7 +73363,7 @@
   },
   {
    "date": "2026-07-14",
-   "algo_version": 112,
+   "algo_version": 113,
    "source": "band",
    "device_family": "gen4",
    "coverage_devices": "",
@@ -73368,7 +73371,7 @@
   },
   {
    "date": "2026-07-15",
-   "algo_version": 112,
+   "algo_version": 113,
    "source": "band",
    "device_family": "gen4",
    "coverage_devices": "",
@@ -73378,7 +73381,7 @@
  "wake_day_features": [
   {
    "day_id": "2026-07-13",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "day_id": "2026-07-13",
     "active_min": 90,
@@ -74586,7 +74589,7 @@
   },
   {
    "day_id": "2026-07-14",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "day_id": "2026-07-14",
     "active_min": 240,
@@ -75794,7 +75797,7 @@
   },
   {
    "day_id": "2026-07-15",
-   "algo_version": 112,
+   "algo_version": 113,
    "payload_json": {
     "day_id": "2026-07-15",
     "active_min": 40,
@@ -76989,6 +76992,7 @@
    "readiness": 27.03382323567632,
    "resp_rate": 13.51304972588547,
    "skin_temp_z": 3.8090587513754603,
+   "skin_temp_illness_ok": false,
    "trimp": 227.5841832798056,
    "strain": null,
    "steps": null,
@@ -77199,6 +77203,7 @@
    "readiness": 27.033601802905416,
    "resp_rate": 13.51304972588547,
    "skin_temp_z": 2.5820748428079483,
+   "skin_temp_illness_ok": false,
    "trimp": 221.15132594116318,
    "strain": null,
    "steps": null,
@@ -77409,6 +77414,7 @@
    "readiness": 66.1155535435143,
    "resp_rate": 13.51304972588547,
    "skin_temp_z": 2.083348400888466,
+   "skin_temp_illness_ok": false,
    "trimp": 218.15549360346512,
    "strain": null,
    "steps": null,
@@ -77632,8 +77638,7 @@
    "date": "2026-07-15",
    "flag": "normal",
    "luteal": false,
-   "confidence": 0.0,
-   "note": "need_baseline:have=2,need=7"
+   "confidence": 0.0
   },
   "load": {
    "value": "—",
