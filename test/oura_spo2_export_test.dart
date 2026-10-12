@@ -104,50 +104,59 @@ void main() {
     expect(wrote, isFalse);
   });
 
-  test('the walk policy: unsuitable days SKIP without consuming; '
-      'failures stop at the day; only written advances', () {
-    expect(ouraSpo2CursorAdvance(OuraSpo2ExportResult.written), isTrue);
-    expect(ouraSpo2CursorAdvance(OuraSpo2ExportResult.notEligible),
-        isFalse);
-    expect(ouraSpo2CursorAdvance(OuraSpo2ExportResult.noData), isFalse);
-    expect(ouraSpo2CursorAdvance(OuraSpo2ExportResult.deleteFailed),
+  test('the walk policy: written advances both cursors; noData skips '
+      'with scan progress; gate-closed and failures hold both', () {
+    expect(ouraSpo2CursorAdvance2(OuraSpo2ExportResult.written),
+        (advanceSuccess: true, advanceScan: true));
+    // No candidate: the scan moves past (skip marker), success holds.
+    expect(ouraSpo2CursorAdvance2(OuraSpo2ExportResult.noData),
+        (advanceSuccess: false, advanceScan: true));
+    // Gate closed: TEMPORARY — the scan must NOT consume these days.
+    expect(ouraSpo2CursorAdvance2(OuraSpo2ExportResult.notEligible),
+        (advanceSuccess: false, advanceScan: false));
+    // Store failures: retry at the day, nothing moves.
+    expect(ouraSpo2CursorAdvance2(OuraSpo2ExportResult.deleteFailed)
+        .advanceSuccess,
         isNull);
-    expect(ouraSpo2CursorAdvance(OuraSpo2ExportResult.writeFailed),
+    expect(ouraSpo2CursorAdvance2(OuraSpo2ExportResult.writeFailed)
+        .advanceSuccess,
         isNull);
   });
 
-  test('the walk: skip-continue for unsuitable days, stop-at for failures, '
-      'monotonic cursor for older rewrites', () async {
+  test('the walk: skip-continue for noData, stop-at for failures, '
+      'monotonic success cursor, exact expectations', () async {
     final exported = <String>[];
-    final cursorWrites = <String>[];
-    var cursor = '2026-03-10';
+    final successWrites = <String>[];
+    final scanWrites = <String>[];
     await runOuraSpo2BackfillPass(
-      cursor: cursor,
+      successCursor: '2026-03-10',
       days: [
-        '2026-03-08', // tail rewrite: written, cursor must NOT go back
-        '2026-03-09', // notEligible: skip, keep going
-        '2026-03-10', // tail rewrite: written, cursor stays
+        '2026-03-08', // older rewrite: written, success must NOT go back
+        '2026-03-09', // noData: skip WITH scan progress, keep going
+        '2026-03-10', // older rewrite: written, success stays
         '2026-03-11', // writeFailed: STOP here
         '2026-03-12', // never reached
       ],
       exportDay: (date) async {
-        if (date == '2026-03-09') return OuraSpo2ExportResult.notEligible;
+        if (date == '2026-03-09') return OuraSpo2ExportResult.noData;
         if (date == '2026-03-11') return OuraSpo2ExportResult.writeFailed;
         exported.add(date);
         return OuraSpo2ExportResult.written;
       },
-      setCursor: (v) async { cursorWrites.add(v); },
+      setSuccessCursor: (v) async { successWrites.add(v); },
+      setScanCursor: (v) async { scanWrites.add(v); },
     );
-    // No head blocking: the pass moved PAST the unsuitable 03-09 and
-    // wrote 03-10 behind it.
+    // No head blocking: the pass moved PAST the noData day and wrote
+    // 03-10 behind it.
     expect(exported, ['2026-03-08', '2026-03-10']);
-    // The failing 03-11 was ATTEMPTED (returned writeFailed) and the
-    // pass stopped there — 03-12 was never attempted.
+    // The failing 03-11 stopped the pass — 03-12 was never attempted.
     expect(exported, isNot(contains('2026-03-12')));
-    // The cursor never went backwards for the older rewrites.
-    for (final c in cursorWrites) {
-      expect(c.compareTo('2026-03-10'), greaterThanOrEqualTo(0));
-    }
+    // EXACT cursor expectations: the success frontier started at
+    // '2026-03-10', and no day in this pass was ABOVE it — the older
+    // rewrites never dragged it backwards and never re-set it.
+    expect(successWrites, isEmpty);
+    // The scan moved past every non-failing day including the skip.
+    expect(scanWrites, ['2026-03-08', '2026-03-09', '2026-03-10']);
   });
 
   test('the health package contract: BLOOD_OXYGEN maps to PERCENT', () {

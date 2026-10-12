@@ -372,6 +372,63 @@ String? healthExportCursorBefore(String cursor, String date) {
   return dayLabelOf(DateTime(d.year, d.month, d.day - 1));
 }
 
+/// The EXPORT METHOD version, part of the change fingerprint: bump when
+/// WHAT this export writes changes shape (unit, interval semantics,
+/// aggregation), so every stored fingerprint compares unequal and every
+/// day re-exports once after a method change.
+const String kOuraSpo2ExportMethod = 'v1';
+
+/// A stable FINGERPRINT of the export candidate — the change detection
+/// this path runs on. It covers everything the exported sample IS:
+/// source device, aggregate value, sample count, measured interval and
+/// the export method version. MAX(ts_ms)+COUNT(*) alone CANNOT detect a
+/// value correction at the same second, an owner change without a newer
+/// stamp, or an aggregation/method change; this fingerprint can.
+@visibleForTesting
+String ouraSpo2CandidateFingerprint(
+  ({String deviceId, double meanPercent, int count, int firstTsMs,
+      int lastTsMs}) c,
+) =>
+    // The mean at full double precision — a corrected sample at the same
+    // timestamps moves the mean and therefore the fingerprint.
+    '$kOuraSpo2ExportMethod|${c.deviceId}|'
+    '${c.meanPercent.toStringAsPrecision(17)}|'
+    '${c.count}|${c.firstTsMs}|${c.lastTsMs}';
+
+/// The walk result's effect on the TWO cursors this path keeps:
+/// * `written` -> advance BOTH cursors (success frontier + scan).
+/// * `notEligible`/`noData` -> SKIP WITHOUT CONSUMING for the success
+///   cursor, but the SCAN cursor moves past the day — an old
+///   unsuitable day must never pin the pass at the same 30-day window
+///   forever, and the day stays re-evaluable because re-evaluation
+///   comes from the day REMAINING above the SUCCESS cursor and from
+///   the changed-day fingerprint scope.
+/// * failures -> stop the pass at the day (both cursors unchanged).
+@visibleForTesting
+({bool? advanceSuccess, bool advanceScan}) ouraSpo2CursorAdvance2(
+  OuraSpo2ExportResult result,
+) =>
+    switch (result) {
+      // Written: both frontiers move.
+      OuraSpo2ExportResult.written =>
+        (advanceSuccess: true, advanceScan: true),
+      // No candidate: the scan moves past (a skip marker records WHY,
+      // and the reassess scope re-evaluates when a candidate appears),
+      // the success cursor does not.
+      OuraSpo2ExportResult.noData =>
+        (advanceSuccess: false, advanceScan: true),
+      // Gate closed: TEMPORARY by design — the scan must NOT move past
+      // these days or the release would find them gone (no marker
+      // exists for a gate skip). While closed they hold the scan front
+      // open, and the moment the gate opens they drain to `written`.
+      OuraSpo2ExportResult.notEligible =>
+        (advanceSuccess: false, advanceScan: false),
+      // A store failure: neither frontier moves; the next pass retries.
+      OuraSpo2ExportResult.deleteFailed ||
+      OuraSpo2ExportResult.writeFailed =>
+        (advanceSuccess: null, advanceScan: false),
+    };
+
 /// One Oura-SpO2 backfill pass over [days], behind [cursor]. THE walk both
 /// production (`_exportOuraSpo2BehindCursor`) and the integration test run —
 /// there is no second implementation anywhere. The caller owns day
@@ -387,22 +444,29 @@ String? healthExportCursorBefore(String cursor, String date) {
 /// days that were actually written.
 @visibleForTesting
 Future<void> runOuraSpo2BackfillPass({
-  required String cursor,
+  required String successCursor,
   required List<String> days,
   required Future<OuraSpo2ExportResult> Function(String date) exportDay,
-  required Future<void> Function(String) setCursor,
+  required Future<void> Function(String) setSuccessCursor,
+  required Future<void> Function(String) setScanCursor,
 }) async {
   for (final date in days) {
     final result = await exportDay(date);
-    final advance = ouraSpo2CursorAdvance(result);
-    if (advance == null) return; // a genuine failure — retry this day
-    if (!advance) continue; // unsuitable day: skip WITHOUT consuming it
-    // MONOTONIC PROGRESS: a tail rewrite of an OLDER day never drags
-    // the cursor backwards — the frontier stays at the newest day this
-    // pass actually wrote above it, so a failure further up still
-    // leaves every older success durable.
-    await setCursor(date.compareTo(cursor) > 0 ? date : cursor);
-    cursor = date.compareTo(cursor) > 0 ? date : cursor;
+    final step = ouraSpo2CursorAdvance2(result);
+    if (step.advanceSuccess == null) return; // a failure — retry this day
+    // The SCAN cursor moves only over days the pass could not export but
+    // whose unsuitability is recorded (a 'none' skip marker) — an old
+    // forgotten-ring day never pins the next pass at the same window.
+    // Gate-closed days HOLD the scan front: they are temporary, and
+    // moving past them would consume what a later release must find.
+    if (step.advanceScan) await setScanCursor(date);
+    if (step.advanceSuccess != true) continue; // skipped, not consumed
+    // MONOTONIC SUCCESS PROGRESS: an older re-export never drags the
+    // frontier backwards.
+    if (date.compareTo(successCursor) > 0) {
+      await setSuccessCursor(date);
+      successCursor = date;
+    }
   }
 }
 
@@ -1648,6 +1712,11 @@ class HealthExporter {
   /// new table, no schema change.
   ///
   static const String _kOuraSpo2Cursor = 'health_oura_spo2_through';
+  /// The SCAN cursor: how far the pass has WALKED, independently of what
+  /// it managed to WRITE. See the walk doc — the two progress quantities
+  /// must not collapse into one, or 30 permanently unsuitable days pin
+  /// the scan window forever.
+  static const String _kOuraSpo2ScanCursor = 'health_oura_spo2_scan_through';
   static const int _kOuraSpo2DaysPerPass = 30;
 
   /// One pass of the Oura-SpO2 export, behind its own cursor and the same
@@ -1695,54 +1764,126 @@ class HealthExporter {
     bool interpretationVerified = kOuraSpo2InterpretationVerified,
   }) async {
     try {
-      final cursor = await LocalDb.getCursor(_kOuraSpo2Cursor) ?? '';
+      final success = await LocalDb.getCursor(_kOuraSpo2Cursor) ?? '';
+      final scan = await LocalDb.getCursor(_kOuraSpo2ScanCursor) ?? '';
       final db = await LocalDb.instance;
-      // A COPY: sqflite hands back a read-only list, and the tail below
-      // prepends to it.
-      final above = <Map<String, Object?>>[...await db.rawQuery(
-        "SELECT date "
-        'FROM observation '
+      // THE SCAN FRONT: days the pass has not walked past yet — the
+      // success cursor alone would pin the pass at the same 30-day
+      // window whenever that window is full of unsuitable days (an old
+      // forgotten ring's whole history). Scan progress and export
+      // progress are DIFFERENT quantities: the scan cursor moves past a
+      // skipped day, the success cursor only over a written one. A
+      // skipped day is never lost: the skip marker it leaves behind is
+      // what the reassess scope below watches.
+      final from = scan.compareTo(success) > 0 ? scan : success;
+      final fresh = <Map<String, Object?>>[...await db.rawQuery(
+        'SELECT date FROM observation '
         "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
         "AND unit = '%' AND value >= 70 AND value <= 100 "
         'AND date > ? '
         'GROUP BY date ORDER BY date ASC LIMIT $_kOuraSpo2DaysPerPass',
-        [cursor],
+        [from],
       )];
-      // The RE-EXPORT SCOPE behind the cursor — not a fixed 3-day window:
-      // every past-cursor day whose observations CHANGED since it was
-      // last exported. The sync_cursor table carries each day's last
-      // successful export verbatim (the walk sets
-      // `health_oura_spo2_done:<date>` on every `written`), and a day
-      // rejoins the walk when its newest row is newer than that vermark
-      // — a late delivery weeks later, an anchor-corrected re-stamp, or
-      // any other append behind the cursor. Bounded per pass by the
-      // same day cap; nothing is re-walked wholesale.
-      final tail = cursor.isEmpty
+      // THE REASSESS SCOPE: days the scan already passed as `noData`
+      // (skip marker 'none' — no candidate then) that HAVE a candidate
+      // now — a ring re-paired, or an in-range row corrected in. The
+      // candidate existence is SQL-checkable on the SAME source set the
+      // atomic candidate reads. (A fingerprint change on a
+      // gate-skipped day re-evaluates at the release method bump —
+      // documented in the acceptance guide.)
+      final reassess = <Map<String, Object?>>[...await db.rawQuery(
+        "SELECT substr(s.name, 23) AS date FROM sync_cursor s "
+        "WHERE s.name LIKE 'health_oura_spo2_skip:%' "
+        "AND s.value = 'none' "
+        "AND substr(s.name, 23) <= ? "
+        "AND EXISTS ( "
+        "  SELECT 1 FROM observation o "
+        "  JOIN device d ON d.id = o.device_id "
+        "      AND d.adapter_id = 'oura' "
+        "  WHERE o.date = substr(s.name, 23) "
+        "    AND o.vendor_key = 'spo2' "
+        "    AND o.source_kind = 'vendor' AND o.unit = '%' "
+        "    AND o.value >= 70 AND o.value <= 100 ) "
+        "ORDER BY date ASC LIMIT $_kOuraSpo2DaysPerPass",
+        [success],
+      )];
+      // THE FINGERPRINT-CHANGED SCOPE — the same source set the atomic
+      // candidate reads (JOIN on the still-paired OURA device, the same
+      // owner ranking): a day rejoins the walk when its CANDIDATE
+      // differs from the fingerprint of the candidate it last exported.
+      // The fingerprint covers device, mean, count, interval and the
+      // export method version — a value correction at the same second,
+      // an owner change without a newer stamp, a late EARLIER delivery
+      // that lowers the firstTs, and an aggregation-method bump all
+      // move it; an unchanged candidate does NOT re-export, however
+      // many unrelated rows other devices added that day.
+      // THE FINGERPRINT-CHANGED SCOPE. SQL enumerates the (bounded) set
+      // of days this path once wrote behind the cursor; the comparison
+      // itself runs in DART (`ouraSpo2CandidateFingerprint`), because a
+      // SQL-side string render of a double (`printf %.17g`) does not
+      // match Dart's `toStringAsPrecision(17)` for integral means
+      // ('95' vs '95.000000000000000') — a mismatch that would have
+      // re-exported every day forever. The candidate query is the SAME
+      // atomic source set the export reads.
+      final doneDays = success.isEmpty
           ? const <Map<String, Object?>>[]
           : await db.rawQuery(
-              'SELECT o.date AS date, MAX(o.ts_ms) AS newest '
-              'FROM observation o '
-              "LEFT JOIN sync_cursor c ON c.name = 'health_oura_spo2_done:' || o.date "
-              "WHERE o.vendor_key = 'spo2' AND o.source_kind = 'vendor' "
-              "AND o.unit = '%' AND o.value >= 70 AND o.value <= 100 "
-              'AND o.date <= ? '
-              'GROUP BY o.date '
-              'HAVING c.value IS NULL '
-              '   OR CAST(c.value AS INTEGER) < MAX(o.ts_ms) '
-              'ORDER BY o.date ASC LIMIT $_kOuraSpo2DaysPerPass',
-              [cursor],
+              "SELECT substr(c.name, 23) AS date, c.value AS fp "
+              "FROM sync_cursor c "
+              "WHERE c.name LIKE 'health_oura_spo2_done:%' "
+              "AND substr(c.name, 23) <= ? "
+              "ORDER BY date ASC LIMIT $_kOuraSpo2DaysPerPass",
+              [success],
+            );
+      final changed = <String>[];
+      for (final row in doneDays) {
+        final date = row['date'] as String;
+        final c = await LocalDb.ouraSpo2DayCandidate(date);
+        // A done day WITHOUT a candidate anymore is the VANISHED scope's
+        // job, not this one.
+        if (c == null) continue;
+        if (row['fp'] != ouraSpo2CandidateFingerprint(c)) {
+          changed.add(date);
+        }
+      }
+      final vanished = success.isEmpty
+          ? const <Map<String, Object?>>[]
+          : await db.rawQuery(
+              // Days this path once wrote (a done watermark exists) that
+              // no longer have ANY still-paired Oura candidate — the
+              // ring was forgotten, the rows were deleted, or a
+              // correction moved the candidate to another day. They
+              // CLEAN UP their own prior sample instead of exporting.
+              "SELECT substr(c.name, 23) AS date FROM sync_cursor c "
+              "WHERE c.name LIKE 'health_oura_spo2_done:%' "
+              "AND substr(c.name, 23) <= ? "
+              "AND NOT EXISTS ( "
+              "  SELECT 1 FROM observation o "
+              "  JOIN device d ON d.id = o.device_id "
+              "      AND d.adapter_id = 'oura' "
+              "  WHERE o.date = substr(c.name, 23) "
+              "    AND o.vendor_key = 'spo2' "
+              "    AND o.source_kind = 'vendor' AND o.unit = '%' "
+              "    AND o.value >= 70 AND o.value <= 100 ) "
+              "ORDER BY date ASC LIMIT $_kOuraSpo2DaysPerPass",
+              [success],
             );
       await runOuraSpo2BackfillPass(
-        cursor: cursor,
-        days: [for (final r in tail) r['date'] as String] +
-            [for (final r in above) r['date'] as String],
+        successCursor: success,
+        days: [
+          ...changed,
+          for (final r in vanished) r['date'] as String,
+          for (final r in reassess) r['date'] as String,
+          for (final r in fresh) r['date'] as String,
+        ],
         exportDay: (date) => _exportOuraSpo2(
           date,
           writeOverride: writeOverride,
           deleteWindowOverride: deleteWindowOverride,
           interpretationVerified: interpretationVerified,
         ),
-        setCursor: (v) => LocalDb.setCursor(_kOuraSpo2Cursor, v),
+        setSuccessCursor: (v) => LocalDb.setCursor(_kOuraSpo2Cursor, v),
+        setScanCursor: (v) => LocalDb.setCursor(_kOuraSpo2ScanCursor, v),
       );
     } catch (e) {
       debugPrint('[health] oura spo2 backfill: $e');
@@ -1787,7 +1928,40 @@ class HealthExporter {
       // same query — the gate can never approve ring B's eligibility
       // while ring A's value is written. A forgotten ring does not rank.
       final candidate = await LocalDb.ouraSpo2DayCandidate(date);
-      if (candidate == null) return OuraSpo2ExportResult.noData;
+      if (candidate == null) {
+        // A VANISHED candidate: this day was exported once (a done
+        // watermark exists) and its source has since disappeared — the
+        // ring forgotten, the observations deleted, or a correction
+        // moved the candidate to another day. The prior OWN export on
+        // THIS day is stale and must be REMOVED: the health store keeps
+        // only what still has a source behind it. Only OUR samples are
+        // ever touched; foreign data is untouchable by the platform API.
+        final done = await LocalDb.getCursor('health_oura_spo2_done:$date');
+        if (done != null) {
+          final dayStart = DateTime.tryParse('${date}T00:00:00');
+          if (dayStart != null) {
+            final dayEnd =
+                DateTime(dayStart.year, dayStart.month, dayStart.day + 1);
+            final clear = deleteWindowOverride ??
+                (start, end) =>
+                    _deleteOwnSamples(HealthDataType.BLOOD_OXYGEN, start, end);
+            if (await clear(dayStart, dayEnd)) {
+              await LocalDb.deleteCursor('health_oura_spo2_done:$date');
+              debugPrint('[health] oura spo2 $date: candidate vanished, '
+                  'prior export removed');
+            } else {
+              debugPrint('[health] oura spo2 $date: candidate vanished, '
+                  'cleanup delete failed');
+            }
+          }
+        }
+        // The SKIP MARKER: what the scan passed and why, so the reassess
+        // scope can re-evaluate the day when its suitability changes
+        // (ring re-paired) instead of re-exporting unchanged days
+        // forever.
+        await LocalDb.setCursor('health_oura_spo2_skip:$date', 'none');
+        return OuraSpo2ExportResult.noData;
+      }
       // THE DELETE WINDOW IS THE CANDIDATE'S OWN LOCAL DAY, not the new
       // measured interval: this export writes exactly ONE sample per
       // day-candidate, and a re-export must remove THIS DAY's own prior
@@ -1825,12 +1999,18 @@ class HealthExporter {
         // day (any date behind the cursor) makes the day rejoin the
         // walk's re-export scope. Set ONLY on success — a failed write
         // must leave the day pending.
-        // setCursor (not a raw insert): it fills sync_cursor's NOT NULL
-        // updated_at stamp the way every other cursor write does.
+        // The day's CHANGE fingerprint — the candidate this export was
+        // built from (device, mean, count, interval, method version),
+        // not a bare MAX(ts_ms): a value correction at the same second,
+        // an owner swap without a newer stamp, or a method bump must all
+        // re-export, while an unchanged candidate never re-touches the
+        // health store. setCursor (not a raw insert): it fills
+        // sync_cursor's NOT NULL updated_at stamp.
         await LocalDb.setCursor(
           'health_oura_spo2_done:$date',
-          '${candidate.lastTsMs}',
+          ouraSpo2CandidateFingerprint(candidate),
         );
+        await LocalDb.deleteCursor('health_oura_spo2_skip:$date');
       }
       return result;
     } catch (e) {
