@@ -1152,7 +1152,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
         MetricRow(LucideIcons.wind, C.teal, l?.healthRowRespRate ?? 'Respiratory rate',
             resp.toStringAsFixed(1),
             sub: l?.healthSubAsleep ?? 'Asleep', unit: 'br/min'),
-      if (skinTemp.value != null)
+      if (skinTemp.value != null || tempDevC != null)
         // NAME THE QUANTITY. This is `skin_temp_z` — standard deviations from
         // the user's own baseline. It printed signed and unitless beside a
         // heart rate in bpm, so it read as °C; and the sleep scrub's

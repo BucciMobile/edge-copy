@@ -1380,7 +1380,7 @@ List<PhysioDay> calendarDays(
               ana.hrLedSleepWindow(hrSlice, tsSlice, hrBaseline: hrBaseline);
           if (cand != null &&
               fallbackNightAcceptable(cand.onsetSec, cand.offsetSec,
-                  tzOffsetSec: tzOffsetSecondsAt(cand.onsetSec),
+                  tzOffsetSec: tzOffset(cand.onsetSec),
                   habitualMidsleepSec: habitualMidsleepSec)) {
             final s2 = ana.segmentSleep(
               accelSlice,

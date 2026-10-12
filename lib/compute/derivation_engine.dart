@@ -5701,6 +5701,21 @@ class DerivationEngine {
               blocks.wake['strain_absent'] ?? kUnknownAbsenceNote;
         }
       }
+      // A session floor raised the scalar above the HR-only envelope: the
+      // envelope carries the same number and says why. `series.strain_curve`
+      // stays the HR build-up through the day.
+      final strainEnv = (bundle['clinical'] as Map?)?['strain'];
+      final scStrain = scMap?['strain'];
+      if (strainEnv is Map &&
+          scStrain is num &&
+          strainEnv['value'] is num &&
+          scStrain > (strainEnv['value'] as num)) {
+        final hrStrain = (strainEnv['value'] as num).toDouble();
+        strainEnv['value'] = scStrain;
+        strainEnv['note'] = 'the day\'s headline strain, which a workout '
+            'logged this day can raise (heart-rate strain '
+            '${hrStrain.toStringAsFixed(1)})';
+      }
       // Method, family and class on each envelope of a wearable's day
       // (inputs/canonical.dart). A band's day is untouched.
       tagEnvelopes(bundle['clinical'] as Map?, daySub.deviceFamily);

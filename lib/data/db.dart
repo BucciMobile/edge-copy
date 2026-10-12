@@ -7578,6 +7578,10 @@ class LocalDb {
     'undecodable_rec_v24',
   ];
 
+  /// `compute_freshness` key: [startSec, endSec) windows of days the user
+  /// deleted, which an archive re-drive must not refill.
+  static const String kRedriveExcludedKey = 'redrive_excluded_windows';
+
   /// `compute_freshness` key for [redriveArchiveOnce].
   static const String kArchiveRedriveKey = 'archive_redrive_v12_v1';
 
@@ -7599,9 +7603,20 @@ class LocalDb {
       if (v is Map) state = v.cast<String, dynamic>();
     }
     if (state['done'] == true) return 0;
+    final excluded = <(int, int)>[];
+    if ((await computeFreshness(kRedriveExcludedKey))?['payload_json']
+        case final String j) {
+      for (final w in jsonDecode(j) as List) {
+        final l = w as List;
+        excluded.add(((l[0] as num).toInt(), (l[1] as num).toInt()));
+      }
+    }
     final r = await _redrive(
       await instance,
       reasons: redrivableArchiveReasons,
+      skip: excluded.isEmpty
+          ? null
+          : (t) => excluded.any((w) => t >= w.$1 && t < w.$2),
       startHex: state['after_hex'] as String? ?? '',
       startDevice: state['after_device'] as String? ?? '',
       budget: budget,
@@ -7661,6 +7676,7 @@ class LocalDb {
     String startHex = '',
     String startDevice = '',
     Duration? budget,
+    bool Function(int recTs)? skip,
   }) async {
     final clock = Stopwatch()..start();
     // Both are cheap and both are required: a DB whose ladder has not created
@@ -7688,8 +7704,9 @@ class LocalDb {
         !(await _columnsOf(db, 'raw_archive')).contains('device_id');
 
     final marks = List.filled(reasons.length, '?').join(',');
-    // Paged on (hex, device_id) — a stable, total order that needs no extra
-    // index and no offset scan. Post-v51, `hex` alone is no longer unique
+    // Paged on the primary key, (device_id, hex) post-v51 and hex before it —
+    // a stable, total order that needs no extra index and no offset scan.
+    // Post-v51, `hex` alone is no longer unique
     // (two devices can share a byte-identical undecodable frame), so a plain
     // `hex > ?` cursor would silently skip the second device's row.
     var afterHex = startHex;
@@ -7705,9 +7722,11 @@ class LocalDb {
             )
           : await db.rawQuery(
               'SELECT device_id, hex, counter, packet_type, rec_ts, captured_at '
-              'FROM raw_archive WHERE reason IN ($marks) AND (hex, device_id) > (?, ?) '
-              'ORDER BY hex ASC, device_id ASC LIMIT 500',
-              [...reasons, afterHex, afterDevice],
+              // Primary-key order (device_id, hex), so each page continues
+              // down the key's own index instead of re-sorting the archive.
+              'FROM raw_archive WHERE reason IN ($marks) AND (device_id, hex) > (?, ?) '
+              'ORDER BY device_id ASC, hex ASC LIMIT 500',
+              [...reasons, afterDevice, afterHex],
             );
       if (rows.isEmpty) return (recovered: recovered, resume: null);
       afterHex = rows.last['hex'] as String;
@@ -7740,9 +7759,15 @@ class LocalDb {
         // is the decoded timestamp — and a record with no plausible time has
         // nowhere to land in a table keyed by one.
         if (recTs <= 0) continue;
+        if (skip != null && skip(recTs)) continue;
         byDeviceRecTs[(deviceId, recTs)] = (raw, s);
       }
-      if (byDeviceRecTs.isEmpty) continue;
+      if (byDeviceRecTs.isEmpty) {
+        if (budget != null && clock.elapsed > budget) {
+          return (recovered: recovered, resume: (afterHex, afterDevice));
+        }
+        continue;
+      }
 
       // "Already decoded" must be checked PER DEVICE once decoded_onehz
       // carries device_id — otherwise device B's second looks "taken" because
@@ -8718,8 +8743,10 @@ class LocalDb {
       'SELECT rec_ts / 60 AS m, AVG(skin_temp_raw) AS t, AVG(ambient_raw) AS a '
       'FROM decoded_onehz WHERE rec_ts >= ? AND rec_ts < ? '
       'AND skin_temp_raw > 0 AND ambient_raw > 0 '
-      'AND ${derivableSourceSql()} GROUP BY m ORDER BY m',
-      [fromSec, toSec],
+      // The primary band's own rows only: the same sensor the night's
+      // skin_temp_z comes from, never a second band or a wearable's mix.
+      'AND $kPrimaryBandSourceSql AND device_id = ? GROUP BY m ORDER BY m',
+      [fromSec, toSec, kPrimaryDeviceId],
     );
     return [
       for (final r in rows)
@@ -8739,29 +8766,26 @@ class LocalDb {
   /// version and when it was last seen, plus one entry per version change, so
   /// a firmware-specific problem in an exported database can be traced.
   /// Best-effort; never throws into the BLE path.
-  static Future<void> noteBandFirmware(String fw, {int? nowSec}) async {
-    try {
-      final now = nowSec ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final row = await computeFreshness(kBandFirmwareKey);
-      Map<String, dynamic> m = {};
-      if (row?['payload_json'] case final String j) {
-        final v = jsonDecode(j);
-        if (v is Map) m = v.cast<String, dynamic>();
-      }
-      final history = [
-        for (final e in (m['history'] as List?) ?? const [])
-          if (e is Map) e.cast<String, dynamic>(),
-      ];
-      if (history.isEmpty || history.last['fw'] != fw) {
-        history.add({'fw': fw, 'first_seen': now});
-      }
-      // Bounded: firmware changes a handful of times a year.
-      final kept =
-          history.length > 20 ? history.sublist(history.length - 20) : history;
-      await putComputeFreshness(kBandFirmwareKey,
-          jsonEncode({'fw': fw, 'last_seen': now, 'history': kept}));
-    } catch (_) {}
-  }
+  static Future<void> noteBandFirmware(String fw, {int? nowSec}) =>
+      _updateFreshnessJson(kBandFirmwareKey, (m) {
+        final now = nowSec ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final history = [
+          for (final e in (m['history'] as List?) ?? const [])
+            if (e is Map) e.cast<String, dynamic>(),
+        ];
+        if (history.isEmpty || history.last['fw'] != fw) {
+          history.add({'fw': fw, 'first_seen': now});
+        }
+        // Bounded: firmware changes a handful of times a year.
+        final kept = history.length > 20
+            ? history.sublist(history.length - 20)
+            : history;
+        return {'fw': fw, 'last_seen': now, 'history': kept};
+      });
+
+  /// `compute_freshness` key marking the raw-free next-night nap cleanup
+  /// (compute/nap_overlap_cleanup.dart) as applied. Cleared by an import.
+  static const String kNapNextNightCleanupKey = 'nap_next_night_cleanup_v1';
 
   /// `compute_freshness` key for [bumpUsageCounter]'s local counts.
   static const String kUsageCountersKey = 'usage_counters';
@@ -8769,16 +8793,33 @@ class LocalDb {
   /// Count one local event (`coach_open`, `health_upload_ok`, ...). Stays on
   /// the phone; it leaves only inside the database a user chose to contribute.
   /// Best-effort; never throws.
-  static Future<void> bumpUsageCounter(String name) async {
+  static Future<void> bumpUsageCounter(String name) =>
+      _updateFreshnessJson(kUsageCountersKey,
+          (m) => {...m, name: ((m[name] as num?)?.toInt() ?? 0) + 1});
+
+  /// Read-modify-write of one JSON `compute_freshness` row inside a single
+  /// exclusive transaction, so two callers cannot overwrite each other.
+  /// Best-effort; never throws.
+  static Future<void> _updateFreshnessJson(
+    String key,
+    Map<String, dynamic> Function(Map<String, dynamic> current) update,
+  ) async {
     try {
-      final row = await computeFreshness(kUsageCountersKey);
-      Map<String, dynamic> m = {};
-      if (row?['payload_json'] case final String j) {
-        final v = jsonDecode(j);
-        if (v is Map) m = v.cast<String, dynamic>();
-      }
-      m[name] = ((m[name] as num?)?.toInt() ?? 0) + 1;
-      await putComputeFreshness(kUsageCountersKey, jsonEncode(m));
+      final db = await instance;
+      await db.transaction((txn) async {
+        final rows = await txn.query('compute_freshness',
+            where: 'key = ?', whereArgs: [key], limit: 1);
+        Map<String, dynamic> m = {};
+        if (rows.isNotEmpty && rows.first['payload_json'] is String) {
+          final v = jsonDecode(rows.first['payload_json'] as String);
+          if (v is Map) m = v.cast<String, dynamic>();
+        }
+        await txn.insert('compute_freshness', {
+          'key': key,
+          'payload_json': jsonEncode(update(m)),
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }, exclusive: true);
     } catch (_) {}
   }
 
@@ -9469,6 +9510,23 @@ class LocalDb {
     }
 
     await db.transaction((txn) async {
+      // `raw_archive` frames are kept, but a later archive re-drive must not
+      // decode them back into a day the user deleted: record the windows.
+      final prevRow = await txn.query('compute_freshness',
+          where: 'key = ?', whereArgs: [kRedriveExcludedKey], limit: 1);
+      final excluded = <List<int>>[
+        if (prevRow.isNotEmpty)
+          for (final w in (jsonDecode(prevRow.first['payload_json'] as String)
+              as List))
+            [for (final x in w as List) (x as num).toInt()],
+        for (final dayId in sorted)
+          [_localDayWindow(dayId).$1, _localDayWindow(dayId).$2],
+      ];
+      await txn.insert('compute_freshness', {
+        'key': kRedriveExcludedKey,
+        'payload_json': jsonEncode(excluded),
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
       // The archived copy of these seconds goes too — "delete this day" is a
       // privacy action, and the archive holds the same data, compressed.
       deleted += await SubstrateArchive.deleteRanges(txn, [
@@ -10486,6 +10544,9 @@ class LocalDb {
     // import. Rewind it.
     if ((counts['day_result'] ?? 0) > 0) {
       await putComputeFreshness(kReencodeCursorKey, jsonEncode({}));
+      // Same for the raw-free nap cleanup: imported old days may carry the
+      // next-night nap double count it removes, so it runs again.
+      await deleteComputeFreshness(kNapNextNightCleanupKey);
     }
     // Last, so it can never be mistaken for a table row count by anything that
     // walks this map in order.

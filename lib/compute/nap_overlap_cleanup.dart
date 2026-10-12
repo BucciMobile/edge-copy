@@ -13,8 +13,8 @@ import '../data/day_label.dart';
 import '../data/db.dart';
 import 'nap_edits.dart' show napMinutes;
 
-/// `compute_freshness` key marking the cleanup as applied.
-const String kNapNextNightCleanupKey = 'nap_next_night_cleanup_v1';
+/// `compute_freshness` key marking the cleanup as applied (an import clears it).
+const String kNapNextNightCleanupKey = LocalDb.kNapNextNightCleanupKey;
 
 /// Last algo version that could book tonight's sleep as a nap.
 const int kNapNextNightFixedIn = 106;
@@ -69,6 +69,32 @@ Future<int> cleanNextNightNapsOnce() async {
     (payload['naps'] as Map)
       ..['value'] = kept
       ..['count'] = kept.length;
+    // The stored sleep periods list the same naps: drop them there too, and
+    // take their minutes off a known total (an unknown total stays unknown).
+    final periods = payload['sleep_periods'];
+    if (periods is Map && periods['periods'] is List) {
+      bool dropped(Object? p) =>
+          p is Map &&
+          p['is_main'] != true &&
+          !kept.any((n) => n['start'] == p['onset_ts'] && n['end'] == p['wake_ts']);
+      final list = periods['periods'] as List;
+      final gone = list.where(dropped).toList();
+      periods['periods'] = [for (final p in list) if (!dropped(p)) p];
+      final total = periods['total_asleep_min'];
+      if (total is num) {
+        var minus = 0;
+        var known = true;
+        for (final p in gone) {
+          final d = (p as Map)['duration_min'];
+          if (d is num) {
+            minus += d.round();
+          } else {
+            known = false;
+          }
+        }
+        periods['total_asleep_min'] = known ? total.round() - minus : null;
+      }
+    }
     final napMin = napMinutes(kept).toDouble();
     final scalars = payload['scalars'];
     if (scalars is Map) scalars['nap_min'] = napMin;

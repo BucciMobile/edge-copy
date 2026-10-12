@@ -341,10 +341,14 @@ class DeviceAlerts {
     }
     final today = _localDay(nowSec);
     final showCharging = announce && _chargeShownDay != today;
+    final shownBefore = _chargeShownDay;
     if (showCharging) _chargeShownDay = today;
     if (announce) {
       if (showCharging) {
-        await _io(() => _notes.show(_event(
+        // A card the shared gate dropped (quiet hours, category off) does not
+        // spend today's one: put the latch back. A throw keeps it, since
+        // whether a card appeared is then unknown.
+        final dropped = await _showWasDropped(() => _notes.show(_event(
             osId: NotificationService.idCharging,
             // The strap event's own timestamp IS the identity of this charge
             // session (that is what ChargeAlertPolicy arbitrates on), so a
@@ -354,7 +358,11 @@ class DeviceAlerts {
             kind: 'band_charging:${chargingTs ?? nowSec}',
             title: 'Charging',
           )));
-        await _io(() => _store.writeInt(_kChargeShownDay, today));
+        if (dropped) {
+          _chargeShownDay = shownBefore;
+        } else {
+          await _io(() => _store.writeInt(_kChargeShownDay, today));
+        }
       }
       await _io(() => _store.writeInt(_kLastChargeWall, nowSec));
       if (persistEventTs != null) {

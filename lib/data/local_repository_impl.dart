@@ -846,7 +846,11 @@ class LocalRepositoryImpl extends LocalRepository {
       };
     }
     final have = (await LocalDb.metricSeries('skin_temp_adc')).length;
-    return {'value': null, 'note': 'need_baseline:have=$have,need=3'};
+    return {
+      'value': null,
+      'note': 'need_baseline:have=$have,need=3',
+      'dev_c': ?_scalar(b, 'skin_temp_dev_c'),
+    };
   }
 
   // ── day drill-downs ─────────────────────────────────────────────────────────

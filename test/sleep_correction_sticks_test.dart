@@ -68,6 +68,7 @@ void main() {
     );
     expect(await DerivationEngine().runDays(_profile, {_dayId}, force: true), 1);
     final b = await _payload();
+    expect(b['sleep_source'], 'rejected');
     expect((b['scalars'] as Map)['tst_min'], isNull);
   });
 }

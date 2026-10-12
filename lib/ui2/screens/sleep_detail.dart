@@ -885,16 +885,19 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   }
 
   Future<void> _confirmWindow(String day) => _runOverride(
+        day,
         () => context.read<AppState>().confirmSleep(day),
         applied: (n) => n['sleep_source'] == 'confirmed',
       );
 
-  Future<void> _clearWindow(String day) =>
-      _runOverride(() => context.read<AppState>().clearSleepOverride(day));
+  Future<void> _clearWindow(String day) => _runOverride(
+      day, () => context.read<AppState>().clearSleepOverride(day));
 
   Future<void> _rejectWindow(String day) => _runOverride(
+        day,
         () => context.read<AppState>().rejectSleep(day),
-        applied: (n) => n['has_sleep'] != true,
+        applied: (n) =>
+            n['sleep_source'] == 'rejected' && n['has_sleep'] != true,
       );
 
   /// Two pickers, seeded from the window we already have — the user is
@@ -923,6 +926,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         ts is num &&
         (ts.round() - t.millisecondsSinceEpoch ~/ 1000).abs() <= 120;
     await _runOverride(
+      day,
       () => context.read<AppState>().setSleepOverride(day, newOnset, newWake),
       applied: (n) =>
           n['sleep_source'] == 'manual' &&
@@ -951,6 +955,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   /// [applied] reads the reloaded night and says whether the edit took. Without
   /// it, a changed source is the test (clearing an override).
   Future<void> _runOverride(
+    String day,
     Future<void> Function() write, {
     bool Function(Map<String, dynamic> night)? applied,
   }) async {
@@ -976,6 +981,9 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     // the night on screen unchanged — indistinguishable from a correction that
     // worked, which is how a rejected one got dropped without a word. So the
     // reloaded night is checked against what the edit asked for.
+    // The user stepped to another night meanwhile: the reloaded night is not
+    // the one edited, so it cannot say whether the edit took.
+    if (failed == null && _d?.day != day) return;
     final took = applied != null
         ? applied(_d?.night ?? const <String, dynamic>{})
         : _source != before;
