@@ -930,6 +930,51 @@ void main() {
     expect(store.samplesOf('2026-03-29'), hasLength(1));
   });
 
+  // Phase 6.2: the 25-hour fall-back day (Europe/Berlin, 2026-10-25:
+  // 03:00 -> 02:00). The local day is 25 h; the delete window must span
+  // the whole local day (midnight to midnight) so BOTH 02:30 instances
+  // are covered by exactly ONE own sample per day.
+  test('DST fall back: the ambiguous 02:30 hour keeps one own sample per '
+      'local day',
+      skip: !DateTime(2026, 10, 25).isUtc &&
+              DateTime(2026, 10, 25).timeZoneOffset ==
+                  DateTime(2026, 10, 26).timeZoneOffset
+          ? 'no DST in this zone'
+          : false, () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    // Europe/Berlin falls back 2026-10-25 at 03:00 CEST -> 02:00 CET.
+    // The wall clock 02:30 exists TWICE: first as CEST (00:30 UTC), then
+    // as CET (01:30 UTC). Both instants belong to the SAME local day.
+    final first230 =
+        DateTime.utc(2026, 10, 25, 0, 30).toLocal(); // 02:30 CEST
+    final second230 =
+        DateTime.utc(2026, 10, 25, 1, 30).toLocal(); // 02:30 CET
+    // The two instants must actually be distinct and share the label.
+    expect(first230.hour, 2);
+    expect(second230.hour, 2,
+        reason: 'fixture sanity: the zone falls back on this date');
+    expect(first230.millisecondsSinceEpoch,
+        isNot(second230.millisecondsSinceEpoch));
+    await putRows(first230, [95, 96], 'ring-1');
+    await putRows(second230, [97, 98], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    final samples = store.samplesOf('2026-10-25');
+    expect(samples, hasLength(1),
+        reason: 'one own sample per local day, however long the day');
+    // The day's sample is the mean over BOTH ambiguous instants.
+    expect(samples.single.$3, closeTo(96.5, 1e-10));
+    // A correction still replaces exactly the one sample.
+    await putRows(second230, [96, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    final after = store.samplesOf('2026-10-25');
+    expect(after, hasLength(1));
+    // Hand-computed: the first batch (95, 96) stays, the second batch is
+    // replaced by (96, 96) — (95 + 96 + 96 + 96) / 4 = 95.75.
+    expect(after.single.$3, closeTo(95.75, 1e-10),
+        reason: 're-export replaced, not duplicated');
+  });
+
   test('no legacy keys are ever written by the new pass', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
