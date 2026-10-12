@@ -884,14 +884,18 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     ];
   }
 
-  Future<void> _confirmWindow(String day) =>
-      _runOverride(() => context.read<AppState>().confirmSleep(day));
+  Future<void> _confirmWindow(String day) => _runOverride(
+        () => context.read<AppState>().confirmSleep(day),
+        applied: (n) => n['sleep_source'] == 'confirmed',
+      );
 
   Future<void> _clearWindow(String day) =>
       _runOverride(() => context.read<AppState>().clearSleepOverride(day));
 
-  Future<void> _rejectWindow(String day) =>
-      _runOverride(() => context.read<AppState>().rejectSleep(day));
+  Future<void> _rejectWindow(String day) => _runOverride(
+        () => context.read<AppState>().rejectSleep(day),
+        applied: (n) => n['has_sleep'] != true,
+      );
 
   /// Two pickers, seeded from the window we already have — the user is
   /// correcting times, not entering a date. See [correctedSleepWindow].
@@ -912,8 +916,18 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     );
     if (up == null || !mounted) return;
     final (newOnset, newWake) = correctedSleepWindow(onset, wake, bed, up);
+    // Applied = the stored night IS the typed window. The source alone can't
+    // say: re-timing a night that is already manual leaves it unchanged, and
+    // a window erased by the derive comes back as a different source.
+    bool near(Object? ts, DateTime t) =>
+        ts is num &&
+        (ts.round() - t.millisecondsSinceEpoch ~/ 1000).abs() <= 120;
     await _runOverride(
       () => context.read<AppState>().setSleepOverride(day, newOnset, newWake),
+      applied: (n) =>
+          n['sleep_source'] == 'manual' &&
+          near(n['onset_ts'], newOnset) &&
+          near(n['wake_ts'], newWake),
     );
   }
 
@@ -933,7 +947,13 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   /// Every override path is the same shape: write it, wait for the forced
   /// re-derive, then reload the screen from what the engine produced. The
   /// screen must not keep drawing the old night's numbers under a new window.
-  Future<void> _runOverride(Future<void> Function() write) async {
+  ///
+  /// [applied] reads the reloaded night and says whether the edit took. Without
+  /// it, a changed source is the test (clearing an override).
+  Future<void> _runOverride(
+    Future<void> Function() write, {
+    bool Function(Map<String, dynamic> night)? applied,
+  }) async {
     if (_saving) return;
     setState(() {
       _saving = true;
@@ -954,10 +974,12 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     // and logs its own throw, and it returns at its first line when another
     // re-analysis is already running. Both leave the write in the database and
     // the night on screen unchanged — indistinguishable from a correction that
-    // worked, which is how a rejected one got dropped without a word. The
-    // window's source changes on all three actions, so an unchanged source
-    // means nothing was restaged.
-    if (failed != null || _source == before) {
+    // worked, which is how a rejected one got dropped without a word. So the
+    // reloaded night is checked against what the edit asked for.
+    final took = applied != null
+        ? applied(_d?.night ?? const <String, dynamic>{})
+        : _source != before;
+    if (failed != null || !took) {
       final l = AppLocalizations.of(context);
       setState(() => _overrideFailed = failed ??
           l?.sleepDetailReanalyseFailed ??
