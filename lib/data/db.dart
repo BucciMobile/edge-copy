@@ -7638,9 +7638,7 @@ class LocalDb {
     final r = await _redrive(
       await instance,
       reasons: redrivableArchiveReasons,
-      skip: excluded.isEmpty
-          ? null
-          : (t) => excluded.any((w) => t >= w.$1 && t < w.$2),
+      honourDeletions: true,
       startHex: state['after_hex'] as String? ?? '',
       startDevice: state['after_device'] as String? ?? '',
       budget: budget,
@@ -7700,7 +7698,7 @@ class LocalDb {
     String startHex = '',
     String startDevice = '',
     Duration? budget,
-    bool Function(int recTs)? skip,
+    bool honourDeletions = false,
   }) async {
     final clock = Stopwatch()..start();
     // Both are cheap and both are required: a DB whose ladder has not created
@@ -7753,6 +7751,7 @@ class LocalDb {
               [...reasons, afterDevice, afterHex],
             );
       if (rows.isEmpty) return (recovered: recovered, resume: null);
+      final pageHex = afterHex, pageDevice = afterDevice;
       afterHex = rows.last['hex'] as String;
       afterDevice = preArchiveDeviceKey ? '' : rows.last['device_id'] as String;
 
@@ -7783,7 +7782,6 @@ class LocalDb {
         // is the decoded timestamp — and a record with no plausible time has
         // nowhere to land in a table keyed by one.
         if (recTs <= 0) continue;
-        if (skip != null && skip(recTs)) continue;
         byDeviceRecTs[(deviceId, recTs)] = (raw, s);
       }
       if (byDeviceRecTs.isEmpty) {
@@ -7831,27 +7829,58 @@ class LocalDb {
         }
       }
 
-      final batch = db.batch();
-      var queued = 0;
-      for (final e in byDeviceRecTs.entries) {
-        if (taken.contains(e.key)) continue;
-        final (raw, sample) = e.value;
+      // Deleted days are read in the SAME transaction as the write, so a
+      // deletion that commits while this page decodes cannot be refilled. An
+      // unreadable list stops the replay at this page. (The ladder path runs
+      // inside onUpgrade's own transaction and has nothing deleted to honour.)
+      var unreadable = false;
+      Future<void> write(DatabaseExecutor ex) async {
+        var excluded = const <(int, int)>[];
+        if (honourDeletions) {
+          final row = await ex.query('compute_freshness',
+              where: 'key = ?', whereArgs: [kRedriveExcludedKey], limit: 1);
+          if (row.isNotEmpty) {
+            final w = _parseWindows(row.first['payload_json']);
+            if (w == null) {
+              unreadable = true;
+              return;
+            }
+            excluded = w;
+          }
+        }
+        final batch = ex.batch();
+        var queued = 0;
+        for (final e in byDeviceRecTs.entries) {
+          if (taken.contains(e.key)) continue;
+          final t = e.key.$2;
+          if (excluded.any((w) => t >= w.$1 && t < w.$2)) continue;
+          final (raw, sample) = e.value;
         // `sample` is handed back as `preferred` so the hex is decoded once,
         // not twice; `_queueDecodedOneHz` returns it straight back out.
         // `deviceFamily` is deliberately omitted — see the doc comment.
-        if (_queueDecodedOneHz(
-              batch,
-              raw,
-              sample,
-              deviceId: e.key.$1,
-              preDeviceKey: preDeviceKey,
-            ) >
-            0) {
-          queued++;
-          recovered++;
+          if (_queueDecodedOneHz(
+                batch,
+                raw,
+                sample,
+                deviceId: e.key.$1,
+                preDeviceKey: preDeviceKey,
+              ) >
+              0) {
+            queued++;
+          }
         }
+        if (queued > 0) await batch.commit(noResult: true);
+        recovered += queued;
       }
-      if (queued > 0) await batch.commit(noResult: true);
+
+      if (honourDeletions) {
+        await db.transaction(write);
+      } else {
+        await write(db);
+      }
+      if (unreadable) {
+        return (recovered: recovered, resume: (pageHex, pageDevice));
+      }
       if (budget != null && clock.elapsed > budget) {
         return (recovered: recovered, resume: (afterHex, afterDevice));
       }
