@@ -203,6 +203,61 @@ void main() {
     expect(s, isNull);
   });
 
+  test('restore/import marks the merged Oura-SpO2 days dirty (the '
+      'page-txn hook)', () async {
+    final mk = (DateTime s, List<num> v) => [
+          for (var i = 0; i < v.length; i++)
+            Observation(
+              at: s.add(Duration(seconds: i)),
+              sourceKind: ObservationSource.vendor,
+              vendorKey: 'spo2',
+              value: v[i],
+              unit: '%',
+              attribution: 'Oura',
+            ),
+        ];
+    final day = DateTime.now().subtract(const Duration(days: 3));
+    await LocalDb.putObservations(mk(day, [95, 96]), deviceId: 'r-merge');
+    // Drain the dirty set (a completed pass).
+    for (final d in await LocalDb.ouraSpo2DirtyDays(limit: 100)) {
+      await LocalDb.clearOuraSpo2DirtyIfUnchanged(d.date, d.token);
+    }
+    expect(await LocalDb.ouraSpo2DirtyDays(), isEmpty);
+    // A backup file with ONE changed row for the same day.
+    final dir = await databaseFactory.getDatabasesPath();
+    final srcPath = p.join(dir, 'merge_src_test.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+        'CREATE TABLE observation (device_id TEXT NOT NULL DEFAULT "", '
+        'ts_ms INTEGER NOT NULL, date TEXT NOT NULL, '
+        'source_kind TEXT NOT NULL, vendor_key TEXT, key TEXT, '
+        'value REAL, unit TEXT, attribution TEXT NOT NULL, '
+        'CHECK (vendor_key IS NOT NULL OR key IS NOT NULL))');
+    final at = day.add(const Duration(seconds: 5));
+    final m = at.month.toString().padLeft(2, '0');
+    final dd = at.day.toString().padLeft(2, '0');
+    final label = '${at.year}-$m-$dd';
+    await src.insert('observation', {
+      'device_id': 'r-merge',
+      'ts_ms': at.millisecondsSinceEpoch,
+      'date': label,
+      'source_kind': 'vendor',
+      'vendor_key': 'spo2',
+      'value': 97.0,
+      'unit': '%',
+      'attribution': 'Oura',
+    });
+    final counts = await LocalDb.importFromDbFile(srcPath);
+    expect(counts['observation'], greaterThan(0));
+    // The merged day IS dirty again — the hook marked it inside the
+    // merge's own page transaction.
+    final dirty = await LocalDb.ouraSpo2DirtyDays();
+    expect(dirty.map((d) => d.date), contains(label));
+    await src.close();
+    await databaseFactory.deleteDatabase(srcPath);
+  });
+
   test('an empty day has no summary', () async {
     expect(await LocalDb.ouraSpo2DaySummary('2026-03-09'), isNull);
   });

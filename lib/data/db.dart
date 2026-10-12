@@ -46,7 +46,34 @@ import 'med_store.dart';
 import 'models.dart';
 import 'nutrition_store.dart';
 import 'observation.dart';
+
 import 'series_codec.dart';
+
+/// The Oura-SpO2 export's day candidate — device, aggregate value, sample
+/// count and measured interval, selected atomically by
+/// [LocalDb.ouraSpo2DayCandidate].
+typedef OuraSpo2Candidate = ({
+  String deviceId,
+  double meanPercent,
+  int count,
+  int firstTsMs,
+  int lastTsMs,
+});
+
+/// sync_cursor key prefixes for the Oura-SpO2 export's dirty-set model.
+/// The DONE marker holds the candidate fingerprint of the last successful
+/// export; DIRTY marks days whose export may be stale; RETRY holds
+/// '<attempts>|<lastAttemptMs>' per day.
+const String kOuraSpo2DonePrefix = 'health_oura_spo2_done:';
+const String kOuraSpo2DirtyPrefix = 'health_oura_spo2_dirty:';
+const String kOuraSpo2RetryPrefix = 'health_oura_spo2_retry:';
+/// One-time bootstrap marker: which export-method version last seeded
+/// the dirty set (a method bump re-seeds every observed day once).
+const String kOuraSpo2EpochName = 'health_oura_spo2_epoch';
+/// The recent-days safety sweep runs once per local day; this holds the
+/// last swept day label.
+const String kOuraSpo2SweepName = 'health_oura_spo2_recent_sweep';
+
 
 /// The outcome of a database rebuild: why the old file would not open, where it
 /// was parked, and how many rows came back per table.
@@ -2612,6 +2639,14 @@ class LocalDb {
     // statement whose `?` count differs from the argument list binds every
     // value one column to the left, which SQLite accepts silently.
     final blankAdapter = adapterId == null && clearAdapterId;
+    // A pairing/unpairing changes WHICH days have an Oura-SpO2 candidate
+    // (the export joins on this row) without touching an observation —
+    // the dirty set hears about it from the device write itself.
+    if (id != kPrimaryDeviceId &&
+        (adapterId == 'oura' || blankAdapter) &&
+        await _deviceHasOuraObservations(db, id)) {
+      await markOuraSpo2DirtyForDevice(db, id);
+    }
     await db.rawUpdate(
       'UPDATE device SET '
       '${blankAdapter ? 'adapter_id = NULL, ' : 'adapter_id = COALESCE(?, adapter_id), '}'
@@ -2648,7 +2683,27 @@ class LocalDb {
   /// promises and what `decoded_*` keeping its `device_id` makes possible.
   static Future<void> deleteDevice([String id = kPrimaryDeviceId]) async {
     final db = await instance;
+    // Forgetting a ring removes its days' candidate (the export joins on
+    // this row): those days become dirty so the pass cleans up any
+    // export that now has no source behind it.
+    if (id != kPrimaryDeviceId &&
+        await _deviceHasOuraObservations(db, id)) {
+      await markOuraSpo2DirtyForDevice(db, id);
+    }
     await db.delete('device', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Whether [deviceId] has any Oura-SpO2 observation rows at all — the
+  /// cheap guard that keeps the pairing hooks off every non-Oura device.
+  static Future<bool> _deviceHasOuraObservations(
+      DatabaseExecutor db, String deviceId) async {
+    final r = await db.rawQuery(
+      'SELECT 1 FROM observation '
+      "WHERE device_id = ? AND vendor_key = 'spo2' "
+      "AND source_kind = 'vendor' AND unit = '%' LIMIT 1",
+      [deviceId],
+    );
+    return r.isNotEmpty;
   }
 
   // ── OBSERVATIONS (vendor-computed / typed-in / imported scalars) ───────────
@@ -2752,6 +2807,11 @@ class LocalDb {
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await batch.commit(noResult: true);
+      // The Oura-SpO2 export's change detection: the days this write
+      // touched are dirty IN THE SAME COMMIT as the rows themselves —
+      // an interrupted transaction leaves neither.
+      final spo2Dates = ouraSpo2DatesOf(rows);
+      if (spo2Dates.isNotEmpty) await markOuraSpo2Dirty(txn, spo2Dates);
     });
     return rows.length;
   }
@@ -2798,6 +2858,180 @@ class LocalDb {
   /// post-midnight seconds to their own LOCAL days, matching how every other
   /// table here is day-keyed.
   ///
+  static int _ouraSpo2DirtySeq = 0;
+
+  /// A unique-per-process token for a dirty marker: the pass reads it
+  /// back and clears the marker ONLY if the token still matches, so a
+  /// change that lands WHILE the pass is running keeps the day dirty
+  /// for the next one (compare-and-clear).
+  static String _ouraSpo2DirtyToken() =>
+      '${DateTime.now().microsecondsSinceEpoch}-${_ouraSpo2DirtySeq++}';
+
+  /// The local dates of the Oura-SpO2 rows among [rows] — the days a
+  /// write to `observation` can have changed.
+  static Set<String> ouraSpo2DatesOf(Iterable<Observation> rows) => {
+        for (final o in rows)
+          if (o.vendorKey == 'spo2' &&
+              o.sourceKind == ObservationSource.vendor &&
+              o.unit == '%')
+            o.date,
+      };
+
+  /// Mark [dates] dirty, INSIDE the caller's transaction so the marker
+  /// commits atomically with the change that justifies it.
+  static Future<void> markOuraSpo2Dirty(
+      DatabaseExecutor ex, Iterable<String> dates) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    for (final date in dates) {
+      await ex.insert(
+        'sync_cursor',
+        {
+          'name': '$kOuraSpo2DirtyPrefix$date',
+          'value': _ouraSpo2DirtyToken(),
+          'updated_at': now,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  /// Re-pairing, forgetting or deleting a ring changes WHICH days have
+  /// a candidate without touching a single observation row — the dirty
+  /// set must hear about it from the device write itself.
+  static Future<void> markOuraSpo2DirtyForDevice(
+      DatabaseExecutor ex, String deviceId) async {
+    await ex.rawInsert(
+      'INSERT OR REPLACE INTO sync_cursor(name, value, updated_at) '
+      "SELECT DISTINCT ? || date, ?, ? FROM observation "
+      "WHERE device_id = ? AND vendor_key = 'spo2' "
+      "AND source_kind = 'vendor' AND unit = '%'",
+      [
+        kOuraSpo2DirtyPrefix,
+        _ouraSpo2DirtyToken(),
+        DateTime.now().millisecondsSinceEpoch,
+        deviceId,
+      ],
+    );
+  }
+
+  /// The dirty days, NEWEST FIRST. Deliberately over-fetched by the
+  /// caller so days still in retry backoff do not starve the rest.
+  /// NOTE the substr filters: LIKE's `_` is a WILDCARD, and the prefix
+  /// itself contains one — `LIKE 'health_oura_spo2_dirty:%'` would also
+  /// match a hypothetical `health_ouraXspo2_dirty:...`; the
+  /// `substr(name, 1, len) = prefix` form is exact.
+  static Future<List<({String date, String token})>> ouraSpo2DirtyDays(
+      {int limit = 60}) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT substr(name, ?) AS date, value AS token FROM sync_cursor '
+      'WHERE substr(name, 1, ?) = ? ORDER BY date DESC LIMIT ?',
+      [
+        kOuraSpo2DirtyPrefix.length + 1,
+        kOuraSpo2DirtyPrefix.length,
+        kOuraSpo2DirtyPrefix,
+        limit,
+      ],
+    );
+    return [
+      for (final r in rows)
+        (date: r['date'] as String, token: (r['token'] ?? '') as String),
+    ];
+  }
+
+  /// Compare-and-clear: a day that changed AFTER the pass read it keeps
+  /// its (new) marker; only the exact token the pass saw is removed.
+  static Future<void> clearOuraSpo2DirtyIfUnchanged(
+      String date, String token) async {
+    final db = await instance;
+    await db.delete(
+      'sync_cursor',
+      where: 'name = ? AND value = ?',
+      whereArgs: ['$kOuraSpo2DirtyPrefix$date', token],
+    );
+  }
+
+  /// A day's retry state, '<attempts>|<lastAttemptMs>' in sync_cursor.
+  static Future<({int attempts, int lastMs})> ouraSpo2Retry(
+      String date) async {
+    final v = await getCursor('$kOuraSpo2RetryPrefix$date');
+    final p = v?.split('|');
+    if (p == null || p.length != 2) return (attempts: 0, lastMs: 0);
+    return (
+      attempts: int.tryParse(p[0]) ?? 0,
+      lastMs: int.tryParse(p[1]) ?? 0,
+    );
+  }
+
+  /// One-time bootstrap per export-method version plus a cheap daily
+  /// safety sweep of the last 14 observed days. The bootstrap covers
+  /// pre-existing observations (installs upgrading to the dirty model)
+  /// and any write path that predates a marker; the sweep catches
+  /// whatever a missed path could still have slipped through recently.
+  /// An unchanged day costs one candidate query and NO health-store
+  /// contact.
+  static Future<void> ensureOuraSpo2DirtyBootstrap(
+      String exportMethodVersion) async {
+    final db = await instance;
+    final now = DateTime.now();
+    final nowMs = now.millisecondsSinceEpoch;
+    if (await getCursor(kOuraSpo2EpochName) != exportMethodVersion) {
+      await db.transaction((txn) async {
+        await txn.rawInsert(
+          'INSERT OR REPLACE INTO sync_cursor(name, value, updated_at) '
+          "SELECT DISTINCT ? || date, ?, ? FROM observation "
+          "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
+          "AND unit = '%'",
+          [kOuraSpo2DirtyPrefix, _ouraSpo2DirtyToken(), nowMs],
+        );
+        // Legacy round-4/5 walk state, now unused by the dirty pass.
+        await txn.delete(
+          'sync_cursor',
+          where:
+              "substr(name, 1, 22) = 'health_oura_spo2_skip:' OR name IN "
+              "('health_oura_spo2_through', 'health_oura_spo2_scan_through')",
+        );
+        await txn.insert(
+          'sync_cursor',
+          {
+            'name': kOuraSpo2EpochName,
+            'value': exportMethodVersion,
+            'updated_at': nowMs,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      });
+    }
+    final today = dayLabelOf(now);
+    if (await getCursor(kOuraSpo2SweepName) != today) {
+      final from = dayLabelOf(DateTime(now.year, now.month, now.day - 14));
+      final token = _ouraSpo2DirtyToken();
+      // TWO sources, both bounded to the recent window: days with
+      // observations AND days this path once exported (a done marker)
+      // — a vanished candidate has rows nowhere, but its stale export
+      // must not outlive its source. The done half is what keeps the
+      // working set from consisting only of days that still have rows.
+      await db.rawInsert(
+        'INSERT OR REPLACE INTO sync_cursor(name, value, updated_at) '
+        "SELECT DISTINCT ? || date, ?, ? FROM observation "
+        "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
+        "AND unit = '%' AND date >= ? "
+        'UNION '
+        "SELECT ? || substr(name, ?), ?, ? FROM sync_cursor "
+        "WHERE substr(name, 1, ?) = ? AND substr(name, ?) >= ?",
+        [
+          kOuraSpo2DirtyPrefix, token, nowMs, from,
+          kOuraSpo2DirtyPrefix,
+          kOuraSpo2DonePrefix.length + 1,
+          token, nowMs,
+          kOuraSpo2DonePrefix.length, kOuraSpo2DonePrefix,
+          kOuraSpo2DonePrefix.length + 1, from,
+        ],
+      );
+      await setCursor(kOuraSpo2SweepName, today);
+    }
+  }
+
   /// The day's export CANDIDATE, selected ATOMICALLY: the device, the
   /// eligibility and the value come from ONE query, so the gate can never
   /// approve one ring's eligibility while another ring's value is
@@ -8764,6 +8998,7 @@ class LocalDb {
                 );
               }
               await batch.commit(noResult: true);
+
             });
           }
         },
@@ -9711,6 +9946,20 @@ class LocalDb {
                   whereArgs: [e.key.$1, e.key.$2, e.value],
                 );
                 if (++ops >= chunkOps) await flush();
+              }
+              // Restore/import can rewrite Oura-SpO2 observation
+              // days: mark them dirty IN THIS PAGE'S TRANSACTION, so
+              // the marker commits with the rows it describes.
+              if (t == 'observation') {
+                final dates = <String>{
+                  for (final row in rows)
+                    if (row['vendor_key'] == 'spo2' &&
+                        row['source_kind'] == 'vendor' &&
+                        row['unit'] == '%' &&
+                        row['date'] != null)
+                      '${row['date']}',
+                };
+                if (dates.isNotEmpty) await markOuraSpo2Dirty(txn, dates);
               }
               await flush();
             });

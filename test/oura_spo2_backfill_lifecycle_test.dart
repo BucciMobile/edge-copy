@@ -1,19 +1,16 @@
-// The Oura-SpO2 backfill LIFECYCLE against the PRODUCTION entry point.
+// The Oura-SpO2 DIRTY-SET lifecycle against the PRODUCTION entry point.
 //
-// `HealthExporter.debugRunSpo2Pass` IS `_exportOuraSpo2BehindCursor` —
-// the same enumeration, the same atomic candidate, the same gate, the
-// same cursor tables, the same retry order production runs. NOTHING is
-// re-wired in the test. The ONLY doubles are the health-store
-// operations (through a STATEFUL store that keeps real sample state and
-// counts every store contact) and the interpretation gate, granted as
-// an explicit test parameter.
+// `HealthExporter.debugRunSpo2Pass` IS `_exportOuraSpo2Pass` — the same
+// bootstrap, dirty enumeration, atomic candidate, gate, fingerprint
+// compare, retry backoff and compare-and-clear production runs after
+// exportAll. NOTHING is re-wired here. The ONLY doubles are the
+// health-store operations (a STATEFUL store counting every contact) and
+// the clock (`nowMs`) for the backoff cases.
 //
-// Round-5 audit cases, each with hand-computed expectations:
-// value correction at the same second; an EARLIER late delivery below
-// the old MAX; a removed measurement; an owner change without a newer
-// stamp; a vanished candidate (forgotten ring / deleted rows / moved
-// across midnight); more than 30 unsuitable days; and idempotence — an
-// unchanged candidate makes NO new health-store contact.
+// Round-6 audit cases A-I plus the fairness/idempotence/midnight
+// regressions. Every expectation is hand-computed. `pairRing` uses the
+// PRODUCTION pairing writer (`LocalDb.upsertDevice`), so the device-hook
+// dirty marking is exercised by the tests that need it.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -21,17 +18,15 @@ import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/observation.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 
-/// A STATEFUL health-store double. It keeps the samples this "app"
-/// wrote, deletes only samples inside the given window, and counts
-/// EVERY store contact so idempotence is provable by absence.
+/// A STATEFUL health-store double: keeps real own-sample state, deletes
+/// only window-own samples, holds seeded FOREIGN samples untouched,
+/// injects per-day write/delete failures, and counts EVERY contact so
+/// idempotence is provable by absence.
 class StatefulSpo2Store {
   final own = <(String, int, int, double)>[];
   final foreign = <(int, int, double)>[];
   final refuseWrites = <String>{};
   final refuseDeletes = <String>{};
-
-  /// Store-contact counters: the idempotence case asserts these stay
-  /// FLAT for an unchanged candidate.
   int writeCalls = 0;
   int deleteCalls = 0;
 
@@ -73,11 +68,6 @@ void main() {
     await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
   });
 
-  final d9 = DateTime(2026, 3, 9, 1, 0, 0);
-
-  /// DISTINCT measurement seconds — never the same stamp twice. The
-  /// round-4 fixture wrote one stamp ten times; this builds a real
-  /// spread the stored state can be asserted against.
   List<Observation> rowsAt(DateTime start, List<num> values) => [
         for (var i = 0; i < values.length; i++)
           Observation(
@@ -90,22 +80,22 @@ void main() {
           ),
       ];
 
-  Future<void> pairRing(String id) async {
-    final db = await LocalDb.instance;
-    await db.insert('device', {
-      'id': id,
-      'adapter_id': 'oura',
-      'first_seen': d9.millisecondsSinceEpoch,
-      'last_seen': d9.millisecondsSinceEpoch,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-
   Future<void> putRows(DateTime start, List<num> values, String ring) =>
       LocalDb.putObservations(rowsAt(start, values), deviceId: ring);
+
+  /// The PRODUCTION pairing writer — the same call `OuraLink` makes, so
+  /// the device-hook dirty marking runs exactly as in production.
+  Future<void> pairRing(String id) => LocalDb.upsertDevice(
+        id: id,
+        adapterId: 'oura',
+        remoteId: 'test-$id',
+        label: 'Test $id',
+      );
 
   Future<void> runPass(
     StatefulSpo2Store store, {
     required bool interpretationVerified,
+    int Function()? nowMs,
   }) async {
     await HealthExporter.shared.debugRunSpo2Pass(
       write: (v, s, e) {
@@ -119,338 +109,292 @@ void main() {
         return store.deleteWindow(day, s, e);
       },
       interpretationVerified: interpretationVerified,
+      nowMs: nowMs,
     );
   }
 
-  test('#1 value correction at the SAME second re-exports (the '
-      'fingerprint covers the mean, not only MAX)', () async {
+  test('A: correction on the NEWEST day after 35 exported days — the '
+      'dirty set has no 30-day blind spot', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
+    // 35 days of two samples each: [95, 96] -> mean 95.5.
+    for (var i = 0; i < 35; i++) {
+      await putRows(DateTime(2026, 1, 1 + i, 1), [95, 96], 'ring-1');
+    }
+    for (var pass = 0; pass < 3; pass++) {
+      await runPass(store, interpretationVerified: true);
+    }
+    expect(store.own, hasLength(35));
+    final calls = store.writeCalls;
+    // A replay that CORRECTS the newest day (2026-01-35 normalises to
+    // 2026-02-04): [95,96] -> [90,96] -> mean 93.
+    await putRows(DateTime(2026, 2, 4, 1), [90, 96], 'ring-1');
     await runPass(store, interpretationVerified: true);
-    expect(store.samplesOf('2026-03-09').single.$3,
-        closeTo(93.33333333333333, 1e-10));
-
-    // A replay that CORRECTS one value in place — same seconds, same
-    // count, same MAX. MAX(ts_ms)+COUNT(*) cannot see this; the
-    // fingerprint's mean can: 90 -> 96 moves the mean to 95.333...
-    await putRows(d9, [96, 90, 100], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    final after = store.samplesOf('2026-03-09');
-    expect(after, hasLength(1), reason: 'replaced, not stacked');
-    expect(after.single.$3, closeTo(95.33333333333333, 1e-10));
+    expect(store.writeCalls, calls + 1);
+    expect(store.samplesOf('2026-02-04').single.$3, 93);
   });
 
-  test('#2 an EARLIER late delivery below the old MAX re-exports '
-      '(the fingerprint covers first_ms)', () async {
+  test('B: never-seen days OLDER than the newest exported day still '
+      'export; then idempotence — no store contact', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    await putRows(d9.add(const Duration(hours: 1)), [95, 96], 'ring-1');
+    await putRows(DateTime(2026, 3, 10, 1), [95, 96], 'ring-1');
     await runPass(store, interpretationVerified: true);
+    // Two days that were never seen before, both OLDER than the one
+    // already exported.
+    await putRows(DateTime(2026, 3, 8, 1), [90, 92], 'ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [93, 93], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    // Hand-computed means: 91 and 93.
+    expect(store.samplesOf('2026-03-08').single.$3, 91);
+    expect(store.samplesOf('2026-03-09').single.$3, 93);
+    // Idempotence: unchanged days make NO store contact.
+    final calls = store.writeCalls;
+    final deletes = store.deleteCalls;
+    await runPass(store, interpretationVerified: true);
+    await runPass(store, interpretationVerified: true);
+    expect(store.writeCalls, calls);
+    expect(store.deleteCalls, deletes);
+  });
+
+  test('C: forgotten-ring days NEWER than the last success, then '
+      're-pair — the device hook marks them dirty', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 1, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, hasLength(1));
+    // Six days of a ring that has NO pairing row: no candidate, and
+    // they sit NEWER than the exported day — under the round-5 cursors
+    // these would never have been re-assessed after a re-pair.
+    for (var d = 5; d <= 10; d++) {
+      await putRows(DateTime(2026, 3, d, 1), [97, 98], 'ring-gone');
+    }
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, hasLength(1), reason: 'ring-gone has no candidate');
+    // Re-pair through the PRODUCTION writer: the hook marks its days
+    // dirty, the next pass exports them.
+    await pairRing('ring-gone');
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, hasLength(7));
+    expect(store.samplesOf('2026-03-10').single.$3, 97.5);
+  });
+
+  test('D: one permanently failing day never blocks the others; the '
+      'backoff retries it and the retry state is exact', () async {
+    final store = StatefulSpo2Store()..refuseDeletes.add('2026-03-09');
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [90, 90], 'ring-1');
+    await putRows(DateTime(2026, 3, 10, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    // The OTHER day exported; the failing one left no sample.
+    expect(store.samplesOf('2026-03-10'), hasLength(1));
+    expect(store.samplesOf('2026-03-09'), isEmpty);
+    // Exact retry state: one attempt recorded.
+    final retry = await LocalDb.ouraSpo2Retry('2026-03-09');
+    expect(retry.attempts, 1);
+    // The day stays dirty.
+    final dirty = await LocalDb.ouraSpo2DirtyDays(limit: 100);
+    expect(dirty.map((d) => d.date), contains('2026-03-09'));
+    // After the backoff (5 minutes) and the store recovering, the retry
+    // heals — driven through the clock seam.
+    store.refuseDeletes.clear();
+    await runPass(store, interpretationVerified: true);
+    // Not yet due: within the same clock reading it stays pending.
+    expect(store.samplesOf('2026-03-09'), isEmpty);
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 10 * 60000,
+    );
     expect(store.samplesOf('2026-03-09'), hasLength(1));
-
-    // A late delivery EARLIER than every stored second: MAX does not
-    // move, but the interval and mean do.
-    await putRows(d9, [90], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    final after = store.samplesOf('2026-03-09');
-    expect(after, hasLength(1));
-    // Hand-computed over three: (90+95+96)/3 = 93.666...
-    expect(after.single.$3, closeTo(93.66666666666667, 1e-10));
-    // The interval now starts at the delivered second.
-    expect(after.single.$1, d9.millisecondsSinceEpoch);
+    // Success cleared the retry state.
+    expect((await LocalDb.ouraSpo2Retry('2026-03-09')).attempts, 0);
   });
 
-  test('#3 a REMOVED measurement re-exports (count/mean/last_ms change)',
-      () async {
+  test('E: gate closed keeps every day dirty (all 40); opening drains '
+      'them across bounded passes', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-
-    // Delete one observation row (the day still has a candidate).
-    final db = await LocalDb.instance;
-    await db.delete('observation',
-        where: "vendor_key = 'spo2' AND value = 100 AND date = ?",
-        whereArgs: ['2026-03-09']);
-    await runPass(store, interpretationVerified: true);
-    final after = store.samplesOf('2026-03-09');
-    expect(after, hasLength(1));
-    // Hand-computed over the remaining two: mean 90.
-    expect(after.single.$3, 90);
+    for (var d = 1; d <= 40; d++) {
+      await putRows(DateTime(2026, 3, d, 1), [95, 96], 'ring-1');
+    }
+    await runPass(store, interpretationVerified: false);
+    expect(store.own, isEmpty);
+    expect(await LocalDb.ouraSpo2DirtyDays(limit: 100), hasLength(40));
+    for (var pass = 0; pass < 3; pass++) {
+      await runPass(store, interpretationVerified: true);
+    }
+    expect(store.own, hasLength(40));
+    expect(await LocalDb.ouraSpo2DirtyDays(limit: 100), isEmpty);
   });
 
-  test('#4 an OWNER CHANGE without a newer stamp re-exports (the '
-      'fingerprint covers the device)', () async {
-    final store = StatefulSpo2Store();
+  test('F: compare-and-clear keeps a marker changed during the pass; '
+      'the substr offset is exact', () async {
     await pairRing('ring-1');
-    await pairRing('ring-2');
-    // ring-1 measured the whole day; ring-2 one earlier second.
-    await putRows(d9, [95, 95, 95], 'ring-1');
-    await putRows(d9.subtract(const Duration(seconds: 1)), [97], 'ring-2');
-    await runPass(store, interpretationVerified: true);
-    expect(store.samplesOf('2026-03-09').single.$3, 95);
-
-    // ring-2 gains the MAJORITY: three more samples at its OWN earlier
-    // seconds — all below the old MAX. The owner flips to ring-2 with
-    // FIVE samples of 97: mean 97, no new MAX anywhere. The fingerprint
-    // covers the device and the mean, so the day re-exports.
-    await putRows(d9.subtract(const Duration(seconds: 4)), [97, 97, 97],
-        'ring-2');
-    await runPass(store, interpretationVerified: true);
-    final after = store.samplesOf('2026-03-09');
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    final read = (await LocalDb.ouraSpo2DirtyDays()).single;
+    // A change lands between the read and the clear: the re-mark gives
+    // the day a NEW token, so the stale clear must not remove it.
+    await putRows(DateTime(2026, 3, 9, 1), [95, 97], 'ring-1');
+    await LocalDb.clearOuraSpo2DirtyIfUnchanged(read.date, read.token);
+    final after = await LocalDb.ouraSpo2DirtyDays();
     expect(after, hasLength(1));
-    // ring-2 now owns the day with five samples: (97*5)/5 = 97.
-    expect(after.single.$3, 97);
+    // The substr offset extracts the exact date — this also guards the
+    // prefix arithmetic (no off-by-five this time: prefix length + 1).
+    expect(after.single.date, '2026-03-09');
   });
 
-  test('#5/#7a the LAST suitable observation of a once-exported day is '
-      'removed: the prior own export is cleaned up, foreign data stays',
-      () async {
+  test('G: bootstrap over pre-existing done fingerprints — an unchanged '
+      'day costs NO store contact; legacy keys are removed', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    // A foreign sample on the same day — untouchable by our delete.
-    store.foreign.add((
-      d9.add(const Duration(minutes: 5)).millisecondsSinceEpoch,
-      d9.add(const Duration(minutes: 6)).millisecondsSinceEpoch,
-      88.0
-    ));
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    // Simulate a round-4/5 install: a done fingerprint written by the
+    // OLD walk plus its legacy cursor keys.
+    await LocalDb.setCursor('health_oura_spo2_done:2026-03-09',
+        'v1|ring-1|95.500000000000000|2|1773018000000|1773018001000');
+    await LocalDb.setCursor('health_oura_spo2_through', '2026-03-09');
+    await LocalDb.setCursor('health_oura_spo2_scan_through', '2026-03-09');
+    await LocalDb.setCursor('health_oura_spo2_skip:2026-03-09', 'none');
     await runPass(store, interpretationVerified: true);
-    expect(store.samplesOf('2026-03-09'), hasLength(1));
-
-    // Every observation of the day is deleted (the candidate vanishes).
-    final db = await LocalDb.instance;
-    await db.delete('observation',
-        where: "vendor_key = 'spo2' AND date = ?",
-        whereArgs: ['2026-03-09']);
-    await runPass(store, interpretationVerified: true);
-    expect(store.samplesOf('2026-03-09'), isEmpty,
-        reason: 'the stale own export was removed');
-    expect(store.foreign, hasLength(1), reason: 'foreign data untouched');
-    expect(await LocalDb.getCursor('health_oura_spo2_done:2026-03-09'),
+    // The bootstrap seeded the dirty set, the pass compared the
+    // fingerprint, found it UNCHANGED, and made no store contact.
+    expect(store.writeCalls, 0);
+    expect(store.deleteCalls, 0);
+    // The legacy keys are gone.
+    expect(await LocalDb.getCursor('health_oura_spo2_through'), isNull);
+    expect(await LocalDb.getCursor('health_oura_spo2_scan_through'),
         isNull);
+    expect(await LocalDb.getCursor('health_oura_spo2_skip:2026-03-09'),
+        isNull);
+    // And the day is no longer dirty.
+    expect(await LocalDb.ouraSpo2DirtyDays(), isEmpty);
   });
 
-  test('#7b a FORGOTTEN registered source device: vanished-candidate '
-      'cleanup removes the stale export', () async {
+  test('H: cleanup of a vanished candidate fails, then heals after the '
+      'backoff', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
     await runPass(store, interpretationVerified: true);
     expect(store.samplesOf('2026-03-09'), hasLength(1));
-
-    // The ring is forgotten — its row goes, its observations stay.
-    final db = await LocalDb.instance;
-    await db.delete('device', where: 'id = ?', whereArgs: ['ring-1']);
+    // The ring is forgotten: the candidate vanishes, the cleanup must
+    // remove the stale export — but the store refuses the delete.
+    await LocalDb.deleteDevice('ring-1');
+    store.refuseDeletes.add('2026-03-09');
     await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), hasLength(1),
+        reason: 'the cleanup delete failed — the sample stays');
+    expect((await LocalDb.ouraSpo2Retry('2026-03-09')).attempts, 1);
+    // The store recovers; while the backoff holds, the cleanup does
+    // NOT run — the stale sample stays, visibly, until the retry is due.
+    store.refuseDeletes.clear();
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), hasLength(1),
+        reason: 'still within the 5-minute backoff');
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 10 * 60000,
+    );
     expect(store.samplesOf('2026-03-09'), isEmpty);
     expect(await LocalDb.getCursor('health_oura_spo2_done:2026-03-09'),
         isNull);
   });
 
-  test('#7c a time correction across MIDNIGHT: the old day is cleaned, '
-      'the new day is exported, foreign data on both days stays',
-      () async {
+  test('midnight correction: day A cleaned up, day B exported, foreign '
+      'samples on BOTH days untouched', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    // Day A: 2026-03-09 01:00.
-    await putRows(d9, [90, 90, 100], 'ring-1');
+    // RELATIVE dates: inside the recent-days sweep window regardless of
+    // the wall clock the test runs under.
+    final now = DateTime.now();
+    final dayA = DateTime(now.year, now.month, now.day - 2, 1);
+    final dayB = DateTime(now.year, now.month, now.day - 1, 2);
+    String label(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    final dayALabel = label(dayA);
+    final dayBLabel = label(dayB);
+    await putRows(dayA, [90, 90, 100], 'ring-1');
     await runPass(store, interpretationVerified: true);
-    expect(store.samplesOf('2026-03-09'), hasLength(1));
-    // Foreign samples on BOTH days.
+    expect(store.samplesOf(dayALabel), hasLength(1));
     store.foreign.add((
-      d9.add(const Duration(minutes: 5)).millisecondsSinceEpoch,
-      d9.add(const Duration(minutes: 6)).millisecondsSinceEpoch,
+      dayA.add(const Duration(minutes: 5)).millisecondsSinceEpoch,
+      dayA.add(const Duration(minutes: 6)).millisecondsSinceEpoch,
       88.0
     ));
-    final dayBForeign = (
-      DateTime(2026, 3, 10, 2, 0, 0).millisecondsSinceEpoch,
-      DateTime(2026, 3, 10, 2, 0, 1).millisecondsSinceEpoch,
+    store.foreign.add((
+      dayB.add(const Duration(minutes: 1)).millisecondsSinceEpoch,
+      dayB.add(const Duration(minutes: 2)).millisecondsSinceEpoch,
       89.0
-    );
-    store.foreign.add(dayBForeign);
-
-    // The anchor is corrected: the same three seconds now land on
-    // 2026-03-10. Day A loses every row (its candidate vanishes), day B
-    // gains them (a fresh candidate).
+    ));
+    // The anchor is corrected: the seconds move from day A to day B. A
+    // raw delete (a path outside the hooks — the merge hook covers the
+    // production restore) is caught by the once-per-day recent sweep;
+    // resetting the sweep marker models the next local day.
     final db = await LocalDb.instance;
     await db.delete('observation',
-        where: "vendor_key = 'spo2' AND date = ?",
-        whereArgs: ['2026-03-09']);
-    final dayB = DateTime(2026, 3, 10, 2, 0, 0);
+        where: "vendor_key = 'spo2' AND date = ?", whereArgs: [dayALabel]);
+    await LocalDb.deleteCursor('health_oura_spo2_recent_sweep');
     await putRows(dayB, [90, 90, 100], 'ring-1');
     await runPass(store, interpretationVerified: true);
-
-    // The OLD day's own export is gone, the NEW day carries it.
-    expect(store.samplesOf('2026-03-09'), isEmpty);
-    final b = store.samplesOf('2026-03-10');
+    expect(store.samplesOf(dayALabel), isEmpty);
+    final b = store.samplesOf(dayBLabel);
     expect(b, hasLength(1));
     expect(b.single.$3, closeTo(93.33333333333333, 1e-10));
-    // Foreign data on BOTH days untouched.
     expect(store.foreign, hasLength(2));
   });
 
-  test('#3-audit more than 30 permanently unsuitable days never pin the '
-      'scan: the suitable day behind them is reached, the skipped days '
-      'stay re-evaluable', () async {
+  test('fairness: 35 dirty days with retry days among them — older days '
+      'still make progress', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    // 35 days of a FORGOTTEN ring's rows (no device row -> no
-    // candidate, permanently unsuitable until it is re-paired), then a
-    // suitable day behind them.
     for (var i = 0; i < 35; i++) {
-      final day = DateTime(2026, 1, 1 + i, 1, 0, 0);
-      await putRows(day, [90, 91], 'ring-gone');
+      await putRows(DateTime(2026, 1, 1 + i, 1), [95, 96], 'ring-1');
     }
-    final suitableDay = DateTime(2026, 2, 10, 1, 0, 0);
-    await putRows(suitableDay, [95, 96], 'ring-1');
-
-    // Several bounded passes: the scan walks past the unsuitable days.
-    for (var pass = 0; pass < 6; pass++) {
-      await runPass(store, interpretationVerified: true);
-    }
-    // The suitable day WAS reached and written.
-    expect(store.samplesOf('2026-02-10'), hasLength(1));
-    expect(store.samplesOf('2026-02-10').single.$3, 95.5);
-
-    // The skipped days stay RE-EVALUABLE: re-pair the forgotten ring and
-    // its FIRST days export (the reassess scope picks them up).
-    await pairRing('ring-gone');
-    for (var pass = 0; pass < 4; pass++) {
-      await runPass(store, interpretationVerified: true);
-    }
-    expect(store.samplesOf('2026-01-01'), hasLength(1));
+    // A few newer days that fail: they take backoff, but must not
+    // starve the older ones.
+    store.refuseWrites.add('2026-02-05');
+    await putRows(DateTime(2026, 2, 5, 1), [90, 90], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    // The pass bounded at 30 days: the oldest days progressed.
+    expect(store.own.length, greaterThanOrEqualTo(29));
+    // A second pass works through the rest (the failing day stays in
+    // backoff, everything else drains).
+    await runPass(store, interpretationVerified: true);
+    expect(store.own.length, greaterThanOrEqualTo(35));
   });
 
-  test('#7 idempotence: an UNCHANGED candidate makes NO new health-store '
-      'contact after a successful export', () async {
+  test('a vanished candidate with NO prior export: nothing to do, the '
+      'marker clears without any store contact', () async {
     final store = StatefulSpo2Store();
-    await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    expect(store.writeCalls, 1);
-    final deletesAfterFirst = store.deleteCalls;
-
-    // An identical replay of the same rows — the candidate is unchanged,
-    // so no scope may hand the day to the walk again.
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    await runPass(store, interpretationVerified: true);
-    expect(store.writeCalls, 1, reason: 'no re-export of the same candidate');
-    expect(store.deleteCalls, deletesAfterFirst,
-        reason: 'no health-store contact at all');
-    expect(store.samplesOf('2026-03-09'), hasLength(1));
-  });
-
-  test('#7 an unrelated non-Oura source appending to an exported day '
-      'does not re-export the unchanged candidate', () async {
-    final store = StatefulSpo2Store();
-    await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    expect(store.writeCalls, 1);
-
-    // A DIFFERENT device's rows on the same day — not a candidate source
-    // (no oura adapter_id), and the candidate is untouched regardless.
-    await pairRing('other-band'); // registered but not an Oura ring
-    final db = await LocalDb.instance;
-    await db.update('device', {'adapter_id': 'whoop_gen4'},
-        where: 'id = ?', whereArgs: ['other-band']);
-    await putRows(d9.add(const Duration(minutes: 10)), [99, 99],
-        'other-band');
-    await runPass(store, interpretationVerified: true);
-    expect(store.writeCalls, 1, reason: 'the candidate never changed');
-    expect(store.samplesOf('2026-03-09'), hasLength(1));
-  });
-
-  test('gate closed: nothing written, both cursors untouched, no skip '
-      'markers — the release finds every day', () async {
-    final store = StatefulSpo2Store();
-    await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    await runPass(store, interpretationVerified: false);
-    expect(store.own, isEmpty);
-    expect(await LocalDb.getCursor('health_oura_spo2_through'), isNull);
-    expect(await LocalDb.getCursor('health_oura_spo2_scan_through'), isNull);
-    await runPass(store, interpretationVerified: true);
-    expect(store.own, hasLength(1));
-  });
-
-  test('cursor expectations are EXACT: a successful newer day sets the '
-      'frontier to that day, a failure does not move it', () async {
-    final store = StatefulSpo2Store();
-    await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    final d10 = DateTime(2026, 3, 10, 2, 0, 0);
-    await putRows(d10, [96, 98], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    expect(await LocalDb.getCursor('health_oura_spo2_through'),
-        '2026-03-10');
-
-    // The newer day now fails; the older day gets late data and
-    // re-exports. The success cursor stays EXACTLY at the failed day's
-    // predecessor... no: the failed day never moved it, so it stays at
-    // '2026-03-10' (the last written day).
-    store.refuseWrites.add('2026-03-10');
-    await putRows(d9.add(const Duration(seconds: 10)), [97, 97], 'ring-1');
-    await runPass(store, interpretationVerified: true);
-    expect(await LocalDb.getCursor('health_oura_spo2_through'),
-        '2026-03-10',
-        reason: 'the older rewrite never dragged it back; the failed '
-            'newer day never advanced it');
-    // The older day WAS re-exported (94.8 over five, hand-computed).
-    expect(store.samplesOf('2026-03-09').single.$3, closeTo(94.8, 1e-10));
-    // The refused day still holds its old sample; retry heals it.
-    expect(store.samplesOf('2026-03-10'), hasLength(1));
-    store.refuseWrites.clear();
-    await runPass(store, interpretationVerified: true);
-    expect(store.samplesOf('2026-03-10').single.$3, 97);
-  });
-
-  test('delete succeeded, write failed -> no sample, no watermark, '
-      'retry heals', () async {
-    final store = StatefulSpo2Store();
-    await pairRing('ring-1');
-    await putRows(d9, [90, 90, 100], 'ring-1');
-    store.refuseWrites.add('2026-03-09');
+    // A ring with rows but no pairing: no candidate, no done marker.
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-never-paired');
     await runPass(store, interpretationVerified: true);
     expect(store.own, isEmpty);
-    expect(await LocalDb.getCursor('health_oura_spo2_done:2026-03-09'),
-        isNull);
-    store.refuseWrites.clear();
-    await runPass(store, interpretationVerified: true);
-    expect(store.own, hasLength(1));
+    expect(store.writeCalls, 0);
+    expect(store.deleteCalls, 0);
+    // nothingToDo cleared the dirty marker — the day is not re-walked.
+    expect(await LocalDb.ouraSpo2DirtyDays(), isEmpty,
+        reason: 'the recent-days sweep is once per local day; within the '
+            'same test the sweep has already run for today');
   });
 
-  test('the forgotten-ring-with-many-samples fixture: TEN DISTINCT '
-      'measurement seconds, checked against the stored BESTAND',
-      () async {
+  test('no legacy keys are ever written by the new pass', () async {
     final store = StatefulSpo2Store();
-    // ring-1 (paired): two samples at 01:00:00 and 01:00:01.
     await pairRing('ring-1');
-    await putRows(d9, [95, 95], 'ring-1');
-    // ring-gone (forgotten): TEN DISTINCT seconds at 01:10:00..01:10:09.
-    final gone = d9.add(const Duration(minutes: 10));
-    await putRows(gone, [for (var i = 0; i < 10; i++) 99], 'ring-gone');
-
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
     await runPass(store, interpretationVerified: true);
-    // The paired ring's candidate is exported, exactly once.
-    expect(store.own, hasLength(1));
-    expect(store.own.single.$1, '2026-03-09');
-    expect(store.own.single.$4, 95);
-    // The stored DB rows: the forgotten ring's ten DISTINCT seconds are
-    // all banked (display keeps history), ten rows, ten distinct stamps.
+    await runPass(store, interpretationVerified: true);
     final db = await LocalDb.instance;
-    final rows = await db.rawQuery(
-        "SELECT ts_ms FROM observation WHERE device_id = 'ring-gone' "
-        'ORDER BY ts_ms');
-    expect(rows, hasLength(10));
-    expect(rows.map((r) => r['ts_ms']).toSet(), hasLength(10),
-        reason: 'ten distinct measurement seconds, not one stamp x10');
-    // And its stamps are exactly the 10-second spread, hand-computed.
-    expect(rows.first['ts_ms'], gone.millisecondsSinceEpoch);
-    expect(rows.last['ts_ms'],
-        gone.add(const Duration(seconds: 9)).millisecondsSinceEpoch);
+    final legacy = await db.rawQuery(
+      "SELECT name FROM sync_cursor WHERE "
+      "name IN ('health_oura_spo2_through',"
+      "'health_oura_spo2_scan_through') "
+      "OR substr(name, 1, 22) = 'health_oura_spo2_skip:'",
+    );
+    expect(legacy, isEmpty);
   });
 }
