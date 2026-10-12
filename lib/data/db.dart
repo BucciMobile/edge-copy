@@ -7582,6 +7582,32 @@ class LocalDb {
   /// deleted, which an archive re-drive must not refill.
   static const String kRedriveExcludedKey = 'redrive_excluded_windows';
 
+  /// `[[start, end], ...]` JSON as windows; null when unreadable.
+  static List<(int, int)>? _parseWindows(Object? json) {
+    try {
+      return [
+        for (final w in jsonDecode(json as String) as List)
+          (((w as List)[0] as num).toInt(), (w[1] as num).toInt()),
+      ];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// [windows] sorted, with overlapping or touching ones merged.
+  static List<(int, int)> _mergeWindows(List<(int, int)> windows) {
+    final sorted = [...windows]..sort((a, b) => a.$1.compareTo(b.$1));
+    final out = <(int, int)>[];
+    for (final w in sorted) {
+      if (out.isNotEmpty && w.$1 <= out.last.$2) {
+        if (w.$2 > out.last.$2) out[out.length - 1] = (out.last.$1, w.$2);
+      } else {
+        out.add(w);
+      }
+    }
+    return out;
+  }
+
   /// `compute_freshness` key for [redriveArchiveOnce].
   static const String kArchiveRedriveKey = 'archive_redrive_v12_v1';
 
@@ -7603,14 +7629,12 @@ class LocalDb {
       if (v is Map) state = v.cast<String, dynamic>();
     }
     if (state['done'] == true) return 0;
-    final excluded = <(int, int)>[];
-    if ((await computeFreshness(kRedriveExcludedKey))?['payload_json']
-        case final String j) {
-      for (final w in jsonDecode(j) as List) {
-        final l = w as List;
-        excluded.add(((l[0] as num).toInt(), (l[1] as num).toInt()));
-      }
-    }
+    final row = await computeFreshness(kRedriveExcludedKey);
+    final excluded =
+        row == null ? const <(int, int)>[] : _parseWindows(row['payload_json']);
+    // Deleted days we can no longer read back: replaying could refill one,
+    // so the replay waits rather than guess.
+    if (excluded == null) return 0;
     final r = await _redrive(
       await instance,
       reasons: redrivableArchiveReasons,
@@ -9514,17 +9538,19 @@ class LocalDb {
       // decode them back into a day the user deleted: record the windows.
       final prevRow = await txn.query('compute_freshness',
           where: 'key = ?', whereArgs: [kRedriveExcludedKey], limit: 1);
-      final excluded = <List<int>>[
-        if (prevRow.isNotEmpty)
-          for (final w in (jsonDecode(prevRow.first['payload_json'] as String)
-              as List))
-            [for (final x in w as List) (x as num).toInt()],
-        for (final dayId in sorted)
-          [_localDayWindow(dayId).$1, _localDayWindow(dayId).$2],
-      ];
+      // An unreadable earlier list is replaced, not fatal: the deletion
+      // itself must still go through.
+      final excluded = _mergeWindows([
+        ...?(prevRow.isEmpty
+            ? null
+            : _parseWindows(prevRow.first['payload_json'])),
+        for (final dayId in sorted) _localDayWindow(dayId),
+      ]);
       await txn.insert('compute_freshness', {
         'key': kRedriveExcludedKey,
-        'payload_json': jsonEncode(excluded),
+        'payload_json': jsonEncode([
+          for (final w in excluded) [w.$1, w.$2],
+        ]),
         'updated_at': DateTime.now().millisecondsSinceEpoch,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       // The archived copy of these seconds goes too — "delete this day" is a

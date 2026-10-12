@@ -5,12 +5,14 @@
 // invariant). Runs the REAL LocalDb over an in-memory
 // sqlite via sqflite_common_ffi.
 
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/data/models.dart';
 
@@ -297,6 +299,38 @@ void main() {
     // The archive keeps its bytes.
     final stats = await LocalDb.rawArchiveStats();
     expect((stats['by_reason'] as Map)['undecodable_rec_v12'], 3);
+  });
+
+  test('re-drive never refills a day the user deleted', () async {
+    // A recovered v12 second on a day the user then deletes, archived again.
+    final b = Uint8List(88);
+    final d = ByteData.sublistView(b);
+    b[0] = 0x2F;
+    b[1] = 12;
+    const ts = 1752000000;
+    d.setUint32(3, 910000, Endian.little);
+    d.setUint32(7, ts, Endian.little);
+    b[17] = 70;
+    d.setFloat32(44, 1.0, Endian.little);
+    await LocalDb.archiveRawRecord(ArchiveRecord(
+      counter: 910000,
+      hex: b.map((x) => x.toRadixString(16).padLeft(2, '0')).join(),
+      packetType: 0x2F,
+      capturedAt: 1752000100000,
+      reason: 'undecodable_rec_v12',
+    ));
+    final day = dayLabelOf(DateTime.fromMillisecondsSinceEpoch(ts * 1000));
+    await LocalDb.deleteDays({day});
+    await LocalDb.deleteDays({day}); // twice: windows merge, not pile up
+    await LocalDb.deleteComputeFreshness(LocalDb.kArchiveRedriveKey);
+    await LocalDb.redriveArchiveOnce();
+    final db = await LocalDb.instance;
+    expect(
+        await db.rawQuery(
+            'SELECT 1 FROM decoded_onehz WHERE rec_ts = ?', const [ts]),
+        isEmpty);
+    final w = await LocalDb.computeFreshness(LocalDb.kRedriveExcludedKey);
+    expect((jsonDecode(w!['payload_json'] as String) as List), hasLength(1));
   });
 
   // The REAL exports, through the REAL ladder — the same harness shape as
