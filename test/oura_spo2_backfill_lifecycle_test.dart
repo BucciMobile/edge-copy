@@ -801,6 +801,39 @@ void main() {
     expect(r11.attempts, 1, reason: 'a fresh failure starts at 1');
   });
 
+  // Regression for the seed-175 model-based failure: a done marker is a
+  // claim "the store holds this sample". When the delete window succeeds
+  // but the write fails, the sample was REMOVED — a marker keeping the
+  // old fingerprint would later classify the day `unchanged` (fingerprint
+  // match) and never rewrite it. The marker must not outlive the sample.
+  test('writeFailed after the delete window drops the done marker — the '
+      'sample cannot stay lost when the fingerprint matches again',
+      () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), hasLength(1));
+    // The store refuses writes; a CHANGED candidate forces a re-export
+    // attempt: the delete window removes the old sample, the write is
+    // refused — but the done marker still holds the OLD fingerprint.
+    store.refuseWrites.add('2026-03-09');
+    await putRows(DateTime(2026, 3, 9, 1), [90, 91], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    // The delete window ran, the write was refused: no sample in the store.
+    expect(store.samplesOf('2026-03-09'), isEmpty);
+    // The candidate now goes BACK to the marker's fingerprint (reverted
+    // correction, or a re-paired ring like seed 175).
+    store.refuseWrites.clear();
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true,
+        nowMs: () => DateTime.now().millisecondsSinceEpoch + 10 * 60000);
+    expect(store.samplesOf('2026-03-09'), hasLength(1),
+        reason: 'the fingerprint matches the marker again, but the sample '
+            'was lost to the refused write — the marker must not claim it');
+    expect(store.samplesOf('2026-03-09').single.$3, closeTo(95.5, 1e-9));
+  });
+
   test('no legacy keys are ever written by the new pass', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');

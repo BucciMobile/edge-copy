@@ -1928,6 +1928,14 @@ class HealthExporter {
         await LocalDb.setCursor(doneKey, fp);
         return OuraSpo2DayOutcome.exported;
       }
+      if (r == OuraSpo2ExportResult.writeFailed) {
+        // The delete window ALREADY removed this day's prior own sample;
+        // the refused write left NOTHING in the store. A done marker is a
+        // claim "the store holds this sample" — keeping the old marker
+        // would later classify a matching fingerprint as `unchanged` and
+        // never rewrite the lost sample (the seed-175 model finding).
+        await LocalDb.deleteCursor(doneKey);
+      }
       return r == OuraSpo2ExportResult.notEligible
           ? OuraSpo2DayOutcome.gateClosed
           : OuraSpo2DayOutcome.failed;
