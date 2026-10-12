@@ -68,7 +68,7 @@ void main() {
     await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
   });
 
-  String _dayLabel(DateTime d) {
+  String dayLabel(DateTime d) {
     final m = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
     return '${d.year}-$m-$dd';
@@ -428,7 +428,7 @@ void main() {
     // stop the pass GLOBALLY.
     for (var d = 1; d <= 5; d++) {
       store.refuseWrites
-          .add(_dayLabel(DateTime(2026, 3, d)));
+          .add(dayLabel(DateTime(2026, 3, d)));
     }
     for (var d = 1; d <= 5; d++) {
       await putRows(DateTime(2026, 3, d, 1), [95, 96], 'ring-1');
@@ -443,12 +443,12 @@ void main() {
     // Newest first: Mar 5, Mar 4, Mar 3 were ATTEMPTED before the stop
     // and carry the flat counters; Mar 2 and Mar 1 were never reached.
     for (final d in [5, 4, 3]) {
-      expect((await LocalDb.ouraSpo2Retry(_dayLabel(DateTime(2026, 3, d))))
+      expect((await LocalDb.ouraSpo2Retry(dayLabel(DateTime(2026, 3, d))))
           .attempts, 1,
           reason: 'flat day counters on a global stop');
     }
     for (final d in [2, 1]) {
-      expect((await LocalDb.ouraSpo2Retry(_dayLabel(DateTime(2026, 3, d))))
+      expect((await LocalDb.ouraSpo2Retry(dayLabel(DateTime(2026, 3, d))))
           .attempts, 0,
           reason: 'never attempted: the stop came first');
     }
@@ -473,7 +473,7 @@ void main() {
       'its DAY backoff (not global)', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    final failLabel = _dayLabel(DateTime(2026, 3, 9));
+    final failLabel = dayLabel(DateTime(2026, 3, 9));
     store.refuseWrites.add(failLabel);
     await putRows(DateTime(2026, 3, 9, 1), [90, 90], 'ring-1');
     await putRows(DateTime(2026, 3, 10, 1), [95, 96], 'ring-1');
@@ -530,7 +530,7 @@ void main() {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
     final day = DateTime.now().subtract(const Duration(days: 3));
-    final label = _dayLabel(day);
+    final label = dayLabel(day);
     await putRows(day, [95, 96], 'ring-1');
     // A done marker as ANOTHER INSTALL would have written it — after a
     // restore it must not count as export proof here.
@@ -590,7 +590,7 @@ void main() {
     final broken = <String>[];
     for (var d = 11; d <= 13; d++) {
       final day = DateTime(2026, 3, d);
-      final label = _dayLabel(day);
+      final label = dayLabel(day);
       broken.add(label);
       store.refuseWrites.add(label);
       await putRows(day, [95, 96], 'ring-1');
@@ -643,12 +643,12 @@ void main() {
     // contact and must NOT clear the global marker.
     final day1 = DateTime(2026, 3, 10);
     await putRows(day1, [95, 96], 'ring-1');
-    final c1 = await LocalDb.ouraSpo2DayCandidate(_dayLabel(day1));
+    final c1 = await LocalDb.ouraSpo2DayCandidate(dayLabel(day1));
     // A global marker in its hold window (attempts == 2 -> 5 minutes,
     // stamped just now) — the pass must run PAST it via the clock seam.
     await LocalDb.setCursor('health_oura_spo2_global_fail',
         '2|${DateTime.now().millisecondsSinceEpoch}');
-    await LocalDb.setCursor('health_oura_spo2_done:${_dayLabel(day1)}',
+    await LocalDb.setCursor('health_oura_spo2_done:${dayLabel(day1)}',
         ouraSpo2CandidateFingerprint(c1!));
     final writesBefore = store.writeCalls;
     final deletesBefore = store.deleteCalls;
@@ -667,7 +667,7 @@ void main() {
     // store-success proof, the day takes its (real, day-scoped)
     // backoff — the streak was never reset by the unchanged day.
     final day2 = DateTime(2026, 3, 9);
-    store.refuseWrites.add(_dayLabel(day2));
+    store.refuseWrites.add(dayLabel(day2));
     await putRows(day2, [90, 90], 'ring-1');
     await runPass(
       store,
@@ -677,7 +677,7 @@ void main() {
     expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 2,
         reason: 'a failed day is no proof either — the marker survives');
     expect(
-        (await LocalDb.ouraSpo2Retry(_dayLabel(day2))).attempts, 1);
+        (await LocalDb.ouraSpo2Retry(dayLabel(day2))).attempts, 1);
   });
 
   test('d) the global backoff is CLAMPED at 60 minutes: attempts == 100 '
@@ -711,7 +711,7 @@ void main() {
       'day retry; the next pass exports without waiting', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    final label = _dayLabel(DateTime(2026, 3, 9));
+    final label = dayLabel(DateTime(2026, 3, 9));
     await putRows(DateTime(2026, 3, 9), [95, 96], 'ring-1');
     // A failed day + a global marker, both stamped NOW: the global
     // backoff (5 * (5 - 1) = 20 min) and the day retry (20 min for
@@ -774,7 +774,7 @@ void main() {
     final store = StatefulSpo2Store();
     // Three newest days failing on DELETE (the store's clear window).
     for (final d in [10, 11, 12]) {
-      store.refuseDeletes.add(_dayLabel(DateTime(2026, 3, d)));
+      store.refuseDeletes.add(dayLabel(DateTime(2026, 3, d)));
     }
     await pairRing('ring-1');
     for (final d in [9, 10, 11, 12]) {

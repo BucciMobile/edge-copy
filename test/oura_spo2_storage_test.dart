@@ -205,7 +205,7 @@ void main() {
 
   test('restore/import marks the merged Oura-SpO2 days dirty (the '
       'page-txn hook)', () async {
-    final mk = (DateTime s, List<num> v) => [
+    List<Observation> mk(DateTime s, List<num> v) => [
           for (var i = 0; i < v.length; i++)
             Observation(
               at: s.add(Duration(seconds: i)),

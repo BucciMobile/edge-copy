@@ -63,7 +63,7 @@ typedef OuraSpo2Candidate = ({
 /// sync_cursor key prefixes for the Oura-SpO2 export's dirty-set model.
 /// The DONE marker holds the candidate fingerprint of the last successful
 /// export; DIRTY marks days whose export may be stale; RETRY holds
-/// '<attempts>|<lastAttemptMs>' per day.
+/// `[attempts]|[lastAttemptMs]` per day.
 const String kOuraSpo2DonePrefix = 'health_oura_spo2_done:';
 const String kOuraSpo2DirtyPrefix = 'health_oura_spo2_dirty:';
 const String kOuraSpo2RetryPrefix = 'health_oura_spo2_retry:';
@@ -2997,7 +2997,7 @@ class LocalDb {
     );
   }
 
-  /// The GLOBAL failure state, '<attempts>|<lastAttemptMs>' — set when
+  /// The GLOBAL failure state, `[attempts]|[lastAttemptMs]` — set when
   /// three consecutive day failures end a pass (a global cause), cleared
   /// on the first success, the health-sync toggle, a permission change
   /// or an explicit user export.
@@ -3011,7 +3011,7 @@ class LocalDb {
     );
   }
 
-  /// A day's retry state, '<attempts>|<lastAttemptMs>' in sync_cursor.
+  /// A day's retry state, `[attempts]|[lastAttemptMs]` in sync_cursor.
   static Future<({int attempts, int lastMs})> ouraSpo2Retry(
       String date) async {
     final v = await getCursor('$kOuraSpo2RetryPrefix$date');

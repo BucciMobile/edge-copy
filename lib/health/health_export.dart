@@ -392,6 +392,55 @@ String ouraSpo2CandidateFingerprint(OuraSpo2Candidate c) =>
     '${c.meanPercent.toStringAsPrecision(17)}|'
     '${c.count}|${c.firstTsMs}|${c.lastTsMs}';
 
+/// HealthKit's percent unit is a FRACTION (0.0-1.0): 0.97 is 97%.
+/// Health Connect's OxygenSaturationRecord.percentage is 0-100. The
+/// internal model of this app is always PERCENT; only the plugin call
+/// converts. Returns null for anything that is not a valid percentage.
+///
+/// Evidence (health 12.2.1, the pubspec.lock-pinned version, read from
+/// the pub cache): the iOS writer builds
+/// `HKQuantity(unit: unitDict[unit]!, doubleValue: value)` with
+/// `unitDict[PERCENT] = HKUnit.percent()` (SwiftHealthPlugin.swift:453,
+/// :1391) and NO scaling — and Apple's HKUnit.percent() measures
+/// 0.0-1.0, so writing 97.0 through it stores 9700%. The iOS reader
+/// returns `sample.quantity.doubleValue(for: unit ...)` (line ~900) —
+/// the same fraction on the way back. The Android writer wraps the
+/// value in `Percentage(value)` for OxygenSaturationRecord
+/// (HealthPlugin.kt:1821), which IS 0-100. Hence: divide by 100 on
+/// Apple, pass through on Android.
+@visibleForTesting
+double? ouraSpo2HealthStoreValue(double percent, {required bool apple}) {
+  if (!percent.isFinite || percent <= 0 || percent > 100) return null;
+  return apple ? percent / 100.0 : percent;
+}
+
+/// The exact arguments of the plugin write — testable without a device.
+/// Null means "do not write": an out-of-range value never reaches the
+/// plugin through this path.
+@visibleForTesting
+({
+  double value,
+  HealthDataType type,
+  HealthDataUnit unit,
+  DateTime start,
+  DateTime end,
+})? ouraSpo2PluginWrite(
+  double percent,
+  DateTime start,
+  DateTime end, {
+  required bool apple,
+}) {
+  final v = ouraSpo2HealthStoreValue(percent, apple: apple);
+  if (v == null) return null;
+  return (
+    value: v,
+    type: HealthDataType.BLOOD_OXYGEN,
+    unit: HealthDataUnit.PERCENT,
+    start: start,
+    end: end,
+  );
+}
+
 /// One dirty day's outcome in the export pass.
 enum OuraSpo2DayOutcome {
   /// Candidate exported (or re-exported after a change).
@@ -1850,14 +1899,22 @@ class HealthExporter {
       final fp = ouraSpo2CandidateFingerprint(candidate);
       if (done == fp) return OuraSpo2DayOutcome.unchanged;
 
+      // THE PLUGIN BOUNDARY: the app's model is PERCENT, HealthKit's
+      // percent unit is a FRACTION — see `ouraSpo2PluginWrite` for the
+      // pinned-plugin evidence. writeOverride stays on the PERCENT
+      // level (the store doubles assert percent semantics).
       final write = writeOverride ??
-          (v, s, e) => _health.writeHealthData(
-                value: v,
-                type: HealthDataType.BLOOD_OXYGEN,
-                startTime: s,
-                endTime: e,
-                unit: HealthDataUnit.PERCENT,
-              );
+          (percent, s, e) {
+            final w = ouraSpo2PluginWrite(percent, s, e, apple: isApple);
+            if (w == null) return Future.value(false);
+            return _health.writeHealthData(
+              value: w.value,
+              type: w.type,
+              unit: w.unit,
+              startTime: w.start,
+              endTime: w.end,
+            );
+          };
       final r = await exportOuraSpo2Day(
         candidate: candidate,
         write: write,
@@ -1866,7 +1923,7 @@ class HealthExporter {
         // re-export must remove THIS DAY's prior sample wherever the
         // candidate's interval has since MOVED. Only OUR samples are
         // ever touched; foreign data is untouchable by the platform API.
-        deleteWindow: (_, __) => clear(dayStart, dayEnd),
+        deleteWindow: (start, end) => clear(dayStart, dayEnd),
         interpretationVerified: interpretationVerified,
       );
       if (r == OuraSpo2ExportResult.written) {

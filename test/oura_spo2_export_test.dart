@@ -304,6 +304,31 @@ void main() {
         isFalse);
   });
 
+  test('plugin write: iOS gets a fraction, Android a percentage', () {
+    final s = DateTime(2026, 3, 9, 1);
+    final e = s.add(const Duration(seconds: 3));
+    final ios = ouraSpo2PluginWrite(97, s, e, apple: true)!;
+    expect(ios.value, closeTo(0.97, 1e-12));
+    expect(ios.type, HealthDataType.BLOOD_OXYGEN);
+    expect(ios.unit, HealthDataUnit.PERCENT);
+    final and = ouraSpo2PluginWrite(97, s, e, apple: false)!;
+    expect(and.value, 97);
+    // Hand-computed: 93.333...% -> 0.9333... fraction on iOS.
+    expect(
+        ouraSpo2PluginWrite(93.33333333333333, s, e, apple: true)!.value,
+        closeTo(0.9333333333333333, 1e-12));
+  });
+
+  test('plugin write: out-of-range input never reaches the plugin', () {
+    final t = DateTime(2026, 3, 9, 1);
+    for (final bad in [0.0, -1.0, 100.0000001, double.nan, double.infinity]) {
+      expect(ouraSpo2PluginWrite(bad, t, t, apple: true), isNull);
+      expect(ouraSpo2PluginWrite(bad, t, t, apple: false), isNull);
+    }
+    // 100% is the inclusive upper bound: 1.0 on iOS.
+    expect(ouraSpo2PluginWrite(100, t, t, apple: true)!.value, 1.0);
+  });
+
   test('the health package contract: BLOOD_OXYGEN maps to PERCENT', () {
     expect(
       const {
