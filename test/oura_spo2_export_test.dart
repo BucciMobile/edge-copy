@@ -102,8 +102,9 @@ void main() {
     expect(wrote, isFalse);
   });
 
-  test('I: the retry backoff — 5, 10, 20 ... capped at 1440 minutes; a '
-      'clock that went backwards counts as due', () {
+  test('I: the retry backoff — 5, 10, 20 ... capped by the 2^8 shift '
+      'clamp at 1280 minutes; a clock that went backwards counts as due',
+      () {
     final t0 = 1787000000000; // an arbitrary fixed base.
     // Never-attempted: due immediately.
     expect(

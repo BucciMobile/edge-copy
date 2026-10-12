@@ -1785,14 +1785,12 @@ class HealthExporter {
       await LocalDb.ensureOuraSpo2DirtyBootstrap(kOuraSpo2ExportMethod);
       final clock =
           nowMs ?? () => DateTime.now().millisecondsSinceEpoch;
-      // THE GLOBAL GATE: after a consecutive-failure stop, wait out a
-      // small backoff (5 * attempts minutes) before touching the store
-      // again — cleared on the first success, the health-sync toggle,
-      // a permission change or an explicit user export.
-      final g = await LocalDb.ouraSpo2GlobalFail();
       // THE GLOBAL GATE: a consecutive-failure stop may hold the pass —
       // see `ouraSpo2GlobalHold` for the full reasoning (first stop
-      // holds nothing, growth capped, backwards clock never holds).
+      // holds nothing, growth capped at an hour, backwards clock never
+      // holds). The marker is cleared on the first store success, the
+      // health-sync toggle, a permission change or an explicit user sync.
+      final g = await LocalDb.ouraSpo2GlobalFail();
       if (ouraSpo2GlobalHold(
           attempts: g.attempts, lastMs: g.lastMs, nowMs: clock())) {
         debugPrint('[health] oura spo2 pass: global backoff holds');
