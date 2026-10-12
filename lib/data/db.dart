@@ -7585,11 +7585,40 @@ class LocalDb {
   /// path (called from a heavy derive). Marked done only after it finishes,
   /// so an interrupted pass repeats; the replay skips seconds already decoded,
   /// so a repeat is safe.
-  static Future<int> redriveArchiveOnce() async {
-    if (await computeFreshness(kArchiveRedriveKey) != null) return 0;
-    final n = await redriveArchivedRecords(await instance);
-    await putComputeFreshness(kArchiveRedriveKey, '{"recovered":$n}');
-    return n;
+  ///
+  /// Bounded per call by [budget]: a million archived frames take minutes on a
+  /// phone, and a derive holds its latch while this runs. An unfinished pass
+  /// stores where it stopped and the next call resumes there.
+  static Future<int> redriveArchiveOnce({
+    Duration budget = const Duration(seconds: 20),
+  }) async {
+    Map<String, dynamic> state = {};
+    if ((await computeFreshness(kArchiveRedriveKey))?['payload_json']
+        case final String j) {
+      final v = jsonDecode(j);
+      if (v is Map) state = v.cast<String, dynamic>();
+    }
+    if (state['done'] == true) return 0;
+    final r = await _redrive(
+      await instance,
+      reasons: redrivableArchiveReasons,
+      startHex: state['after_hex'] as String? ?? '',
+      startDevice: state['after_device'] as String? ?? '',
+      budget: budget,
+    );
+    final total = ((state['recovered'] as num?)?.toInt() ?? 0) + r.recovered;
+    await putComputeFreshness(
+      kArchiveRedriveKey,
+      jsonEncode({
+        'recovered': total,
+        if (r.resume == null) 'done': true,
+        if (r.resume case (final h, final d)) ...{
+          'after_hex': h,
+          'after_device': d,
+        },
+      }),
+    );
+    return r.recovered;
   }
 
   /// GATES 4b — replay the archive through the CURRENT decoders, into
@@ -7621,7 +7650,19 @@ class LocalDb {
   static Future<int> redriveArchivedRecords(
     Database db, {
     List<String> reasons = redrivableArchiveReasons,
+  }) async =>
+      (await _redrive(db, reasons: reasons)).recovered;
+
+  /// [redriveArchivedRecords] from a resume point, stopping after the first
+  /// page that ends past [budget]. `resume` is null once the archive is done.
+  static Future<({int recovered, (String, String)? resume})> _redrive(
+    Database db, {
+    required List<String> reasons,
+    String startHex = '',
+    String startDevice = '',
+    Duration? budget,
   }) async {
+    final clock = Stopwatch()..start();
     // Both are cheap and both are required: a DB whose ladder has not created
     // the archive yet (or is mid-ladder) must no-op rather than throw — a throw
     // in here rolls the WHOLE upgrade back and quarantines the database.
@@ -7630,7 +7671,7 @@ class LocalDb {
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
         [t],
       );
-      if (present.isEmpty) return 0;
+      if (present.isEmpty) return (recovered: 0, resume: null);
     }
     // SELF-DETECTING, because this runs from BOTH sides of the v47 rung: from
     // the oldV<44 ladder step, where `decoded_onehz` is still keyed by rec_ts
@@ -7651,8 +7692,8 @@ class LocalDb {
     // index and no offset scan. Post-v51, `hex` alone is no longer unique
     // (two devices can share a byte-identical undecodable frame), so a plain
     // `hex > ?` cursor would silently skip the second device's row.
-    var afterHex = '';
-    var afterDevice = '';
+    var afterHex = startHex;
+    var afterDevice = startDevice;
     var recovered = 0;
     while (true) {
       final rows = preArchiveDeviceKey
@@ -7668,7 +7709,7 @@ class LocalDb {
               'ORDER BY hex ASC, device_id ASC LIMIT 500',
               [...reasons, afterHex, afterDevice],
             );
-      if (rows.isEmpty) return recovered;
+      if (rows.isEmpty) return (recovered: recovered, resume: null);
       afterHex = rows.last['hex'] as String;
       afterDevice = preArchiveDeviceKey ? '' : rows.last['device_id'] as String;
 
@@ -7762,6 +7803,9 @@ class LocalDb {
         }
       }
       if (queued > 0) await batch.commit(noResult: true);
+      if (budget != null && clock.elapsed > budget) {
+        return (recovered: recovered, resume: (afterHex, afterDevice));
+      }
     }
   }
 

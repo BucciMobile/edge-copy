@@ -276,8 +276,14 @@ void main() {
     }
     expect(LocalDb.redrivableArchiveReasons, contains('undecodable_rec_v12'));
 
-    // The one-shot runs once: the second call is a no-op by its marker.
-    expect(await LocalDb.redriveArchiveOnce(), 3);
+    // Out of budget after the first page: it stops there and the next call
+    // resumes, finds nothing left and marks itself done.
+    expect(await LocalDb.redriveArchiveOnce(budget: Duration.zero), 3);
+    final mid = await LocalDb.computeFreshness(LocalDb.kArchiveRedriveKey);
+    expect(mid!['payload_json'] as String, isNot(contains('"done"')));
+    expect(await LocalDb.redriveArchiveOnce(), 0);
+    final end = await LocalDb.computeFreshness(LocalDb.kArchiveRedriveKey);
+    expect(end!['payload_json'] as String, contains('"done":true'));
     expect(await LocalDb.redriveArchiveOnce(), 0);
 
     final db = await LocalDb.instance;
