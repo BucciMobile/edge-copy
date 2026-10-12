@@ -280,7 +280,8 @@ void main() {
   test(
     'logging a session retires the auto-detect suggestion it covers',
     () async {
-      final start = sessionStart - 12 * 86400;
+      // Within the week an unanswered suggestion stays listed.
+      final start = sessionStart - 4 * 86400;
       await (await LocalDb.instance).update('activity_review_meta', {'activated_at': start - 1});
       await LocalDb.putWorkoutSuggestion({
         'id': 'sug-covered',
