@@ -1799,7 +1799,18 @@ import 'vendor_sleep.dart';
 // 110 → 111 (#315): new scalar `sdnn_window`, the mean of 5-min-window SDNNs over the sleep NN (windows under 21 beats left out); the Apple Health HRV SDNN sample now carries it instead of the drift-inflated whole-night `sdnn`, which is unchanged. Edge-only.
 // (no bump) The multi-device wearable paths (`compute/inputs/`, the partial readiness composite, wearable worn-minutes and skin-temp cadence, ring nights) only run for a wearable whose developer flag is on and which is the active wearable; flags default off and a flag-off device contributes nothing. WHOOP output is unchanged, pinned by test/whoop_freeze_golden_test.dart against goldens generated from main.
 // 111 → 112 (recovery calibration): analytics main @ 77fe373 (#95). Readiness merges HRV and RHR into one autonomic input (mean of their oriented z's, weight 0.70) and maps the composite z through the user's own spread once 14 prior nights exist: score = logistic(0.65·(z − ĉ)/σ̂), σ̂ = MAD×1.4826 of the trailing `readiness_z` series floored at 0.3, ĉ = its median capped to ±0.5 (re-centring; calibrating before 14 nights). The per-day composite z is stored as `readiness_z`; `readiness_calibration_backfill.dart` rebuilds it from stored drivers and re-scores days whose raw is pruned. readiness_lnrmssd's z/SWC/band use the prior window's median + MAD.
-const int kAlgoVersion = 112;
+// 112 → 113 (contributed-data study, edge-only): day strain is floored at the
+// strain of a finished, non-private session that day; a main sleep under 3 h
+// yields no resting HR (absent with the reason) and so no RHR readiness input
+// or `rhr` baseline entry; a day with no night of its own prices strain and
+// energy on the median of prior nightly RHR (3+ nights, typed RHR first); an
+// HR-led fallback window under 3 h or starting 10:00-19:00 local is not the
+// main sleep (day sleepers exempt); WHOOP 5 nights get `skin_temp_dev_c` (°C
+// against the median of prior nightly means, 14+ nights); WHOOP 4 nights
+// store `skin_temp_ambient_r` and the illness watch leaves out WHOOP 4 nights
+// whose skin temp tracks ambient (|r| >= 0.8, or unmeasured). One-shot,
+// raw-free: days derived before v106 drop naps overlapping the next night.
+const int kAlgoVersion = 113;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -6804,8 +6815,10 @@ class DerivationEngine {
       'readiness': col('readiness') ?? sc('readiness'),
       'resp_rate': sc('resp_rate'),
       'skin_temp_z': sc('skin_temp_z'),
-      'skin_temp_illness_ok': skinTempIllnessEligible(
-          payload['device_family'] as String?, sc('skin_temp_ambient_r')),
+      // Only the refusal is written: an eligible night reads as before.
+      if (!skinTempIllnessEligible(
+          payload['device_family'] as String?, sc('skin_temp_ambient_r')))
+        'skin_temp_illness_ok': false,
       'trimp': sc('trimp'),
       // Headline 0–21 strain, daily steps, nap minutes — feed Sleep/Strain Coach
       // + VO₂max/Fitness Age in the cross-day rollup.

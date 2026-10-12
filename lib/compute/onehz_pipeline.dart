@@ -1760,8 +1760,8 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
       // computing from ~day 4. This is the series _attachHistory must feed back.
       'skin_temp_adc': skinTempAdc,
       // WHOOP 5 only: °C above (+) or below (-) the user's usual night.
-      'skin_temp_dev_c':
-          skinTempDevC == null ? null : _round(skinTempDevC, 2),
+      // Key only when present: no new key on every other night.
+      if (skinTempDevC != null) 'skin_temp_dev_c': _round(skinTempDevC, 2),
       // WH-11a — the fraction of the sleep window the temp channel actually
       // covered. Emitted, NOT gated on: no floor is defensible until we have
       // looked at what this reads on real nights.
