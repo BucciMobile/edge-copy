@@ -77,6 +77,23 @@ String needInputNote(String name, {num? have, num? need}) =>
 /// not. Anything that renders a reason must be able to reach this.
 const String kUnknownAbsenceNote = 'unknown_cause';
 
+/// Least sleep a night needs before its resting HR is read (same 3 h the
+/// FINAL-night rule uses). Shorter nights do not reach the overnight low.
+const int kRhrMinSleepSec = 3 * 3600;
+
+/// Resting HR to price a day's strain and energy against when the day has no
+/// night of its own (no sleep detected, or a short one): the median of the
+/// user's own prior nights, from [rhrFallbackMinNights] of them. Null below
+/// that, so a cold start still abstains rather than use a population value.
+double? rhrFallbackFromHistory(List<double> history) {
+  final xs = [for (final v in history) if (v.isFinite && v > 0) v]..sort();
+  if (xs.length < rhrFallbackMinNights) return null;
+  final mid = xs.length ~/ 2;
+  return xs.length.isOdd ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+
+const int rhrFallbackMinNights = 3;
+
 /// Physiological cap on the readiness composite z, above which the score is a
 /// degenerate-baseline artefact rather than a real reading — so it is abstained
 /// from the HEADLINE scalar rather than persisted.
@@ -613,14 +630,26 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // samples it SHOULD hold at the stream's own measured cadence), and a stream
   // with no measurable cadence yields ABSENCE rather than a guess. The
   // no-sleep-no-RHR branch above is untouched by any of that.
-  final rhr = (hasSleep && sleepHr.isNotEmpty)
+  //
+  // A night under [kRhrMinSleepSec] does not reach the overnight low: in the
+  // contributed nights it read about 5-6 bpm above the user's usual, as a
+  // recovery hit and a wider RHR baseline. Absent, with the reason.
+  final shortNight = tstSec != null && tstSec < kRhrMinSleepSec;
+  final rhr = (hasSleep && sleepHr.isNotEmpty && !shortNight)
       ? nocturnalRhr(sleepHr, tsSec: sleepTs)
-      : const Metric<NocturnalRhr>.absent(
-          tier: Tier.high,
-          inputs_used: ['hr_1hz', 'sleep_window'],
-          note: 'no sleep was scored for this day — resting HR is only ever '
-              'measured over a sleep window, never over waking hours',
-        );
+      : shortNight
+          ? const Metric<NocturnalRhr>.absent(
+              tier: Tier.high,
+              inputs_used: ['hr_1hz', 'sleep_window'],
+              note: 'short night: under 3 h of sleep does not reach the '
+                  'overnight low, so resting HR is not read from it',
+            )
+          : const Metric<NocturnalRhr>.absent(
+              tier: Tier.high,
+              inputs_used: ['hr_1hz', 'sleep_window'],
+              note: 'no sleep was scored for this day — resting HR is only ever '
+                  'measured over a sleep window, never over waking hours',
+            );
   // HR dip: day-side = waking HR outside the sleep window; night-side = sleep HR.
   final dayOnly = _dayHrOutsideSleep(d);
   final dip = hrDip(dayOnly, sleepHr);
@@ -903,7 +932,11 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     restingHrHistory: d.rhrHistory,
     manualZoneLowerBpm: manualZoneBoundsFromProfile(prof),
   );
-  final rhrForTrimp = rhrToday ?? (prof['resting_hr'] as num?)?.toDouble();
+  // No night of its own: the user's typed resting HR, then the median of
+  // their own recent nights, so a band worn all day still gets a strain.
+  final rhrForTrimp = rhrToday ??
+      (prof['resting_hr'] as num?)?.toDouble() ??
+      rhrFallbackFromHistory(d.rhrHistory);
   final weightKg = (prof['weight_kg'] as num?)?.toDouble();
   final heightCm = (prof['height_cm'] as num?)?.toDouble();
   // Wake-span per-minute mean HR = the day minus the sleep window (shared by

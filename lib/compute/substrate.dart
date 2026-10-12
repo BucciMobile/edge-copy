@@ -1378,7 +1378,10 @@ List<PhysioDay> calendarDays(
           final tsSlice = [for (var i = loS; i < hiS; i++) sub.tsSec[i]];
           final cand =
               ana.hrLedSleepWindow(hrSlice, tsSlice, hrBaseline: hrBaseline);
-          if (cand != null) {
+          if (cand != null &&
+              fallbackNightAcceptable(cand.onsetSec, cand.offsetSec,
+                  tzOffsetSec: tzOffsetSecondsAt(cand.onsetSec),
+                  habitualMidsleepSec: habitualMidsleepSec)) {
             final s2 = ana.segmentSleep(
               accelSlice,
               hrSlice,
@@ -1502,6 +1505,30 @@ int tzOffsetSecondsAt(int epochSec) =>
     DateTime.fromMillisecondsSinceEpoch(epochSec * 1000, isUtc: false)
         .timeZoneOffset
         .inSeconds;
+
+/// Shortest HR-led fallback window that may stand as a day's main sleep.
+const int kFallbackNightMinSec = 3 * 3600;
+
+/// Whether an HR-led fallback window may be the day's main sleep.
+///
+/// The fallback was corrected about 3.6 times as often as accel-led nights,
+/// and its wrong picks were short (2-3 h) or daytime HR dips. Under
+/// [kFallbackNightMinSec], or starting 10:00-19:00 local, it is not the night;
+/// nap detection still sees that span on its own. A user whose habitual
+/// midsleep is itself in that daytime band (shift work) keeps daytime windows.
+bool fallbackNightAcceptable(
+  int onsetSec,
+  int offsetSec, {
+  required int tzOffsetSec,
+  int? habitualMidsleepSec,
+}) {
+  if (offsetSec - onsetSec < kFallbackNightMinSec) return false;
+  bool daytime(int secOfDay) => secOfDay >= 10 * 3600 && secOfDay < 19 * 3600;
+  if (habitualMidsleepSec != null && daytime(habitualMidsleepSec % 86400)) {
+    return true;
+  }
+  return !daytime(((onsetSec + tzOffsetSec) % 86400 + 86400) % 86400);
+}
 
 /// Local midnight (epoch sec) at/before [epochSec].
 int _localMidnight(int epochSec) {

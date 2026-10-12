@@ -8662,6 +8662,22 @@ class LocalDb {
   /// The result row for one day_id at the highest version this build serves
   /// (see [_servedAlgoCeiling]), with a normalized `date` alias for callers.
   /// Null if absent.
+  /// Replace one stored bundle's JSON in place, same version. For raw-free
+  /// one-shot heals of fields that only live in the bundle.
+  static Future<void> rewriteDayPayload(
+    String dayId,
+    int algoVersion,
+    String payloadJson,
+  ) async {
+    final db = await instance;
+    await db.update(
+      'day_result',
+      {'payload_json': payloadJson},
+      where: 'day_id = ? AND algo_version = ?',
+      whereArgs: [dayId, algoVersion],
+    );
+  }
+
   static Future<Map<String, dynamic>?> dayResult(String dayId) async {
     final db = await instance;
     final rows = await db.query(

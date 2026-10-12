@@ -35,6 +35,7 @@ import 'readiness_calibration_backfill.dart'
 import 'package:crypto/crypto.dart' show sha1;
 import 'package:flutter/foundation.dart';
 import 'findings.dart';
+import 'nap_overlap_cleanup.dart';
 import 'nap_edits.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
 import '../data/live_coverage_policy.dart' show CoverageSpan;
@@ -3081,6 +3082,13 @@ class DerivationEngine {
         } catch (e) {
           _log('[derive] archive redrive failed (will retry): $e');
         }
+        // Raw-free: old days that booked tonight's sleep as a nap.
+        try {
+          final n = await cleanNextNightNapsOnce();
+          if (n > 0) _log('[derive] nap cleanup: $n day(s)');
+        } catch (e) {
+          _log('[derive] nap cleanup failed (will retry): $e');
+        }
       }
       _diag['stage'] = 'scope';
       final scope = await _deriveScope(heavy: heavy, force: force);
@@ -5554,6 +5562,12 @@ class DerivationEngine {
         // had already refused to publish. `rhr_nocturnal` is null unless a
         // sleep session was detected — exactly the gate readiness uses.
         rhr: (scMap?['rhr_nocturnal'] as num?)?.toDouble(),
+        // Same fallback, same order as the pure half: the typed value wins,
+        // so this is only set when there is none.
+        rhrFallback: profile.restingHrManual != null
+            ? null
+            : rhrFallbackFromHistory(history.valuesBefore('rhr', day.date,
+                family: _baselineFamily('rhr', daySub.deviceFamily))),
         maxHrUsed: (bundle['max_hr_used'] as num?)?.round(),
         liveStepsReal: liveSteps.total,
         liveStepsFromStrap: liveSteps.strap,
@@ -7332,6 +7346,12 @@ class DerivationEngine {
         wake['calories_session_credit'] = credited;
       }
     }
+    // A day can't have less strain than a workout inside it. The two are
+    // priced on different windows and baselines, and a logged strain-8 run
+    // under a strain-3 day reads as a bug. Only a scored day is floored; an
+    // abstaining one stays absent.
+    wake['strain'] =
+        strainFlooredAtSessions((wake['strain'] as num?)?.toDouble(), sessions);
     _applyWakeDayFeatures(bundle, scalars, wake);
     _stepsAndEnergy(
       bundle,
@@ -7357,6 +7377,24 @@ class DerivationEngine {
     final measuredSteps = scalars['steps'];
     if (measuredSteps != null) wake['steps'] = measuredSteps;
     return wake;
+  }
+
+  /// [strain], raised to the highest strain of a finished, non-private
+  /// session in [sessions]. Null stays null.
+  @visibleForTesting
+  static double? strainFlooredAtSessions(
+    double? strain,
+    List<Map<String, dynamic>> sessions,
+  ) {
+    if (strain == null) return null;
+    var best = strain;
+    for (final s in sessions) {
+      if (s['status'] != 'done') continue;
+      if ((s['private'] as num?)?.toInt() == 1) continue;
+      final v = (s['strain'] as num?)?.toDouble();
+      if (v != null && v.isFinite && v > best) best = v;
+    }
+    return best;
   }
 
   static void _applyWakeDayFeatures(
@@ -9432,7 +9470,7 @@ class DerivationEngine {
       // NOT `inp.dayEndSec` — that is the data edge. See `applyDayActivity`.
       dayCalendarEndSec: localNextMidnightSecForDayLabel(inp.date),
       dataNowSec: inp.dataNowSec,
-      restingHr: inp.rhr,
+      restingHr: inp.rhr ?? inp.rhrFallback,
       dynFloorG: inp.dynFloorG,
       liveStepsReal: inp.liveStepsReal,
       liveStepsFromStrap: inp.liveStepsFromStrap,
@@ -10154,6 +10192,11 @@ class _DayBlocksInput {
   /// sleep session was detected. NOT `scalars.rhr`, which is allowed to fall
   /// back to daytime HR for the resting-HR card and is not a TRIMP reference.
   final double? rhr;
+
+  /// Prior nights' median resting HR, for strain and energy on a day with no
+  /// night of its own ([rhrFallbackFromHistory]). Never used for workout
+  /// detection, which keeps needing a real night.
+  final double? rhrFallback;
   final int? maxHrUsed;
   final int liveStepsReal;
   /// Step-counter calibration read on the main isolate; null = uncalibrated.
@@ -10230,6 +10273,7 @@ class _DayBlocksInput {
     required this.offsetSec,
     this.napExcludeEndSec,
     required this.rhr,
+    this.rhrFallback,
     required this.maxHrUsed,
     required this.liveStepsReal,
     this.counterProfile,
