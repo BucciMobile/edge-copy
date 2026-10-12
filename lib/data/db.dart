@@ -8662,6 +8662,32 @@ class LocalDb {
   /// The result row for one day_id at the highest version this build serves
   /// (see [_servedAlgoCeiling]), with a normalized `date` alias for callers.
   /// Null if absent.
+  /// Minute means of `skin_temp_raw` and `ambient_raw` over the band's own
+  /// rows in [fromSec, toSec), oldest first, minutes holding both only. Feeds
+  /// the WHOOP 4 ambient check ([skinTempAmbientR]).
+  static Future<List<(int, double, double)>> skinTempAmbientMinutes(
+    int fromSec,
+    int toSec,
+  ) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT rec_ts / 60 AS m, AVG(skin_temp_raw) AS t, AVG(ambient_raw) AS a '
+      'FROM decoded_onehz WHERE rec_ts >= ? AND rec_ts < ? '
+      'AND skin_temp_raw > 0 AND ambient_raw > 0 '
+      'AND ${derivableSourceSql()} GROUP BY m ORDER BY m',
+      [fromSec, toSec],
+    );
+    return [
+      for (final r in rows)
+        if (r['m'] is num && r['t'] is num && r['a'] is num)
+          (
+            (r['m'] as num).toInt(),
+            (r['t'] as num).toDouble(),
+            (r['a'] as num).toDouble(),
+          ),
+    ];
+  }
+
   /// Replace one stored bundle's JSON in place, same version. For raw-free
   /// one-shot heals of fields that only live in the bundle.
   static Future<void> rewriteDayPayload(

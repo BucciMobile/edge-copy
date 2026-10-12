@@ -55,4 +55,22 @@ void main() {
     expect(kept.map((n) => n['start']), [100, 950]);
     expect(napsWithoutNextNight(naps.sublist(0, 1), 1000, 5000), isNull);
   });
+
+  test('WHOOP 4 skin temp that tracks ambient stays out of the illness watch',
+      () {
+    // Skin temp moving with ambient minute to minute: r near 1.
+    final tracking = [
+      for (var m = 0; m < 60; m++)
+        (m, 800.0 + (m % 7) * 3, 600.0 + (m % 7) * 2),
+    ];
+    final r = skinTempAmbientR(tracking)!;
+    expect(r, greaterThan(0.95));
+    expect(skinTempIllnessEligible('gen4', r), isFalse);
+    // Too few minutes: no r, and WHOOP 4 fails closed.
+    expect(skinTempAmbientR(tracking.sublist(0, 10)), isNull);
+    expect(skinTempIllnessEligible('gen4', null), isFalse);
+    expect(skinTempIllnessEligible(null, 0.1), isTrue);
+    // WHOOP 5 reads real °C and is not checked.
+    expect(skinTempIllnessEligible('gen5', null), isTrue);
+  });
 }

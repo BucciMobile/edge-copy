@@ -1133,6 +1133,9 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     final worn = v.wear['worn_min'] as num?;
     final coverage = v.wear['coverage_pct'] as num?;
     final skinTemp = metricOf(d.today['skin_temp']);
+    // WHOOP 5 reads in real °C, so its row says degrees, not SDs.
+    final tempDevC = ((d.today['skin_temp'] as Map?)?['dev_c'] as num?)
+        ?.toDouble();
     final rmssd = v.hrv['rmssd'] as num?;
     // MetricRow, not a private copy of it. The one this screen used to grow
     // stacked the value over its qualifier in a shrink-wrapped column, so
@@ -1159,8 +1162,10 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
           LucideIcons.thermometer,
           C.orange,
           l?.healthRowSkinTemp ?? 'Skin temperature',
-            '${skinTemp.value! >= 0 ? '+' : '−'}'
-                '${skinTemp.value!.abs().toStringAsFixed(2)}',
+          tempDevC != null
+              ? '${tempDevC >= 0 ? '+' : '−'}${tempDevC.abs().toStringAsFixed(1)}'
+              : '${skinTemp.value! >= 0 ? '+' : '−'}'
+                  '${skinTemp.value!.abs().toStringAsFixed(2)}',
           sub: [
             if ((d.today['skin_temp'] as Map?)?['provisional'] == true)
               l?.wearableProvisional ?? 'Provisional',
@@ -1169,7 +1174,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
                 : (l?.healthVsOwnNightsOn(prettyDay(tempNight, l)) ??
                       'vs your own nights · ${prettyDay(tempNight, l)}'),
           ].join(' · '),
-          unit: 'SD',
+          unit: tempDevC != null ? '°C' : 'SD',
           // Both this row and the wear row below it carry a FULL, written,
           // cited spec in `metric_detail.dart` that no tap in the app opened.
           // The number was on screen and its method was unreachable.

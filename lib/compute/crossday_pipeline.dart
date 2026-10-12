@@ -120,8 +120,16 @@ Map<String, dynamic> buildCrossDayBundle(
   // exception still fires, with the confound named. Suppressing a real illness
   // is worse than the false alarm.
   final luteal = _lutealFlags(dates, cycleStartDates);
+  //
+  // A WHOOP 4 night whose skin temp moved with the band's ambient channel is
+  // left out (`skin_temp_illness_ok`, see `skinTempIllnessEligible`): the
+  // illness watch should not fire on a warm bedroom. A record without the key
+  // (built by an older caller) keeps the old behaviour.
   final tempIllness = ana.tempIllnessFlag(dates, [
-    for (var i = 0; i < n; i++) settled(i, tempList[i]),
+    for (var i = 0; i < n; i++)
+      days[i]['skin_temp_illness_ok'] == false
+          ? null
+          : settled(i, tempList[i]),
   ], luteal: luteal);
 
   // ── circadian: mid-sleep, free/work split, jetlag, chronotype, sleep debt ──

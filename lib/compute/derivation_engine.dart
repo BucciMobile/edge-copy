@@ -5545,6 +5545,17 @@ class DerivationEngine {
         await reviewDb.transaction((tx) => ActivityStore.preserveLegacyNaps(tx, day.date,
           Map<String, dynamic>.from(jsonDecode(previousDay['payload_json'] as String) as Map)));
       }
+      // WHOOP 4 ambient check: how closely the night's skin temp moves with
+      // the band's ambient channel. Read here (the isolate has no DB) and
+      // stored, so the illness watch can leave ambient-driven nights out.
+      if (scMap != null &&
+          scMap['skin_temp_z'] != null &&
+          (daySub.deviceFamily == null || daySub.deviceFamily == 'gen4') &&
+          day.sleepOffsetSec > day.sleepOnsetSec) {
+        scMap['skin_temp_ambient_r'] = skinTempAmbientR(
+            await LocalDb.skinTempAmbientMinutes(
+                day.sleepOnsetSec, day.sleepOffsetSec));
+      }
       final napEdits = await ActivityStore.napEdits(reviewDb, day.date);
       final blocksInput = _DayBlocksInput(
         daySub: daySub,
@@ -6793,6 +6804,8 @@ class DerivationEngine {
       'readiness': col('readiness') ?? sc('readiness'),
       'resp_rate': sc('resp_rate'),
       'skin_temp_z': sc('skin_temp_z'),
+      'skin_temp_illness_ok': skinTempIllnessEligible(
+          payload['device_family'] as String?, sc('skin_temp_ambient_r')),
       'trimp': sc('trimp'),
       // Headline 0–21 strain, daily steps, nap minutes — feed Sleep/Strain Coach
       // + VO₂max/Fitness Age in the cross-day rollup.
