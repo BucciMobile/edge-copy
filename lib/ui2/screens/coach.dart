@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'coach_text.dart';
 // COACH — the door onto the agentic AI that was already built.
 //
@@ -18,6 +19,7 @@ import 'coach_text.dart';
 //      painters); everything else is grammar.dart. The one thing that is not is
 //      the markdown body, because there is no house widget for prose.
 
+import '../../data/db.dart';
 import '../../l10n/display_text.dart';
 import 'package:flutter/material.dart';
 import 'package:gpt_markdown/gpt_markdown.dart';
@@ -138,6 +140,9 @@ class _CoachScreenState extends State<CoachScreen> {
     if (!mounted) return;
     final repo = repoOf(context);
     if (repo == null) return;
+    // A local count of coach opens; leaves the phone only inside a database
+    // the user chose to contribute.
+    unawaited(LocalDb.bumpUsageCounter('coach_open'));
     final app = context.read<AppState>();
     final cfg = context.read<CoachConfig>();
     final engine = CoachEngine(

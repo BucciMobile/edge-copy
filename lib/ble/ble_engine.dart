@@ -6035,6 +6035,7 @@ class BleEngine {
         state.charging = h.charging;
         state.wristOn = h.wristOn;
         onState(state);
+        unawaited(LocalDb.noteBandFirmware(h.firmwareVersion));
         _log('[HELLO gen5] serial=${h.serial} fw=${h.firmwareVersion} '
             'battery=${h.batteryPct}% charging=${h.charging} '
             'wrist=${h.wristOn} whoop5=${h.isWhoop5}');

@@ -8688,6 +8688,56 @@ class LocalDb {
     ];
   }
 
+  /// `compute_freshness` key holding the band firmware this install has seen.
+  static const String kBandFirmwareKey = 'band_firmware';
+
+  /// Record the firmware the band reported on this connection: the current
+  /// version and when it was last seen, plus one entry per version change, so
+  /// a firmware-specific problem in an exported database can be traced.
+  /// Best-effort; never throws into the BLE path.
+  static Future<void> noteBandFirmware(String fw, {int? nowSec}) async {
+    try {
+      final now = nowSec ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final row = await computeFreshness(kBandFirmwareKey);
+      Map<String, dynamic> m = {};
+      if (row?['payload_json'] case final String j) {
+        final v = jsonDecode(j);
+        if (v is Map) m = v.cast<String, dynamic>();
+      }
+      final history = [
+        for (final e in (m['history'] as List?) ?? const [])
+          if (e is Map) e.cast<String, dynamic>(),
+      ];
+      if (history.isEmpty || history.last['fw'] != fw) {
+        history.add({'fw': fw, 'first_seen': now});
+      }
+      // Bounded: firmware changes a handful of times a year.
+      final kept =
+          history.length > 20 ? history.sublist(history.length - 20) : history;
+      await putComputeFreshness(kBandFirmwareKey,
+          jsonEncode({'fw': fw, 'last_seen': now, 'history': kept}));
+    } catch (_) {}
+  }
+
+  /// `compute_freshness` key for [bumpUsageCounter]'s local counts.
+  static const String kUsageCountersKey = 'usage_counters';
+
+  /// Count one local event (`coach_open`, `health_upload_ok`, ...). Stays on
+  /// the phone; it leaves only inside the database a user chose to contribute.
+  /// Best-effort; never throws.
+  static Future<void> bumpUsageCounter(String name) async {
+    try {
+      final row = await computeFreshness(kUsageCountersKey);
+      Map<String, dynamic> m = {};
+      if (row?['payload_json'] case final String j) {
+        final v = jsonDecode(j);
+        if (v is Map) m = v.cast<String, dynamic>();
+      }
+      m[name] = ((m[name] as num?)?.toInt() ?? 0) + 1;
+      await putComputeFreshness(kUsageCountersKey, jsonEncode(m));
+    } catch (_) {}
+  }
+
   /// Replace one stored bundle's JSON in place, same version. For raw-free
   /// one-shot heals of fields that only live in the bundle.
   static Future<void> rewriteDayPayload(
