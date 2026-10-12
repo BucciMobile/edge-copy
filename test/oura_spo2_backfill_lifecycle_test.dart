@@ -834,6 +834,102 @@ void main() {
     expect(store.samplesOf('2026-03-09').single.$3, closeTo(95.5, 1e-9));
   });
 
+  test('fingerprint includes the sample COUNT — a same-mean, same-interval '
+      'correction still re-exports', () async {
+    final store = StatefulSpo2Store();
+    final t0 = DateTime(2026, 3, 9, 1);
+    await pairRing('ring-1');
+    // Two samples at second 0 and second 10.
+    await LocalDb.putObservations([
+      Observation(
+          at: t0,
+          sourceKind: ObservationSource.vendor,
+          vendorKey: 'spo2',
+          value: 92,
+          unit: '%',
+          attribution: 'Oura'),
+      Observation(
+          at: t0.add(const Duration(seconds: 10)),
+          sourceKind: ObservationSource.vendor,
+          vendorKey: 'spo2',
+          value: 94,
+          unit: '%',
+          attribution: 'Oura'),
+    ], deviceId: 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), hasLength(1));
+    final calls = store.writeCalls;
+    // THREE samples now: 92, 93, 94 — the same mean (93) and the SAME
+    // first (0 s) and last (10 s) stamp, but the count moved 2 -> 3.
+    await LocalDb.putObservations([
+      Observation(
+          at: t0,
+          sourceKind: ObservationSource.vendor,
+          vendorKey: 'spo2',
+          value: 92,
+          unit: '%',
+          attribution: 'Oura'),
+      Observation(
+          at: t0.add(const Duration(seconds: 5)),
+          sourceKind: ObservationSource.vendor,
+          vendorKey: 'spo2',
+          value: 93,
+          unit: '%',
+          attribution: 'Oura'),
+      Observation(
+          at: t0.add(const Duration(seconds: 10)),
+          sourceKind: ObservationSource.vendor,
+          vendorKey: 'spo2',
+          value: 94,
+          unit: '%',
+          attribution: 'Oura'),
+    ], deviceId: 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.writeCalls, calls + 1,
+        reason: 'the count moved the fingerprint — the day re-exports');
+    expect(store.samplesOf('2026-03-09'), hasLength(1));
+  });
+
+  // Killing test for mutant M21 (dayEnd = dayStart.add(24 h) instead of
+  // the NEXT LOCAL MIDNIGHT): on the 23-hour spring-forward day the two
+  // differ — 24 h after local 00:00 is 01:00 the NEXT day, so a +24 h
+  // window would swallow a sample that belongs to the FOLLOWING day.
+  // Requires TZ=Europe/Berlin (CI parity); skipped where no DST exists.
+  test('DST spring forward: the delete window ends at the NEXT local '
+      'midnight, never 24 h later',
+      skip: !DateTime(2026, 3, 29).isUtc &&
+              DateTime(2026, 3, 29).timeZoneOffset ==
+                  DateTime(2026, 3, 30).timeZoneOffset
+          ? 'no DST in this zone'
+          : false, () async {
+    // Europe/Berlin switches on 2026-03-29 at 02:00 -> 03:00: the local
+    // day is 23 h long. A sample at 00:30 on 2026-03-30 belongs to the
+    // NEXT day — a 24 h window (ending 01:00 on 03-30) would delete it.
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    // Day 2026-03-29: own sample at 03:30 (after the gap).
+    await putRows(DateTime(2026, 3, 29, 3, 30), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-29'), hasLength(1));
+    // The NEXT day has its OWN sample at 00:30 — inside a +24 h window
+    // over 2026-03-29 (which would end 01:00 on 03-30), but OUTSIDE the
+    // 23-hour local day that ends at midnight 2026-03-30T00:00.
+    await putRows(DateTime(2026, 3, 30, 0, 30), [97, 97], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-30'), hasLength(1));
+    final writesBefore = store.writeCalls;
+    // Correction on 2026-03-29 (moved mean): the re-export's clear window
+    // may remove THIS day's sample but must NEVER reach into the next day.
+    await putRows(DateTime(2026, 3, 29, 3, 30), [95, 97], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.writeCalls, writesBefore + 1,
+        reason: 'the corrected day re-exports');
+    expect(store.samplesOf('2026-03-30'), hasLength(1),
+        reason: 'the 23 h local day ends at midnight; a +24 h window '
+            'would have deleted the next day\'s 00:30 sample');
+    expect(store.samplesOf('2026-03-29'), hasLength(1));
+  });
+
   test('no legacy keys are ever written by the new pass', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
