@@ -1019,11 +1019,11 @@ class LocalDb {
           // them in the same pass; and derivation has to see them, which means
           // landing before the next derive, not after it.
           //
-          // Bounded by `redrivableArchiveReasons` precisely so it is not the
+          // Bounded by `_ladderRedriveReasons` precisely so it is not the
           // heavy pass the v42 rung refuses to do here: it is 1,035 short
           // frames on the largest real export, not the 492 MB of v20 hex
           // sitting beside them.
-          await redriveArchivedRecords(db);
+          await redriveArchivedRecords(db, reasons: _ladderRedriveReasons);
         }
         if (oldV < 45) {
           // `band_battery.charge_units` — ADD COLUMN, idempotent, a no-op on a
@@ -7562,7 +7562,35 @@ class LocalDb {
     // three real exports; it costs nothing to include and is the case this
     // would otherwise have to be rewritten for.
     'undecodable_rec_v24',
+    // gen4 1 Hz records from older firmware, archived by builds that predate
+    // the v12 decode path. The current decoder reads them (the 88-byte form
+    // through the short-frame fallback). Can be large, so the launch-path
+    // ladder rung skips it; [redriveArchiveOnce] replays it from a derive.
+    'undecodable_rec_v12',
   ];
+
+  /// What the oldV<44 ladder rung replays inside `onUpgrade`: the small,
+  /// bounded reasons only. v12 can be a million rows on one install, which
+  /// does not belong on the launch path.
+  static const List<String> _ladderRedriveReasons = [
+    'undecodable_rec_v18',
+    'partial_decode_v18_no_gravity',
+    'undecodable_rec_v24',
+  ];
+
+  /// `compute_freshness` key for [redriveArchiveOnce].
+  static const String kArchiveRedriveKey = 'archive_redrive_v12_v1';
+
+  /// One-shot replay of every [redrivableArchiveReasons] row, off the launch
+  /// path (called from a heavy derive). Marked done only after it finishes,
+  /// so an interrupted pass repeats; the replay skips seconds already decoded,
+  /// so a repeat is safe.
+  static Future<int> redriveArchiveOnce() async {
+    if (await computeFreshness(kArchiveRedriveKey) != null) return 0;
+    final n = await redriveArchivedRecords(await instance);
+    await putComputeFreshness(kArchiveRedriveKey, '{"recovered":$n}');
+    return n;
+  }
 
   /// GATES 4b — replay the archive through the CURRENT decoders, into
   /// `decoded_onehz` / `decoded_rr`. Returns the seconds recovered.
@@ -7590,7 +7618,10 @@ class LocalDb {
   ///    the family will correctly refuse rather than assume gen4.
   ///  * It does not delete, thin or relabel the archived row. The bytes stay
   ///    exactly where they are, under the reason they were captured with.
-  static Future<int> redriveArchivedRecords(Database db) async {
+  static Future<int> redriveArchivedRecords(
+    Database db, {
+    List<String> reasons = redrivableArchiveReasons,
+  }) async {
     // Both are cheap and both are required: a DB whose ladder has not created
     // the archive yet (or is mid-ladder) must no-op rather than throw — a throw
     // in here rolls the WHOLE upgrade back and quarantines the database.
@@ -7615,7 +7646,7 @@ class LocalDb {
     final preArchiveDeviceKey =
         !(await _columnsOf(db, 'raw_archive')).contains('device_id');
 
-    final marks = List.filled(redrivableArchiveReasons.length, '?').join(',');
+    final marks = List.filled(reasons.length, '?').join(',');
     // Paged on (hex, device_id) — a stable, total order that needs no extra
     // index and no offset scan. Post-v51, `hex` alone is no longer unique
     // (two devices can share a byte-identical undecodable frame), so a plain
@@ -7629,13 +7660,13 @@ class LocalDb {
               'SELECT hex, counter, packet_type, rec_ts, captured_at '
               'FROM raw_archive WHERE reason IN ($marks) AND hex > ? '
               'ORDER BY hex ASC LIMIT 500',
-              [...redrivableArchiveReasons, afterHex],
+              [...reasons, afterHex],
             )
           : await db.rawQuery(
               'SELECT device_id, hex, counter, packet_type, rec_ts, captured_at '
               'FROM raw_archive WHERE reason IN ($marks) AND (hex, device_id) > (?, ?) '
               'ORDER BY hex ASC, device_id ASC LIMIT 500',
-              [...redrivableArchiveReasons, afterHex, afterDevice],
+              [...reasons, afterHex, afterDevice],
             );
       if (rows.isEmpty) return recovered;
       afterHex = rows.last['hex'] as String;

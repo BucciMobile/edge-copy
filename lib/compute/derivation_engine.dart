@@ -3069,6 +3069,19 @@ class DerivationEngine {
           _log('[derive] baseline refresh after the quiet_hrr seed failed: $e');
         }
       }
+      // Archived records today's decoder can read (old-firmware v12), back
+      // into the decoded store ahead of the scope, so this pass derives the
+      // days they fill. One-shot and foreground-only: it can be a million
+      // frames, which a short background budget should not take on.
+      if ((heavy || force) && !background) {
+        _diag['stage'] = 'archive_redrive';
+        try {
+          final n = await LocalDb.redriveArchiveOnce();
+          if (n > 0) _log('[derive] archive redrive: $n second(s) recovered');
+        } catch (e) {
+          _log('[derive] archive redrive failed (will retry): $e');
+        }
+      }
       _diag['stage'] = 'scope';
       final scope = await _deriveScope(heavy: heavy, force: force);
       _diag

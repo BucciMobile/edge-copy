@@ -6,6 +6,7 @@
 // sqlite via sqflite_common_ffi.
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -238,6 +239,58 @@ void main() {
       const [1786242470],
     )).first;
     expect(row['hr'], 199);
+  });
+
+  test('archived old-firmware v12 frames decode on re-drive (88-byte form)',
+      () async {
+    // A v12 1 Hz record at the 88-byte length older firmware sends: the
+    // v24/v12 field map (counter @3, ts @7, subsec @11, hr @17, accel f32
+    // @36/40/44), one byte short of the 89 the strict parser wants.
+    Uint8List v12(int counter, int ts, int hr) {
+      final b = Uint8List(88);
+      final d = ByteData.sublistView(b);
+      b[0] = 0x2F;
+      b[1] = 12;
+      d.setUint32(3, counter, Endian.little);
+      d.setUint32(7, ts, Endian.little);
+      d.setUint16(11, 0x0102, Endian.little);
+      b[17] = hr;
+      d.setFloat32(36, 0.0, Endian.little);
+      d.setFloat32(40, 0.0, Endian.little);
+      d.setFloat32(44, 1.0, Endian.little);
+      return b;
+    }
+
+    String hex(Uint8List b) =>
+        b.map((x) => x.toRadixString(16).padLeft(2, '0')).join();
+
+    const t0 = 1751000000;
+    for (var i = 0; i < 3; i++) {
+      await LocalDb.archiveRawRecord(ArchiveRecord(
+        counter: 900000 + i,
+        hex: hex(v12(900000 + i, t0 + i, 60 + i)),
+        packetType: 0x2F,
+        capturedAt: 1751000100000,
+        reason: 'undecodable_rec_v12',
+      ));
+    }
+    expect(LocalDb.redrivableArchiveReasons, contains('undecodable_rec_v12'));
+
+    // The one-shot runs once: the second call is a no-op by its marker.
+    expect(await LocalDb.redriveArchiveOnce(), 3);
+    expect(await LocalDb.redriveArchiveOnce(), 0);
+
+    final db = await LocalDb.instance;
+    final rows = await db.rawQuery(
+      'SELECT rec_ts, hr, az FROM decoded_onehz WHERE rec_ts BETWEEN ? AND ? '
+      'ORDER BY rec_ts',
+      const [t0, t0 + 2],
+    );
+    expect([for (final r in rows) r['hr']], [60, 61, 62]);
+    expect((rows.first['az'] as num).toDouble(), closeTo(1.0, 1e-6));
+    // The archive keeps its bytes.
+    final stats = await LocalDb.rawArchiveStats();
+    expect((stats['by_reason'] as Map)['undecodable_rec_v12'], 3);
   });
 
   // The REAL exports, through the REAL ladder — the same harness shape as
