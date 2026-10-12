@@ -68,6 +68,12 @@ void main() {
     await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
   });
 
+  String _dayLabel(DateTime d) {
+    final m = d.month.toString().padLeft(2, '0');
+    final dd = d.day.toString().padLeft(2, '0');
+    return '${d.year}-$m-$dd';
+  }
+
   List<Observation> rowsAt(DateTime start, List<num> values) => [
         for (var i = 0; i < values.length; i++)
           Observation(
@@ -249,14 +255,25 @@ void main() {
       'day costs NO store contact; legacy keys are removed', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
-    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
-    // Simulate a round-4/5 install: a done fingerprint written by the
-    // OLD walk plus its legacy cursor keys.
-    await LocalDb.setCursor('health_oura_spo2_done:2026-03-09',
-        'v1|ring-1|95.500000000000000|2|1773018000000|1773018001000');
-    await LocalDb.setCursor('health_oura_spo2_through', '2026-03-09');
-    await LocalDb.setCursor('health_oura_spo2_scan_through', '2026-03-09');
-    await LocalDb.setCursor('health_oura_spo2_skip:2026-03-09', 'none');
+    final gDay = DateTime(2026, 3, 9, 1);
+    String gLabel(DateTime d) =>
+        '${d.year}-${d.month.toString().padLeft(2, '0')}-'
+        '${d.day.toString().padLeft(2, '0')}';
+    await putRows(gDay, [95, 96], 'ring-1');
+    // The pre-change done fingerprint, built from the LIVE candidate —
+    // a hardcoded epoch would only match under one timezone (the round-6
+    // version hardcoded 2026-03-09T01:00 UTC and failed under
+    // Europe/Berlin).
+    final gCandidate = await LocalDb.ouraSpo2DayCandidate(gLabel(gDay));
+    expect(gCandidate, isNotNull);
+    final gFp = ouraSpo2CandidateFingerprint(gCandidate!);
+    await LocalDb.setCursor(
+        'health_oura_spo2_done:${gLabel(gDay)}', gFp);
+    // Legacy round-4/5 keys alongside it.
+    await LocalDb.setCursor('health_oura_spo2_through', gLabel(gDay));
+    await LocalDb.setCursor('health_oura_spo2_scan_through', gLabel(gDay));
+    await LocalDb.setCursor(
+        'health_oura_spo2_skip:${gLabel(gDay)}', 'none');
     await runPass(store, interpretationVerified: true);
     // The bootstrap seeded the dirty set, the pass compared the
     // fingerprint, found it UNCHANGED, and made no store contact.
@@ -266,7 +283,8 @@ void main() {
     expect(await LocalDb.getCursor('health_oura_spo2_through'), isNull);
     expect(await LocalDb.getCursor('health_oura_spo2_scan_through'),
         isNull);
-    expect(await LocalDb.getCursor('health_oura_spo2_skip:2026-03-09'),
+    expect(
+        await LocalDb.getCursor('health_oura_spo2_skip:${gLabel(gDay)}'),
         isNull);
     // And the day is no longer dirty.
     expect(await LocalDb.ouraSpo2DirtyDays(), isEmpty);
@@ -347,24 +365,44 @@ void main() {
     expect(store.foreign, hasLength(2));
   });
 
-  test('fairness: 35 dirty days with retry days among them — older days '
-      'still make progress', () async {
+  test('fairness: 35 dirty days with a retry day among them — the OTHER '
+      'days all drain; the failing day keeps its own backoff', () async {
     final store = StatefulSpo2Store();
     await pairRing('ring-1');
+    // 35 days, oldest 2026-01-01 .. 2026-02-04. The pass works NEWEST
+    // FIRST: the first pass drains the 30 newest (Jan 6 .. Feb 4 plus
+    // the failing Feb 5 attempt in its backoff), the second the rest.
     for (var i = 0; i < 35; i++) {
       await putRows(DateTime(2026, 1, 1 + i, 1), [95, 96], 'ring-1');
     }
-    // A few newer days that fail: they take backoff, but must not
-    // starve the older ones.
-    store.refuseWrites.add('2026-02-05');
-    await putRows(DateTime(2026, 2, 5, 1), [90, 90], 'ring-1');
+    final failDay = DateTime(2026, 2, 5, 1);
+    final failLabel =
+        '${failDay.year}-${failDay.month.toString().padLeft(2, '0')}-'
+        '${failDay.day.toString().padLeft(2, '0')}';
+    store.refuseWrites.add(failLabel);
+    await putRows(failDay, [90, 90], 'ring-1');
     await runPass(store, interpretationVerified: true);
-    // The pass bounded at 30 days: the oldest days progressed.
-    expect(store.own.length, greaterThanOrEqualTo(29));
-    // A second pass works through the rest (the failing day stays in
-    // backoff, everything else drains).
+    // EXACT: the pass works NEWEST FIRST — Feb 5 (the failing day) is
+    // the newest, is attempted and fails first, then 29 of the 30-day
+    // budget export (Feb 4 down to Jan 7). 29 successes + 1 failure.
+    expect(store.own, hasLength(29));
+    // The second pass drains the remaining 6 (Jan 6..Jan 1); the
+    // failing day is in its 5-minute backoff and is SKIPPED, not
+    // re-attempted.
     await runPass(store, interpretationVerified: true);
-    expect(store.own.length, greaterThanOrEqualTo(35));
+    expect(store.own, hasLength(35));
+    expect(store.samplesOf(failLabel), isEmpty);
+    expect((await LocalDb.ouraSpo2Retry(failLabel)).attempts, 1,
+        reason: 'the failure was day-scoped: other days succeeded');
+    // After the backoff and the store recovering, the day heals.
+    store.refuseWrites.clear();
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 10 * 60000,
+    );
+    expect(store.samplesOf(failLabel), hasLength(1));
+    expect((await LocalDb.ouraSpo2Retry(failLabel)).attempts, 0);
   });
 
   test('a vanished candidate with NO prior export: nothing to do, the '
@@ -380,6 +418,155 @@ void main() {
     expect(await LocalDb.ouraSpo2DirtyDays(), isEmpty,
         reason: 'the recent-days sweep is once per local day; within the '
             'same test the sweep has already run for today');
+  });
+
+  test('global failure: 5 days fail (global stop); after the cause is '
+      'fixed the days export WITHOUT day-backoff waiting', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    // 5 days, all failing (permission-denied shape): three consecutive
+    // stop the pass GLOBALLY.
+    for (var d = 1; d <= 5; d++) {
+      store.refuseWrites
+          .add(_dayLabel(DateTime(2026, 3, d)));
+    }
+    for (var d = 1; d <= 5; d++) {
+      await putRows(DateTime(2026, 3, d, 1), [95, 96], 'ring-1');
+    }
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, isEmpty);
+    // ONE global marker, NO day counters.
+    final g = await LocalDb.ouraSpo2GlobalFail();
+    expect(g.attempts, 1);
+    for (var d = 1; d <= 5; d++) {
+      expect((await LocalDb.ouraSpo2Retry(_dayLabel(DateTime(2026, 3, d))))
+          .attempts, 0,
+          reason: 'a global stop writes no day backoff');
+    }
+    // The days stay dirty (all of them).
+    expect(await LocalDb.ouraSpo2DirtyDays(limit: 10), hasLength(5));
+    // THE FIX: the cause is gone. The global backoff is small (5 min
+    // for attempt 1) — simulate its expiry through the clock seam and
+    // the days export in the VERY NEXT pass, no 21-h day backoff.
+    store.refuseWrites.clear();
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 6 * 60000,
+    );
+    expect(store.own, hasLength(5),
+        reason: 'the days drained immediately after the global backoff');
+    // Success cleared the global state.
+    expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 0);
+  });
+
+  test('a single permanently failing day NEXT TO successful days keeps '
+      'its DAY backoff (not global)', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    final failLabel = _dayLabel(DateTime(2026, 3, 9));
+    store.refuseWrites.add(failLabel);
+    await putRows(DateTime(2026, 3, 9, 1), [90, 90], 'ring-1');
+    await putRows(DateTime(2026, 3, 10, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    // The other day exported; the failure was day-scoped.
+    expect(store.own, hasLength(1));
+    expect((await LocalDb.ouraSpo2Retry(failLabel)).attempts, 1);
+    expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 0,
+        reason: 'one failure next to a success is not a global cause');
+    // After the 5-minute DAY backoff it heals.
+    store.refuseWrites.clear();
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 10 * 60000,
+    );
+    expect(store.own, hasLength(2));
+  });
+
+  test('same-adapter upsert does NOT re-mark: the dirty token stays '
+      'identical, an unchanged candidate is never re-verified', () async {
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    final before = (await LocalDb.ouraSpo2DirtyDays()).single;
+    // The Oura sync re-touches the row with the SAME adapter id.
+    await pairRing('ring-1');
+    await pairRing('ring-1');
+    final after = await LocalDb.ouraSpo2DirtyDays();
+    expect(after, hasLength(1));
+    expect(after.single.token, before.token,
+        reason: 'an unchanged pairing must not mint a new dirty token');
+  });
+
+  test('adapter change away from oura removes the candidates: the days '
+      'turn dirty and the stale exports clean up', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), hasLength(1));
+    // The device is re-paired as a DIFFERENT adapter: its days lose
+    // candidacy and the prior export must be cleaned up.
+    await LocalDb.upsertDevice(
+        id: 'ring-1', adapterId: 'whoop_gen4', remoteId: 'x2');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), isEmpty);
+    expect(await LocalDb.getCursor('health_oura_spo2_done:2026-03-09'),
+        isNull);
+  });
+
+  test('restore drops foreign export markers and re-seeds the observed '
+      'days dirty (a done marker is not export proof on this phone)',
+      () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    final day = DateTime.now().subtract(const Duration(days: 3));
+    final label = _dayLabel(day);
+    await putRows(day, [95, 96], 'ring-1');
+    // A done marker as ANOTHER INSTALL would have written it — after a
+    // restore it must not count as export proof here.
+    await LocalDb.setCursor('health_oura_spo2_done:$label',
+        'v1|ring-1|95.500000000000000|2|1|2');
+    // Drain the dirty set to isolate the restore's effect.
+    for (final d in await LocalDb.ouraSpo2DirtyDays(limit: 100)) {
+      await LocalDb.clearOuraSpo2DirtyIfUnchanged(d.date, d.token);
+    }
+    // A backup file with the same observation rows.
+    final dir = await databaseFactory.getDatabasesPath();
+    final srcPath = p.join(dir, 'restore_marker_test.db');
+    await databaseFactory.deleteDatabase(srcPath);
+    final src = await databaseFactory.openDatabase(srcPath);
+    await src.execute(
+        'CREATE TABLE observation (device_id TEXT NOT NULL DEFAULT "", '
+        'ts_ms INTEGER NOT NULL, date TEXT NOT NULL, '
+        'source_kind TEXT NOT NULL, vendor_key TEXT, key TEXT, '
+        'value REAL, unit TEXT, attribution TEXT NOT NULL, '
+        'CHECK (vendor_key IS NOT NULL OR key IS NOT NULL))');
+    await src.insert('observation', {
+      'device_id': 'ring-1',
+      'ts_ms': day.millisecondsSinceEpoch,
+      'date': label,
+      'source_kind': 'vendor',
+      'vendor_key': 'spo2',
+      'value': 97.0,
+      'unit': '%',
+      'attribution': 'Oura',
+    });
+    await LocalDb.importFromDbFile(srcPath);
+    // The foreign done marker is gone; the day is dirty; the next pass
+    // WRITES (the local health store has nothing).
+    expect(await LocalDb.getCursor('health_oura_spo2_done:$label'), isNull);
+    expect((await LocalDb.ouraSpo2DirtyDays()).map((d) => d.date),
+        contains(label));
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf(label), hasLength(1),
+        reason: 'the restore re-exported: the marker was not proof');
+    // Hand-computed over the merged rows: the backup's 97 REPLACES the
+    // same-second local 95 (the observation identity index), leaving
+    // [97, 96] -> mean 96.5.
+    expect(store.samplesOf(label).single.$3, closeTo(96.5, 1e-10));
+    await src.close();
+    await databaseFactory.deleteDatabase(srcPath);
   });
 
   test('no legacy keys are ever written by the new pass', () async {

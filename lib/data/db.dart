@@ -2617,50 +2617,70 @@ class LocalDb {
   }) async {
     final db = await instance;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    await db.insert('device', {
-      'id': id,
-      'adapter_id': adapterId,
-      'remote_id': remoteId,
-      'label': label,
-      'tier': tier,
-      'first_seen': now,
-      'last_seen': now,
-      // NAMED, not left to the column DEFAULT. `id == ''` IS the primary band
-      // permanently, and the v51 rung stamps that row `'primary'` on every
-      // UPGRADED database — so taking the `'paired'` default here would give a
-      // FRESH install a different role for the same row than an upgraded one,
-      // and the first reader of this column would be wrong on exactly the
-      // installs that never migrated. Insert-only (the conflict algorithm is
-      // IGNORE), so it can never demote a row that already exists.
-      'role': id == kPrimaryDeviceId ? 'primary' : 'paired',
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
     // ONE flag decides both the placeholder and its argument. It is a local
     // and not the expression twice because the two must never disagree: a
-    // statement whose `?` count differs from the argument list binds every
+    // statement whose `?` count differs from its argument list binds every
     // value one column to the left, which SQLite accepts silently.
     final blankAdapter = adapterId == null && clearAdapterId;
-    // A pairing/unpairing changes WHICH days have an Oura-SpO2 candidate
-    // (the export joins on this row) without touching an observation —
-    // the dirty set hears about it from the device write itself.
-    if (id != kPrimaryDeviceId &&
-        (adapterId == 'oura' || blankAdapter) &&
-        await _deviceHasOuraObservations(db, id)) {
-      await markOuraSpo2DirtyForDevice(db, id);
-    }
-    await db.rawUpdate(
-      'UPDATE device SET '
-      '${blankAdapter ? 'adapter_id = NULL, ' : 'adapter_id = COALESCE(?, adapter_id), '}'
-      'remote_id = COALESCE(?, remote_id), label = COALESCE(?, label), '
-      'tier = COALESCE(?, tier), last_seen = ? WHERE id = ?',
-      [
-        if (!blankAdapter) adapterId,
-        remoteId,
-        label,
-        tier,
-        now,
-        id,
-      ],
-    );
+    // THE OLD adapter_id, read BEFORE the write: the SpO2 dirty hook only
+    // fires when the pairing fact that decides candidacy CHANGES. A
+    // same-adapter upsert (every Oura sync re-touches this row) must not
+    // re-mark the ring's days — an unchanged candidate costs one
+    // fingerprint compare, but a fresh TOKEN every sync would defeat
+    // compare-and-clear across a pass boundary.
+    final oldRow = await db.query('device',
+        columns: ['adapter_id'], where: 'id = ?', whereArgs: [id]);
+    final oldAdapter =
+        oldRow.isEmpty ? null : oldRow.first['adapter_id'] as String?;
+    final newAdapter = blankAdapter ? null : (adapterId ?? oldAdapter);
+    // Device row AND dirty markers in ONE transaction: a pass reading a
+    // marker mid-pairing must never evaluate the NEW token against the
+    // OLD device state — both become visible together or not at all.
+    await db.transaction((txn) async {
+      await txn.insert('device', {
+        'id': id,
+        'adapter_id': adapterId,
+        'remote_id': remoteId,
+        'label': label,
+        'tier': tier,
+        'first_seen': now,
+        'last_seen': now,
+        // NAMED, not left to the column DEFAULT. `id == ''` IS the primary
+        // band permanently, and the v51 rung stamps that row `'primary'` on
+        // every UPGRADED database — so taking the `'paired'` default here
+        // would give a FRESH install a different role for the same row than
+        // an upgraded one, and the first reader of this column would be
+        // wrong on exactly the installs that never migrated. Insert-only
+        // (the conflict algorithm is IGNORE), so it can never demote a row
+        // that already exists.
+        'role': id == kPrimaryDeviceId ? 'primary' : 'paired',
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      // EITHER DIRECTION of an adapter change alters WHICH days have an
+      // Oura-SpO2 candidate: 'oura' -> another adapter removes them from
+      // the candidate set (their exports must clean up); another adapter
+      // -> 'oura' adds them. Only the CHANGE, never a repeat.
+      final candidacyChanged = (oldAdapter ?? '') != (newAdapter ?? '') &&
+          (oldAdapter == 'oura' || newAdapter == 'oura');
+      if (id != kPrimaryDeviceId &&
+          candidacyChanged &&
+          await _deviceHasOuraObservations(txn, id)) {
+        await markOuraSpo2DirtyForDevice(txn, id);
+      }
+      await txn.rawUpdate(
+        'UPDATE device SET '
+        '${blankAdapter ? 'adapter_id = NULL, ' : 'adapter_id = COALESCE(?, adapter_id), '}'
+        'remote_id = COALESCE(?, remote_id), label = COALESCE(?, label), '
+        'tier = COALESCE(?, tier), last_seen = ? WHERE id = ?',
+        [
+          if (!blankAdapter) adapterId,
+          remoteId,
+          label,
+          tier,
+          now,
+          id,
+        ],
+      );
+    });
   }
 
   /// One device row, or null when this phone has never seen it.
@@ -2685,12 +2705,16 @@ class LocalDb {
     final db = await instance;
     // Forgetting a ring removes its days' candidate (the export joins on
     // this row): those days become dirty so the pass cleans up any
-    // export that now has no source behind it.
-    if (id != kPrimaryDeviceId &&
-        await _deviceHasOuraObservations(db, id)) {
-      await markOuraSpo2DirtyForDevice(db, id);
-    }
-    await db.delete('device', where: 'id = ?', whereArgs: [id]);
+    // export that now has no source behind it. Marker and row deletion
+    // share ONE transaction — a pass must never see one without the
+    // other.
+    await db.transaction((txn) async {
+      if (id != kPrimaryDeviceId &&
+          await _deviceHasOuraObservations(txn, id)) {
+        await markOuraSpo2DirtyForDevice(txn, id);
+      }
+      await txn.delete('device', where: 'id = ?', whereArgs: [id]);
+    });
   }
 
   /// Whether [deviceId] has any Oura-SpO2 observation rows at all — the
@@ -2948,6 +2972,20 @@ class LocalDb {
       'sync_cursor',
       where: 'name = ? AND value = ?',
       whereArgs: ['$kOuraSpo2DirtyPrefix$date', token],
+    );
+  }
+
+  /// The GLOBAL failure state, '<attempts>|<lastAttemptMs>' — set when
+  /// three consecutive day failures end a pass (a global cause), cleared
+  /// on the first success, the health-sync toggle, a permission change
+  /// or an explicit user export.
+  static Future<({int attempts, int lastMs})> ouraSpo2GlobalFail() async {
+    final v = await getCursor('health_oura_spo2_global_fail');
+    final p = v?.split('|');
+    if (p == null || p.length != 2) return (attempts: 0, lastMs: 0);
+    return (
+      attempts: int.tryParse(p[0]) ?? 0,
+      lastMs: int.tryParse(p[1]) ?? 0,
     );
   }
 
@@ -10024,6 +10062,40 @@ class LocalDb {
     if ((counts['day_result'] ?? 0) > 0) {
       await putComputeFreshness(kReencodeCursorKey, jsonEncode({}));
     }
+    // RESTORED sync_cursor ROWS ARE NOT EXPORT PROOF. Apple Health is not
+    // restored by an Edge backup — a done/dirty/retry marker from another
+    // install describes a health store THIS phone does not have. The
+    // SpO2 export markers never survive a restore: they are dropped, and
+    // every observed day is re-seeded dirty so the export rebuilds the
+    // local store from scratch. (A re-import on the SAME install
+    // converges the same way, at one bounded pass of cost — honest and
+    // cheap, and never a stale done marker.)
+    await db.transaction((txn) async {
+      await txn.delete(
+        'sync_cursor',
+        where:
+            "substr(name, 1, ?) = ? OR substr(name, 1, ?) = ? OR "
+            "substr(name, 1, ?) = ? OR name = ? OR name = ? OR name = ?",
+        whereArgs: [
+          kOuraSpo2DonePrefix.length, kOuraSpo2DonePrefix,
+          kOuraSpo2DirtyPrefix.length, kOuraSpo2DirtyPrefix,
+          kOuraSpo2RetryPrefix.length, kOuraSpo2RetryPrefix,
+          kOuraSpo2EpochName, kOuraSpo2SweepName,
+          'health_oura_spo2_global_fail',
+        ],
+      );
+      await txn.rawInsert(
+        'INSERT OR REPLACE INTO sync_cursor(name, value, updated_at) '
+        "SELECT DISTINCT ? || date, ?, ? FROM observation "
+        "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
+        "AND unit = '%'",
+        [
+          kOuraSpo2DirtyPrefix,
+          _ouraSpo2DirtyToken(),
+          DateTime.now().millisecondsSinceEpoch,
+        ],
+      );
+    });
     // Last, so it can never be mistaken for a table row count by anything that
     // walks this map in order.
     if (importedDays != null) counts['_days'] = importedDays.length;

@@ -164,40 +164,36 @@ void main() {
       (date: '2026-03-12', token: 'a'),
       (date: '2026-03-11', token: 'b'), // in retry backoff: SKIPPED
       (date: '2026-03-10', token: 'c'),
-      (date: '2026-03-09', token: 'd'), // fails twice then succeeds
-      (date: '2026-03-08', token: 'e'), // fails -> 3rd consecutive stops
-      (date: '2026-03-07', token: 'f'), // never reached
+      (date: '2026-03-09', token: 'd'), // fails
+      (date: '2026-03-08', token: 'e'), // fails (2nd consecutive)
+      (date: '2026-03-07', token: 'f'), // exports after the failures
     ];
-    var fail0310 = false;
+    var globalFails = 0;
     await runOuraSpo2DirtyPass(
       dirtyDays: () async => dirty,
       retryDue: (d) async => d != '2026-03-11',
       processDay: (d) async {
         processed.add(d);
-        if (d == '2026-03-09' || (d == '2026-03-10' && fail0310)) {
+        if (d == '2026-03-09' || d == '2026-03-08') {
           return OuraSpo2DayOutcome.failed;
         }
-        if (d == '2026-03-08') return OuraSpo2DayOutcome.failed;
         return OuraSpo2DayOutcome.exported;
       },
       clearDirty: (d, token) async => cleared.add('$d:$token'),
-      noteFailure: (d) async => failedDays.add(d),
+      noteDayFailures: (dates) async => failedDays.addAll(dates),
       noteSuccess: (d) async => succeededDays.add(d),
+      noteGlobalFailure: (count) async => globalFails++,
     );
     // The backoff day was skipped entirely (not processed, not cleared).
     expect(processed, isNot(contains('2026-03-11')));
-    // 03-10 exported, 03-09 failed (1st), 03-08 failed (2nd consecutive
-    // within this call -> pass continues; the third failure threshold is
-    // per-pass-consecutive: 03-09 and 03-08 are two; the pass ends after
-    // 03-08 by reaching the END of the list, not the cap).
-    // 03-09 fails (1st consecutive), 03-08 fails (2nd), 03-07 is
-    // attempted and fails — the THIRD consecutive failure ends the pass
-    // (after noting it). All four were processed; nothing was cleared
-    // for the failed days.
+    // The pass continued past the two failures (03-07 succeeded), so
+    // the failures were DAY-SCOPED and committed as day backoffs at the
+    // end of the pass.
     expect(processed,
         ['2026-03-12', '2026-03-10', '2026-03-09', '2026-03-08', '2026-03-07']);
     expect(succeededDays, ['2026-03-12', '2026-03-10', '2026-03-07']);
     expect(failedDays, ['2026-03-09', '2026-03-08']);
+    expect(globalFails, 0, reason: 'no global stop: other days succeeded');
     // Only the successful days' tokens were cleared — failed days keep
     // their markers for the backoff retry.
     expect(cleared, ['2026-03-12:a', '2026-03-10:c', '2026-03-07:f']);
@@ -217,13 +213,20 @@ void main() {
         return OuraSpo2DayOutcome.gateClosed;
       },
       clearDirty: (d, token) async => fail('must not clear on gateClosed'),
-      noteFailure: (d) async => fail('must not note failure on gateClosed'),
+      noteDayFailures: (dates) async =>
+          fail('must not note failures on gateClosed'),
       noteSuccess: (d) async => fail('must not note success on gateClosed'),
+      noteGlobalFailure: (count) async =>
+          fail('must not note a global failure on gateClosed'),
     );
     expect(gateHit, isTrue);
-    // Three consecutive failures stop the pass: 4 days, the 4th never
-    // processed.
+    // Three consecutive failures stop the pass GLOBALLY: the 4th day is
+    // never processed, ONE global marker is written (its own small
+    // backoff), and NO per-day retry counters — a global cause must not
+    // strand days behind day-backoff the moment it is fixed.
     final processed = <String>[];
+    final dayBackoffs = <String>[];
+    var globalStops = 0;
     await runOuraSpo2DirtyPass(
       dirtyDays: () async => [
         for (final d in ['2026-03-10', '09', '08', '07'])
@@ -235,12 +238,16 @@ void main() {
         return OuraSpo2DayOutcome.failed;
       },
       clearDirty: (d, token) async {},
-      noteFailure: (d) async {},
+      noteDayFailures: (dates) async => dayBackoffs.addAll(dates),
       noteSuccess: (d) async {},
+      noteGlobalFailure: (count) async => globalStops++,
       maxConsecutiveFailures: 3,
     );
     expect(processed, hasLength(3),
         reason: 'the 4th day was never attempted after 3 failures');
+    expect(globalStops, 1, reason: 'exactly one global marker');
+    expect(dayBackoffs, isEmpty,
+        reason: 'a global stop writes NO day counters');
   });
 
   test('the health package contract: BLOOD_OXYGEN maps to PERCENT', () {

@@ -418,9 +418,10 @@ enum OuraSpo2DayOutcome {
 }
 
 /// Whether a day's retry backoff has elapsed. Exponential from 5 minutes
-/// (5, 10, 20 ... capped at 24 h), and a clock that went backwards counts
-/// as due — a device reboot must not strand a day for a day's worth of
-/// phantom backoff.
+/// (5, 10, 20 ...), with the doubling clamped at 2^8 — so the backoff
+/// tops out at 5 * 256 = 1280 minutes (~21.3 h), and a clock that went
+/// backwards counts as due — a device reboot must not strand a day
+/// behind phantom backoff.
 @visibleForTesting
 bool ouraSpo2RetryDue({
   required int attempts,
@@ -451,13 +452,21 @@ Future<void> runOuraSpo2DirtyPass({
   required Future<bool> Function(String date) retryDue,
   required Future<OuraSpo2DayOutcome> Function(String date) processDay,
   required Future<void> Function(String date, String token) clearDirty,
-  required Future<void> Function(String date) noteFailure,
+  required Future<void> Function(List<String> dates) noteDayFailures,
   required Future<void> Function(String date) noteSuccess,
+  required Future<void> Function(int count) noteGlobalFailure,
   int maxDays = 30,
   int maxConsecutiveFailures = 3,
 }) async {
   var handled = 0;
   var failures = 0;
+  // Collected, NOT yet written: three consecutive failures point at a
+  // GLOBAL cause (permission denied, store hung), and per-day counters
+  // for such a failure would strand the newest days behind up to 21 h of
+  // backoff the moment the cause is fixed. The counters are only
+  // committed when the pass went on to succeed with other days — then
+  // the failures were genuinely the days' own.
+  final failedDays = <String>[];
   for (final d in await dirtyDays()) {
     if (handled >= maxDays) break;
     if (!await retryDue(d.date)) continue;
@@ -467,14 +476,21 @@ Future<void> runOuraSpo2DirtyPass({
       return; // keep ALL dirty days for the release
     }
     if (outcome == OuraSpo2DayOutcome.failed) {
-      await noteFailure(d.date);
-      if (++failures >= maxConsecutiveFailures) return; // likely global
+      failedDays.add(d.date);
+      if (++failures >= maxConsecutiveFailures) {
+        // GLOBAL: one marker with its own small backoff, no day counters.
+        await noteGlobalFailure(failedDays.length);
+        return;
+      }
       continue;
     }
     failures = 0;
     await noteSuccess(d.date);
     await clearDirty(d.date, d.token);
   }
+  // The pass did NOT end in a global stop: the collected failures are
+  // day-scoped after all (the pass kept succeeding around them).
+  if (failedDays.isNotEmpty) await noteDayFailures(failedDays);
 }
 
 
@@ -1597,37 +1613,6 @@ class HealthExporter {
     return success;
   }
 
-  /// The Oura ring's own blood-oxygen day summary, exported as ONE
-  /// `BLOOD_OXYGEN` sample at the day's FIRST measured second — the only
-  /// instant in the contract that is a real measurement time, never a noon
-  /// fallback or a receive time.
-  ///
-  /// WHY A SEPARATE RESULT, NOT `success`: a refused SpO2 write permission
-  /// must never block the day's sleep/HR/workout export (the plugin
-  /// silently no-ops an ungranted type, and `writeHealthData` returning
-  /// false for it would otherwise flip the whole day to not-exported and
-  /// stall the main cursor on a partial grant forever). The main cursor
-  /// advances on the main types; this result only feeds the SpO2-specific
-  /// cursor in `_exportOuraSpo2`.
-  ///
-  /// WHY THE GATE IS HERE AND NOT IN THE CALLER: the eligibility function
-  /// is the ONE place that decides, so no background path can bypass it.
-  /// Until hardware validation flips `kOuraSpo2InterpretationVerified`
-  /// this returns `notEligible` before touching the health store — the
-  /// software path is wired, the release is that one constant.
-  /// Export one day's ATOMIC candidate (device + value + interval from
-  /// ONE query — see [LocalDb.ouraSpo2DayCandidate]). The candidate is
-  /// suitable by construction (still-paired Oura ring, its own rows);
-  /// `interpretationVerified` is the ONLY remaining gate and stays the
-  /// compile-time release constant.
-  ///
-  /// [deleteWindow] clears THIS DAY's own prior sample before the write,
-  /// independent of where the new interval sits — a shrunk, shifted or
-  /// re-owned candidate must not leave the old sample behind. The
-
-  /// One pass of the Oura-SpO2 export, behind its own cursor and the same
-  /// [_workoutLock] the caller already holds (exportAll runs under it, so
-  /// concurrent passes are serialized here too). Never throws.
   /// Export one day's ATOMIC candidate (device + value + interval from
   /// ONE query — see [LocalDb.ouraSpo2DayCandidate]). The candidate is
   /// suitable by construction (still-paired Oura ring, its own rows);
@@ -1710,6 +1695,19 @@ class HealthExporter {
       await LocalDb.ensureOuraSpo2DirtyBootstrap(kOuraSpo2ExportMethod);
       final clock =
           nowMs ?? () => DateTime.now().millisecondsSinceEpoch;
+      // THE GLOBAL GATE: after a consecutive-failure stop, wait out a
+      // small backoff (5 * attempts minutes) before touching the store
+      // again — cleared on the first success, the health-sync toggle,
+      // a permission change or an explicit user export.
+      final g = await LocalDb.ouraSpo2GlobalFail();
+      if (g.attempts > 0) {
+        final minutes = 5 * g.attempts;
+        if (clock() - g.lastMs < minutes * 60000) {
+          debugPrint('[health] oura spo2 pass: global backoff holds '
+              '(${minutes}min)');
+          return;
+        }
+      }
       await runOuraSpo2DirtyPass(
         // Over-fetch: days in retry backoff must not starve the rest.
         dirtyDays: () => LocalDb.ouraSpo2DirtyDays(limit: 60),
@@ -1728,15 +1726,37 @@ class HealthExporter {
           interpretationVerified: interpretationVerified,
         ),
         clearDirty: LocalDb.clearOuraSpo2DirtyIfUnchanged,
-        noteFailure: (d) async {
-          final r = await LocalDb.ouraSpo2Retry(d);
-          await LocalDb.setCursor(
-            '$kOuraSpo2RetryPrefix$d',
-            '${r.attempts + 1}|${clock()}',
-          );
+        noteDayFailures: (dates) async {
+          // Day-scoped failures (the pass kept succeeding around them):
+          // each takes the retry backoff.
+          for (final d in dates) {
+            final r = await LocalDb.ouraSpo2Retry(d);
+            await LocalDb.setCursor(
+              '$kOuraSpo2RetryPrefix$d',
+              '${r.attempts + 1}|${clock()}',
+            );
+          }
         },
-        noteSuccess: (d) =>
-            LocalDb.deleteCursor('$kOuraSpo2RetryPrefix$d'),
+        noteSuccess: (d) async {
+          // Any success clears the GLOBAL fail state — the cause was
+          // not global after all (or just got fixed).
+          await LocalDb.deleteCursor('health_oura_spo2_global_fail');
+          await LocalDb.deleteCursor('$kOuraSpo2RetryPrefix$d');
+        },
+        noteGlobalFailure: (count) async {
+          // One marker, its own small backoff, no per-day counters: a
+          // global cause (permission denied, store hung) must not strand
+          // the newest days behind up to 21 h of day backoff the moment
+          // it is fixed. Attempts escalate 1..3; the retry gate below
+          // reads it.
+          final prev = await LocalDb.ouraSpo2GlobalFail();
+          await LocalDb.setCursor(
+            'health_oura_spo2_global_fail',
+            '${prev.attempts + 1}|${clock()}',
+          );
+          debugPrint('[health] oura spo2 global failure x$count '
+              '(attempt ${prev.attempts + 1})');
+        },
       );
     } catch (e) {
       debugPrint('[health] oura spo2 pass: $e');

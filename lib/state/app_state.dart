@@ -675,6 +675,9 @@ class AppState extends ChangeNotifier {
     healthSyncEnabled = on;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kHealthSync, on);
+    // The toggle is an explicit user statement about the health store:
+    // any Oura-SpO2 global-failure backoff is stale the moment it moves.
+    await LocalDb.deleteCursor('health_oura_spo2_global_fail');
     notifyListeners();
     if (on) {
       await requestHealth();
