@@ -160,6 +160,7 @@ void main() {
     final cleared = <String>[];
     final failedDays = <String>[];
     final succeededDays = <String>[];
+    final noContact = <String>[];
     final dirty = <({String date, String token})>[
       (date: '2026-03-12', token: 'a'),
       (date: '2026-03-11', token: 'b'), // in retry backoff: SKIPPED
@@ -180,8 +181,10 @@ void main() {
         return OuraSpo2DayOutcome.exported;
       },
       clearDirty: (d, token) async => cleared.add('$d:$token'),
-      noteDayFailures: (dates) async => failedDays.addAll(dates),
-      noteSuccess: (d) async => succeededDays.add(d),
+      noteDayFailures: (dates, {required bool flat}) async =>
+          failedDays.addAll(dates.map((d) => flat ? '$d:flat' : d)),
+      noteStoreSuccess: (d) async => succeededDays.add(d),
+      noteNoContact: (d) async => noContact.add(d),
       noteGlobalFailure: (count) async => globalFails++,
     );
     // The backoff day was skipped entirely (not processed, not cleared).
@@ -192,8 +195,10 @@ void main() {
     expect(processed,
         ['2026-03-12', '2026-03-10', '2026-03-09', '2026-03-08', '2026-03-07']);
     expect(succeededDays, ['2026-03-12', '2026-03-10', '2026-03-07']);
-    expect(failedDays, ['2026-03-09', '2026-03-08']);
+    expect(failedDays, ['2026-03-09', '2026-03-08'],
+        reason: 'day-scoped, NOT flat: the pass kept succeeding');
     expect(globalFails, 0, reason: 'no global stop: other days succeeded');
+    expect(noContact, isEmpty);
     // Only the successful days' tokens were cleared — failed days keep
     // their markers for the backoff retry.
     expect(cleared, ['2026-03-12:a', '2026-03-10:c', '2026-03-07:f']);
@@ -213,9 +218,12 @@ void main() {
         return OuraSpo2DayOutcome.gateClosed;
       },
       clearDirty: (d, token) async => fail('must not clear on gateClosed'),
-      noteDayFailures: (dates) async =>
+      noteDayFailures: (dates, {required bool flat}) async =>
           fail('must not note failures on gateClosed'),
-      noteSuccess: (d) async => fail('must not note success on gateClosed'),
+      noteStoreSuccess: (d) async =>
+          fail('must not note store success on gateClosed'),
+      noteNoContact: (d) async =>
+          fail('must not note no-contact on gateClosed'),
       noteGlobalFailure: (count) async =>
           fail('must not note a global failure on gateClosed'),
     );
@@ -226,11 +234,14 @@ void main() {
     // strand days behind day-backoff the moment it is fixed.
     final processed = <String>[];
     final dayBackoffs = <String>[];
+    final flatFlags = <bool>[];
     var globalStops = 0;
     await runOuraSpo2DirtyPass(
       dirtyDays: () async => [
-        for (final d in ['2026-03-10', '09', '08', '07'])
-          (date: '2026-03-$d', token: d),
+        (date: '2026-03-10', token: 'a'),
+        (date: '2026-03-09', token: 'b'),
+        (date: '2026-03-08', token: 'c'),
+        (date: '2026-03-07', token: 'd'),
       ],
       retryDue: (d) async => true,
       processDay: (d) async {
@@ -238,16 +249,23 @@ void main() {
         return OuraSpo2DayOutcome.failed;
       },
       clearDirty: (d, token) async {},
-      noteDayFailures: (dates) async => dayBackoffs.addAll(dates),
-      noteSuccess: (d) async {},
+      noteDayFailures: (dates, {required bool flat}) async {
+        dayBackoffs.addAll(dates);
+        flatFlags.add(flat);
+      },
+      noteStoreSuccess: (d) async => fail('no store success in this pass'),
+      noteNoContact: (d) async => fail('no no-contact days in this pass'),
       noteGlobalFailure: (count) async => globalStops++,
       maxConsecutiveFailures: 3,
     );
     expect(processed, hasLength(3),
         reason: 'the 4th day was never attempted after 3 failures');
     expect(globalStops, 1, reason: 'exactly one global marker');
-    expect(dayBackoffs, isEmpty,
-        reason: 'a global stop writes NO day counters');
+    expect(dayBackoffs, ['2026-03-10', '2026-03-09', '2026-03-08'],
+        reason: 'the day counters ARE written on a global stop');
+    expect(flatFlags, [true],
+        reason: 'but FLAT: attempts stay 1 (a 5-minute backoff), so the '
+            'same broken days cannot block older healthy days forever');
   });
 
   test('the health package contract: BLOOD_OXYGEN maps to PERCENT', () {

@@ -655,6 +655,9 @@ class AppState extends ChangeNotifier {
   /// Prompt for write access (user gesture). On grant + enabled, kick a sync.
   Future<void> requestHealth() async {
     healthState = await _healthExport.request();
+    // A permission answer can change what the store accepts: any
+    // Oura-SpO2 failure backoff recorded under the old grant is stale.
+    await LocalDb.resetOuraSpo2FailureState();
     notifyListeners();
     if (healthState == HealthLinkState.ready && healthSyncEnabled) {
       unawaited(healthSyncNow());
@@ -676,8 +679,9 @@ class AppState extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_kHealthSync, on);
     // The toggle is an explicit user statement about the health store:
-    // any Oura-SpO2 global-failure backoff is stale the moment it moves.
-    await LocalDb.deleteCursor('health_oura_spo2_global_fail');
+    // any Oura-SpO2 failure backoff (global AND day retries) is stale
+    // the moment it moves.
+    await LocalDb.resetOuraSpo2FailureState();
     notifyListeners();
     if (on) {
       await requestHealth();
@@ -685,8 +689,29 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  DateTime? _lastOuraSpo2FailReset;
+
+  /// Foreground-resume reset of the Oura-SpO2 failure backoff,
+  /// throttled to one run per 15 minutes: the user may have changed the
+  /// health-store permission in OS Settings while the app was
+  /// backgrounded, and a stale backoff would keep waiting out a cause
+  /// that no longer exists.
+  Future<void> maybeResetOuraSpo2FailureState() async {
+    final now = DateTime.now();
+    final last = _lastOuraSpo2FailReset;
+    if (last != null && now.difference(last) < const Duration(minutes: 15)) {
+      return;
+    }
+    _lastOuraSpo2FailReset = now;
+    await LocalDb.resetOuraSpo2FailureState();
+  }
+
   /// Export all finalized-but-unexported days now. Returns days written.
   Future<int> healthSyncNow() async {
+    // An explicit user sync is a statement that the store should be
+    // tried NOW — any Oura-SpO2 failure backoff it would wait out is
+    // stale by the user's own action.
+    await LocalDb.resetOuraSpo2FailureState();
     // Both halves of this seam matter and neither subsumes the other: the
     // export runs through the single-flight guard (main), and the phone-steps
     // sync stays gated on the user's preference (this branch).

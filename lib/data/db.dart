@@ -2622,21 +2622,25 @@ class LocalDb {
     // statement whose `?` count differs from its argument list binds every
     // value one column to the left, which SQLite accepts silently.
     final blankAdapter = adapterId == null && clearAdapterId;
-    // THE OLD adapter_id, read BEFORE the write: the SpO2 dirty hook only
-    // fires when the pairing fact that decides candidacy CHANGES. A
-    // same-adapter upsert (every Oura sync re-touches this row) must not
-    // re-mark the ring's days — an unchanged candidate costs one
-    // fingerprint compare, but a fresh TOKEN every sync would defeat
-    // compare-and-clear across a pass boundary.
-    final oldRow = await db.query('device',
-        columns: ['adapter_id'], where: 'id = ?', whereArgs: [id]);
-    final oldAdapter =
-        oldRow.isEmpty ? null : oldRow.first['adapter_id'] as String?;
-    final newAdapter = blankAdapter ? null : (adapterId ?? oldAdapter);
     // Device row AND dirty markers in ONE transaction: a pass reading a
     // marker mid-pairing must never evaluate the NEW token against the
     // OLD device state — both become visible together or not at all.
+    // THE OLD adapter_id is read INSIDE that transaction: outside it, a
+    // concurrent writer could change the row between the read and the
+    // write, and the candidacy-change detection would decide on a
+    // stale value.
     await db.transaction((txn) async {
+      // THE OLD adapter_id: the SpO2 dirty hook only fires when the
+      // pairing fact that decides candidacy CHANGES. A same-adapter
+      // upsert (every Oura sync re-touches this row) must not re-mark
+      // the ring's days — an unchanged candidate costs one fingerprint
+      // compare, but a fresh TOKEN every sync would defeat
+      // compare-and-clear across a pass boundary.
+      final oldRow = await txn.query('device',
+          columns: ['adapter_id'], where: 'id = ?', whereArgs: [id]);
+      final oldAdapter =
+          oldRow.isEmpty ? null : oldRow.first['adapter_id'] as String?;
+      final newAdapter = blankAdapter ? null : (adapterId ?? oldAdapter);
       await txn.insert('device', {
         'id': id,
         'adapter_id': adapterId,
@@ -2972,6 +2976,24 @@ class LocalDb {
       'sync_cursor',
       where: 'name = ? AND value = ?',
       whereArgs: ['$kOuraSpo2DirtyPrefix$date', token],
+    );
+  }
+
+  /// Drop the Oura-SpO2 GLOBAL failure marker and EVERY day retry
+  /// marker — the "the cause is gone, try now" reset. Wired to the
+  /// moments that make a stale backoff wrong: the health-sync toggle,
+  /// a health-permission request result, an explicit user sync, and
+  /// the restore path.
+  static Future<void> resetOuraSpo2FailureState() async {
+    final db = await instance;
+    await db.delete(
+      'sync_cursor',
+      where: 'name = ? OR substr(name, 1, ?) = ?',
+      whereArgs: [
+        'health_oura_spo2_global_fail',
+        kOuraSpo2RetryPrefix.length,
+        kOuraSpo2RetryPrefix,
+      ],
     );
   }
 

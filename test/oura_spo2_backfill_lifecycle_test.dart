@@ -435,19 +435,28 @@ void main() {
     }
     await runPass(store, interpretationVerified: true);
     expect(store.own, isEmpty);
-    // ONE global marker, NO day counters.
+    // ONE global marker AND flat day counters (attempts == 1: the
+    // 5-minute pacing that keeps the broken days from failing again on
+    // the very next pass while the first stop holds nothing).
     final g = await LocalDb.ouraSpo2GlobalFail();
     expect(g.attempts, 1);
-    for (var d = 1; d <= 5; d++) {
+    // Newest first: Mar 5, Mar 4, Mar 3 were ATTEMPTED before the stop
+    // and carry the flat counters; Mar 2 and Mar 1 were never reached.
+    for (final d in [5, 4, 3]) {
+      expect((await LocalDb.ouraSpo2Retry(_dayLabel(DateTime(2026, 3, d))))
+          .attempts, 1,
+          reason: 'flat day counters on a global stop');
+    }
+    for (final d in [2, 1]) {
       expect((await LocalDb.ouraSpo2Retry(_dayLabel(DateTime(2026, 3, d))))
           .attempts, 0,
-          reason: 'a global stop writes no day backoff');
+          reason: 'never attempted: the stop came first');
     }
     // The days stay dirty (all of them).
     expect(await LocalDb.ouraSpo2DirtyDays(limit: 10), hasLength(5));
-    // THE FIX: the cause is gone. The global backoff is small (5 min
-    // for attempt 1) — simulate its expiry through the clock seam and
-    // the days export in the VERY NEXT pass, no 21-h day backoff.
+    // THE FIX: the cause is gone. The first stop holds NOTHING; the
+    // flat day backoffs pace the retry at 5 minutes — past them (clock
+    // seam) the days export in the VERY NEXT pass.
     store.refuseWrites.clear();
     await runPass(
       store,
@@ -455,8 +464,8 @@ void main() {
       nowMs: () => DateTime.now().millisecondsSinceEpoch + 6 * 60000,
     );
     expect(store.own, hasLength(5),
-        reason: 'the days drained immediately after the global backoff');
-    // Success cleared the global state.
+        reason: 'the days drained after the flat 5-minute backoff');
+    // Store success cleared the global state.
     expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 0);
   });
 
@@ -567,6 +576,178 @@ void main() {
     expect(store.samplesOf(label).single.$3, closeTo(96.5, 1e-10));
     await src.close();
     await databaseFactory.deleteDatabase(srcPath);
+  });
+
+  test('a) three permanently broken NEWEST days do not starve ten healthy '
+      'older days — all ten export across passes; the broken days keep '
+      'attempts == 1', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    // Three permanently broken NEWEST days (Mar 11..13); ten healthy
+    // older days behind them (Mar 1..10). This is the audit's exact
+    // starvation shape: newest-first, the broken days fail before any
+    // healthy day is reached.
+    final broken = <String>[];
+    for (var d = 11; d <= 13; d++) {
+      final day = DateTime(2026, 3, d);
+      final label = _dayLabel(day);
+      broken.add(label);
+      store.refuseWrites.add(label);
+      await putRows(day, [95, 96], 'ring-1');
+    }
+    for (var d = 1; d <= 10; d++) {
+      await putRows(DateTime(2026, 3, d), [95, 96], 'ring-1');
+    }
+    // Pass 1: the three broken days fail first (newest first), the pass
+    // stops globally, the day counters are written FLAT.
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, isEmpty);
+    for (final b in broken) {
+      expect((await LocalDb.ouraSpo2Retry(b)).attempts, 1,
+          reason: 'flat: attempts stay 1 on a global stop');
+    }
+    // Pass 2 (+2 min, INSIDE the broken days' flat 5-minute backoff):
+    // the first global stop holds NOTHING, so the pass runs; the broken
+    // days are not retry-due yet and SKIP; the ten healthy days
+    // export. This is the window the flat design exists for — under
+    // the round-7 code (no day counters on a global stop) these ten
+    // days were starved FOREVER, because the broken days were
+    // attempts-0 retry-due again on every pass.
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 2 * 60000,
+    );
+    expect(store.own, hasLength(10),
+        reason: 'the healthy older days were reached');
+    // b) The cause is fixed: past the flat 5-minute day backoff
+    // (clock seam) the three broken days export.
+    for (final b in broken) {
+      store.refuseWrites.remove(b);
+    }
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 6 * 60000,
+    );
+    expect(store.own, hasLength(13),
+        reason: 'all three broken days exported after the flat backoff');
+  });
+
+  test('c) a global marker survives an unchanged day: no store contact, '
+      'the streak keeps counting', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    // PASS 1 — ONLY the unchanged day: it was exported earlier with
+    // exactly this fingerprint, so re-processing it must make NO store
+    // contact and must NOT clear the global marker.
+    final day1 = DateTime(2026, 3, 10);
+    await putRows(day1, [95, 96], 'ring-1');
+    final c1 = await LocalDb.ouraSpo2DayCandidate(_dayLabel(day1));
+    // A global marker in its hold window (attempts == 2 -> 5 minutes,
+    // stamped just now) — the pass must run PAST it via the clock seam.
+    await LocalDb.setCursor('health_oura_spo2_global_fail',
+        '2|${DateTime.now().millisecondsSinceEpoch}');
+    await LocalDb.setCursor('health_oura_spo2_done:${_dayLabel(day1)}',
+        ouraSpo2CandidateFingerprint(c1!));
+    final writesBefore = store.writeCalls;
+    final deletesBefore = store.deleteCalls;
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 6 * 60000,
+    );
+    expect(store.writeCalls, writesBefore,
+        reason: 'an unchanged day makes no store contact');
+    expect(store.deleteCalls, deletesBefore,
+        reason: 'an unchanged day makes no store contact');
+    expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 2,
+        reason: 'an unchanged day is not proof the store works');
+    // PASS 2 — a FAILING day after it: the marker still holds no
+    // store-success proof, the day takes its (real, day-scoped)
+    // backoff — the streak was never reset by the unchanged day.
+    final day2 = DateTime(2026, 3, 9);
+    store.refuseWrites.add(_dayLabel(day2));
+    await putRows(day2, [90, 90], 'ring-1');
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch + 6 * 60000,
+    );
+    expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 2,
+        reason: 'a failed day is no proof either — the marker survives');
+    expect(
+        (await LocalDb.ouraSpo2Retry(_dayLabel(day2))).attempts, 1);
+  });
+
+  test('d) the global backoff is CLAMPED at 60 minutes: attempts == 100 '
+      'is due after 60, not after 500', () async {
+    await pairRing('ring-1');
+    final t0 = DateTime.now().millisecondsSinceEpoch;
+    await LocalDb.setCursor('health_oura_spo2_global_fail', '100|$t0');
+    // Direct probe of the clamp through the pass's own gate: a pass at
+    // +59 min is held, at +61 min runs (it will process nothing dirty,
+    // but it must not print the "backoff holds" bail).
+    final store = StatefulSpo2Store();
+    await putRows(DateTime(2026, 3, 9), [95, 96], 'ring-1');
+    // At wall-now the 60-minute clamp HOLDS the pass: nothing exports.
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, isEmpty, reason: 'the clamp holds before +60 min');
+    final g = await LocalDb.ouraSpo2GlobalFail();
+    expect(g.attempts, 100);
+    // The clamp: 5 * (100 - 1) clamped to 60 -> due at +60 min. The
+    // next pass with a clock 61 minutes ahead is NOT held (the day
+    // drains).
+    await runPass(
+      store,
+      interpretationVerified: true,
+      nowMs: () => t0 + 61 * 60000,
+    );
+    expect(store.own, hasLength(1),
+        reason: 'the global backoff was due after 60 minutes, not 500');
+  });
+
+  test('e) resetOuraSpo2FailureState drops the global marker and every '
+      'day retry; the next pass exports without waiting', () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    final label = _dayLabel(DateTime(2026, 3, 9));
+    await putRows(DateTime(2026, 3, 9), [95, 96], 'ring-1');
+    // A failed day + a global marker, both stamped NOW: the global
+    // backoff (5 * (5 - 1) = 20 min) and the day retry (20 min for
+    // attempt 3) are both ACTIVE.
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    await LocalDb.setCursor('health_oura_spo2_retry:$label', '3|$nowMs');
+    await LocalDb.setCursor('health_oura_spo2_global_fail', '5|$nowMs');
+    // Without the reset nothing exports: the global gate holds.
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, isEmpty);
+    // THE RESET: the explicit user action clears both.
+    await LocalDb.resetOuraSpo2FailureState();
+    expect((await LocalDb.ouraSpo2GlobalFail()).attempts, 0);
+    expect((await LocalDb.ouraSpo2Retry(label)).attempts, 0);
+    // The very next pass (same wall clock!) exports without waiting.
+    await runPass(store, interpretationVerified: true);
+    expect(store.own, hasLength(1),
+        reason: 'the reset removed the waiting, not the clock');
+  });
+
+  test('f) two PARALLEL upsertDevice calls with the same adapterId: the '
+      'dirty token is stable afterwards (no re-mark churn)', () async {
+    await pairRing('ring-1');
+    await putRows(DateTime(2026, 3, 9), [95, 96], 'ring-1');
+    final before = (await LocalDb.ouraSpo2DirtyDays()).single;
+    // Two concurrent same-adapter upserts: whichever wins, the adapter
+    // did not CHANGE, so no new token may appear.
+    await Future.wait([
+      pairRing('ring-1'),
+      pairRing('ring-1'),
+    ]);
+    final after = await LocalDb.ouraSpo2DirtyDays();
+    expect(after, hasLength(1));
+    expect(after.single.token, before.token,
+        reason: 'a same-adapter re-mark would mint a fresh token and '
+            'defeat compare-and-clear');
   });
 
   test('no legacy keys are ever written by the new pass', () async {

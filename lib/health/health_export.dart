@@ -446,26 +446,25 @@ bool ouraSpo2RetryDue({
 /// points at a global cause (permission denied, store hung), not at the
 /// days themselves.
 @visibleForTesting
+bool ouraSpo2OutcomeTouchedStore(OuraSpo2DayOutcome o) =>
+    o == OuraSpo2DayOutcome.exported || o == OuraSpo2DayOutcome.cleanedUp;
+
 Future<void> runOuraSpo2DirtyPass({
   required Future<List<({String date, String token})>> Function()
       dirtyDays,
   required Future<bool> Function(String date) retryDue,
   required Future<OuraSpo2DayOutcome> Function(String date) processDay,
   required Future<void> Function(String date, String token) clearDirty,
-  required Future<void> Function(List<String> dates) noteDayFailures,
-  required Future<void> Function(String date) noteSuccess,
+  required Future<void> Function(List<String> dates, {required bool flat})
+      noteDayFailures,
+  required Future<void> Function(String date) noteStoreSuccess,
+  required Future<void> Function(String date) noteNoContact,
   required Future<void> Function(int count) noteGlobalFailure,
   int maxDays = 30,
   int maxConsecutiveFailures = 3,
 }) async {
   var handled = 0;
-  var failures = 0;
-  // Collected, NOT yet written: three consecutive failures point at a
-  // GLOBAL cause (permission denied, store hung), and per-day counters
-  // for such a failure would strand the newest days behind up to 21 h of
-  // backoff the moment the cause is fixed. The counters are only
-  // committed when the pass went on to succeed with other days — then
-  // the failures were genuinely the days' own.
+  var streak = 0;
   final failedDays = <String>[];
   for (final d in await dirtyDays()) {
     if (handled >= maxDays) break;
@@ -477,20 +476,36 @@ Future<void> runOuraSpo2DirtyPass({
     }
     if (outcome == OuraSpo2DayOutcome.failed) {
       failedDays.add(d.date);
-      if (++failures >= maxConsecutiveFailures) {
-        // GLOBAL: one marker with its own small backoff, no day counters.
+      if (++streak >= maxConsecutiveFailures) {
+        // Suspected GLOBAL cause. The day counters are STILL written —
+        // but FLAT (attempts stays 1, a 5-minute backoff): without
+        // them, the same newest days would be retry-due again at
+        // attempts 0 in the very next pass, fail again, and the
+        // consecutive stop would permanently starve every older healthy
+        // day behind them. Flat counters let the older days advance on
+        // the next pass and re-try the broken days within 5 minutes
+        // once the cause is fixed.
+        await noteDayFailures(failedDays, flat: true);
         await noteGlobalFailure(failedDays.length);
         return;
       }
       continue;
     }
-    failures = 0;
-    await noteSuccess(d.date);
+    // Only outcomes that TOUCHED the store prove the store works: they
+    // reset the failure streak and clear the global marker. An
+    // unchanged or nothingToDo day made no contact and must neither
+    // reset the streak nor clear the global state.
+    if (ouraSpo2OutcomeTouchedStore(outcome)) {
+      streak = 0;
+      await noteStoreSuccess(d.date);
+    } else {
+      await noteNoContact(d.date);
+    }
     await clearDirty(d.date, d.token);
   }
-  // The pass did NOT end in a global stop: the collected failures are
-  // day-scoped after all (the pass kept succeeding around them).
-  if (failedDays.isNotEmpty) await noteDayFailures(failedDays);
+  // No global stop: the collected failures were the days' own — real
+  // (escalating) day backoffs.
+  if (failedDays.isNotEmpty) await noteDayFailures(failedDays, flat: false);
 }
 
 
@@ -1701,8 +1716,19 @@ class HealthExporter {
       // a permission change or an explicit user export.
       final g = await LocalDb.ouraSpo2GlobalFail();
       if (g.attempts > 0) {
-        final minutes = 5 * g.attempts;
-        if (clock() - g.lastMs < minutes * 60000) {
+        // BOUNDED AND OFF-BY-ONE ON PURPOSE: 5 * (attempts - 1)
+        // minutes, clamped to an hour. The FIRST consecutive-failure
+        // stop holds NOTHING (attempts == 1 -> 0 minutes) — the flat
+        // day counters are what keep the newest broken days from
+        // failing again on the very next pass, and if this marker held
+        // the same five minutes they hold, there would be NO window in
+        // which the pass runs while the broken days skip: global and
+        // day deadlines run from the same stamp, so older healthy days
+        // would be starved forever. From the SECOND stop the marker
+        // holds 5 * (attempts - 1) minutes — real backoff for a cause
+        // that survived a store-working pass, still capped at an hour.
+        final minutes = (5 * (g.attempts - 1)).clamp(0, 60);
+        if (minutes > 0 && clock() - g.lastMs < minutes * 60000) {
           debugPrint('[health] oura spo2 pass: global backoff holds '
               '(${minutes}min)');
           return;
@@ -1726,29 +1752,32 @@ class HealthExporter {
           interpretationVerified: interpretationVerified,
         ),
         clearDirty: LocalDb.clearOuraSpo2DirtyIfUnchanged,
-        noteDayFailures: (dates) async {
-          // Day-scoped failures (the pass kept succeeding around them):
-          // each takes the retry backoff.
+        noteDayFailures: (dates, {required bool flat}) async {
           for (final d in dates) {
             final r = await LocalDb.ouraSpo2Retry(d);
+            // FLAT on a global stop: attempts stays 1 (a 5-minute
+            // backoff) so the newest broken days cannot block the older
+            // healthy ones forever and re-try soon after the cause is
+            // fixed. Real escalation only for day-scoped failures.
+            final attempts = flat ? 1 : r.attempts + 1;
             await LocalDb.setCursor(
               '$kOuraSpo2RetryPrefix$d',
-              '${r.attempts + 1}|${clock()}',
+              '$attempts|${clock()}',
             );
           }
         },
-        noteSuccess: (d) async {
-          // Any success clears the GLOBAL fail state — the cause was
-          // not global after all (or just got fixed).
+        noteStoreSuccess: (d) async {
+          // A STORE-TOUCHING success clears the global fail state —
+          // the cause was not global after all (or just got fixed).
           await LocalDb.deleteCursor('health_oura_spo2_global_fail');
           await LocalDb.deleteCursor('$kOuraSpo2RetryPrefix$d');
         },
+        noteNoContact: (d) =>
+            LocalDb.deleteCursor('$kOuraSpo2RetryPrefix$d'),
         noteGlobalFailure: (count) async {
-          // One marker, its own small backoff, no per-day counters: a
-          // global cause (permission denied, store hung) must not strand
-          // the newest days behind up to 21 h of day backoff the moment
-          // it is fixed. Attempts escalate 1..3; the retry gate below
-          // reads it.
+          // One marker with its own small backoff; the day counters were
+          // already written FLAT. Attempts escalate, the pass's global
+          // gate below reads the marker.
           final prev = await LocalDb.ouraSpo2GlobalFail();
           await LocalDb.setCursor(
             'health_oura_spo2_global_fail',
