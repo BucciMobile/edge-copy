@@ -7507,6 +7507,7 @@
     }
   },
   "healthWellbeingAllSub": "Дыхание, настроение, дневник, привычки и лекарства",
+  "healthWellbeingAllSubCycle": "Дыхание, настроение, дневник, привычки, лекарства и цикл",
   "reportIdCopied": "Скопировано: {id}",
   "@reportIdCopied": {
     "placeholders": {

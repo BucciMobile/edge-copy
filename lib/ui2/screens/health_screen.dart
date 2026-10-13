@@ -10,6 +10,7 @@ import '../../l10n/display_text.dart';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:provider/provider.dart';
 
 import '../../compute/findings.dart';
 import '../../data/day_label.dart';
@@ -20,6 +21,7 @@ import '../../import/journal_csv_import.dart' show isValidDayLabel;
 import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart';
 import '../../models/payloads.dart' show todayHeadlineOf;
+import '../../state/app_state.dart';
 import '../profile/profile.dart' show ProfileAvatar;
 import '../profile/wearable_numbers.dart'
     show WearableCells, kHealthWearableRows;
@@ -934,8 +936,12 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
             c,
             LucideIcons.wind,
             l?.wellnessTabMind ?? 'Mind',
-            l?.healthWellbeingAllSub ??
-                'Breathing, mood, the journal, habits and medication',
+            // Cycle is a tab there only while cycle tracking is on.
+            _cycleTrackingOn(c)
+                ? (l?.healthWellbeingAllSubCycle ??
+                    'Breathing, mood, the journal, habits, medication and cycle')
+                : (l?.healthWellbeingAllSub ??
+                    'Breathing, mood, the journal, habits and medication'),
             () => go(c, const WellnessScreen(initialTab: 0))),
       ),
 
@@ -1815,5 +1821,15 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     }
     _l = null;
     await _loadLabs();
+  }
+}
+
+/// Whether the wellness screen shows its Cycle tab. False where no AppState
+/// is provided (widget tests that build the Health tab on its own).
+bool _cycleTrackingOn(BuildContext c) {
+  try {
+    return c.select<AppState, bool>((a) => a.cycleTrackingEnabled);
+  } on ProviderNotFoundException {
+    return false;
   }
 }
