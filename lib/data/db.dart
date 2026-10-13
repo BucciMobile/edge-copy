@@ -74,6 +74,12 @@ const String kOuraSpo2EpochName = 'health_oura_spo2_epoch';
 /// last swept day label.
 const String kOuraSpo2SweepName = 'health_oura_spo2_recent_sweep';
 
+/// In-flight intent log of a day's export: set BEFORE the first store
+/// contact, removed once the outcome is known. A leftover (an exception,
+/// a killed process, an uncertain result) means the done marker is NOT
+/// proof that the store holds the sample — the day must re-export.
+const String kOuraSpo2InflightPrefix = 'health_oura_spo2_inflight:';
+
 
 /// The outcome of a database rebuild: why the old file would not open, where it
 /// was parked, and how many rows came back per table.
@@ -3066,28 +3072,36 @@ class LocalDb {
     if (await getCursor(kOuraSpo2SweepName) != today) {
       final from = dayLabelOf(DateTime(now.year, now.month, now.day - 14));
       final token = _ouraSpo2DirtyToken();
-      // TWO sources, both bounded to the recent window: days with
-      // observations AND days this path once exported (a done marker)
-      // — a vanished candidate has rows nowhere, but its stale export
-      // must not outlive its source. The done half is what keeps the
-      // working set from consisting only of days that still have rows.
-      await db.rawInsert(
+      // THREE sources, all bounded to the recent window: days with
+      // observations, days this path once exported (a done marker) and
+      // days with a leftover in-flight marker (an interrupted export —
+      // its state is uncertain and must not outlive the sweep window).
+      // A vanished candidate has rows nowhere, but its stale export must
+      // not outlive its source; the marker halves keep the working set
+      // from consisting only of days that still have rows.
+      final markerSources = [kOuraSpo2DonePrefix, kOuraSpo2InflightPrefix];
+      final sql = StringBuffer(
         'INSERT OR REPLACE INTO sync_cursor(name, value, updated_at) '
         "SELECT DISTINCT ? || date, ?, ? FROM observation "
         "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
-        "AND unit = '%' AND date >= ? "
-        'UNION '
-        "SELECT ? || substr(name, ?), ?, ? FROM sync_cursor "
-        "WHERE substr(name, 1, ?) = ? AND substr(name, ?) >= ?",
-        [
-          kOuraSpo2DirtyPrefix, token, nowMs, from,
-          kOuraSpo2DirtyPrefix,
-          kOuraSpo2DonePrefix.length + 1,
-          token, nowMs,
-          kOuraSpo2DonePrefix.length, kOuraSpo2DonePrefix,
-          kOuraSpo2DonePrefix.length + 1, from,
-        ],
+        "AND unit = '%' AND date >= ?",
       );
+      for (final _ in markerSources) {
+        sql.write(
+          " UNION SELECT ? || substr(name, ?), ?, ? FROM sync_cursor "
+          "WHERE substr(name, 1, ?) = ? AND substr(name, ?) >= ?",
+        );
+      }
+      await db.rawInsert(sql.toString(), [
+        kOuraSpo2DirtyPrefix, token, nowMs, from,
+        for (final src in markerSources) ...[
+          kOuraSpo2DirtyPrefix,
+          src.length + 1,
+          token, nowMs,
+          src.length, src,
+          src.length + 1, from,
+        ],
+      ]);
       await setCursor(kOuraSpo2SweepName, today);
     }
   }
@@ -10093,29 +10107,66 @@ class LocalDb {
     // converges the same way, at one bounded pass of cost — honest and
     // cheap, and never a stale done marker.)
     await db.transaction((txn) async {
+      // A restored done/in-flight marker is NOT export proof — but the
+      // day it names MAY still hold one of OUR samples in THIS phone's
+      // health store (a re-import on the same install), and its rows may
+      // have vanished since (a raw delete the hooks never saw). Both must
+      // be re-processed: after the drop, every such day gets an IN-FLIGHT
+      // marker ("the store state is uncertain — resolve") and a dirty
+      // one. The resolving pass is harmless even for markers foreign to
+      // this phone: the delete window only ever touches OUR samples, of
+      // which another phone has none.
+      final uncertainDays = <String>{};
+      for (final src in [kOuraSpo2DonePrefix, kOuraSpo2InflightPrefix]) {
+        final rows = await txn.rawQuery(
+          'SELECT DISTINCT substr(name, ?) AS day FROM sync_cursor '
+          'WHERE substr(name, 1, ?) = ?',
+          [src.length + 1, src.length, src],
+        );
+        uncertainDays.addAll(rows.map((r) => r['day'] as String));
+      }
       await txn.delete(
         'sync_cursor',
         where:
             "substr(name, 1, ?) = ? OR substr(name, 1, ?) = ? OR "
-            "substr(name, 1, ?) = ? OR name = ? OR name = ? OR name = ?",
+            "substr(name, 1, ?) = ? OR substr(name, 1, ?) = ? OR "
+            "name = ? OR name = ? OR name = ?",
         whereArgs: [
           kOuraSpo2DonePrefix.length, kOuraSpo2DonePrefix,
           kOuraSpo2DirtyPrefix.length, kOuraSpo2DirtyPrefix,
           kOuraSpo2RetryPrefix.length, kOuraSpo2RetryPrefix,
+          kOuraSpo2InflightPrefix.length, kOuraSpo2InflightPrefix,
           kOuraSpo2EpochName, kOuraSpo2SweepName,
           'health_oura_spo2_global_fail',
         ],
       );
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
+      for (final day in uncertainDays) {
+        await txn.insert(
+          'sync_cursor',
+          {
+            'name': '$kOuraSpo2InflightPrefix$day',
+            'value': 'restored-uncertain',
+            'updated_at': nowMs,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+        await txn.insert(
+          'sync_cursor',
+          {
+            'name': '$kOuraSpo2DirtyPrefix$day',
+            'value': _ouraSpo2DirtyToken(),
+            'updated_at': nowMs,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
       await txn.rawInsert(
         'INSERT OR REPLACE INTO sync_cursor(name, value, updated_at) '
         "SELECT DISTINCT ? || date, ?, ? FROM observation "
         "WHERE vendor_key = 'spo2' AND source_kind = 'vendor' "
         "AND unit = '%'",
-        [
-          kOuraSpo2DirtyPrefix,
-          _ouraSpo2DirtyToken(),
-          DateTime.now().millisecondsSinceEpoch,
-        ],
+        [kOuraSpo2DirtyPrefix, _ouraSpo2DirtyToken(), nowMs],
       );
     });
     // Last, so it can never be mistaken for a table row count by anything that

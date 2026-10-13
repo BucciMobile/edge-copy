@@ -1873,7 +1873,14 @@ class HealthExporter {
           (s, e) =>
               _deleteOwnSamples(HealthDataType.BLOOD_OXYGEN, s, e);
       final doneKey = '$kOuraSpo2DonePrefix$date';
+      final inflightKey = '$kOuraSpo2InflightPrefix$date';
       final done = await LocalDb.getCursor(doneKey);
+      // An interrupted export (exception, killed process, uncertain
+      // result) leaves the in-flight marker behind: the done marker is
+      // then NOT proof the store holds the sample. See
+      // [kOuraSpo2InflightPrefix].
+      final inflight = await LocalDb.getCursor(inflightKey);
+      final mayHoldSample = done != null || inflight != null;
       // ONE ATOMIC CANDIDATE: device, eligibility and value out of the
       // same query — the gate can never approve ring B's eligibility
       // while ring A's value is written. A forgotten ring does not rank.
@@ -1882,11 +1889,12 @@ class HealthExporter {
       if (candidate == null) {
         // No candidate: a prior export of this day is stale and goes;
         // a day that never exported has nothing to do.
-        if (done == null) return OuraSpo2DayOutcome.nothingToDo;
+        if (!mayHoldSample) return OuraSpo2DayOutcome.nothingToDo;
         if (!await clear(dayStart, dayEnd)) {
           return OuraSpo2DayOutcome.failed;
         }
         await LocalDb.deleteCursor(doneKey);
+        await LocalDb.deleteCursor(inflightKey);
         return OuraSpo2DayOutcome.cleanedUp;
       }
       // Gate closed ENDS the pass (the caller stops; every dirty day
@@ -1895,7 +1903,11 @@ class HealthExporter {
       // is closed for new writes.
       if (!interpretationVerified) return OuraSpo2DayOutcome.gateClosed;
       final fp = ouraSpo2CandidateFingerprint(candidate);
-      if (done == fp) return OuraSpo2DayOutcome.unchanged;
+      // Only an UNINTERRUPTED marker match means unchanged: a leftover
+      // in-flight marker invalidates the claim the store still matches.
+      if (inflight == null && done == fp) {
+        return OuraSpo2DayOutcome.unchanged;
+      }
 
       // THE PLUGIN BOUNDARY: the app's model is PERCENT, HealthKit's
       // percent unit is a FRACTION — see `ouraSpo2PluginWrite` for the
@@ -1913,6 +1925,11 @@ class HealthExporter {
               endTime: w.end,
             );
           };
+      // INTENT LOG, before the FIRST store contact: if this export is
+      // interrupted by an exception between the delete and the write,
+      // the leftover marker is what keeps the done marker from
+      // masquerading as sample proof later.
+      await LocalDb.setCursor(inflightKey, fp);
       final r = await exportOuraSpo2Day(
         candidate: candidate,
         write: write,
@@ -1926,6 +1943,7 @@ class HealthExporter {
       );
       if (r == OuraSpo2ExportResult.written) {
         await LocalDb.setCursor(doneKey, fp);
+        await LocalDb.deleteCursor(inflightKey);
         return OuraSpo2DayOutcome.exported;
       }
       if (r == OuraSpo2ExportResult.writeFailed) {
@@ -1935,7 +1953,12 @@ class HealthExporter {
         // would later classify a matching fingerprint as `unchanged` and
         // never rewrite the lost sample (the seed-175 model finding).
         await LocalDb.deleteCursor(doneKey);
+        // The in-flight marker STAYS: the store state is uncertain until
+        // a later pass resolves the day (the refused write may have been
+        // a late partial success on the platform side).
       }
+      // deleteFailed: the old sample may still be in the store; the
+      // in-flight marker stays (uncertain state) — a later pass resolves.
       return r == OuraSpo2ExportResult.notEligible
           ? OuraSpo2DayOutcome.gateClosed
           : OuraSpo2DayOutcome.failed;

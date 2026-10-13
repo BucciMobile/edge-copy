@@ -27,11 +27,16 @@ class StatefulSpo2Store {
   final foreign = <(int, int, double)>[];
   final refuseWrites = <String>{};
   final refuseDeletes = <String>{};
+  final throwOnWrite = <String>{};
+  final throwOnDelete = <String>{};
   int writeCalls = 0;
   int deleteCalls = 0;
 
   Future<bool> deleteWindow(String day, DateTime start, DateTime end) async {
     deleteCalls++;
+    if (throwOnDelete.contains(day)) {
+      throw StateError('store delete exploded on $day');
+    }
     if (refuseDeletes.contains(day)) return false;
     final s = start.millisecondsSinceEpoch;
     final e = end.millisecondsSinceEpoch;
@@ -42,6 +47,9 @@ class StatefulSpo2Store {
   Future<bool> write(
       String day, double value, DateTime start, DateTime end) async {
     writeCalls++;
+    if (throwOnWrite.contains(day)) {
+      throw StateError('store write exploded on $day');
+    }
     if (refuseWrites.contains(day)) return false;
     own.add((day, start.millisecondsSinceEpoch, end.millisecondsSinceEpoch,
         value));
@@ -973,6 +981,39 @@ void main() {
     // replaced by (96, 96) — (95 + 96 + 96 + 96) / 4 = 95.75.
     expect(after.single.$3, closeTo(95.75, 1e-10),
         reason: 're-export replaced, not duplicated');
+  });
+
+  // R11b 1.2: the exception path. write() THROWS after the delete window
+  // already removed the day's prior own sample — the same lost-sample
+  // invariant as seed 175, but through the catch, not the false path.
+  test('write THROWS after a successful delete: the lost sample is '
+      'rewritten once the candidate matches the old marker again',
+      () async {
+    final store = StatefulSpo2Store();
+    await pairRing('ring-1');
+    // fp F: two samples, mean 95.5.
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), hasLength(1));
+
+    // fp G: the correction moves the fingerprint; the write now THROWS
+    // (after the delete window already removed the F sample).
+    await putRows(DateTime(2026, 3, 9, 1), [90, 96], 'ring-1');
+    store.throwOnWrite.add('2026-03-09');
+    await runPass(store, interpretationVerified: true);
+    expect(store.samplesOf('2026-03-09'), isEmpty);
+
+    // Back to fp F (reverted correction): the matching marker must NOT
+    // classify the day unchanged — the store is empty.
+    await putRows(DateTime(2026, 3, 9, 1), [95, 96], 'ring-1');
+    store.throwOnWrite.clear();
+    final t0 = DateTime.now().millisecondsSinceEpoch;
+    await runPass(store,
+        interpretationVerified: true, nowMs: () => t0 + 25 * 3600000);
+    expect(store.samplesOf('2026-03-09'), hasLength(1),
+        reason: 'the invariant "marker => sample" must survive an '
+            'exception between delete and write');
+    expect(store.samplesOf('2026-03-09').single.$3, closeTo(95.5, 1e-10));
   });
 
   test('no legacy keys are ever written by the new pass', () async {
