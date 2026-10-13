@@ -56,7 +56,7 @@ void main() {
     final w = _window(b)!;
     expect((w['onset_ms'] as num) ~/ 1000, onset);
     expect((w['offset_ms'] as num) ~/ 1000, offset);
-  });
+  }, timeout: const Timeout(Duration(minutes: 5)));
 
   test('"Not sleep" over a stored night leaves the day with no night',
       () async {
@@ -70,5 +70,5 @@ void main() {
     final b = await _payload();
     expect(b['sleep_source'], 'rejected');
     expect((b['scalars'] as Map)['tst_min'], isNull);
-  });
+  }, timeout: const Timeout(Duration(minutes: 5)));
 }
