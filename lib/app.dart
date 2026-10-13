@@ -94,6 +94,10 @@ class _OpenStrapAppState extends State<OpenStrapApp> with WidgetsBindingObserver
       unawaited(app.maybeStopBreathingFromLiveActivity());
       app.refreshAppStatus(); // re-check OTA + admin banner on every foreground
       app.runCadenceChecks(); // evening wind-down / weekly recap nudges (best-effort)
+      // The user may have flipped the health-store permission in OS
+      // Settings while backgrounded. Drop any Oura-SpO2 failure backoff
+      // (throttled: a resume storm must not churn the cursor table).
+      unawaited(app.maybeResetOuraSpo2FailureState());
       // A Siri "start breathing" App Intent may have just foregrounded an
       // already-running process (openAppWhenRun doesn't guarantee a fresh
       // launch) — the constructor-time check alone would miss that case.

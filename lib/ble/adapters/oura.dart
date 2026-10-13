@@ -48,6 +48,7 @@ import '../../data/observation.dart'
 import '../../compute/vendor_sleep.dart' show VendorEpoch;
 import '_registry.dart';
 import 'adapter.dart';
+import 'oura_spo2.dart';
 import 'signals.dart';
 
 /// Encrypt one authentication challenge.
@@ -133,9 +134,13 @@ class OuraAdapter extends BandAdapter {
 
   /// NOTHING, and that is the honest answer today rather than a placeholder.
   ///
-  /// The ring emits beat-to-beat intervals and SpO2, and this adapter
-  /// decodes neither: their layouts are bit-packed and there is not one
-  /// captured byte of either to check a decoder against. A declared-but-absent
+  /// SpO2 is DECODED now (`kOuraEvtSpo2` → per-second `observation` rows under
+  /// the vendor's key), but a declared signal here would tell the metric layer
+  /// a SpO2 card can exist, and the reading's MEANING is still unverified on
+  /// hardware — `kOuraSpo2InterpretationVerified` is false, and the rows are
+  /// display-only vendor values until that flips. The beat intervals remain
+  /// undecoded entirely: their layout is bit-packed and there is not one
+  /// captured byte to check a decoder against. A declared-but-absent
   /// signal is WORSE than a missing one (see [BandAdapter.signals]) — it turns
   /// a card that should delete itself into one that is permanently empty — so
   /// nothing is claimed until a decoder exists and a real capture has met it.
@@ -187,6 +192,18 @@ class OuraAdapter extends BandAdapter {
   /// its own entry instead of counting the same event twice.
   final Map<(int ds, int tag, int header), List<OuraSleepPhase>> _heldStages =
       {};
+
+  /// SpO2 events waiting for an origin, keyed by the event that carried them
+  /// (so a re-read decisecond overwrites its own entry instead of counting
+  /// the same seconds twice — the same lifecycle as [_heldStages]). The
+  /// samples are kept PER SECOND with the second's own decisecond, not as a
+  /// batch mean: a BLE batch is a transport boundary, not a physiological
+  /// window, and one ring's night routinely spans several batches while one
+  /// batch can carry fragments of two nights. A per-second row is the only
+  /// shape that survives re-reads (the identity index collapses them), lets
+  /// a later summary aggregate any window honestly, and keeps the sample
+  /// count — the thing a batch mean silently destroys.
+  final List<(int ds, OuraSpo2Samples)> _heldSpo2 = [];
 
   /// The Unix second [ds] falls on, or null when no origin is known.
   int? _anchorUnixFor(int ds) {
@@ -459,6 +476,28 @@ class OuraAdapter extends BandAdapter {
           final hyp = decodeSleepPhases(e);
           if (hyp == null) break;
           _heldStages[(e.tsDs, e.tag, hyp.header)] = hyp.phases;
+        case kOuraEvtSpo2:
+          // One saturation per second. The decoder refuses the WHOLE event on
+          // an over-100 sample (a wrong layout, not a high reading — see
+          // `decodeOuraSpo2`), and a zero means "no measurement this second",
+          // kept here and dropped only at summary time so the gap stays
+          // visible in the row set rather than becoming a fabricated sample.
+          // The adapter floor (70) is applied HERE, at the same boundary the
+          // upstream adapter applies it, and not inside the decoder: the
+          // decoder's contract is layout honesty, the adapter's is reading
+          // plausibility.
+          //
+          // APPENDED IN DELIVERY ORDER, never keyed by (ds, tag): a run that
+          // continues across events (the `0xff` marker) has its seconds
+          // numbered AFTER the previous event's, and the stamping below
+          // walks that order. Keying by (ds, tag) would also let two
+          // SAME-stamped events overwrite each other's samples — a
+          // replacement that is only honest for a re-read of the SAME
+          // event, never for two events the ring actually sent.
+          final xs =
+              decodeOuraSpo2(OuraSpo2Event(e.tag, e.tsDs, e.body));
+          if (xs == null) break;
+          _heldSpo2.add((e.tsDs, xs));
       }
     }
     // Stamp everything an origin can now reach — this batch's readings and any
@@ -519,7 +558,64 @@ class OuraAdapter extends BandAdapter {
           attribution: 'Oura',
         ),
     ];
-    if (stageRows.isNotEmpty) yield VendorScalars(stageRows);
+    // SpO2 rows, one per measured second, stamped at that second's own
+    // decisecond-derived Unix second — the MEASUREMENT time, never the
+    // receive time. Same no-fallback rule as every other reading this
+    // adapter emits: without an origin there is no timestamp, and a value
+    // without one stays held (and dropped at the end of the drain) rather
+    // than guessed at. A zero sample ("no reading that second") is not
+    // stored — absent stays absent.
+    //
+    // `vendorKey: 'spo2'` and NOT `key: 'spo2'`: this is the RING's own
+    // number under the ring's own name, never our `spo2` metric — that key
+    // is the WHOOP import's series and a vendor row sharing it would render
+    // as ours and collide with a derived value on the same day.
+    final spo2Rows = <Observation>[];
+    if (a != null) {
+      // WITHIN ONE EVENT, the timing is the decompiled-app contract
+      // (open_oura `native-decoder.md`): N samples share one envelope
+      // stamp, the FIRST sample sits at `stamp - (n-1) * 1 s` and the
+      // samples step forward to the stamp — the stamp is the LAST
+      // sample's second. Rows are stamped BACKWARD from the envelope
+      // stamp accordingly.
+      //
+      // ACROSS EVENTS there is NO established contract: `0xff` says the
+      // run continues, not that the next event's samples are the
+      // immediately-following seconds. Stitching would invent a
+      // gapless series, so each event keeps its OWN envelope-derived
+      // seconds. Two events of one run may then claim the same second;
+      // the observation identity index collapses that pair the same way
+      // it collapses a re-read — the later write wins, and the raw
+      // frames stay in `raw_archive` for the day the continuation
+      // contract is established on real captures. That ambiguity is
+      // one of the reasons the whole export path stays behind
+      // `kOuraSpo2InterpretationVerified`.
+      for (final (ds, xs) in _heldSpo2) {
+        final lastMs = a.$2 * 1000 + (ds - a.$1) * 100;
+        final n = xs.values.length;
+        for (var i = 0; i < n; i++) {
+          final v = xs.values[i];
+          // 0 = "no measurement this second". NOT stored, NOT a sample.
+          // The EXCLUDED value shifts nothing: every kept sample keeps
+          // its own second (first at lastMs - (n-1-0)*1000), the gap
+          // stays where the ring left it.
+          if (v < kOuraSpo2AdapterFloor) continue;
+          spo2Rows.add(Observation(
+            at: DateTime.fromMillisecondsSinceEpoch(
+                lastMs - (n - 1 - i) * 1000),
+            sourceKind: ObservationSource.vendor,
+            vendorKey: 'spo2',
+            value: v,
+            unit: '%',
+            attribution: 'Oura',
+          ));
+        }
+      }
+      _heldSpo2.clear();
+    }
+    if (stageRows.isNotEmpty || spo2Rows.isNotEmpty) {
+      yield VendorScalars([...stageRows, ...spo2Rows]);
+    }
     // EVERY event frame is archived, including the ones just decoded and every
     // one that was not. Beat intervals, SpO2 and steps all live in here
     // undecoded, and that is the point: the bytes are banked now so a decoder

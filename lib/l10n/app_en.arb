@@ -12670,5 +12670,25 @@
   "tabWellness": "Wellness",
   "@tabHome": {
     "description": "Bottom tab bar labels (tabHome..tabWellness). Keep short; the five must read as different words."
+  },
+  "dayTimelineOuraSpo2Title": "Blood oxygen · Oura",
+  "@dayTimelineOuraSpo2Title": {
+    "description": "Timeline moment title for the Oura ring's own blood-oxygen summary of the day."
+  },
+  "dayTimelineOuraSpo2Detail": "{value}% over {count,plural, =1{1 measurement} other{{count} measurements}}",
+  "@dayTimelineOuraSpo2Detail": {
+    "description": "Timeline moment detail for the Oura blood-oxygen summary: the equal-weighted mean of every stored per-second sample, with the sample count so a short fragment cannot read as a night average.",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dayTimelineOuraSpo2Experimental": "experimental interpretation",
+  "@dayTimelineOuraSpo2Experimental": {
+    "description": "Timeline qualifier while the Oura SpO2 decode is unverified on hardware."
   }
 }

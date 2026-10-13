@@ -2454,5 +2454,25 @@
   "tabHealth": "健康",
   "tabNutrition": "营养",
   "tabWorkout": "锻炼",
-  "tabWellness": "身心"
+  "tabWellness": "身心",
+  "dayTimelineOuraSpo2Title": "血氧 · Oura",
+  "@dayTimelineOuraSpo2Title": {
+    "description": "Oura 戒指当日血氧摘要的时间线标题。"
+  },
+  "dayTimelineOuraSpo2Detail": "{value}%，共 {count,plural, =1{1 次测量} other{{count} 次测量}}",
+  "@dayTimelineOuraSpo2Detail": {
+    "description": "时间线详情：所有已存储的每秒样本的等权重平均值，附样本数。",
+    "placeholders": {
+      "value": {
+        "type": "String"
+      },
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dayTimelineOuraSpo2Experimental": "实验性解读",
+  "@dayTimelineOuraSpo2Experimental": {
+    "description": "在 Oura 血氧解码未经验证硬件期间显示的限定语。"
+  }
 }

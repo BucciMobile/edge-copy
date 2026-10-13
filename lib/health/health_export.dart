@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../ble/adapters/oura_spo2.dart';
 import '../data/day_label.dart';
 import '../data/db.dart';
 import '../data/series_codec.dart';
@@ -33,6 +34,30 @@ import 'health_heart_rate_batch.dart';
 import 'health_sleep_session.dart';
 
 /// What we can do with the health store right now.
+/// The outcome of one day's Oura-SpO2 export attempt. Logically distinct
+/// states, never collapsed: `notEligible` is the gate holding (no data was
+/// refused — nothing was owed), `noData` is a day the ring has no rows for,
+/// and only the last three are failures a retry should revisit.
+enum OuraSpo2ExportResult {
+  /// The eligibility gate held — unverified interpretation, device not
+  /// selected, integration off, or unsuitable time reference. NOTHING was
+  /// written and nothing is owed.
+  notEligible,
+
+  /// No suitable rows for this day. Not a failure.
+  noData,
+
+  /// The delete-before-write did not clear the window (store hung, or a
+  /// genuine delete failure). Retried on the next pass.
+  deleteFailed,
+
+  /// The write call failed or was refused. Retried on the next pass.
+  writeFailed,
+
+  /// Written.
+  written,
+}
+
 enum HealthLinkState {
   unknown,
   ready, // permission granted, can write
@@ -347,6 +372,218 @@ String? healthExportCursorBefore(String cursor, String date) {
   return dayLabelOf(DateTime(d.year, d.month, d.day - 1));
 }
 
+/// The EXPORT METHOD version, part of the change fingerprint: bump when
+/// WHAT this export writes changes shape (unit, interval semantics,
+/// aggregation), so every stored fingerprint compares unequal and every
+/// day re-exports once after a method change.
+const String kOuraSpo2ExportMethod = 'v1';
+
+/// A stable FINGERPRINT of the export candidate — the change detection
+/// this path runs on. It covers everything the exported sample IS:
+/// source device, aggregate value, sample count, measured interval and
+/// the export method version. MAX(ts_ms)+COUNT(*) alone CANNOT detect a
+/// value correction at the same second, an owner change without a newer
+/// stamp, or an aggregation/method change; this fingerprint can.
+@visibleForTesting
+String ouraSpo2CandidateFingerprint(OuraSpo2Candidate c) =>
+    // The mean at full double precision — a corrected sample at the same
+    // timestamps moves the mean and therefore the fingerprint.
+    '$kOuraSpo2ExportMethod|${c.deviceId}|'
+    '${c.meanPercent.toStringAsPrecision(17)}|'
+    '${c.count}|${c.firstTsMs}|${c.lastTsMs}';
+
+/// HealthKit's percent unit is a FRACTION (0.0-1.0): 0.97 is 97%.
+/// Health Connect's OxygenSaturationRecord.percentage is 0-100. The
+/// internal model of this app is always PERCENT; only the plugin call
+/// converts. Returns null for anything that is not a valid percentage.
+///
+/// Evidence (health 12.2.1, the pubspec.lock-pinned version, read from
+/// the pub cache): the iOS writer builds
+/// `HKQuantity(unit: unitDict[unit]!, doubleValue: value)` with
+/// `unitDict[PERCENT] = HKUnit.percent()` (SwiftHealthPlugin.swift:453,
+/// :1391) and NO scaling — and Apple's HKUnit.percent() measures
+/// 0.0-1.0, so writing 97.0 through it stores 9700%. The iOS reader
+/// returns `sample.quantity.doubleValue(for: unit ...)` (line ~900) —
+/// the same fraction on the way back. The Android writer wraps the
+/// value in `Percentage(value)` for OxygenSaturationRecord
+/// (HealthPlugin.kt:1821), which IS 0-100. Hence: divide by 100 on
+/// Apple, pass through on Android.
+@visibleForTesting
+double? ouraSpo2HealthStoreValue(double percent, {required bool apple}) {
+  if (!percent.isFinite || percent <= 0 || percent > 100) return null;
+  return apple ? percent / 100.0 : percent;
+}
+
+/// The exact arguments of the plugin write — testable without a device.
+/// Null means "do not write": an out-of-range value never reaches the
+/// plugin through this path.
+@visibleForTesting
+({
+  double value,
+  HealthDataType type,
+  HealthDataUnit unit,
+  DateTime start,
+  DateTime end,
+})? ouraSpo2PluginWrite(
+  double percent,
+  DateTime start,
+  DateTime end, {
+  required bool apple,
+}) {
+  final v = ouraSpo2HealthStoreValue(percent, apple: apple);
+  if (v == null) return null;
+  return (
+    value: v,
+    type: HealthDataType.BLOOD_OXYGEN,
+    unit: HealthDataUnit.PERCENT,
+    start: start,
+    end: end,
+  );
+}
+
+/// One dirty day's outcome in the export pass.
+enum OuraSpo2DayOutcome {
+  /// Candidate exported (or re-exported after a change).
+  exported,
+
+  /// Fingerprint matches the done marker: nothing to write, no store
+  /// contact — the pass just clears the dirty marker.
+  unchanged,
+
+  /// The candidate vanished since the last export; this day's own prior
+  /// sample was removed and the done marker dropped.
+  cleanedUp,
+
+  /// No candidate and no prior export — nothing to do.
+  nothingToDo,
+
+  /// The interpretation gate is closed: the pass ENDS, every dirty day
+  /// stays dirty, the later release finds them all.
+  gateClosed,
+
+  /// A store failure (delete or write refused/timed out): the day keeps
+  /// its dirty marker and takes a retry backoff.
+  failed,
+}
+
+/// Whether the GLOBAL failure backoff still holds the pass back.
+/// The first stop (attempts <= 1) holds nothing: the flat day counters
+/// carry the pacing. From the second stop the hold grows by 5 minutes
+/// per attempt, capped at an hour. A clock that went backwards
+/// (elapsed < 0) never holds — the same rule as the day backoff.
+@visibleForTesting
+bool ouraSpo2GlobalHold({
+  required int attempts,
+  required int lastMs,
+  required int nowMs,
+}) {
+  if (attempts <= 1) return false;
+  final minutes = (5 * (attempts - 1)).clamp(0, 60);
+  final elapsed = nowMs - lastMs;
+  return elapsed >= 0 && elapsed < minutes * 60000;
+}
+
+/// Whether a day's retry backoff has elapsed. Exponential from 5 minutes
+/// (5, 10, 20 ...), with the doubling clamped at 2^8 — so the backoff
+/// tops out at 5 * 256 = 1280 minutes (~21.3 h), and a clock that went
+/// backwards counts as due — a device reboot must not strand a day
+/// behind phantom backoff.
+@visibleForTesting
+bool ouraSpo2RetryDue({
+  required int attempts,
+  required int lastAttemptMs,
+  required int nowMs,
+}) {
+  if (attempts <= 0 || nowMs < lastAttemptMs) return true;
+  final minutes = (5 * (1 << (attempts - 1).clamp(0, 8))).clamp(5, 1440);
+  return nowMs - lastAttemptMs >= minutes * 60000;
+}
+
+/// One pass over the DIRTY SET — the whole export model. Every change
+/// that can affect a day's export marks the day dirty AT ITS WRITE POINT
+/// (`LocalDb.markOuraSpo2Dirty*`); this pass works only that set, newest
+/// first, bounded. Per day: retry-due check, process, then
+/// Whether an outcome TOUCHED the health store — the only outcomes that
+/// prove the store works: they may reset the failure streak and clear
+/// the global fail marker. `unchanged` and `nothingToDo` made no
+/// contact and may do neither.
+@visibleForTesting
+bool ouraSpo2OutcomeTouchedStore(OuraSpo2DayOutcome o) =>
+    o == OuraSpo2DayOutcome.exported || o == OuraSpo2DayOutcome.cleanedUp;
+
+/// One pass over the DIRTY SET — the whole export model. Every change
+/// that can affect a day's export marks the day dirty AT ITS WRITE POINT
+/// (`LocalDb.markOuraSpo2Dirty*`); this pass works only that set, newest
+/// first, bounded. Per day: retry-due check, process, then
+/// compare-and-clear — a day that changed DURING the pass keeps its
+/// (newer) marker for the next one.
+///
+/// Gate closed ends the pass with EVERY day still dirty (the release
+/// drains them later). A failing day takes a retry backoff and the pass
+/// MOVES ON; three consecutive failures end the pass — that pattern
+/// points at a global cause (permission denied, store hung), not at the
+/// days themselves.
+@visibleForTesting
+Future<void> runOuraSpo2DirtyPass({
+  required Future<List<({String date, String token})>> Function()
+      dirtyDays,
+  required Future<bool> Function(String date) retryDue,
+  required Future<OuraSpo2DayOutcome> Function(String date) processDay,
+  required Future<void> Function(String date, String token) clearDirty,
+  required Future<void> Function(List<String> dates, {required bool flat})
+      noteDayFailures,
+  required Future<void> Function(String date) noteStoreSuccess,
+  required Future<void> Function(String date) noteNoContact,
+  required Future<void> Function(int count) noteGlobalFailure,
+  int maxDays = 30,
+  int maxConsecutiveFailures = 3,
+}) async {
+  var handled = 0;
+  var streak = 0;
+  final failedDays = <String>[];
+  for (final d in await dirtyDays()) {
+    if (handled >= maxDays) break;
+    if (!await retryDue(d.date)) continue;
+    handled++;
+    final outcome = await processDay(d.date);
+    if (outcome == OuraSpo2DayOutcome.gateClosed) {
+      return; // keep ALL dirty days for the release
+    }
+    if (outcome == OuraSpo2DayOutcome.failed) {
+      failedDays.add(d.date);
+      if (++streak >= maxConsecutiveFailures) {
+        // Suspected GLOBAL cause. The day counters are STILL written —
+        // but FLAT (attempts stays 1, a 5-minute backoff): without
+        // them, the same newest days would be retry-due again at
+        // attempts 0 in the very next pass, fail again, and the
+        // consecutive stop would permanently starve every older healthy
+        // day behind them. Flat counters let the older days advance on
+        // the next pass and re-try the broken days within 5 minutes
+        // once the cause is fixed.
+        await noteDayFailures(failedDays, flat: true);
+        await noteGlobalFailure(failedDays.length);
+        return;
+      }
+      continue;
+    }
+    // Only outcomes that TOUCHED the store prove the store works: they
+    // reset the failure streak and clear the global marker. An
+    // unchanged or nothingToDo day made no contact and must neither
+    // reset the streak nor clear the global state.
+    if (ouraSpo2OutcomeTouchedStore(outcome)) {
+      streak = 0;
+      await noteStoreSuccess(d.date);
+    } else {
+      await noteNoContact(d.date);
+    }
+    await clearDirty(d.date, d.token);
+  }
+  // No global stop: the collected failures were the days' own — real
+  // (escalating) day backoffs.
+  if (failedDays.isNotEmpty) await noteDayFailures(failedDays, flat: false);
+}
+
+
 class HealthExportSingleFlight {
   Future<int>? _inFlight;
 
@@ -518,6 +755,13 @@ class HealthExporter {
 
   List<HealthDataType> get _types => [
     HealthDataType.RESTING_HEART_RATE,
+    // The Oura ring's own SpO2 day summary (one sample per day, behind the
+    // eligibility gate — see exportOuraSpo2Day). Requested for WRITE SCOPE
+    // only; deliberately NOT in the delete-then-write loop (_rewriteTypes),
+    // which is owned by the derived metrics: its per-day window and success
+    // accounting belong to the main export, and this type clears its own
+    // measured span inside exportOuraSpo2Day.
+    HealthDataType.BLOOD_OXYGEN,
     _hrvType,
     HealthDataType.RESPIRATORY_RATE,
     HealthDataType.HEART_RATE,
@@ -1087,6 +1331,7 @@ class HealthExporter {
         debugPrint(
           '[health] exported $done day(s); finalized-cursor=$newCursor',
         );
+        await _exportOuraSpo2Pass();
         return done;
       };
 
@@ -1456,6 +1701,271 @@ class HealthExporter {
       }
     }
     return success;
+  }
+
+  /// Export one day's ATOMIC candidate (device + value + interval from
+  /// ONE query — see [LocalDb.ouraSpo2DayCandidate]). The candidate is
+  /// suitable by construction (still-paired Oura ring, its own rows);
+  /// `interpretationVerified` is the ONLY remaining gate and stays the
+  /// compile-time release constant.
+  ///
+  /// [deleteWindow] clears THIS DAY's own prior sample before the write,
+  /// independent of where the new interval sits — a shrunk, shifted or
+  /// re-owned candidate must not leave the old sample behind. The
+  /// platform API removes only OUR samples; foreign data is untouchable.
+  static Future<OuraSpo2ExportResult> exportOuraSpo2Day({
+    required OuraSpo2Candidate candidate,
+    required Future<bool> Function(double value, DateTime start, DateTime end)
+        write,
+    required Future<bool> Function(DateTime start, DateTime end) deleteWindow,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+  }) async {
+    final eligible = eligibleOuraSpo2Percent(
+      value: candidate.meanPercent,
+      unit: '%',
+      deviceSelected: true,
+      integrationEnabled: true,
+      interpretationVerified: interpretationVerified,
+      timeReferenceSuitable: true,
+    );
+    if (eligible == null) return OuraSpo2ExportResult.notEligible;
+    // THE SAMPLE IS THE MEASURED INTERVAL, not a point at its first
+    // second: a day's equal-weighted mean over [first .. last] measured
+    // seconds is an AGGREGATE, and HealthKit models that as
+    // startTime..endTime. Writing it at startTime == endTime would be a
+    // point-sample claim — a measurement at one instant the ring never
+    // made at that instant alone.
+    final start = DateTime.fromMillisecondsSinceEpoch(candidate.firstTsMs);
+    final end = DateTime.fromMillisecondsSinceEpoch(candidate.lastTsMs);
+    // Day-window clear FIRST — see the doc: the prior sample of this day
+    // goes wherever the previous candidate put it, and only a
+    // day-relative clear can replace a MOVED interval.
+    if (!await deleteWindow(start, end)) {
+      return OuraSpo2ExportResult.deleteFailed;
+    }
+    return await write(candidate.meanPercent, start, end)
+        ? OuraSpo2ExportResult.written
+        : OuraSpo2ExportResult.writeFailed;
+  }
+
+  /// The health-store seam the pass goes through — production wires the
+  /// real plugin, the integration test wires a stateful double. Nothing
+  /// else differs: the dirty set, the candidate, the gate, the retry
+  /// backoff and the compare-and-clear are the production code below.
+  /// [nowMs] is the clock seam for the retry-backoff tests.
+  @visibleForTesting
+  Future<void> debugRunSpo2Pass({
+    Future<bool> Function(double value, DateTime start, DateTime end)?
+        write,
+    Future<bool> Function(DateTime start, DateTime end)? deleteWindow,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+    int Function()? nowMs,
+  }) async {
+    try {
+      await _exportOuraSpo2Pass(
+        writeOverride: write,
+        deleteWindowOverride: deleteWindow,
+        interpretationVerified: interpretationVerified,
+        nowMs: nowMs,
+      );
+    } catch (e) {
+      debugPrint('[health] oura spo2 pass: $e');
+    }
+  }
+
+  /// One production pass over the Oura-SpO2 DIRTY SET. Never throws.
+  Future<void> _exportOuraSpo2Pass({
+    Future<bool> Function(double value, DateTime start, DateTime end)?
+        writeOverride,
+    Future<bool> Function(DateTime start, DateTime end)? deleteWindowOverride,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+    int Function()? nowMs,
+  }) async {
+    try {
+      await LocalDb.ensureOuraSpo2DirtyBootstrap(kOuraSpo2ExportMethod);
+      final clock =
+          nowMs ?? () => DateTime.now().millisecondsSinceEpoch;
+      // THE GLOBAL GATE: a consecutive-failure stop may hold the pass —
+      // see `ouraSpo2GlobalHold` for the full reasoning (first stop
+      // holds nothing, growth capped at an hour, backwards clock never
+      // holds). The marker is cleared on the first store success, the
+      // health-sync toggle, a permission change or an explicit user sync.
+      final g = await LocalDb.ouraSpo2GlobalFail();
+      if (ouraSpo2GlobalHold(
+          attempts: g.attempts, lastMs: g.lastMs, nowMs: clock())) {
+        debugPrint('[health] oura spo2 pass: global backoff holds');
+        return;
+      }
+      await runOuraSpo2DirtyPass(
+        // Over-fetch: days in retry backoff must not starve the rest.
+        dirtyDays: () => LocalDb.ouraSpo2DirtyDays(limit: 60),
+        retryDue: (d) async {
+          final r = await LocalDb.ouraSpo2Retry(d);
+          return ouraSpo2RetryDue(
+            attempts: r.attempts,
+            lastAttemptMs: r.lastMs,
+            nowMs: clock(),
+          );
+        },
+        processDay: (d) => _processOuraSpo2Day(
+          d,
+          writeOverride: writeOverride,
+          deleteWindowOverride: deleteWindowOverride,
+          interpretationVerified: interpretationVerified,
+        ),
+        clearDirty: LocalDb.clearOuraSpo2DirtyIfUnchanged,
+        noteDayFailures: (dates, {required bool flat}) async {
+          for (final d in dates) {
+            final r = await LocalDb.ouraSpo2Retry(d);
+            // FLAT on a global stop means "do not grow", NOT "reset":
+            // a day with a real (day-scoped) escalation keeps it —
+            // otherwise it would be retried every 5 minutes forever.
+            // Never below 1 (a 5-minute backoff) so a fresh failure
+            // still paces the next pass; real growth only without the
+            // global stop.
+            final attempts =
+                flat ? (r.attempts > 1 ? r.attempts : 1) : r.attempts + 1;
+            await LocalDb.setCursor(
+              '$kOuraSpo2RetryPrefix$d',
+              '$attempts|${clock()}',
+            );
+          }
+        },
+        noteStoreSuccess: (d) async {
+          // A STORE-TOUCHING success clears the global fail state —
+          // the cause was not global after all (or just got fixed).
+          await LocalDb.deleteCursor('health_oura_spo2_global_fail');
+          await LocalDb.deleteCursor('$kOuraSpo2RetryPrefix$d');
+        },
+        noteNoContact: (d) =>
+            LocalDb.deleteCursor('$kOuraSpo2RetryPrefix$d'),
+        noteGlobalFailure: (count) async {
+          // One marker with its own small backoff; the day counters were
+          // already written FLAT. Attempts escalate, the pass's global
+          // gate below reads the marker.
+          final prev = await LocalDb.ouraSpo2GlobalFail();
+          await LocalDb.setCursor(
+            'health_oura_spo2_global_fail',
+            '${prev.attempts + 1}|${clock()}',
+          );
+          debugPrint('[health] oura spo2 global failure x$count '
+              '(attempt ${prev.attempts + 1})');
+        },
+      );
+    } catch (e) {
+      debugPrint('[health] oura spo2 pass: $e');
+    }
+  }
+
+  /// One dirty day: candidate, gate, fingerprint compare, cleanup.
+  Future<OuraSpo2DayOutcome> _processOuraSpo2Day(
+    String date, {
+    Future<bool> Function(double, DateTime, DateTime)? writeOverride,
+    Future<bool> Function(DateTime, DateTime)? deleteWindowOverride,
+    bool interpretationVerified = kOuraSpo2InterpretationVerified,
+  }) async {
+    try {
+      final dayStart = DateTime.tryParse('${date}T00:00:00');
+      if (dayStart == null) return OuraSpo2DayOutcome.nothingToDo;
+      final dayEnd =
+          DateTime(dayStart.year, dayStart.month, dayStart.day + 1);
+      final clear = deleteWindowOverride ??
+          (s, e) =>
+              _deleteOwnSamples(HealthDataType.BLOOD_OXYGEN, s, e);
+      final doneKey = '$kOuraSpo2DonePrefix$date';
+      final inflightKey = '$kOuraSpo2InflightPrefix$date';
+      final done = await LocalDb.getCursor(doneKey);
+      // An interrupted export (exception, killed process, uncertain
+      // result) leaves the in-flight marker behind: the done marker is
+      // then NOT proof the store holds the sample. See
+      // [kOuraSpo2InflightPrefix].
+      final inflight = await LocalDb.getCursor(inflightKey);
+      final mayHoldSample = done != null || inflight != null;
+      // ONE ATOMIC CANDIDATE: device, eligibility and value out of the
+      // same query — the gate can never approve ring B's eligibility
+      // while ring A's value is written. A forgotten ring does not rank.
+      final candidate = await LocalDb.ouraSpo2DayCandidate(date);
+
+      if (candidate == null) {
+        // No candidate: a prior export of this day is stale and goes;
+        // a day that never exported has nothing to do.
+        if (!mayHoldSample) return OuraSpo2DayOutcome.nothingToDo;
+        if (!await clear(dayStart, dayEnd)) {
+          return OuraSpo2DayOutcome.failed;
+        }
+        await LocalDb.deleteCursor(doneKey);
+        await LocalDb.deleteCursor(inflightKey);
+        return OuraSpo2DayOutcome.cleanedUp;
+      }
+      // Gate closed ENDS the pass (the caller stops; every dirty day
+      // stays dirty). Checked AFTER the vanished-cleanup branch: a
+      // stale export must not outlive its source just because the gate
+      // is closed for new writes.
+      if (!interpretationVerified) return OuraSpo2DayOutcome.gateClosed;
+      final fp = ouraSpo2CandidateFingerprint(candidate);
+      // Only an UNINTERRUPTED marker match means unchanged: a leftover
+      // in-flight marker invalidates the claim the store still matches.
+      if (inflight == null && done == fp) {
+        return OuraSpo2DayOutcome.unchanged;
+      }
+
+      // THE PLUGIN BOUNDARY: the app's model is PERCENT, HealthKit's
+      // percent unit is a FRACTION — see `ouraSpo2PluginWrite` for the
+      // pinned-plugin evidence. writeOverride stays on the PERCENT
+      // level (the store doubles assert percent semantics).
+      final write = writeOverride ??
+          (percent, s, e) {
+            final w = ouraSpo2PluginWrite(percent, s, e, apple: isApple);
+            if (w == null) return Future.value(false);
+            return _health.writeHealthData(
+              value: w.value,
+              type: w.type,
+              unit: w.unit,
+              startTime: w.start,
+              endTime: w.end,
+            );
+          };
+      // INTENT LOG, before the FIRST store contact: if this export is
+      // interrupted by an exception between the delete and the write,
+      // the leftover marker is what keeps the done marker from
+      // masquerading as sample proof later.
+      await LocalDb.setCursor(inflightKey, fp);
+      final r = await exportOuraSpo2Day(
+        candidate: candidate,
+        write: write,
+        // THE DELETE WINDOW IS THE CANDIDATE'S OWN LOCAL DAY: this
+        // export writes exactly ONE sample per day-candidate, and a
+        // re-export must remove THIS DAY's prior sample wherever the
+        // candidate's interval has since MOVED. Only OUR samples are
+        // ever touched; foreign data is untouchable by the platform API.
+        deleteWindow: (start, end) => clear(dayStart, dayEnd),
+        interpretationVerified: interpretationVerified,
+      );
+      if (r == OuraSpo2ExportResult.written) {
+        await LocalDb.setCursor(doneKey, fp);
+        await LocalDb.deleteCursor(inflightKey);
+        return OuraSpo2DayOutcome.exported;
+      }
+      if (r == OuraSpo2ExportResult.writeFailed) {
+        // The delete window ALREADY removed this day's prior own sample;
+        // the refused write left NOTHING in the store. A done marker is a
+        // claim "the store holds this sample" — keeping the old marker
+        // would later classify a matching fingerprint as `unchanged` and
+        // never rewrite the lost sample (the seed-175 model finding).
+        await LocalDb.deleteCursor(doneKey);
+        // The in-flight marker STAYS: the store state is uncertain until
+        // a later pass resolves the day (the refused write may have been
+        // a late partial success on the platform side).
+      }
+      // deleteFailed: the old sample may still be in the store; the
+      // in-flight marker stays (uncertain state) — a later pass resolves.
+      return r == OuraSpo2ExportResult.notEligible
+          ? OuraSpo2DayOutcome.gateClosed
+          : OuraSpo2DayOutcome.failed;
+    } catch (e) {
+      debugPrint('[health] oura spo2 day $date: $e');
+      return OuraSpo2DayOutcome.failed;
+    }
   }
 
   /// The actual `writeWorkoutData` call, shared by [_exportDay]'s per-day loop
