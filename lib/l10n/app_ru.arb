@@ -7506,5 +7506,13 @@
       }
     }
   },
-  "healthWellbeingAllSub": "Дыхание, настроение, дневник, привычки и лекарства"
+  "healthWellbeingAllSub": "Дыхание, настроение, дневник, привычки и лекарства",
+  "reportIdCopied": "Скопировано: {id}",
+  "@reportIdCopied": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  }
 }
