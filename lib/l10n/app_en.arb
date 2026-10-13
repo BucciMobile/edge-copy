@@ -15730,6 +15730,23 @@
   "@reportStageSharing": {
     "description": "Report screen: progress text inside the busy button."
   },
+  "homeRecoveryStartsIn": "{count, plural, =1{Recovery starts in 1 night} other{Recovery starts in {count} nights}}",
+  "@homeRecoveryStartsIn": {
+    "description": "First weeks card step: live countdown until recovery can first be scored. count is the number of nights still needed.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "healthWellbeingAllSub": "Breathing, mood, the journal, habits and medication",
+  "@healthWellbeingAllSub": {
+    "description": "Health tab: subtitle of the single door into the wellness screen (mind, habits, medication, cycle tabs)."
+  },
+  "healthWellbeingAllSubCycle": "Breathing, mood, the journal, habits, medication and cycle",
+  "@healthWellbeingAllSubCycle": {
+    "description": "Health tab: subtitle of the wellness door when cycle tracking is on (the Cycle tab is shown)."
+  },
   "reportIdCopied": "Copied {id}",
   "@reportIdCopied": {
     "description": "Snackbar after copying the ticket ID on the report screen.",

@@ -332,7 +332,10 @@ void main() {
         // its day, so the accepted-nap output (naps, nap_min, sleep periods)
         // is pinned and not just the pending proposal.
         final store = ActivityStore(await LocalDb.instance);
-        final nap = (await store.pending())
+        // Listed as of the fixture's own week (unanswered suggestions leave
+        // the list a week after they end).
+        final nap = (await store.pending(
+                nowTs: truth.last.day.millisecondsSinceEpoch ~/ 1000 + 86400))
             .singleWhere((s) => s.kind == ActivityKind.nap);
         await store.confirm(nap, startTs: nap.startTs, endTs: nap.endTs);
         await DerivationEngine()

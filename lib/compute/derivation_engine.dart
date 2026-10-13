@@ -35,6 +35,7 @@ import 'readiness_calibration_backfill.dart'
 import 'package:crypto/crypto.dart' show sha1;
 import 'package:flutter/foundation.dart';
 import 'findings.dart';
+import 'nap_overlap_cleanup.dart';
 import 'nap_edits.dart';
 import 'package:openstrap_analytics/onehz.dart' as ana;
 import '../data/live_coverage_policy.dart' show CoverageSpan;
@@ -1798,7 +1799,18 @@ import 'vendor_sleep.dart';
 // 110 → 111 (#315): new scalar `sdnn_window`, the mean of 5-min-window SDNNs over the sleep NN (windows under 21 beats left out); the Apple Health HRV SDNN sample now carries it instead of the drift-inflated whole-night `sdnn`, which is unchanged. Edge-only.
 // (no bump) The multi-device wearable paths (`compute/inputs/`, the partial readiness composite, wearable worn-minutes and skin-temp cadence, ring nights) only run for a wearable whose developer flag is on and which is the active wearable; flags default off and a flag-off device contributes nothing. WHOOP output is unchanged, pinned by test/whoop_freeze_golden_test.dart against goldens generated from main.
 // 111 → 112 (recovery calibration): analytics main @ 77fe373 (#95). Readiness merges HRV and RHR into one autonomic input (mean of their oriented z's, weight 0.70) and maps the composite z through the user's own spread once 14 prior nights exist: score = logistic(0.65·(z − ĉ)/σ̂), σ̂ = MAD×1.4826 of the trailing `readiness_z` series floored at 0.3, ĉ = its median capped to ±0.5 (re-centring; calibrating before 14 nights). The per-day composite z is stored as `readiness_z`; `readiness_calibration_backfill.dart` rebuilds it from stored drivers and re-scores days whose raw is pruned. readiness_lnrmssd's z/SWC/band use the prior window's median + MAD.
-const int kAlgoVersion = 112;
+// 112 → 113 (contributed-data study, edge-only): day strain is floored at the
+// strain of a finished, non-private session that day; a main sleep under 3 h
+// yields no resting HR (absent with the reason) and so no RHR readiness input
+// or `rhr` baseline entry; a day with no night of its own prices strain and
+// energy on the median of prior nightly RHR (3+ nights, typed RHR first); an
+// HR-led fallback window under 3 h or starting 10:00-19:00 local is not the
+// main sleep (day sleepers exempt); WHOOP 5 nights get `skin_temp_dev_c` (°C
+// against the median of prior nightly means, 14+ nights); WHOOP 4 nights
+// store `skin_temp_ambient_r` and the illness watch leaves out WHOOP 4 nights
+// whose skin temp tracks ambient (|r| >= 0.8, or unmeasured). One-shot,
+// raw-free: days derived before v106 drop naps overlapping the next night.
+const int kAlgoVersion = 113;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
@@ -3067,6 +3079,26 @@ class DerivationEngine {
           await _refreshBaselines();
         } catch (e) {
           _log('[derive] baseline refresh after the quiet_hrr seed failed: $e');
+        }
+      }
+      // Archived records today's decoder can read (old-firmware v12), back
+      // into the decoded store ahead of the scope, so this pass derives the
+      // days they fill. One-shot and foreground-only: it can be a million
+      // frames, which a short background budget should not take on.
+      if ((heavy || force) && !background) {
+        _diag['stage'] = 'archive_redrive';
+        try {
+          final n = await LocalDb.redriveArchiveOnce();
+          if (n > 0) _log('[derive] archive redrive: $n second(s) recovered');
+        } catch (e) {
+          _log('[derive] archive redrive failed (will retry): $e');
+        }
+        // Raw-free: old days that booked tonight's sleep as a nap.
+        try {
+          final n = await cleanNextNightNapsOnce();
+          if (n > 0) _log('[derive] nap cleanup: $n day(s)');
+        } catch (e) {
+          _log('[derive] nap cleanup failed (will retry): $e');
         }
       }
       _diag['stage'] = 'scope';
@@ -5524,6 +5556,17 @@ class DerivationEngine {
         await reviewDb.transaction((tx) => ActivityStore.preserveLegacyNaps(tx, day.date,
           Map<String, dynamic>.from(jsonDecode(previousDay['payload_json'] as String) as Map)));
       }
+      // WHOOP 4 ambient check: how closely the night's skin temp moves with
+      // the band's ambient channel. Read here (the isolate has no DB) and
+      // stored, so the illness watch can leave ambient-driven nights out.
+      if (scMap != null &&
+          scMap['skin_temp_z'] != null &&
+          (daySub.deviceFamily == null || daySub.deviceFamily == 'gen4') &&
+          day.sleepOffsetSec > day.sleepOnsetSec) {
+        scMap['skin_temp_ambient_r'] = skinTempAmbientR(
+            await LocalDb.skinTempAmbientMinutes(
+                day.sleepOnsetSec, day.sleepOffsetSec));
+      }
       final napEdits = await ActivityStore.napEdits(reviewDb, day.date);
       final blocksInput = _DayBlocksInput(
         daySub: daySub,
@@ -5541,6 +5584,12 @@ class DerivationEngine {
         // had already refused to publish. `rhr_nocturnal` is null unless a
         // sleep session was detected — exactly the gate readiness uses.
         rhr: (scMap?['rhr_nocturnal'] as num?)?.toDouble(),
+        // Same fallback, same order as the pure half: the typed value wins,
+        // so this is only set when there is none.
+        rhrFallback: profile.restingHrManual != null
+            ? null
+            : rhrFallbackFromHistory(history.valuesBefore('rhr', day.date,
+                family: _baselineFamily('rhr', daySub.deviceFamily))),
         maxHrUsed: (bundle['max_hr_used'] as num?)?.round(),
         liveStepsReal: liveSteps.total,
         liveStepsFromStrap: liveSteps.strap,
@@ -5651,6 +5700,21 @@ class DerivationEngine {
           strainEnv['note'] =
               blocks.wake['strain_absent'] ?? kUnknownAbsenceNote;
         }
+      }
+      // A session floor raised the scalar above the HR-only envelope: the
+      // envelope carries the same number and says why. `series.strain_curve`
+      // stays the HR build-up through the day.
+      final strainEnv = (bundle['clinical'] as Map?)?['strain'];
+      final scStrain = scMap?['strain'];
+      if (strainEnv is Map &&
+          scStrain is num &&
+          strainEnv['value'] is num &&
+          scStrain > (strainEnv['value'] as num)) {
+        final hrStrain = (strainEnv['value'] as num).toDouble();
+        strainEnv['value'] = scStrain;
+        strainEnv['note'] = 'the day\'s headline strain, which a workout '
+            'logged this day can raise (heart-rate strain '
+            '${hrStrain.toStringAsFixed(1)})';
       }
       // Method, family and class on each envelope of a wearable's day
       // (inputs/canonical.dart). A band's day is untouched.
@@ -6766,6 +6830,10 @@ class DerivationEngine {
       'readiness': col('readiness') ?? sc('readiness'),
       'resp_rate': sc('resp_rate'),
       'skin_temp_z': sc('skin_temp_z'),
+      // Only the refusal is written: an eligible night reads as before.
+      if (!skinTempIllnessEligible(
+          payload['device_family'] as String?, sc('skin_temp_ambient_r')))
+        'skin_temp_illness_ok': false,
       'trimp': sc('trimp'),
       // Headline 0–21 strain, daily steps, nap minutes — feed Sleep/Strain Coach
       // + VO₂max/Fitness Age in the cross-day rollup.
@@ -7319,6 +7387,12 @@ class DerivationEngine {
         wake['calories_session_credit'] = credited;
       }
     }
+    // A day can't have less strain than a workout inside it. The two are
+    // priced on different windows and baselines, and a logged strain-8 run
+    // under a strain-3 day reads as a bug. Only a scored day is floored; an
+    // abstaining one stays absent.
+    wake['strain'] =
+        strainFlooredAtSessions((wake['strain'] as num?)?.toDouble(), sessions);
     _applyWakeDayFeatures(bundle, scalars, wake);
     _stepsAndEnergy(
       bundle,
@@ -7344,6 +7418,24 @@ class DerivationEngine {
     final measuredSteps = scalars['steps'];
     if (measuredSteps != null) wake['steps'] = measuredSteps;
     return wake;
+  }
+
+  /// [strain], raised to the highest strain of a finished, non-private
+  /// session in [sessions]. Null stays null.
+  @visibleForTesting
+  static double? strainFlooredAtSessions(
+    double? strain,
+    List<Map<String, dynamic>> sessions,
+  ) {
+    if (strain == null) return null;
+    var best = strain;
+    for (final s in sessions) {
+      if (s['status'] != 'done') continue;
+      if ((s['private'] as num?)?.toInt() == 1) continue;
+      final v = (s['strain'] as num?)?.toDouble();
+      if (v != null && v.isFinite && v > best) best = v;
+    }
+    return best;
   }
 
   static void _applyWakeDayFeatures(
@@ -9419,7 +9511,7 @@ class DerivationEngine {
       // NOT `inp.dayEndSec` — that is the data edge. See `applyDayActivity`.
       dayCalendarEndSec: localNextMidnightSecForDayLabel(inp.date),
       dataNowSec: inp.dataNowSec,
-      restingHr: inp.rhr,
+      restingHr: inp.rhr ?? inp.rhrFallback,
       dynFloorG: inp.dynFloorG,
       liveStepsReal: inp.liveStepsReal,
       liveStepsFromStrap: inp.liveStepsFromStrap,
@@ -10141,6 +10233,11 @@ class _DayBlocksInput {
   /// sleep session was detected. NOT `scalars.rhr`, which is allowed to fall
   /// back to daytime HR for the resting-HR card and is not a TRIMP reference.
   final double? rhr;
+
+  /// Prior nights' median resting HR, for strain and energy on a day with no
+  /// night of its own ([rhrFallbackFromHistory]). Never used for workout
+  /// detection, which keeps needing a real night.
+  final double? rhrFallback;
   final int? maxHrUsed;
   final int liveStepsReal;
   /// Step-counter calibration read on the main isolate; null = uncalibrated.
@@ -10217,6 +10314,7 @@ class _DayBlocksInput {
     required this.offsetSec,
     this.napExcludeEndSec,
     required this.rhr,
+    this.rhrFallback,
     required this.maxHrUsed,
     required this.liveStepsReal,
     this.counterProfile,

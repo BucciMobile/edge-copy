@@ -77,6 +77,68 @@ String needInputNote(String name, {num? have, num? need}) =>
 /// not. Anything that renders a reason must be able to reach this.
 const String kUnknownAbsenceNote = 'unknown_cause';
 
+/// Least sleep a night needs before its resting HR is read (same 3 h the
+/// FINAL-night rule uses). Shorter nights do not reach the overnight low.
+const int kRhrMinSleepSec = 3 * 3600;
+
+/// Resting HR to price a day's strain and energy against when the day has no
+/// night of its own (no sleep detected, or a short one): the median of the
+/// user's own prior nights, from [rhrFallbackMinNights] of them. Null below
+/// that, so a cold start still abstains rather than use a population value.
+double? rhrFallbackFromHistory(List<double> history) {
+  final xs = [for (final v in history) if (v.isFinite && v > 0) v]..sort();
+  if (xs.length < rhrFallbackMinNights) return null;
+  final mid = xs.length ~/ 2;
+  return xs.length.isOdd ? xs[mid] : (xs[mid - 1] + xs[mid]) / 2;
+}
+
+const int rhrFallbackMinNights = 3;
+
+/// Prior nights a WHOOP 5 skin-temperature deviation needs.
+const int kSkinTempDevMinNights = 14;
+
+/// WHOOP 4's `skin_temp_raw` moves with the band's ambient channel: across the
+/// contributed nights their minute-to-minute changes correlated at about 0.95.
+/// A night whose changes track ambient this closely says more about the room
+/// than the wrist, so it does not feed the illness watch.
+/// ponytail: one population threshold; personalise once a labelled night set
+/// (thermometer or cycle log) says where real wrist warming sits.
+const double kSkinTempAmbientMaxR = 0.8;
+
+/// Fewest consecutive-minute pairs the ambient check needs.
+const int kSkinTempAmbientMinPairs = 30;
+
+/// Pearson r between consecutive-minute changes of skin temp and ambient
+/// ([minutes] = (minute index, skin mean, ambient mean), oldest first). Null
+/// under [kSkinTempAmbientMinPairs] pairs or with a flat channel.
+double? skinTempAmbientR(List<(int, double, double)> minutes) {
+  final dt = <double>[], da = <double>[];
+  for (var i = 1; i < minutes.length; i++) {
+    if (minutes[i].$1 != minutes[i - 1].$1 + 1) continue;
+    dt.add(minutes[i].$2 - minutes[i - 1].$2);
+    da.add(minutes[i].$3 - minutes[i - 1].$3);
+  }
+  if (dt.length < kSkinTempAmbientMinPairs) return null;
+  final mt = dt.reduce((a, b) => a + b) / dt.length;
+  final ma = da.reduce((a, b) => a + b) / da.length;
+  var sxy = 0.0, sxx = 0.0, syy = 0.0;
+  for (var i = 0; i < dt.length; i++) {
+    sxy += (dt[i] - mt) * (da[i] - ma);
+    sxx += (dt[i] - mt) * (dt[i] - mt);
+    syy += (da[i] - ma) * (da[i] - ma);
+  }
+  if (sxx <= 0 || syy <= 0) return null;
+  return sxy / math.sqrt(sxx * syy);
+}
+
+/// Whether a day's `skin_temp_z` may feed the illness watch. Only WHOOP 4
+/// (and an unstamped day, most likely one) is checked; it passes only with a
+/// measured ambient r under [kSkinTempAmbientMaxR]. Fails closed.
+bool skinTempIllnessEligible(String? deviceFamily, num? ambientR) {
+  if (deviceFamily != null && deviceFamily != 'gen4') return true;
+  return ambientR != null && ambientR.abs() < kSkinTempAmbientMaxR;
+}
+
 /// Physiological cap on the readiness composite z, above which the score is a
 /// degenerate-baseline artefact rather than a real reading — so it is abstained
 /// from the HEADLINE scalar rather than persisted.
@@ -613,14 +675,26 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // samples it SHOULD hold at the stream's own measured cadence), and a stream
   // with no measurable cadence yields ABSENCE rather than a guess. The
   // no-sleep-no-RHR branch above is untouched by any of that.
-  final rhr = (hasSleep && sleepHr.isNotEmpty)
+  //
+  // A night under [kRhrMinSleepSec] does not reach the overnight low: in the
+  // contributed nights it read about 5-6 bpm above the user's usual, as a
+  // recovery hit and a wider RHR baseline. Absent, with the reason.
+  final shortNight = tstSec != null && tstSec < kRhrMinSleepSec;
+  final rhr = (hasSleep && sleepHr.isNotEmpty && !shortNight)
       ? nocturnalRhr(sleepHr, tsSec: sleepTs)
-      : const Metric<NocturnalRhr>.absent(
-          tier: Tier.high,
-          inputs_used: ['hr_1hz', 'sleep_window'],
-          note: 'no sleep was scored for this day — resting HR is only ever '
-              'measured over a sleep window, never over waking hours',
-        );
+      : shortNight
+          ? const Metric<NocturnalRhr>.absent(
+              tier: Tier.high,
+              inputs_used: ['hr_1hz', 'sleep_window'],
+              note: 'short night: under 3 h of sleep does not reach the '
+                  'overnight low, so resting HR is not read from it',
+            )
+          : const Metric<NocturnalRhr>.absent(
+              tier: Tier.high,
+              inputs_used: ['hr_1hz', 'sleep_window'],
+              note: 'no sleep was scored for this day — resting HR is only ever '
+                  'measured over a sleep window, never over waking hours',
+            );
   // HR dip: day-side = waking HR outside the sleep window; night-side = sleep HR.
   final dayOnly = _dayHrOutsideSleep(d);
   final dip = hrDip(dayOnly, sleepHr);
@@ -781,6 +855,20 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     if (sd != null && sd >= 1) skinTempZ = (skinTempAdc - base) / sd;
   }
 
+  // WHOOP 5 stores skin temperature in real °C (centi-°C in this array), so
+  // its nightly value can be read as degrees away from the user's usual: the
+  // median of up to [kSkinTempDevMinNights]..28 prior nightly means. On the
+  // contributed nights the channel was clean (0.01 °C steps, no sentinels)
+  // with a night-to-night spread near 0.3 °C, so a fever-sized +0.5-1 °C
+  // stands out. Mean against a median of means, one statistic on both sides.
+  double? skinTempDevC;
+  if (d.deviceFamily == 'gen5' &&
+      skinTempAdc != null &&
+      d.skinTempAdcHistory.length >= kSkinTempDevMinNights) {
+    final usual = median(d.skinTempAdcHistory);
+    if (usual != null) skinTempDevC = (skinTempAdc - usual) / 100;
+  }
+
   // ── READINESS (the canonical composite, baseline-dependent) ───────────────
   final lnToday = (sleepSessionRmssd != null && sleepSessionRmssd > 0)
       ? math.log(sleepSessionRmssd)
@@ -903,7 +991,11 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     restingHrHistory: d.rhrHistory,
     manualZoneLowerBpm: manualZoneBoundsFromProfile(prof),
   );
-  final rhrForTrimp = rhrToday ?? (prof['resting_hr'] as num?)?.toDouble();
+  // No night of its own: the user's typed resting HR, then the median of
+  // their own recent nights, so a band worn all day still gets a strain.
+  final rhrForTrimp = rhrToday ??
+      (prof['resting_hr'] as num?)?.toDouble() ??
+      rhrFallbackFromHistory(d.rhrHistory);
   final weightKg = (prof['weight_kg'] as num?)?.toDouble();
   final heightCm = (prof['height_cm'] as num?)?.toDouble();
   // Wake-span per-minute mean HR = the day minus the sleep window (shared by
@@ -1667,6 +1759,9 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
       // still null in the ≤3-day bootstrap), so the series fills and z starts
       // computing from ~day 4. This is the series _attachHistory must feed back.
       'skin_temp_adc': skinTempAdc,
+      // WHOOP 5 only: °C above (+) or below (-) the user's usual night.
+      // Key only when present: no new key on every other night.
+      if (skinTempDevC != null) 'skin_temp_dev_c': _round(skinTempDevC, 2),
       // WH-11a — the fraction of the sleep window the temp channel actually
       // covered. Emitted, NOT gated on: no floor is defensible until we have
       // looked at what this reads on real nights.

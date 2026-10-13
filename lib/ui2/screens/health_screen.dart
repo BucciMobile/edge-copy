@@ -10,6 +10,7 @@ import '../../l10n/display_text.dart';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:provider/provider.dart';
 
 import '../../compute/findings.dart';
 import '../../data/day_label.dart';
@@ -20,6 +21,7 @@ import '../../import/journal_csv_import.dart' show isValidDayLabel;
 import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart';
 import '../../models/payloads.dart' show todayHeadlineOf;
+import '../../state/app_state.dart';
 import '../profile/profile.dart' show ProfileAvatar;
 import '../profile/wearable_numbers.dart'
     show WearableCells, kHealthWearableRows;
@@ -925,36 +927,22 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       // Naps moved to the Sleep tab, beside the night (the Naps door there).
 
       // What used to be the Wellness tab: the things you tell the app back.
-      // One door each, onto the same screen, so the catalogue above stays the
-      // first thing on this tab.
+      // ONE door now, not one per tab: in the contributed data breathing,
+      // medication and cycle were each used by a handful of people, so they
+      // share a row and the screen behind it keeps its own tabs.
       Section(
         l?.healthWellbeingTitle ?? 'Mind, habits and medication',
-        Builder(builder: (c) {
-          final cycle = cycleTrackingOf(c);
-          Widget door(IconData icon, String title, String sub, int tab) =>
-              Padding(
-                padding: const EdgeInsets.only(bottom: S.x3),
-                child: detailLinkRow(c, icon, title, sub,
-                    () => go(c, WellnessScreen(initialTab: tab))),
-              );
-          return Column(children: [
-            door(LucideIcons.wind, l?.wellnessTabMind ?? 'Mind',
-                l?.healthWellbeingMindSub ?? 'Breathing, mood and the journal',
-                0),
-            door(LucideIcons.listChecks, l?.wellnessTabHabits ?? 'Habits',
-                l?.healthWellbeingHabitsSub ??
-                    'Daily habits, counted as days kept',
-                2),
-            door(LucideIcons.pill, l?.wellnessTabMedication ?? 'Medication',
-                l?.healthWellbeingMedsSub ?? 'Today\'s doses and the last week',
-                WellnessScreen.medsTab),
-            if (cycle)
-              door(LucideIcons.droplet, l?.wellnessTabCycle ?? 'Cycle',
-                  l?.healthWellbeingCycleSub ??
-                      'Log your period and see where you are in the cycle',
-                  4),
-          ]);
-        }),
+        detailLinkRow(
+            c,
+            LucideIcons.wind,
+            l?.wellnessTabMind ?? 'Mind',
+            // Cycle is a tab there only while cycle tracking is on.
+            _cycleTrackingOn(c)
+                ? (l?.healthWellbeingAllSubCycle ??
+                    'Breathing, mood, the journal, habits, medication and cycle')
+                : (l?.healthWellbeingAllSub ??
+                    'Breathing, mood, the journal, habits and medication'),
+            () => go(c, const WellnessScreen(initialTab: 0))),
       ),
 
       // THERE IS NO "BODY COMPOSITION" SECTION, AND THE NEXT PERSON SHOULD NOT
@@ -1151,6 +1139,9 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     final worn = v.wear['worn_min'] as num?;
     final coverage = v.wear['coverage_pct'] as num?;
     final skinTemp = metricOf(d.today['skin_temp']);
+    // WHOOP 5 reads in real °C, so its row says degrees, not SDs.
+    final tempDevC = ((d.today['skin_temp'] as Map?)?['dev_c'] as num?)
+        ?.toDouble();
     final rmssd = v.hrv['rmssd'] as num?;
     // MetricRow, not a private copy of it. The one this screen used to grow
     // stacked the value over its qualifier in a shrink-wrapped column, so
@@ -1167,7 +1158,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
         MetricRow(LucideIcons.wind, C.teal, l?.healthRowRespRate ?? 'Respiratory rate',
             resp.toStringAsFixed(1),
             sub: l?.healthSubAsleep ?? 'Asleep', unit: 'br/min'),
-      if (skinTemp.value != null)
+      if (skinTemp.value != null || tempDevC != null)
         // NAME THE QUANTITY. This is `skin_temp_z` — standard deviations from
         // the user's own baseline. It printed signed and unitless beside a
         // heart rate in bpm, so it read as °C; and the sleep scrub's
@@ -1177,8 +1168,10 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
           LucideIcons.thermometer,
           C.orange,
           l?.healthRowSkinTemp ?? 'Skin temperature',
-            '${skinTemp.value! >= 0 ? '+' : '−'}'
-                '${skinTemp.value!.abs().toStringAsFixed(2)}',
+          tempDevC != null
+              ? '${tempDevC >= 0 ? '+' : '−'}${tempDevC.abs().toStringAsFixed(1)}'
+              : '${skinTemp.value! >= 0 ? '+' : '−'}'
+                  '${skinTemp.value!.abs().toStringAsFixed(2)}',
           sub: [
             if ((d.today['skin_temp'] as Map?)?['provisional'] == true)
               l?.wearableProvisional ?? 'Provisional',
@@ -1187,7 +1180,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
                 : (l?.healthVsOwnNightsOn(prettyDay(tempNight, l)) ??
                       'vs your own nights · ${prettyDay(tempNight, l)}'),
           ].join(' · '),
-          unit: 'SD',
+          unit: tempDevC != null ? '°C' : 'SD',
           // Both this row and the wear row below it carry a FULL, written,
           // cited spec in `metric_detail.dart` that no tap in the app opened.
           // The number was on screen and its method was unreachable.
@@ -1828,5 +1821,15 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     }
     _l = null;
     await _loadLabs();
+  }
+}
+
+/// Whether the wellness screen shows its Cycle tab. False where no AppState
+/// is provided (widget tests that build the Health tab on its own).
+bool _cycleTrackingOn(BuildContext c) {
+  try {
+    return c.select<AppState, bool>((a) => a.cycleTrackingEnabled);
+  } on ProviderNotFoundException {
+    return false;
   }
 }

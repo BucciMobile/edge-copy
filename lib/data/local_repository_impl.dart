@@ -841,10 +841,16 @@ class LocalRepositoryImpl extends LocalRepository {
         // A ring's deviation rests on a settle band not yet measured on one:
         // the row says so rather than read as a settled figure.
         if (env?['provisional'] == true) 'provisional': true,
+        // WHOOP 5: the same night in °C away from the usual one.
+        'dev_c': ?_scalar(b, 'skin_temp_dev_c'),
       };
     }
     final have = (await LocalDb.metricSeries('skin_temp_adc')).length;
-    return {'value': null, 'note': 'need_baseline:have=$have,need=3'};
+    return {
+      'value': null,
+      'note': 'need_baseline:have=$have,need=3',
+      'dev_c': ?_scalar(b, 'skin_temp_dev_c'),
+    };
   }
 
   // ── day drill-downs ─────────────────────────────────────────────────────────
