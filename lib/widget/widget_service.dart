@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:flutter/services.dart';
 
+import '../data/day_label.dart' show calendarDaysBetween;
 import '../data/local_repository.dart';
 import '../models/metric.dart';
 import '../models/payloads.dart';
@@ -100,11 +101,10 @@ class WidgetService {
     if (s == null) return false;
     final day = _parseDay(s.overnightDay ?? s.activityDay ?? s.todayDay);
     if (day == null) return false;
-    final today = now ?? DateTime.now();
-    return DateTime(today.year, today.month, today.day)
-            .difference(day)
-            .inDays >
-        1;
+    // Counted in calendar days, not elapsed hours: across a spring-forward
+    // night two local midnights are only 47 h apart, which floors to one day
+    // and kept a two-day-old snapshot looking fresh for a whole extra day.
+    return calendarDaysBetween(day, now ?? DateTime.now()) > 1;
   }
 
   /// 'yyyy-mm-dd' → local midnight. Null for anything else.
