@@ -26,6 +26,7 @@ import '../../data/auto_backup.dart';
 import '../../data/csv_export.dart';
 import '../../data/day_label.dart' show dayLabelOf;
 import '../../data/db.dart';
+import '../../data/export_retention.dart';
 import '../../import/backup_crypto.dart';
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
@@ -165,13 +166,27 @@ class _DataScreenState extends State<DataScreen> {
     final l = AppLocalizations.of(context);
     final origin = shareOrigin(context);
     // VACUUM INTO — a transactionally consistent snapshot, not a file copy.
-    final path = await LocalDb.exportCopy();
+    final path = await _manualExportCopy();
     await Share.shareXFiles([XFile(path)],
         subject: 'OpenStrap database', sharePositionOrigin: origin);
     return (
       l?.dataDatabaseShared ?? 'Database shared. It is the complete copy.',
       false
     );
+  }
+
+  /// A full snapshot in the manual-export folder, with older exports swept.
+  ///
+  /// Each one is the whole health record, and the share sheet is handed the
+  /// file without ever telling us when it is done with it, so they used to
+  /// pile up in temp forever. The sweep runs after the new copy exists and
+  /// keeps the previous export too, in case its share sheet is still open.
+  Future<String> _manualExportCopy() async {
+    final dir = await sharedExportDir();
+    final path = await LocalDb.exportCopy(into: dir);
+    await pruneSharedExports(dir);
+    await pruneLegacyRootExports(dir.parent);
+    return path;
   }
 
   /// The same VACUUM'd snapshot as [_exportDb], sealed with AES-256-GCM under
@@ -186,7 +201,7 @@ class _DataScreenState extends State<DataScreen> {
     if (!mounted) return ('', false);
     final l = AppLocalizations.of(context);
     final origin = shareOrigin(context);
-    final plain = await LocalDb.exportCopy();
+    final plain = await _manualExportCopy();
     final dest = '$plain.osbk';
     try {
       // 210 000 PBKDF2 rounds is seconds of solid CPU. On the UI isolate that

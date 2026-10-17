@@ -9246,11 +9246,16 @@ class LocalDb {
   /// rotating copies, and the archive is already deflated, so gzip cannot
   /// shrink it — a year of history would cost its full size five times over.
   /// A manual export keeps it, which is the lossless copy the user asked for.
+  ///
+  /// [into] puts the copy somewhere other than the temp root; the manual
+  /// export uses its own folder so it can prune its old copies without
+  /// touching snapshots other features are still working on.
   static Future<String> exportCopy({
     bool includeSubstrateArchive = true,
+    Directory? into,
   }) async {
     final db = await instance;
-    final tmp = await getTemporaryDirectory();
+    final tmp = into ?? await getTemporaryDirectory();
     final stamp = DateTime.now().millisecondsSinceEpoch;
     final dest = p.join(tmp.path, 'openstrap_export_$stamp.db');
     final f = File(dest);
