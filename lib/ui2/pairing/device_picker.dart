@@ -206,6 +206,12 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
   /// A category or brand row, tapped deliberately rather than found live.
   Future<void> _openEntry(BandEntry entry) async {
     if (entry.isFramed) {
+      // The pushed screen covers this one without disposing it, so this
+      // screen's 15 s scan would keep the scan lock — and "Find my band"
+      // would sit queued behind the rest of it, spinner already running,
+      // before its own scan even starts. Nothing here can show its results.
+      await HrsLink.stopScanIfRunning(this);
+      if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => const PairingScreen(),
       ));
@@ -234,6 +240,9 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
         !mounted) {
       return;
     }
+    // Same as the framed branch: the sensor's own scan queues behind ours.
+    await HrsLink.stopScanIfRunning(this);
+    if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => PairSensorScreen(
         entry: sensor.entry,
