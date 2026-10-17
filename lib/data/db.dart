@@ -10848,11 +10848,7 @@ class LocalDb {
     final tsRow = (await db.rawQuery(
       'SELECT MIN(rec_ts) AS lo, MAX(rec_ts) AS hi FROM decoded_onehz WHERE rec_ts > 0',
     )).first;
-    final decodedOneHz =
-        Sqflite.firstIntValue(
-          await db.rawQuery('SELECT COUNT(*) FROM decoded_onehz'),
-        ) ??
-        0;
+    final decodedOneHz = count;
     final decodedRr =
         Sqflite.firstIntValue(
           await db.rawQuery('SELECT COUNT(*) FROM decoded_rr'),
@@ -11672,9 +11668,51 @@ class LocalDb {
 
   static String localDayLabelNow() => todayLabel();
 
+  /// `payload_json` of the exact row [recentDayResultsMeta] served for
+  /// [dayId], or null.
+  static Future<Object?> _servedPayloadJson(
+    String dayId,
+    Object? algoVersion,
+  ) async {
+    final db = await instance;
+    final rows = await db.rawQuery(
+      'SELECT payload_json FROM day_result WHERE day_id = ? AND algo_version = ?',
+      [dayId, algoVersion],
+    );
+    return rows.isEmpty ? null : rows.first['payload_json'];
+  }
+
+  /// The three [rawStats] fields freshness reads. [rawStats] also counts
+  /// `samples` and takes MIN(rec_ts) for the diagnostics screen, which a
+  /// derive pass has no use for.
+  static Future<Map<String, dynamic>> _freshnessRawStats() async {
+    final db = await instance;
+    final hi = (await db.rawQuery(
+      'SELECT MAX(rec_ts) AS hi FROM decoded_onehz WHERE rec_ts > 0',
+    )).first['hi'];
+    final oneHz =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM decoded_onehz'),
+        ) ??
+        0;
+    final rr =
+        Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM decoded_rr'),
+        ) ??
+        0;
+    return {
+      'max_rec_ts': (hi as num?)?.toInt(),
+      'decoded_onehz': oneHz,
+      'decoded_rr': rr,
+    };
+  }
+
   static Future<void> refreshComputeFreshness() async {
-    final raw = await rawStats();
-    final recent = await recentDayResults(30);
+    final raw = await _freshnessRawStats();
+    // Payload-free: this runs at the end of every derive pass, including the
+    // light one after each BLE drain, on the UI isolate. The loop usually
+    // stops after a row or two, so each bundle is fetched only when visited.
+    final recent = await recentDayResultsMeta(30);
     final rolling = await baseline('rolling');
     final cross = await baseline('crossday');
     final today = localDayLabelNow();
@@ -11697,7 +11735,9 @@ class LocalDb {
       if (dayId == null || dayId.isEmpty) continue;
       if (dayId == today && todayRow == null) todayRow = row;
       final decoded =
-          SeriesCodec.decodePayloadJson(row['payload_json']) ??
+          SeriesCodec.decodePayloadJson(
+            await _servedPayloadJson(dayId, row['algo_version']),
+          ) ??
           const <String, dynamic>{};
       if (decoded['skipped'] == true) continue;
       // #448: today's night is not today's overnight until the drain has
@@ -11761,9 +11801,14 @@ class LocalDb {
         latestRecoveryDay = dayId;
         latestRecoveryComputedAt = (row['computed_at'] as num?)?.toInt();
       }
+      // Rows run newest day first, so once one is older than today, today has
+      // no row and cannot turn up further down. Waiting for it walked and
+      // decoded all 30 bundles on every pass whenever today was not derived
+      // yet (just after midnight, a held day, a drain that only moved last
+      // night's tail).
       if (latestOvernightDay != null &&
           latestRecoveryDay != null &&
-          todayRow != null) {
+          (todayRow != null || dayId.compareTo(today) < 0)) {
         break;
       }
     }
