@@ -22,6 +22,7 @@ import '../../l10n/display_text.dart';
 import '../../state/locale_controller.dart';
 import 'package:intl/intl.dart';
 import '../../l10n/date_text.dart';
+import '../../l10n/decimal_text.dart';
 import 'dart:convert' show utf8;
 import 'dart:typed_data' show Uint8List;
 
@@ -648,7 +649,7 @@ List<(String, String)> sessionStats(ActivityResult r, UnitsController? u) {
   add('VO2max (est.)',
       r.vo2max == null ? null : '${r.vo2max!.toStringAsFixed(1)} ml/kg/min');
   add('Calories', r.calories == null ? null : '${grouped(r.calories!)} kcal');
-  add('Strain', r.strain?.toStringAsFixed(1));
+  add('Strain', r.strain == null ? null : displayFixed(r.strain!, 1));
   // TS-09 — last, under the measurements, and named 'Your rating' rather than
   // 'RPE' so the row cannot read as something the band found out. It is not on
   // the share card: `shareStats` is its own list and a self-report is not one

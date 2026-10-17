@@ -910,9 +910,9 @@ class RingTrio extends StatelessWidget {
   }
 }
 
-/// "Updated 8:12 · 2 → 28" off a `todayHeadlineOf` `recovery_update`, or null.
 String _fixed1OrEmpty(Object? v) => v is num ? displayFixed(v, 1) : '';
 
+/// "Updated 8:12 · 2 → 28" off a `todayHeadlineOf` `recovery_update`, or null.
 String? recoveryUpdatedLine(Object? update, AppLocalizations? l) {
   if (update case {
     'from': final int from,
