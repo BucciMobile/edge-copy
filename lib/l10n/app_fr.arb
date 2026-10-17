@@ -1442,6 +1442,8 @@
   "homeOfSpan": "sur {duration}",
   "homeLoadFailedTitle": "Impossible de lire les données d'aujourd'hui",
   "homeLoadFailedBody": "La journée enregistrée n'a pas pu être chargée. Rien n'a été supprimé : c'est une erreur de lecture, pas une perte de données.",
+  "wellnessLoadFailedTitle": "Lecture impossible",
+  "wellnessLoadFailedBody": "Les données enregistrées n'ont pas pu être lues. Rien n'a été supprimé : c'est une erreur de lecture, pas une perte de données.",
   "homeTryAgain": "Réessayer",
   "homeNothingDerivedTitle": "Rien n'a encore été calculé",
   "homeNothingDerivedBody": "Aucun enregistrement du bracelet n'a encore été traité.",

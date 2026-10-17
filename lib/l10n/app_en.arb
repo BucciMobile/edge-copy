@@ -7320,6 +7320,14 @@
   "@homeLoadFailedBody": {
     "description": "Body of the card shown when today's data failed to load from the database."
   },
+  "wellnessLoadFailedTitle": "This could not be read",
+  "@wellnessLoadFailedTitle": {
+    "description": "Title of the card shown when the Wellness screen or the sleep plan failed to load from the database."
+  },
+  "wellnessLoadFailedBody": "Reading your stored data failed. Nothing was deleted — this is a read that went wrong, not missing data.",
+  "@wellnessLoadFailedBody": {
+    "description": "Body of the card shown when the Wellness screen or the sleep plan failed to load from the database."
+  },
   "homeTryAgain": "Try again",
   "@homeTryAgain": {
     "description": "Button label to retry loading today's data."

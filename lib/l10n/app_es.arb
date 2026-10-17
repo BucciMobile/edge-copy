@@ -1442,6 +1442,8 @@
   "homeOfSpan": "de {duration}",
   "homeLoadFailedTitle": "No se pudo leer el día de hoy",
   "homeLoadFailedBody": "No se pudo cargar el día guardado. No se eliminó nada; fue un error de lectura, no datos perdidos.",
+  "wellnessLoadFailedTitle": "No se pudo leer",
+  "wellnessLoadFailedBody": "No se pudieron leer los datos guardados. No se eliminó nada; fue un error de lectura, no datos perdidos.",
   "homeTryAgain": "Intentar de nuevo",
   "homeNothingDerivedTitle": "Aún no se ha calculado nada",
   "homeNothingDerivedBody": "Todavía no se ha procesado ninguna grabación de la correa.",

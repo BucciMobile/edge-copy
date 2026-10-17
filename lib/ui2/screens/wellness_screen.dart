@@ -97,6 +97,9 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
   String get _date => todayLabel();
   bool _loading = true;
 
+  /// The last read threw. Shown as a retryable card rather than a spinner.
+  bool _failed = false;
+
   /// One journal write at a time. `putJournalMetrics` deletes the day and
   /// re-inserts it, so two quick taps both read the same day and the second
   /// erased the first.
@@ -161,86 +164,108 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
     final t = beginRead(#wellness);
     final app = context.read<AppState>();
     final repo = app.repo;
-    final db = await LocalDb.instance;
+    // Ten reads, any of which can throw (a malformed med schedule row, a
+    // locked database mid-migration). Uncaught, `_loading` never cleared and
+    // the sleep plan under the Sleep tab spun forever with no way out.
+    try {
+      final db = await LocalDb.instance;
 
-    final meds = await MedDb.defs(db);
-    final doses = await MedDb.dosesForDay(db, _date);
-    final adherence = await MedDb.adherenceWindow(db, days: 7);
-    final breathing = await app.breathingHistory(limit: 5);
+      final meds = await MedDb.defs(db);
+      final doses = await MedDb.dosesForDay(db, _date);
+      final adherence = await MedDb.adherenceWindow(db, days: 7);
+      final breathing = await app.breathingHistory(limit: 5);
 
-    var stress = const <String, dynamic>{};
-    var insights = const <String, dynamic>{};
-    var fields = <String, JournalMetricValue>{};
-    var driverRows = const <DriverFacts>[];
-    var specs = const <JournalFieldSpec>[];
-    if (repo != null) {
-      stress = await repo.getDayStress(_date);
-      insights = await repo.getInsights();
-      // `readiness_glassbox.breakdown`, NOT `.drivers` — drivers is already
-      // filtered to the inputs that cleared the smallest-worthwhile-change
-      // gate, so an input that sat inside its usual spread was never in it and
-      // the screen could not say "and this one did nothing". Same array
-      // ReadinessDetail renders, so the two agree by construction.
-      final gb = envValue(insights['readiness_glassbox']);
-      final bd = gb?['breakdown'];
-      // The baselines block: centre, spread, delta and MDC per input. Written
-      // on every derive since long before anything read it.
-      final heart = await repo.getDayHeart(_date);
-      final charts = <String, Object?>{};
-      for (final k in driverChartKeys) {
-        charts[k] = await repo.getChart(k);
+      var stress = const <String, dynamic>{};
+      var insights = const <String, dynamic>{};
+      var fields = <String, JournalMetricValue>{};
+      var driverRows = const <DriverFacts>[];
+      var specs = const <JournalFieldSpec>[];
+      if (repo != null) {
+        stress = await repo.getDayStress(_date);
+        insights = await repo.getInsights();
+        // `readiness_glassbox.breakdown`, NOT `.drivers` — drivers is already
+        // filtered to the inputs that cleared the smallest-worthwhile-change
+        // gate, so an input that sat inside its usual spread was never in it and
+        // the screen could not say "and this one did nothing". Same array
+        // ReadinessDetail renders, so the two agree by construction.
+        final gb = envValue(insights['readiness_glassbox']);
+        final bd = gb?['breakdown'];
+        // The baselines block: centre, spread, delta and MDC per input. Written
+        // on every derive since long before anything read it.
+        final heart = await repo.getDayHeart(_date);
+        final charts = <String, Object?>{};
+        for (final k in driverChartKeys) {
+          charts[k] = await repo.getChart(k);
+        }
+        driverRows = driverFacts(
+          breakdown: [
+            for (final r in (bd is List ? bd : const []))
+              if (r is Map) r.cast<String, dynamic>(),
+          ],
+          baselines: heart['baselines'] is Map
+              ? (heart['baselines'] as Map).cast<String, dynamic>()
+              : null,
+          charts: charts,
+        );
+        fields = await repo.getJournalMetrics(_date);
+        specs = await repo.getJournalFields();
       }
-      driverRows = driverFacts(
-        breakdown: [
-          for (final r in (bd is List ? bd : const []))
-            if (r is Map) r.cast<String, dynamic>(),
-        ],
-        baselines: heart['baselines'] is Map
-            ? (heart['baselines'] as Map).cast<String, dynamic>()
-            : null,
-        charts: charts,
+      // Day arithmetic, not a subtracted duration: a DST day is 23 or 25 hours
+      // long and `now - 13 days` lands on the wrong calendar date across one.
+      final now = DateTime.now();
+      final since = dayLabelOf(
+        DateTime(now.year, now.month, now.day - (_habitDays - 1)),
       );
-      fields = await repo.getJournalMetrics(_date);
-      specs = await repo.getJournalFields();
-    }
-    // Day arithmetic, not a subtracted duration: a DST day is 23 or 25 hours
-    // long and `now - 13 days` lands on the wrong calendar date across one.
-    final now = DateTime.now();
-    final since = dayLabelOf(
-      DateTime(now.year, now.month, now.day - (_habitDays - 1)),
-    );
-    final history = await LocalDb.journalMetricsByDay(sinceDaysEpoch: since);
+      final history = await LocalDb.journalMetricsByDay(sinceDaysEpoch: since);
 
-    if (!stillNewest(#wellness, t)) return;
-    setState(() {
-      _meds = meds;
-      _slots = slotsForDay(meds, _date, doses, now: DateTime.now());
-      _adherence = adherence;
-      _breathing = breathing;
-      _stress = stress;
-      _insights = insights;
-      _drivers = driverRows;
-      _todayFields = {...fields};
-      // A habit is a custom field with a ceiling of one — a per-day yes/no.
-      // That is exactly what journal_field_def already stores, which is why
-      // there is no habit table.
-      _habits = [
-        for (final s in specs)
-          if (s.custom && s.max == 1) s,
-      ];
-      _fields = specs;
-      _habitHistory = history;
-      _loading = false;
-    });
+      if (!stillNewest(#wellness, t)) return;
+      setState(() {
+        _meds = meds;
+        _slots = slotsForDay(meds, _date, doses, now: DateTime.now());
+        _adherence = adherence;
+        _breathing = breathing;
+        _stress = stress;
+        _insights = insights;
+        _drivers = driverRows;
+        _todayFields = {...fields};
+        // A habit is a custom field with a ceiling of one — a per-day yes/no.
+        // That is exactly what journal_field_def already stores, which is why
+        // there is no habit table.
+        _habits = [
+          for (final s in specs)
+            if (s.custom && s.max == 1) s,
+        ];
+        _fields = specs;
+        _habitHistory = history;
+        _loading = false;
+        _failed = false;
+      });
+    } catch (_) {
+      if (stillNewest(#wellness, t)) {
+        setState(() => (_loading = false, _failed = true));
+      }
+    }
   }
+
+  Widget _loadFailed(AppLocalizations? l) => StatusCard(
+        l?.wellnessLoadFailedTitle ?? 'This could not be read',
+        l?.wellnessLoadFailedBody ??
+            'Reading your stored data failed. Nothing was deleted — this is '
+                'a read that went wrong, not missing data.',
+        fix: l?.homeTryAgain ?? 'Try again',
+        icon: LucideIcons.databaseZap,
+        onFix: () {
+          setState(() => (_loading = true, _failed = false));
+          _load();
+        },
+      );
 
   @override
   Widget build(BuildContext c) {
     final l = AppLocalizations.of(c);
     if (widget.sleepPlanOnly) {
-      return _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _recovery(c);
+      if (_loading) return const Center(child: CircularProgressIndicator());
+      return _failed ? _loadFailed(l) : _recovery(c);
     }
     final last = _breathing.isEmpty ? null : _breathing.first;
     // `select`, not `watch`: AppState ticks at ~1 Hz during a live session and
@@ -282,6 +307,8 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
           const SizedBox(height: S.x5),
           if (_loading)
             const Center(child: CircularProgressIndicator())
+          else if (_failed)
+            _loadFailed(l)
           else ...[
             // Mind is the only tab here with something to START. The other
             // four are logs and reviews, and a "begin" card over a medication
