@@ -421,6 +421,7 @@
   "napsWokeUpHelp": "AUFGEWACHT UM",
   "napsInvalidWindow": "Ein Nickerchen dauert zwischen 5 Minuten und 6 Stunden. Alles Längere ist Schlaf und gehört zur Nacht, wo die Schlafphasen ausgewertet werden.",
   "napsOverlap": "Das überschneidet sich mit einem Nickerchen, das an diesem Tag schon eingetragen ist. Entferne zuerst das andere, damit dieselbe Zeit nicht doppelt zählt.",
+  "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
   "napsNotReanalysed": "Der Tag wurde nicht neu ausgewertet, weil gerade schon eine andere Auswertung lief. Deine Änderung ist gespeichert und wird beim nächsten Mal berücksichtigt.",
   "napsTitle": "Nickerchen",
   "napsNoReadingTitle": "Keine Daten zu Nickerchen an diesem Tag",

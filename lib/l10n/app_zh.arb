@@ -393,6 +393,7 @@
   "napsWokeUpHelp": "醒来时间",
   "napsInvalidWindow": "小睡的时长应在 5 分钟到 6 小时之间。超过这个时长应算作夜间睡眠，属于可以读取睡眠阶段的夜晚记录。",
   "napsOverlap": "该时间段与当天已有的一次小睡重叠。请先删除那一次记录，而不是把同一小时计算两次。",
+  "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
   "napsNotReanalysed": "当天未被重新分析——已有另一项分析正在运行。你的修改已保存，将在下次生效。",
   "napsTitle": "小睡",
   "napsNoReadingTitle": "当天没有小睡数据",

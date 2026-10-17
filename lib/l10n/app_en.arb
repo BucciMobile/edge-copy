@@ -1951,6 +1951,10 @@
   "@napsOverlap": {
     "description": "Validation error when a manually logged nap overlaps an existing one."
   },
+  "napsInFuture": "That nap hasn't finished yet. Log it once you're awake.",
+  "@napsInFuture": {
+    "description": "Validation error when a manually logged nap ends after the current time."
+  },
   "napsNotReanalysed": "The day was not re-analysed — another analysis was already running. Your edit is saved and will apply next time.",
   "@napsNotReanalysed": {
     "description": "Fallback error when a nap edit saved but the day could not be re-derived because another analysis was already running."

@@ -393,6 +393,7 @@
   "napsWokeUpHelp": "CUÁNDO TE DESPERTASTE",
   "napsInvalidWindow": "Una siesta dura entre 5 minutos y 6 horas. Cualquier cosa más larga es un sueño nocturno y pertenece a la noche, donde se pueden leer las fases.",
   "napsOverlap": "Eso se superpone con una siesta ya registrada este día. Elimina esa primero, en lugar de contar la misma hora dos veces.",
+  "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
   "napsNotReanalysed": "El día no se ha vuelto a analizar: ya había otro análisis en curso. Tu edición está guardada y se aplicará la próxima vez.",
   "napsTitle": "Siestas",
   "napsNoReadingTitle": "Sin datos de siestas para este día",

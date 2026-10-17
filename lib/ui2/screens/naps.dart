@@ -226,6 +226,12 @@ class _NapsScreenState extends State<NapsScreen> {
               'stages can be read.');
       return;
     }
+    if (!manualNapWindowHasEnded(
+        e, DateTime.now().millisecondsSinceEpoch ~/ 1000)) {
+      setState(() => _failed = l?.napsInFuture ??
+          "That nap hasn't finished yet. Log it once you're awake.");
+      return;
+    }
     if (napOverlapsExisting(s, e, _d?.naps ?? const [])) {
       setState(() => _failed = l?.napsOverlap ??
           'That overlaps a nap already on this day. '
