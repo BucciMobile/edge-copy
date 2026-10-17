@@ -159,9 +159,13 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
     if (sensor.entry.id == kOura.id) return _openEntry(sensor.entry);
     // Re-checked on every pair: this screen stays open after one for the
     // next, so `addSensor`'s check at the door does not bound a visit.
+    // The minted id is the row only `pairNotifySensor` writes; a `pick`
+    // callback mints its own, so it is checked by adapter alone.
     if (await refuseIfSensorCapReached(context,
-            repairingId:
-                HrsLink.mintDeviceId(sensor.entry, cand.device.remoteId.str)) ||
+            repairingId: sensor.pick == null
+                ? HrsLink.mintDeviceId(sensor.entry, cand.device.remoteId.str)
+                : null,
+            adapterId: sensor.entry.id) ||
         !mounted) {
       return;
     }
@@ -223,7 +227,13 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
     }
     // Re-checked on every tap: this screen stays open after a pair, and the
     // onboarding and re-pair routes reach it without `addSensor`'s check.
-    if (await refuseIfSensorCapReached(context) || !mounted) return;
+    // Soft — a sensor that already has a row still opens its own screen, for
+    // its forget / re-pair section. That screen checks each pair exactly.
+    if (await refuseIfSensorCapReached(context,
+            adapterId: sensor.entry.id, anyOfAdapter: true) ||
+        !mounted) {
+      return;
+    }
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => PairSensorScreen(
         entry: sensor.entry,

@@ -65,6 +65,7 @@ import '../../data/db.dart' show LocalDb;
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
 import '../ui2.dart';
+import 'devices.dart' show refuseIfSensorCapReached;
 import 'profile.dart';
 import 'wearable_numbers.dart' show WearableUnlocks;
 
@@ -92,11 +93,17 @@ class PairSensorScreen extends StatefulWidget {
   /// ordinary [onPicked] step runs, so this only ever adds a way in.
   final Future<String?> Function(BluetoothDevice, String key)? onPickedWithKey;
 
+  /// Candidates to start with instead of an empty list. Tests only: a real
+  /// scan needs a radio, and the pair step is what has to be exercised.
+  @visibleForTesting
+  final List<BandCandidate>? debugFound;
+
   const PairSensorScreen({
     super.key,
     required this.entry,
     this.onPicked,
     this.onPickedWithKey,
+    this.debugFound,
   });
 
   @override
@@ -135,6 +142,7 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
   @override
   void initState() {
     super.initState();
+    _found = widget.debugFound ?? const [];
     unawaited(_load());
   }
 
@@ -185,6 +193,15 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
   }
 
   Future<void> _scan() async {
+    // Before the scan or the system picker, not only before the pair: the iOS
+    // picker grants the accessory at the OS level the moment it is chosen, so
+    // refusing after it would leave a grant behind for a sensor this phone
+    // will not keep. Soft — a sensor that already has its row may re-pair.
+    if (await refuseIfSensorCapReached(context,
+            adapterId: widget.entry.id, anyOfAdapter: true) ||
+        !mounted) {
+      return;
+    }
     if (_viaPicker) return _pairViaPicker();
     if (_unreachable) {
       final label = widget.entry.label;
@@ -265,6 +282,20 @@ class _PairSensorScreenState extends State<PairSensorScreen> {
   Future<void> _pick(BandCandidate c) => _pickDevice(c.device, label: c.label);
 
   Future<void> _pickDevice(BluetoothDevice device, {required String? label}) async {
+    // THE exact cap check. This screen stays open after a pair and offers
+    // "Pair another", and every route into it (Add sensor, onboarding,
+    // re-pair) only checked on the way in. The minted id is the row only
+    // `pairNotifySensor` writes; an injected callback mints its own.
+    final mintedHere =
+        widget.onPicked == null && widget.onPickedWithKey == null;
+    if (await refuseIfSensorCapReached(context,
+            repairingId: mintedHere
+                ? HrsLink.mintDeviceId(widget.entry, device.remoteId.str)
+                : null,
+            adapterId: widget.entry.id) ||
+        !mounted) {
+      return;
+    }
     setState(() {
       _busy = device.remoteId.str;
       _problem = null;

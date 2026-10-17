@@ -1238,28 +1238,50 @@ final List<({BandEntry entry, String blurb, Future<String?> Function(BluetoothDe
 /// a slot freed a moment later cannot un-refuse anything. The same constant
 /// bounds both because the number is the same number.
 ///
-/// [repairingId] is the row a pair would write, when the caller knows it. A
-/// sensor that already has its row is being paired again (a lost bond, a
-/// reset), not added, so it never counts against the cap.
+/// A pair that rewrites a row this phone already has is a re-pair (a lost
+/// bond, a reset), not an addition, so it never counts against the cap. Which
+/// row a pair writes depends on the path:
+///
+/// * [repairingId] — the row id the pair will write, when it is known before
+///   the pair runs (`HrsLink.mintDeviceId`, keyed by the peripheral).
+/// * [adapterId] of a single-slot sensor (the ring: `pairOuraRing` reuses the
+///   one ring row it finds) — any existing row of that adapter is the row the
+///   pair rewrites.
+/// * [anyOfAdapter] — a SOFT check before a sensor's own screen opens or a
+///   scan starts, when the peripheral is not known yet. An existing row of
+///   [adapterId] lets the user through to that screen's forget / re-pair
+///   section; the pair itself is checked again, exactly, before it runs.
+///
+/// Anything else (a Mi Band pair mints a fresh random id every time) adds a
+/// row and is counted.
 bool sensorCapReached(Iterable<Map<String, Object?>> deviceRows,
-    {String? repairingId}) {
-  final ids = deviceRows
-      .map((r) => r['id'])
-      .where((id) => id != LocalDb.kPrimaryDeviceId)
-      .toList();
-  if (repairingId != null && ids.contains(repairingId)) return false;
-  return ids.length >= kMaxConcurrentSecondaryLinks;
+    {String? repairingId, String? adapterId, bool anyOfAdapter = false}) {
+  final secondary =
+      deviceRows.where((r) => r['id'] != LocalDb.kPrimaryDeviceId).toList();
+  final sameAdapterRewrites =
+      adapterId != null && (anyOfAdapter || adapterId == kOura.id);
+  for (final r in secondary) {
+    if (repairingId != null && r['id'] == repairingId) return false;
+    if (sameAdapterRewrites && r['adapter_id'] == adapterId) return false;
+  }
+  return secondary.length >= kMaxConcurrentSecondaryLinks;
 }
 
 /// Shows the sensor-limit sheet and returns true when [sensorCapReached].
 ///
-/// Called before EVERY sensor pair, not only on the way into the picker: the
-/// picker stays open after a pair for the next one, and onboarding and
-/// `RePair` open it without passing through [addSensor] at all, so a check at
-/// the door alone let one visit pair any number of sensors.
+/// Called before EVERY sensor pair, not only on the way into a screen: the
+/// picker and `PairSensorScreen` both stay open after a pair for the next one,
+/// and onboarding and `RePair` open the picker without passing through
+/// [addSensor] at all, so a check at any door alone let one visit pair any
+/// number of sensors. The exact check lives where the pair runs
+/// (`_pickNearby`, `PairSensorScreen._pickDevice`); the ones at doors are
+/// courtesy, so nobody scans for a sensor they cannot keep.
 Future<bool> refuseIfSensorCapReached(BuildContext c,
-    {String? repairingId}) async {
-  if (!sensorCapReached(await LocalDb.deviceRows(), repairingId: repairingId)) {
+    {String? repairingId, String? adapterId, bool anyOfAdapter = false}) async {
+  if (!sensorCapReached(await LocalDb.deviceRows(),
+      repairingId: repairingId,
+      adapterId: adapterId,
+      anyOfAdapter: anyOfAdapter)) {
     return false;
   }
   if (!c.mounted) return true;
