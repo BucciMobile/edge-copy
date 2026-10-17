@@ -10180,6 +10180,22 @@ class LocalDb {
       'substrate_archive',
   ];
 
+  /// Restore tables whose rows the user edits in place, keyed the way the
+  /// app writes them, with the column that says when (null: none — the local
+  /// row wins). `journal_metric` and `strength_set` are keyed by their SET
+  /// (one day's fields, one session's sets), because the app rewrites each
+  /// as a whole and a row-by-row merge splices two versions together.
+  static const Map<String, (List<String>, String?)> _restoreEditedKeys = {
+    'journal': (['date'], 'updated_at'),
+    'journal_metric': (['date'], 'updated_at'),
+    'lab_result': (['marker', 'taken_on'], 'updated_at'),
+    'cycle_symptom': (['date'], 'updated_at'),
+    'sleep_override': (['day_id'], 'created_at'),
+    'cycle_log': (['date'], null),
+    'sessions': (['id'], null),
+    'strength_set': (['session_id'], null),
+  };
+
   @visibleForTesting
   static List<String> get restoreTablesForTest => _restoreTables;
 
@@ -10396,6 +10412,34 @@ class LocalDb {
                       as String?,
                 ).length
               : 0;
+          // Hand-entered rows the user may have edited since the backup was
+          // taken. A plain REPLACE handed every colliding key back to the
+          // backup's older copy: a rewritten journal note, a corrected lab
+          // value or sleep window, a finished workout turned back into the
+          // 'live' one a mid-workout backup caught. So the newer side keeps
+          // the key; a table with no edit stamp keeps the local row, and a
+          // restore only adds what this install has lost.
+          //
+          // Snapshotted BEFORE the table merges, so a key the backup fills in
+          // on page 1 does not read as "local" on page 2.
+          final edited = _restoreEditedKeys[t];
+          final localEdits = <String, int>{};
+          String editKey(Map<String, Object?> r) =>
+              [for (final c in edited!.$1) '${r[c]}'].join('|');
+          if (edited != null) {
+            final keys = edited.$1.join(', ');
+            final stamp = edited.$2 == null
+                ? '0'
+                : 'MAX(COALESCE(${edited.$2}, 0))';
+            for (final r in await db.rawQuery(
+              'SELECT $keys, $stamp AS f FROM $t GROUP BY $keys',
+            )) {
+              localEdits[editKey(r)] = (r['f'] as num?)?.toInt() ?? 0;
+            }
+          }
+          // Sets already replaced wholesale by a newer backup copy — the
+          // local set is cleared once, on the first row, never per page.
+          final replacedSets = <String>{};
           var copied = 0;
           var page = firstPage;
           // ONE TRANSACTION PER PAGE, not per table. The whole-table transaction
@@ -10498,6 +10542,23 @@ class LocalDb {
                     whereArgs: [row['end_ts'], row['start_ts'], row['created_at']]);
                   // A newer local correction has already answered this window.
                   if (local.isNotEmpty) continue;
+                }
+                if (edited != null) {
+                  final key = editKey(row);
+                  final mine = localEdits[key];
+                  if (mine != null) {
+                    final stamp = edited.$2;
+                    final theirs =
+                        stamp == null ? null : (row[stamp] as num?)?.toInt();
+                    if (theirs == null || theirs <= mine) continue;
+                    // The backup's day is newer, and a day's fields are a SET:
+                    // patching it row by row would keep a field the backup's
+                    // version had already removed.
+                    if (t == 'journal_metric' && replacedSets.add(key)) {
+                      batch.delete(t, where: 'date = ?', whereArgs: [row['date']]);
+                      if (++ops >= chunkOps) await flush();
+                    }
+                  }
                 }
                 if (t == 'activity_suggestions') {
                   final local = await txn.query(t, where: 'id = ?', whereArgs: [row['id']], limit: 1);
