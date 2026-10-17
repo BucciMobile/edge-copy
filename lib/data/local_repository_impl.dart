@@ -1031,12 +1031,20 @@ class LocalRepositoryImpl extends LocalRepository {
       // elsewhere. The periods ride along so the screen can show what it does
       // know instead of claiming nothing happened.
       final napPeriods = _periodsWithMainStages(b, const {});
+      // Why a window produced nothing, when the segmenter knows — a user-set
+      // window the band barely recorded is the case the Sleep screen explains.
+      final absence = _sub(b, 'sleep')?['absence_reason'] as String?;
       if (napPeriods.isEmpty) {
-        return {'has_sleep': false, 'sleep_source': sleepSource};
+        return {
+          'has_sleep': false,
+          'sleep_source': sleepSource,
+          'absence_reason': ?absence,
+        };
       }
       return {
         'has_sleep': false,
         'sleep_source': sleepSource,
+        'absence_reason': ?absence,
         'periods': napPeriods,
         'total_asleep_min': _totalAsleepMin(b, napPeriods),
       };

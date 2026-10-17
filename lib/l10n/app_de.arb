@@ -1699,6 +1699,8 @@
   "sleepDetailBedTimeHelp": "INS BETT GEGANGEN UM",
   "sleepDetailWakeTimeHelp": "AUFGESTANDEN UM",
   "sleepDetailReanalyseFailed": "Die Nacht wurde nicht neu ausgewertet – entweder lief bereits eine andere Auswertung, oder sie ist fehlgeschlagen. Deine Zeiten sind gespeichert; „Alles neu analysieren“ unter „Deine Daten“ wendet sie an.",
+  "sleepDetailWindowUnrecorded": "Deine Zeiten sind gespeichert, aber das Band hat in diesen Stunden größtenteils nichts aufgezeichnet (nicht getragen oder beim Laden), daher gibt es keine Nacht zum Auswerten.",
+  "sleepDetailWindowNoSleep": "Deine Zeiten sind gespeichert, aber die Aufzeichnungen des Bands aus diesen Stunden zeigen keinen Schlaf zum Auswerten.",
   "sleepDetailCorrectionUnavailable": "Die detaillierten Aufzeichnungen dieser Nacht sind nicht mehr auf dem Telefon, daher lässt sich ihr Schlaf nicht mehr korrigieren.",
   "sleepDetailCorrectionEveningPruned": "Der Abend vor dieser Nacht ist nicht mehr auf dem Telefon, daher lassen sich nur eine Schlafenszeit nach Mitternacht oder „Kein Schlaf“ übernehmen.",
   "sleepDetailNoHypnogramTitle": "Kein Hypnogramm für diese Nacht",

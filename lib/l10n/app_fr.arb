@@ -1649,6 +1649,8 @@
   "sleepDetailBedTimeHelp": "HEURE DU COUCHER",
   "sleepDetailWakeTimeHelp": "HEURE DU LEVER",
   "sleepDetailReanalyseFailed": "La nuit n'a pas été réanalysée : une autre réanalyse était déjà en cours, ou elle a échoué. Les horaires que vous avez définis sont enregistrés ; « Tout réanalyser » dans Vos données les appliquera.",
+  "sleepDetailWindowUnrecorded": "Vos horaires sont enregistrés, mais le bracelet n'a pas enregistré pendant la majeure partie de ces heures (retiré du poignet ou en charge) : il n'y a donc pas de nuit à évaluer.",
+  "sleepDetailWindowNoSleep": "Vos horaires sont enregistrés, mais les enregistrements du bracelet pour ces heures ne montrent aucun sommeil à évaluer.",
   "sleepDetailCorrectionUnavailable": "Les enregistrements détaillés de cette nuit ne sont plus sur le téléphone, son sommeil ne peut donc plus être corrigé.",
   "sleepDetailCorrectionEveningPruned": "La soirée précédant cette nuit n’est plus sur le téléphone : on peut seulement indiquer une heure de coucher après minuit, ou marquer la nuit comme n’étant pas du sommeil.",
   "sleepDetailNoHypnogramTitle": "Aucun hypnogramme pour cette nuit",

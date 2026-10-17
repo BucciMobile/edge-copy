@@ -1150,7 +1150,9 @@ class PhysioDay {
   ///   'auto_fallback' — HR-led fallback (van Hees found nothing); LOW confidence,
   ///                     surface a "is this right?" prompt
   ///   'vendor_staged' — the band's own hypnogram (window + stages), gated
-  ///   'manual'        — user typed the window (Approach 1)
+  ///   'manual'        — user typed the window (Approach 1); with no
+  ///                     [sleep] present when the window staged to nothing
+  ///                     (its `absence_reason` says why)
   ///   'confirmed'     — user accepted the fallback's proposal
   ///   'none'          — no sleep at all
   final String sleepSource;
@@ -1463,6 +1465,30 @@ List<PhysioDay> calendarDays(
         // it was a rejection rather than an ordinary absence — sleep_detail
         // reads this to keep the "not sleep" state from re-prompting.
         sleepSource = 'rejected';
+      } else if (ov != null) {
+        // A user-set window that staged to nothing — most often "I was
+        // asleep" on a night the band spent on the charger, so most of the
+        // window was never observed. Labelling it 'none' made it look like no
+        // override existed: the screen then blamed a busy re-analysis and sent
+        // the user to a re-run that gives the same answer. Keep the source and
+        // the segmenter's absence (it carries `absence_reason`) so the screen
+        // can say why the saved window has no night in it.
+        //
+        // A window with no samples at all comes back as the bare `absent`
+        // (no reason); give it the same unobserved reason the segmenter gives
+        // a thinly-recorded one, so "the band wasn't recording" isn't shown as
+        // "no sleep found".
+        final span = ov.offsetSec - ov.onsetSec;
+        final have = _lowerBound(sub.tsSec, ov.offsetSec) -
+            _lowerBound(sub.tsSec, ov.onsetSec);
+        seg = (s.absenceReason == null &&
+                span > 0 &&
+                have < span * ana.kMinObservedFractionForSleep)
+            ? ana.SleepSegmentation.unobservedWindow(
+                'only ${have}s of a ${span}s window were recorded; below the '
+                '${(ana.kMinObservedFractionForSleep * 100).round()}% floor')
+            : s;
+        sleepSource = src;
       }
     }
 

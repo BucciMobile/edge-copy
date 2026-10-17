@@ -586,7 +586,8 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               ? (l?.sleepDetailRejectedBody ??
                   'You told us this stretch was not sleep, so nothing is '
                       'scored for it.')
-              : (l?.sleepDetailNoNightBody ??
+              : (_userWindowEmpty(d.night, l) ??
+                  l?.sleepDetailNoNightBody ??
                   'No stretch of band recordings long enough to score.'),
           fix: rejected ? '' : (l?.sleepDetailNoNightFix ??
               'Wear the band overnight and sync in the morning'),
@@ -1059,9 +1060,31 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         : _source != before;
     if (failed != null || !took) {
       setState(() => _overrideFailed = failed ??
+          _userWindowEmpty(_d?.night ?? const <String, dynamic>{}, l) ??
           l?.sleepDetailReanalyseFailed ??
           'The night wasn’t re-analysed; another run was busy or it failed. Your times are saved: open Your data and tap Re-analyze everything.');
     }
+  }
+
+  /// Why a night the user set the times for still has nothing to show, or
+  /// null when it isn't one. The re-analysis ran and kept the window; the band
+  /// just recorded too little of it (charger, off the wrist) or no sleep in it,
+  /// so the generic "another run was busy, re-analyse everything" would send
+  /// the user to a re-run that gives the same answer.
+  static String? _userWindowEmpty(
+      Map<String, dynamic> n, AppLocalizations? l) {
+    final src = n['sleep_source'];
+    if ((src != 'manual' && src != 'confirmed') || n['has_sleep'] == true) {
+      return null;
+    }
+    return n['absence_reason'] != null
+        ? (l?.sleepDetailWindowUnrecorded ??
+            'Your times are saved, but the band wasn\u2019t recording for most '
+                'of those hours (off your wrist or charging), so there\u2019s '
+                'no night to score.')
+        : (l?.sleepDetailWindowNoSleep ??
+            'Your times are saved, but the band\u2019s recordings for those '
+                'hours show no sleep to score.');
   }
 
   /// Where the drawn window came from: 'auto', 'auto_fallback', 'manual' or

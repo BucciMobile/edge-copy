@@ -1649,6 +1649,8 @@
   "sleepDetailBedTimeHelp": "上床时间",
   "sleepDetailWakeTimeHelp": "起床时间",
   "sleepDetailReanalyseFailed": "这一夜未能重新分析——可能另一次重新分析正在进行，也可能分析失败了。你设置的时间已保存；在“你的数据”中点击“重新分析全部”即可应用。",
+  "sleepDetailWindowUnrecorded": "你设置的时间已保存，但这段时间里手环大部分时候没有记录（没戴在手腕上或在充电），所以没有可评分的夜晚。",
+  "sleepDetailWindowNoSleep": "你设置的时间已保存，但手环在这段时间的记录中没有可评分的睡眠。",
   "sleepDetailCorrectionUnavailable": "这一夜的详细记录已不在手机上，因此无法再更正这一夜的睡眠。",
   "sleepDetailCorrectionEveningPruned": "这一夜之前的傍晚记录已不在手机上，因此只能设置午夜之后的入睡时间，或将这一夜标记为不是睡眠。",
   "sleepDetailNoHypnogramTitle": "这一夜没有睡眠阶段图",

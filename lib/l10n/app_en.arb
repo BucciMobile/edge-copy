@@ -8466,6 +8466,14 @@
     "description": "Help text on the time picker for when the user got up."
   },
   "sleepDetailReanalyseFailed": "The night wasn’t re-analysed; another run was busy or it failed. Your times are saved: open Your data and tap Re-analyze everything.",
+  "sleepDetailWindowUnrecorded": "Your times are saved, but the band wasn’t recording for most of those hours (off your wrist or charging), so there’s no night to score.",
+  "sleepDetailWindowNoSleep": "Your times are saved, but the band’s recordings for those hours show no sleep to score.",
+  "@sleepDetailWindowUnrecorded": {
+    "description": "Shown after the user set their own sleep window (e.g. \"I was asleep\") and the band recorded too little of it to stage a night."
+  },
+  "@sleepDetailWindowNoSleep": {
+    "description": "Shown after the user set their own sleep window and the band recorded it, but staging found no sleep in it."
+  },
   "sleepDetailCorrectionUnavailable": "This night’s detailed recordings are no longer on the phone, so its sleep can’t be corrected now.",
   "sleepDetailCorrectionEveningPruned": "The evening before this night is no longer on the phone, so only a bedtime after midnight, or Not sleep, can be applied.",
   "@sleepDetailCorrectionEveningPruned": {
