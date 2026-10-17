@@ -302,9 +302,16 @@ struct EnableTomorrowAlarmIntent: AppIntent {
     // Calendar's `.weekday` is 1=Sun..7=Sat; AlarmScheduleEntry's column
     // (lib/state/alarm_schedule.dart) is 0=Mon..6=Sun — `(weekday + 5) % 7`
     // converts one to the other (Mon 2→0 … Sat 7→5, Sun 1→6).
+    //
+    // Before local noon "tomorrow" means the morning still ahead: asked at
+    // 00:40 on Tuesday, the user is going to bed and wants Tuesday's alarm,
+    // not Wednesday's. Same noon cut-off as alarmArmsTonight.
     let cal = Calendar.current
-    let tomorrow = cal.date(byAdding: .day, value: 1, to: Date()) ?? Date()
-    let column = (cal.component(.weekday, from: tomorrow) + 5) % 7
+    let now = Date()
+    let target = cal.component(.hour, from: now) < 12
+      ? now
+      : (cal.date(byAdding: .day, value: 1, to: now) ?? now)
+    let column = (cal.component(.weekday, from: target) + 5) % 7
     OpenStrapShared.defaults()?.set(column, forKey: "enable_tomorrow_alarm_weekday")
     // Same App Group route latch StartBreathingIntent uses, so the user lands
     // on the Alarm screen and can see the toggle actually flipped rather than
