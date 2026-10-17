@@ -31,7 +31,8 @@ import 'onehz_pipeline.dart' show needInputNote;
 ///
 /// Each [daysOldestFirst] element is one day shaped like:
 ///   {'date': 'YYYY-MM-DD', 'rhr': num?, 'rmssd': num?, 'readiness': num?,
-///    'resp_rate': num?, 'skin_temp_z': num?, 'trimp': num?,
+///    'resp_rate': num?, 'skin_temp_z': num?, 'skin_temp_adc': num?,
+///    'skin_temp_family': String?, 'trimp': num?,
 ///    'onset_sec': int?, 'wake_sec': int?, 'tst_min': int?,
 ///    'hypnogram': [{start,end,stage}]?}
 ///
@@ -66,6 +67,33 @@ Map<String, dynamic> buildCrossDayBundle(
   final respList = <double?>[for (final d in days) _numOrNull(d['resp_rate'])];
   final tempList = <double?>[
     for (final d in days) _numOrNull(d['skin_temp_z']),
+  ];
+  // The temperature illness flag standardises its input once, itself, so it
+  // takes the RAW nightly mean — never `skin_temp_z`. That z is already scored
+  // against a mean/SD that holds the earlier fever nights, so it decays night
+  // over night, and standardising it again let a real multi-night rise fall
+  // under the flag's two-night persistence threshold.
+  //
+  // Raw values are in their device family's unit (gen4 ADC counts, gen5
+  // centi-°C, a wearable's own scale), which the z-score had been hiding. Only
+  // nights in the newest scored night's family are kept; the rest are null
+  // rather than mixed into one baseline.
+  final rawTemp = <double?>[
+    for (final d in days) _numOrNull(d['skin_temp_adc']),
+  ];
+  final tempFamily = <String?>[
+    for (final d in days) d['skin_temp_family'] as String?,
+  ];
+  String? latestTempFamily;
+  for (var i = n - 1; i >= 0; i--) {
+    if (rawTemp[i] != null) {
+      latestTempFamily = tempFamily[i];
+      break;
+    }
+  }
+  final tempRawList = <double?>[
+    for (var i = 0; i < n; i++)
+      tempFamily[i] == latestTempFamily ? rawTemp[i] : null,
   ];
 
   // A day flagged `unsettled` (today, until it was derived from a complete
@@ -129,7 +157,7 @@ Map<String, dynamic> buildCrossDayBundle(
     for (var i = 0; i < n; i++)
       days[i]['skin_temp_illness_ok'] == false
           ? null
-          : settled(i, tempList[i]),
+          : settled(i, tempRawList[i]),
   ], luteal: luteal);
 
   // ── circadian: mid-sleep, free/work split, jetlag, chronotype, sleep debt ──
@@ -504,7 +532,8 @@ Map<String, dynamic> buildCrossDayBundle(
             .length >=
         2),
   );
-  final latestTemp = at(tempIllness, newestScored((i) => tempList[i] != null));
+  final latestTemp =
+      at(tempIllness, newestScored((i) => tempRawList[i] != null));
 
   // per-day flags (for notifications / trends): asleep/illness/anomaly/temp,
   // plus the nightly RESTING HR the "your resting HR trend shifted" CUSUM

@@ -6830,6 +6830,13 @@ class DerivationEngine {
       'readiness': col('readiness') ?? sc('readiness'),
       'resp_rate': sc('resp_rate'),
       'skin_temp_z': sc('skin_temp_z'),
+      // The RAW nightly mean and the family whose unit it is in, for the
+      // temperature illness flag: it standardises its input itself, and a
+      // z-score handed to it is standardised twice against a baseline that
+      // already holds the earlier fever nights, so a multi-night rise fades
+      // below its threshold before the persistence rule can fire.
+      'skin_temp_adc': sc('skin_temp_adc'),
+      'skin_temp_family': payload['device_family'] as String?,
       // Only the refusal is written: an eligible night reads as before.
       if (!skinTempIllnessEligible(
           payload['device_family'] as String?, sc('skin_temp_ambient_r')))

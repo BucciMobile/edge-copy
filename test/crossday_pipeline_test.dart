@@ -7,6 +7,8 @@
 // injected RHR spike trips the illness flag, and that absent inputs degrade to
 // honest absent envelopes (never a thrown exception, never a fabricated number).
 
+import 'dart:math' as math;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/compute/crossday_pipeline.dart';
 
@@ -48,6 +50,7 @@ List<Map<String, dynamic>> _synthDays(
       'readiness': readiness,
       'resp_rate': resp,
       'skin_temp_z': temp,
+      'skin_temp_adc': 3000.0 + wobble * 8.0,
       if (withTrimp) 'trimp': trimp,
       if (withSleep) 'onset_sec': onsetSec,
       if (withSleep) 'wake_sec': wakeSec,
@@ -736,6 +739,82 @@ void _wiredFamilies() {
       final sc = (buildCrossDayBundle(days, const {},
           sessionTypesByDate: types)['session_cost'] as Map)['rhr'] as Map;
       expect(sc['value'], '—');
+    });
+  });
+
+  // The temperature flag standardises its own input. It was handed
+  // `skin_temp_z`, which is already scored against a baseline that holds the
+  // earlier fever nights, so the z it saw decayed night over night and a real
+  // multi-night rise never stayed above threshold for two nights.
+  group('the temperature flag reads the raw nightly mean', () {
+    // Deterministic noise around 3000 ADC, SD ~8.
+    const noise = [-9.0, 4.0, 11.0, -3.0, -12.0, 7.0, 1.0, -6.0, 13.0, -5.0,
+      2.0, -10.0, 8.0, -1.0, 5.0, -7.0, 10.0, -4.0, 0.0, 6.0];
+
+    // The edge z exactly as the per-day pipeline computes it: trailing 28 raw
+    // nightly means strictly before the night, sample SD, gated at SD >= 1.
+    double? edgeZ(List<double> raw, int i) {
+      final hist = raw.sublist(i - 28 < 0 ? 0 : i - 28, i);
+      if (hist.length < 3) return null;
+      final mean = hist.reduce((a, b) => a + b) / hist.length;
+      var ss = 0.0;
+      for (final v in hist) {
+        ss += (v - mean) * (v - mean);
+      }
+      final sd = ss == 0 ? 0.0 : math.sqrt(ss / (hist.length - 1));
+      return sd >= 1 ? (raw[i] - mean) / sd : null;
+    }
+
+    List<Map<String, dynamic>> feverDays({
+      required double feverSd,
+      String? Function(int i)? family,
+      double Function(int i, double v)? shift,
+    }) {
+      const baseline = 40;
+      final raw = <double>[
+        for (var i = 0; i < baseline; i++) 3000 + noise[i % noise.length],
+        for (var i = 0; i < 3; i++) 3000 + feverSd * 8,
+      ];
+      var dt = DateTime(2024, 1, 1);
+      final out = <Map<String, dynamic>>[];
+      for (var i = 0; i < raw.length; i++) {
+        final v = shift == null ? raw[i] : shift(i, raw[i]);
+        out.add({
+          'date': '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
+              '${dt.day.toString().padLeft(2, '0')}',
+          'skin_temp_z': edgeZ(raw, i),
+          'skin_temp_adc': v,
+          if (family != null) 'skin_temp_family': family(i),
+        });
+        dt = dt.add(const Duration(days: 1));
+      }
+      return out;
+    }
+
+    List<bool> flags(List<Map<String, dynamic>> days) => [
+          for (final r in buildCrossDayBundle(days, const {})['recent'] as List)
+            (r as Map)['temp'] as bool,
+        ];
+
+    test('a three-night rise is flagged on its second and third nights', () {
+      final f = flags(feverDays(feverSd: 3));
+      expect(f.sublist(f.length - 3), [false, true, true]);
+    });
+
+    test('nights in another family\'s unit are not mixed into the baseline',
+        () {
+      // A gen4 history in ADC counts, then a swap to gen5 reading centi-°C
+      // around 3400 for the last five nights. No fever anywhere: mixed into
+      // one series the swap itself reads as a sustained rise.
+      final days = feverDays(
+        feverSd: 0,
+        family: (i) => i < 38 ? 'gen4' : 'gen5',
+        shift: (i, v) => i < 38 ? v : 3400 + noise[i % noise.length] / 4,
+      );
+      final f = flags(days);
+      expect(f.contains(true), isFalse);
+      final b = buildCrossDayBundle(days, const {});
+      expect((b['temp_illness'] as Map)['date'], days.last['date']);
     });
   });
 }
