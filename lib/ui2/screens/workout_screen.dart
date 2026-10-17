@@ -26,6 +26,7 @@ import '../../health/health_import_state.dart';
 import '../../health/auto_workout_import.dart';
 import '../../health/health_workout_import.dart';
 import '../../l10n/app_localizations.dart';
+import '../../l10n/decimal_text.dart';
 import '../../models/metric.dart';
 import '../../state/app_state.dart';
 import '../../state/clock_format.dart' show formatClockOf;
@@ -1094,7 +1095,7 @@ class _HistoryRow extends StatelessWidget {
                 ]),
           ),
           if (w.strain != null) ...[
-            Text(w.strain!.toStringAsFixed(1),
+            Text(displayFixed(w.strain!, 1),
                 style: F.n17.copyWith(color: p.ink)),
             const SizedBox(width: S.x1),
             Padding(

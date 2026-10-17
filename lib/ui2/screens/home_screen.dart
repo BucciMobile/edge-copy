@@ -911,6 +911,8 @@ class RingTrio extends StatelessWidget {
 }
 
 /// "Updated 8:12 · 2 → 28" off a `todayHeadlineOf` `recovery_update`, or null.
+String _fixed1OrEmpty(Object? v) => v is num ? displayFixed(v, 1) : '';
+
 String? recoveryUpdatedLine(Object? update, AppLocalizations? l) {
   if (update case {
     'from': final int from,
@@ -1042,7 +1044,7 @@ _RingState _ringOf(HomeRingKind k, HomeData d, AppLocalizations? l) {
           ? _gap(k, l?.homeRingStrain ?? 'Strain', LucideIcons.zap, C.purple,
               d.strain, l?.homeRingNoStrain ?? 'No strain', l, unit: 'days')
           : _RingState(k, l?.homeRingStrain ?? 'Strain', LucideIcons.zap, C.purple,
-              value: v.toStringAsFixed(1), sub: l?.homeStrainOf21 ?? 'of 21', frac: v / 21);
+              value: displayFixed(v, 1), sub: l?.homeStrainOf21 ?? 'of 21', frac: v / 21);
     case HomeRingKind.sleep:
       final v = d.sleepMin.value;
       final need = d.sleepNeedMin.value;
@@ -2329,8 +2331,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           C.purple,
           met
               ? (l?.homeStrainTargetMet ?? 'Strain target met')
-              : (l?.homeAimForStrain(aim.toStringAsFixed(1)) ??
-                  'Aim for ${aim.toStringAsFixed(1)} strain'),
+              : (l?.homeAimForStrain(displayFixed(aim, 1)) ??
+                  'Aim for ${displayFixed(aim, 1)} strain'),
           // Built on a wearable's estimated TRIMP: say so.
           [
             l?.homeTraining ?? 'Training',
@@ -2338,8 +2340,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           ].join(' · '),
           met
               ? (l?.actionDone ?? 'Done')
-              : '${(target['low'] as num?)?.toStringAsFixed(1) ?? ''}–'
-                  '${(target['high'] as num?)?.toStringAsFixed(1) ?? ''}',
+              : '${_fixed1OrEmpty(target['low'])}–'
+                  '${_fixed1OrEmpty(target['high'])}',
           met));
     }
 

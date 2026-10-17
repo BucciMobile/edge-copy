@@ -25,6 +25,7 @@ import '../../data/day_label.dart';
 import '../../data/local_repository.dart';
 import '../../l10n/app_localizations.dart';
 import '../../l10n/date_text.dart';
+import '../../l10n/decimal_text.dart';
 import '../../models/metric.dart' show whyFromNote;
 import '../screens/home_screen.dart' show repoOf;
 import '../screens/metric_detail.dart' show detailScaffold;
@@ -267,8 +268,8 @@ class _DayStrainDetailState extends State<DayStrainDetail> {
               ? why ??
                   (l?.dayStrainNoReasonBody ??
                       'Nothing recorded says why this day produced no strain.')
-              : (l?.dayStrainScoredNoTraceBody(s.toStringAsFixed(1)) ??
-                  'The day strain is ${s.toStringAsFixed(1)}. The waking minutes '
+              : (l?.dayStrainScoredNoTraceBody(displayFixed(s, 1)) ??
+                  'The day strain is ${displayFixed(s, 1)}. The waking minutes '
                       'it was built from are not stored for this day.'),
           fix: (s == null && !saw)
               ? (l?.dayStrainWearBandFix ?? 'Wear the band through the day')
@@ -303,7 +304,7 @@ class _DayStrainDetailState extends State<DayStrainDetail> {
             const SizedBox(height: S.x4),
             InlineMetrics([
               if (d.strain != null)
-                (l?.dayStrainTitle ?? 'Day strain', d.strain!.toStringAsFixed(1),
+                (l?.dayStrainTitle ?? 'Day strain', displayFixed(d.strain!, 1),
                     C.purple),
               if (d.peakHr != null)
                 (l?.dayStrainPeakHr ?? 'Peak HR', '${d.peakHr} bpm', C.red),
