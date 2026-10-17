@@ -61,6 +61,47 @@ enum OpenStrapShared {
   }
   static var noData: String { "I don't have today's numbers yet. Open OpenStrap and sync your band." }
 
+  /// What to say when the phone has today's snapshot but is holding one number
+  /// back, or nil when the number is simply missing and [noData] is right.
+  ///
+  /// The bare ints are -1 for a baseline still calibrating, a provisional score
+  /// still finishing and a night still being worked out, and none of those is
+  /// cleared by a sync — telling someone on night 2 of 4 to sync their band
+  /// sends them round in a circle for days. WidgetService already resolves the
+  /// reason into `overnight_why` and the `ring_<key>_*` strings the widget
+  /// draws, so Siri says the same thing rather than inventing a fourth answer.
+  /// A provisional number is still not spoken: Siri only reads final scores.
+  static func pendingLine(ring key: String, noun: String, heldOver: Bool,
+                          in d: UserDefaults? = defaults()) -> String? {
+    guard let d else { return nil }
+    if heldOver, let why = d.string(forKey: "overnight_why"), !why.isEmpty {
+      return why
+    }
+    guard let state = d.object(forKey: "ring_\(key)_state") as? Int else { return nil }
+    let value = d.string(forKey: "ring_\(key)_value") ?? ""
+    let sub = d.string(forKey: "ring_\(key)_sub") ?? ""
+    let why = d.string(forKey: "ring_\(key)_why") ?? ""
+    switch state {
+    case 1:
+      // State 1 carries either a provisional number or the word for a
+      // baseline still filling, with "2 of 4 nights" under it.
+      if Int(value) != nil { return "\(noun) is still finishing up. Ask again a little later." }
+      return sub.isEmpty
+        ? "\(noun) is still calibrating."
+        : "\(noun) is still calibrating, \(sub) so far."
+    case 2:
+      return why.isEmpty ? nil : "\(noun) isn't scored yet. \(why)"
+    default:
+      return nil
+    }
+  }
+
+  /// [pendingLine] when there is one, otherwise [noData].
+  static func notReady(ring key: String, noun: String, heldOver: Bool) -> String {
+    guard hasData else { return noData }
+    return pendingLine(ring: key, noun: noun, heldOver: heldOver) ?? noData
+  }
+
   /// The snapshot as JSON for [GetNumbersIntent]. Every number is null unless
   /// [hasData]; a -1 sentinel is null too. `date` is the local day of `updated_at`.
   static func numbersJSON() -> String {
@@ -118,7 +159,8 @@ struct RecoveryIntent: AppIntent {
 
   func perform() async throws -> some IntentResult & ProvidesDialog {
     guard OpenStrapShared.hasData, OpenStrapShared.readiness >= 0 else {
-      return .result(dialog: IntentDialog(stringLiteral: OpenStrapShared.noData))
+      return .result(dialog: IntentDialog(stringLiteral: OpenStrapShared.notReady(
+        ring: "recovery", noun: "Readiness", heldOver: true)))
     }
     // "Readiness, out of 100" — the app's own name and unit. It is not a
     // percentage and it is not called Recovery anywhere else in the product.
@@ -137,7 +179,8 @@ struct StrainIntent: AppIntent {
 
   func perform() async throws -> some IntentResult & ProvidesDialog {
     guard OpenStrapShared.hasData, OpenStrapShared.strain >= 0 else {
-      return .result(dialog: IntentDialog(stringLiteral: OpenStrapShared.noData))
+      return .result(dialog: IntentDialog(stringLiteral: OpenStrapShared.notReady(
+        ring: "strain", noun: "Strain", heldOver: false)))
     }
     let s = String(format: "%.1f", OpenStrapShared.strain)
     return .result(dialog: "Today's strain so far is \(s) out of twenty-one.")
@@ -152,7 +195,8 @@ struct SleepIntent: AppIntent {
 
   func perform() async throws -> some IntentResult & ProvidesDialog {
     guard OpenStrapShared.hasData, OpenStrapShared.sleepMin >= 0 else {
-      return .result(dialog: IntentDialog(stringLiteral: OpenStrapShared.noData))
+      return .result(dialog: IntentDialog(stringLiteral: OpenStrapShared.notReady(
+        ring: "sleep", noun: "Sleep", heldOver: true)))
     }
     return .result(dialog: "You slept \(OpenStrapShared.sleepText) last night.")
   }
