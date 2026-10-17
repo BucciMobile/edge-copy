@@ -15851,5 +15851,50 @@
         "type": "String"
       }
     }
+  },
+  "notifRecoveryReadyBody": "Recovery {score}.",
+  "@notifRecoveryReadyBody": {
+    "description": "OS notification body when the day's recovery score is ready.",
+    "placeholders": {
+      "score": {
+        "type": "int"
+      }
+    }
+  },
+  "notifRecoveryReadySleptBody": "Recovery {score}, slept {hours}h {minutes}m.",
+  "@notifRecoveryReadySleptBody": {
+    "description": "OS notification body when the day's recovery score is ready, with last night's sleep time.",
+    "placeholders": {
+      "score": {
+        "type": "int"
+      },
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "notifStepGoalBody": "You hit about {steps} steps — at or above your {goal} goal.",
+  "@notifStepGoalBody": {
+    "description": "OS notification body when the day's step estimate reaches the goal.",
+    "placeholders": {
+      "steps": {
+        "type": "int"
+      },
+      "goal": {
+        "type": "int"
+      }
+    }
+  },
+  "notifLowBatteryBody": "Your band is at {percent}%. Charge it soon.",
+  "@notifLowBatteryBody": {
+    "description": "OS notification body when the band's battery is low.",
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
   }
 }

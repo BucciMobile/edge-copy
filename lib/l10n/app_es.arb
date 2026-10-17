@@ -2692,6 +2692,10 @@
   "dataReanalyzeFailed": "El reanálisis falló: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
+  "notifRecoveryReadyBody": "Recuperación {score}.",
+  "notifRecoveryReadySleptBody": "Recuperación {score}, dormiste {hours} h {minutes} min.",
+  "notifStepGoalBody": "Llegaste a unos {steps} pasos, al menos tu objetivo de {goal}.",
+  "notifLowBatteryBody": "Tu banda está al {percent} %. Cárgala pronto.",
   "reportDeleteConfirmTitle": "¿Eliminar el informe {id}?",
   "reportDeleteConfirmBody": "Se borra del servidor ahora mismo y ya no se podrá abrir con su ID. No se puede deshacer.",
   "profileImplausibleFields": "Revisa {fields}. El valor está fuera de rango, así que no se guardó nada."

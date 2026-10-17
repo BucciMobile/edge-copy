@@ -2788,6 +2788,10 @@
   "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
   "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
+  "notifRecoveryReadyBody": "Erholung {score}.",
+  "notifRecoveryReadySleptBody": "Erholung {score}, geschlafen {hours} h {minutes} min.",
+  "notifStepGoalBody": "Du hast etwa {steps} Schritte erreicht – mindestens dein Ziel von {goal}.",
+  "notifLowBatteryBody": "Dein Band ist bei {percent} %. Lade es bald auf.",
   "reportDeleteConfirmTitle": "Bericht {id} löschen?",
   "reportDeleteConfirmBody": "Er wird sofort vom Server entfernt und lässt sich danach nicht mehr über seine ID öffnen. Das lässt sich nicht rückgängig machen.",
   "profileImplausibleFields": "Bitte {fields} prüfen. Der Wert liegt außerhalb des gültigen Bereichs, daher wurde nichts gespeichert."

@@ -41,6 +41,35 @@ String localizedJournalTag(AppLocalizations? l, String tag) {
   };
 }
 
+/// OS notification copy. Producers build titles and bodies as English (they run
+/// with no BuildContext, sometimes headless), so the lock screen showed English
+/// whatever the app language was. The bodies carry interpolated numbers, which
+/// an exact-match lookup can never hit, so those are parsed back here.
+String localizedNotificationText(AppLocalizations? l, String text) {
+  if (l == null || l.localeName == 'en') return text;
+  final slept =
+      RegExp(r'^Recovery (\d+), slept (\d+)h (\d+)m\.$').firstMatch(text);
+  if (slept != null) {
+    return l.notifRecoveryReadySleptBody(int.parse(slept[1]!),
+        int.parse(slept[2]!), int.parse(slept[3]!));
+  }
+  final recovery = RegExp(r'^Recovery (\d+)\.$').firstMatch(text);
+  if (recovery != null) {
+    return l.notifRecoveryReadyBody(int.parse(recovery[1]!));
+  }
+  final steps = RegExp(r'^You hit about (\d+) steps — at or above your (\d+) goal\.$')
+      .firstMatch(text);
+  if (steps != null) {
+    return l.notifStepGoalBody(int.parse(steps[1]!), int.parse(steps[2]!));
+  }
+  final battery =
+      RegExp(r'^Your band is at (\d+)%\. Charge it soon\.$').firstMatch(text);
+  if (battery != null) {
+    return l.notifLowBatteryBody(int.parse(battery[1]!));
+  }
+  return localizedText(l, text);
+}
+
 String localizedText(AppLocalizations? l, String text) {
   if (l == null || l.localeName == 'en') return text;
   final lowScore = RegExp(

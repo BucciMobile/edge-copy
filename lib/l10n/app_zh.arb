@@ -2663,6 +2663,10 @@
   "dataReanalyzeFailed": "重新分析失败：{error}",
   "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
   "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
+  "notifRecoveryReadyBody": "恢复 {score}。",
+  "notifRecoveryReadySleptBody": "恢复 {score}，睡眠 {hours} 小时 {minutes} 分钟。",
+  "notifStepGoalBody": "你走了约 {steps} 步，达到或超过 {goal} 步的目标。",
+  "notifLowBatteryBody": "手环电量 {percent}%。请尽快充电。",
   "reportDeleteConfirmTitle": "删除报告 {id}？",
   "reportDeleteConfirmBody": "它会立即从服务器上删除，之后无法再通过 ID 打开。此操作无法撤销。",
   "profileImplausibleFields": "请检查{fields}。数值超出范围，因此未保存任何内容。"

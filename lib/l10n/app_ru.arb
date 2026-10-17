@@ -7555,5 +7555,46 @@
         "type": "String"
       }
     }
+  },
+  "notifRecoveryReadyBody": "Восстановление {score}.",
+  "@notifRecoveryReadyBody": {
+    "placeholders": {
+      "score": {
+        "type": "int"
+      }
+    }
+  },
+  "notifRecoveryReadySleptBody": "Восстановление {score}, сон {hours} ч {minutes} мин.",
+  "@notifRecoveryReadySleptBody": {
+    "placeholders": {
+      "score": {
+        "type": "int"
+      },
+      "hours": {
+        "type": "int"
+      },
+      "minutes": {
+        "type": "int"
+      }
+    }
+  },
+  "notifStepGoalBody": "Вы прошли около {steps} шагов — не меньше цели в {goal}.",
+  "@notifStepGoalBody": {
+    "placeholders": {
+      "steps": {
+        "type": "int"
+      },
+      "goal": {
+        "type": "int"
+      }
+    }
+  },
+  "notifLowBatteryBody": "Заряд браслета {percent}%. Скоро зарядите его.",
+  "@notifLowBatteryBody": {
+    "placeholders": {
+      "percent": {
+        "type": "int"
+      }
+    }
   }
 }
