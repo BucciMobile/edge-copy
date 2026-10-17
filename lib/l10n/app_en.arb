@@ -8466,6 +8466,10 @@
     "description": "Help text on the time picker for when the user got up."
   },
   "sleepDetailReanalyseFailed": "The night wasn’t re-analysed; another run was busy or it failed. Your times are saved: open Your data and tap Re-analyze everything.",
+  "sleepDetailCorrectionUnavailable": "This night’s detailed recordings are no longer on the phone, so its sleep can’t be corrected now.",
+  "@sleepDetailCorrectionUnavailable": {
+    "description": "Shown instead of the sleep correction buttons, or after one was refused, when the night's raw recordings have been pruned and it can no longer be re-analysed."
+  },
   "@sleepDetailReanalyseFailed": {
     "description": "Fallback error message when re-analysis after a window edit could not be confirmed."
   },

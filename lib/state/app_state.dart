@@ -53,7 +53,11 @@ import '../cloud/companion_client.dart';
 import '../compute/derivation_engine.dart';
 import '../compute/derive_scheduler.dart';
 import '../compute/inputs/canonical.dart'
-    show flagOnOrPrimary, onWearableDaysChanged, refreshSessionSensorSources;
+    show
+        flagOnOrPrimary,
+        onWearableDaysChanged,
+        refreshSessionSensorSources,
+        substrateDays;
 import '../compute/manual_session.dart' show supersededSuggestionIds;
 import '../compute/hr_max.dart';
 import '../compute/inputs/measurement_inputs.dart'
@@ -2461,6 +2465,22 @@ class AppState extends ChangeNotifier {
 
   // ── SLEEP OVERRIDE (manual entry + fallback confirm) ────────────────────────
 
+  /// Whether a sleep correction on [date] can reach the derived night. The
+  /// forced re-derive only covers days that still have substrate (decoded band
+  /// rows or the active wearable's rows); once retention prunes a day's raw,
+  /// nothing re-stages it, so an override stored for it would never show and
+  /// "Re-analyze everything" couldn't apply it either.
+  Future<bool> sleepCorrectable(String date) async =>
+      (await substrateDays()).contains(date);
+
+  /// Refuses a correction on a day [sleepCorrectable] rules out, before
+  /// anything is written: the row would sit in sleep_override unapplied.
+  Future<void> _requireSleepSubstrate(String date) async {
+    if (!await sleepCorrectable(date)) {
+      throw SleepCorrectionUnavailable(date);
+    }
+  }
+
   /// Manual sleep entry (Approach 1): the user gives the in-bed window for [date]
   /// (local YYYY-MM-DD). Stored as the source of truth, then a force re-derive
   /// restages that day FROM the window — even if it was finalized/locked.
@@ -2473,6 +2493,7 @@ class AppState extends ChangeNotifier {
     final onsetSec = onset.millisecondsSinceEpoch ~/ 1000;
     final offsetSec = offset.millisecondsSinceEpoch ~/ 1000;
     if (offsetSec <= onsetSec) return;
+    await _requireSleepSubstrate(date);
     await LocalDb.putSleepOverride(
       dayId: date,
       onsetTs: onsetSec,
@@ -2491,6 +2512,7 @@ class AppState extends ChangeNotifier {
     final onset = (sleep['onset_ts'] as num?)?.toInt();
     final offset = (sleep['wake_ts'] as num?)?.toInt();
     if (onset == null || offset == null || offset <= onset) return;
+    await _requireSleepSubstrate(date);
     await LocalDb.putSleepOverride(
       dayId: date,
       onsetTs: onset,
@@ -2517,6 +2539,7 @@ class AppState extends ChangeNotifier {
     // outright), so an absent detected window falls back to a harmless
     // same-day placeholder rather than blocking the rejection.
     final fallback = DateTime.parse(date).millisecondsSinceEpoch ~/ 1000;
+    await _requireSleepSubstrate(date);
     await LocalDb.putSleepOverride(
       dayId: date,
       onsetTs: onset ?? fallback,
@@ -2527,13 +2550,18 @@ class AppState extends ChangeNotifier {
   }
 
   /// Remove a manual/confirmed override for [date] — revert to auto/fallback.
+  /// Refused on a pruned day like the others: deleting the row there would
+  /// leave the derived night still showing the user's window.
   Future<void> clearSleepOverride(String date) async {
+    await _requireSleepSubstrate(date);
     await LocalDb.deleteSleepOverride(date);
     await _reanalyzeForOverride(date);
   }
 
   /// Force-derive after a sleep-override change so the affected day restages from
-  /// the user's window (the engine force-includes override days even if locked).
+  /// the user's window. A force pass re-derives finalized override days, but
+  /// only among days that still have substrate — callers check that first
+  /// ([sleepCorrectable]).
   Future<void> _reanalyzeForOverride([String? editedDay]) async {
     // run() returns 0 without queueing while ANY pass holds the derive latch
     // (a drain's light pass, the post-drain rescan, another edit), and only a
@@ -5374,4 +5402,13 @@ class AppState extends ChangeNotifier {
       _log('[gesture] mark moment failed: $e');
     }
   }
+}
+
+/// A sleep correction on a day whose substrate has been pruned: no re-derive
+/// can reach it, so nothing was written.
+class SleepCorrectionUnavailable implements Exception {
+  SleepCorrectionUnavailable(this.day);
+  final String day;
+  @override
+  String toString() => 'no recordings left to re-analyse $day';
 }

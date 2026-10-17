@@ -430,6 +430,12 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   /// Why the last correction did not take. Null when it did.
   String? _overrideFailed;
 
+  /// Whether the shown night can still be corrected. False once the day's
+  /// recordings have been pruned: no re-analysis reaches it any more, so the
+  /// correction buttons would only ever fail (see AppState.sleepCorrectable).
+  /// Unknown counts as correctable, which is how the screen behaved before.
+  bool _correctable = true;
+
   /// Last night's state against the user's own nights, when it was rough enough
   /// to say so and has not been dismissed. See `rough_night.dart` — it REPLACES
   /// the elevated-sleeping-HR card rather than joining it, so one night can
@@ -488,8 +494,18 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       if (mounted && gen == _loadGen) setState(() => _loading = false);
       return;
     }
+    AppState? app;
+    try {
+      app = context.read<AppState>();
+    } catch (_) {}
     try {
       final d = await SleepData.load(repo, want: _day);
+      var correctable = true;
+      if (app != null && d.day != null) {
+        try {
+          correctable = await app.sleepCorrectable(d.day!);
+        } catch (_) {}
+      }
       // LAST NIGHT ONLY. The card names the luteal phase, and `getCycle` knows
       // today's phase and no other day's — so a card offered while stepping
       // back through the record would either drop that half or invent it.
@@ -500,7 +516,12 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
           ? await loadRoughNight(repo, d.day!, c: mounted ? context : null)
           : null;
       if (mounted && gen == _loadGen) {
-        setState(() => (_d = d, _rough = rough, _loading = false));
+        setState(() => (
+              _d = d,
+              _rough = rough,
+              _correctable = correctable,
+              _loading = false,
+            ));
       }
     } catch (_) {
       if (mounted && gen == _loadGen) setState(() => _loading = false);
@@ -560,7 +581,10 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               'Wear the band overnight and sync in the morning'),
           icon: rejected ? LucideIcons.undo2 : LucideIcons.moon,
         ),
-        if (rejected) ...[
+        if (rejectedDay != null && !_correctable) ...[
+          const SizedBox(height: S.x2),
+          _uncorrectableNote(c, l),
+        ] else if (rejected) ...[
           const SizedBox(height: S.x2),
           TextButton(
             onPressed: _saving ? null : () => _clearWindow(rejectedDay),
@@ -839,6 +863,9 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
             ),
           ],
           const SizedBox(height: S.x2),
+          if (!_correctable)
+            _uncorrectableNote(c, l)
+          else
           Wrap(spacing: S.x2, children: [
             if (fallback)
               TextButton(
@@ -883,6 +910,15 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       ),
     ];
   }
+
+  /// Stands in for the correction buttons on a night that can no longer be
+  /// re-analysed, so it isn't offered a fix that can't land.
+  Widget _uncorrectableNote(BuildContext c, AppLocalizations? l) => Text(
+        l?.sleepDetailCorrectionUnavailable ??
+            'This night\u2019s detailed recordings are no longer on the phone, '
+                'so its sleep can\u2019t be corrected now.',
+        style: F.cap.copyWith(color: P.of(c).ink3),
+      );
 
   Future<void> _confirmWindow(String day) => _runOverride(
         day,
@@ -964,9 +1000,17 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       _saving = true;
       _overrideFailed = null;
     });
+    final unavailable =
+        AppLocalizations.of(context)?.sleepDetailCorrectionUnavailable;
     String? failed;
     try {
       await write();
+    } on SleepCorrectionUnavailable {
+      // Nothing was written, and re-analysing everything can't reach this day
+      // either, so the generic "tap Re-analyze everything" advice is wrong.
+      failed = unavailable ??
+          'This night\u2019s detailed recordings are no longer on the phone, '
+              'so its sleep can\u2019t be corrected now.';
     } catch (e) {
       failed = '$e';
     } finally {

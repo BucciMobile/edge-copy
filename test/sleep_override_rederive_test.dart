@@ -15,6 +15,28 @@ import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/health/health_export.dart';
 import 'package:openstrap_edge/state/app_state.dart';
 
+/// One decoded band second at noon on [day], so the day has substrate for a
+/// forced re-derive to reach.
+Future<void> _seedDay(String day) async {
+  final d = DateTime.parse(day);
+  final ts = DateTime(d.year, d.month, d.day, 12).millisecondsSinceEpoch ~/ 1000;
+  await (await LocalDb.instance).insert(
+    'decoded_onehz',
+    {
+      'device_id': '',
+      'ts_ms': ts * 1000,
+      'rec_ts': ts,
+      'counter': ts % 100000,
+      'hr': 60,
+      'ax': 0.0,
+      'ay': -0.5,
+      'az': 0.98,
+      'device_family': 'gen4',
+    },
+    conflictAlgorithm: ConflictAlgorithm.replace,
+  );
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -37,6 +59,7 @@ void main() {
   test('an edit made while another derive pass runs waits for it', () async {
     final app = AppState.forTesting();
     addTearDown(app.dispose);
+    await _seedDay(todayLabel());
     DerivationEngine.debugRunning = true; // a drain pass / rescan in flight
     addTearDown(() => DerivationEngine.debugRunning = false);
 
@@ -63,6 +86,7 @@ void main() {
     addTearDown(() => DerivationEngine.debugRunning = false);
 
     final day = todayLabel();
+    await _seedDay(day);
     await LocalDb.setFrozenHeadline(day, 45);
     final edit = app.setSleepOverride(
       day,
@@ -83,6 +107,7 @@ void main() {
   test('an edit doesn\'t wait for a health export already running', () async {
     final app = AppState.forTesting();
     addTearDown(app.dispose);
+    await _seedDay('2026-09-20');
     final exporting = Completer<void>();
     final running = HealthExporter.shared.debugRunLocked(
       () => exporting.future,
@@ -141,5 +166,41 @@ void main() {
     await LocalDb.setFrozenHeadline('2026-09-30', 62);
     await LocalDb.deleteSleepOverride('2026-09-30');
     expect(await LocalDb.frozenHeadline(), isNull);
+  });
+
+  test('a correction on a night whose recordings were pruned is refused, '
+      'not stored', () async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    // No decoded rows for this day: the force re-derive can't reach it, so a
+    // stored override would never show and "Re-analyze everything" couldn't
+    // apply it either.
+    const day = '2026-08-01';
+    expect(await app.sleepCorrectable(day), isFalse);
+    await expectLater(
+      app.setSleepOverride(
+          day, DateTime(2026, 7, 31, 23), DateTime(2026, 8, 1, 7)),
+      throwsA(isA<SleepCorrectionUnavailable>()),
+    );
+    expect(await LocalDb.getSleepOverride(day), isNull);
+    expect(app.reanalyzing, isFalse);
+
+    // An override stored back when the day still had raw stays put: deleting
+    // it would leave the derived night showing the user's window anyway.
+    await LocalDb.putSleepOverride(
+      dayId: day,
+      onsetTs: 1000,
+      offsetTs: 2000,
+      source: 'manual',
+    );
+    await expectLater(
+      app.clearSleepOverride(day),
+      throwsA(isA<SleepCorrectionUnavailable>()),
+    );
+    expect(await LocalDb.getSleepOverride(day), isNotNull);
+    await LocalDb.deleteSleepOverride(day);
+
+    await _seedDay(day);
+    expect(await app.sleepCorrectable(day), isTrue);
   });
 }
