@@ -4002,6 +4002,11 @@ class LocalDb {
   /// the day. Day-tagged so it survives restarts and is ignored on a new day.
   static const String kFrozenHeadlineCursor = 'frozen_headline';
 
+  /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
+  /// Only ever raised; the derive engine refuses to re-derive a day whose
+  /// window reaches below it.
+  static const String kDecodedPrunedBeforeCursor = 'decoded_pruned_before';
+
   /// The pinned morning readiness headline (day + value), or null if unset /
   /// unparseable. The `day` must be compared to today's label by the caller — a
   /// pin left over from a previous day must NOT be surfaced.
@@ -10365,6 +10370,22 @@ class LocalDb {
               ))
                 '${r['day']}',
           };
+          // sync_cursor is this install's own bookkeeping, so a row it already
+          // has wins. A backup's older copy would otherwise lower the prune edge
+          // (which is only ever raised): the derive engine would then stop
+          // treating a restored day whose rows end at the backup moment as
+          // truncated, and overwrite its finalized full-day result from that
+          // partial substrate. The prune edge takes the higher of the two;
+          // every other key the backup has that this install lacks still comes
+          // across, which is what a restore onto a new phone needs.
+          final localCursors = <String, String?>{
+            if (t == 'sync_cursor')
+              for (final r in await db.query(
+                'sync_cursor',
+                columns: ['name', 'value'],
+              ))
+                '${r['name']}': r['value'] as String?,
+          };
           // sleep_user_profile is an accumulator (one fold per finalized
           // night), so the local-wins rule below would let a few local nights
           // throw away a backup's months. The side that folded more nights
@@ -10541,6 +10562,17 @@ class LocalDb {
                     }
                   }
                   continue;
+                }
+                if (t == 'sync_cursor') {
+                  final name = '${row['name']}';
+                  if (localCursors.containsKey(name)) {
+                    if (name != kDecodedPrunedBeforeCursor) continue;
+                    final mine = int.tryParse('${localCursors[name]}');
+                    final theirs = int.tryParse('${row['value']}');
+                    if (theirs == null || (mine != null && theirs <= mine)) {
+                      continue;
+                    }
+                  }
                 }
                 if (t == 'day_result') {
                   if (protectedKeys.contains(

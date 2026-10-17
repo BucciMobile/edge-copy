@@ -7194,7 +7194,8 @@ class DerivationEngine {
   static const int _maxRawHoldDays = 14;
 
   /// Cursor holding the highest `rec_ts` cutoff the raw prune has applied.
-  static const String _prunedBeforeCursor = 'decoded_pruned_before';
+  static const String _prunedBeforeCursor =
+      LocalDb.kDecodedPrunedBeforeCursor;
 
   /// The `rec_ts` below which decoded substrate may be deleted, or null when
   /// nothing may be. PURE — the decision the raw prune is, separated from the
