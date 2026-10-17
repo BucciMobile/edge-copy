@@ -175,6 +175,10 @@
   "@devicesOuraKeyRefused": {
     "description": "Snackbar: Oura-Sync fehlgeschlagen — der Ring hat den Kopplungsschlüssel ausdrücklich abgelehnt."
   },
+  "devicesBandKeyRefused": "Das Band hat den Schlüssel abgelehnt. Kopple es neu, um einen akzeptierten Schlüssel zu installieren.",
+  "@devicesBandKeyRefused": {
+    "description": "Snackbar: Mi-Band-Sync fehlgeschlagen — das Band hat den Kopplungsschlüssel ausdrücklich abgelehnt."
+  },
   "devicesOuraStorageFailed": "Die Synchronisation konnte nicht vollständig gespeichert werden. Bitte synchronisiere erneut.",
   "@devicesOuraStorageFailed": {
     "description": "Snackbar: Oura-Sync fehlgeschlagen — der dauerhafte Speicher-Commit ist fehlgeschlagen."

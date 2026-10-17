@@ -111,6 +111,12 @@ const Map<InputSignal, Duration> kGarminSignals = {
 /// Shown next to every value the watch computed itself.
 const String kGarminAttribution = 'Garmin';
 
+/// The [BandNote] a session ends on when the watch never opened its data
+/// channel: no multi-link characteristic, a refused write, or a declined
+/// registration (`declined:<status>`). Without it the session ends as quietly
+/// as one with no new files.
+const String kGarminRefusedNote = 'garmin_refused';
+
 int _defaultNowSeconds() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 int _defaultUtcOffsetSeconds() => DateTime.now().timeZoneOffset.inSeconds;
 
@@ -207,6 +213,7 @@ class GarminAdapter extends BandAdapter {
     final pair = garminMlPair(mlChars);
     if (pair == null) {
       link.log('garmin: no multi-link data characteristic; ending the session.');
+      yield const BandNote(kGarminRefusedNote, 'no_multilink');
       return;
     }
     var notifyChar = pair.notify;
@@ -490,6 +497,7 @@ class GarminAdapter extends BandAdapter {
       if (!await link.write(
           writeChar, garminEncodeTx(0, garminCloseAllRequest()))) {
         link.log('garmin: close-all write refused; ending the session.');
+        yield const BandNote(kGarminRefusedNote, 'write_refused');
         return;
       }
       final closed =
@@ -504,6 +512,7 @@ class GarminAdapter extends BandAdapter {
         if (!await link.write(writeChar,
             garminEncodeTx(0, garminRegisterMlRequest(kGarminServiceGfdi)))) {
           link.log('garmin: register-ml write refused; ending the session.');
+          yield const BandNote(kGarminRefusedNote, 'write_refused');
           return;
         }
         reg = await registerDone.future
@@ -518,6 +527,7 @@ class GarminAdapter extends BandAdapter {
         if (moved == null) {
           link.log('garmin: the watch named multi-link characteristic '
               '${alt.toRadixString(16)}, which it does not expose.');
+          yield const BandNote(kGarminRefusedNote, 'no_multilink');
           return;
         }
         link.log('garmin: GFDI in use; registering on '
@@ -531,6 +541,7 @@ class GarminAdapter extends BandAdapter {
       if (reg == null || !reg.accepted) {
         link.log('garmin: the watch declined the GFDI channel (status '
             '${reg?.status ?? "none"}).');
+        yield BandNote(kGarminRefusedNote, 'declined:${reg?.status}');
         return;
       }
       gfdiHandle = reg.handle;

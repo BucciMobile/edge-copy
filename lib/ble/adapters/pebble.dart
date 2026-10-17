@@ -82,6 +82,11 @@ const Map<InputSignal, Duration> kPebbleSignals = {
   InputSignal.deviceStages: Duration.zero,
 };
 
+/// The [BandNote] a session carries once the watch has sent anything at all
+/// over PPoGATT. The session never ends on its own, so a silent watch and a
+/// working one look the same to the link without it.
+const String kPebbleHeardNote = 'pebble_heard';
+
 class PebbleAdapter extends BandAdapter {
   final int Function() nowSeconds;
 
@@ -121,6 +126,7 @@ class PebbleAdapter extends BandAdapter {
     };
     var serial = 0;
     var greeted = false;
+    var heard = false;
 
     Future<bool> send(int endpoint, List<int> payload) async {
       for (final p in pebblePpogattPackets(pebbleFrame(endpoint, payload), serial)) {
@@ -148,6 +154,10 @@ class PebbleAdapter extends BandAdapter {
     try {
       await for (final (_, value) in link.notify(kPebblePpogattReadUuid)) {
         if (value.isEmpty) continue;
+        if (!heard) {
+          heard = true;
+          yield const BandNote(kPebbleHeardNote);
+        }
         final header = value[0];
         final rxSerial = header >> 3;
         switch (header & 0x7) {

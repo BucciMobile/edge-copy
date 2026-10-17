@@ -168,6 +168,36 @@ void main() {
     expect(await LocalDb.getCursorInt('miband_since:'), since);
   });
 
+  test('a band that rejects the key is a failed sync that says re-pair, not '
+      'a quiet success', () async {
+    await MiBand234Link.instance.ingestForTest(_deviceId, _key, (i, v) {
+      if (v[0] == 0x02) return [_challengeFrame(_challenge)];
+      if (v.isNotEmpty && v[0] == 0x03) return [_authResult(0x04)];
+      return const [];
+    }, nowSeconds: () => _nowSec);
+    expect(MiBand234Link.instance.lastSyncFailure,
+        MiBand234SyncFailure.keyRejected);
+  });
+
+  test('a band that stops answering mid-handshake is told apart from a '
+      'rejected key', () async {
+    await MiBand234Link.instance.ingestForTest(
+        _deviceId, _key, (i, v) => const [],
+        nowSeconds: () => _nowSec);
+    expect(MiBand234Link.instance.lastSyncFailure,
+        MiBand234SyncFailure.authUnanswered);
+  });
+
+  test('an authenticated session leaves no failure behind', () async {
+    await MiBand234Link.instance.ingestForTest(
+        _deviceId, _key, (i, v) => const [],
+        nowSeconds: () => _nowSec);
+    await MiBand234Link.instance.ingestForTest(
+        _deviceId, _key, _reconnectReply,
+        nowSeconds: () => _nowSec);
+    expect(MiBand234Link.instance.lastSyncFailure, isNull);
+  });
+
   test('nothing paired means nothing to sync', () async {
     expect(await MiBand234Link.pairedRow(), isNull);
     expect(await MiBand234Link.instance.sync(), isFalse);

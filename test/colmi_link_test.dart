@@ -136,6 +136,18 @@ void main() {
     expect(ColmiLink.instance.batteryPct, 64);
   });
 
+  test('a ring that answers nothing is a failed sync, not a quiet success',
+      () async {
+    await ColmiLink.instance.ingestForTest(_deviceId, (_, _) => const [],
+        nowSeconds: _nowSec);
+    expect(ColmiLink.instance.lastSyncUnanswered, isTrue);
+  });
+
+  test('a ring that answers only its battery request is listening', () async {
+    await sync();
+    expect(ColmiLink.instance.lastSyncUnanswered, isFalse);
+  });
+
   test('nothing paired means nothing to sync', () async {
     expect(await ColmiLink.pairedRingRow(), isNull);
     expect(await ColmiLink.instance.sync(), isFalse);

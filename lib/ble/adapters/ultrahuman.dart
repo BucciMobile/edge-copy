@@ -77,6 +77,12 @@ const Map<InputSignal, Duration> kUltrahumanSignals = {
   InputSignal.deviceSpo2: Duration(days: 1),
 };
 
+/// The [BandNote] key a drain ends on when it stopped short: the ring
+/// refused a history request (`request_refused`) or a batch never landed
+/// (`unconfirmed`). Without it the drain ends quietly and reads as a sync
+/// that worked.
+const String kUltrahumanDrainFailedNote = 'ultrahuman_drain_failed';
+
 /// One session. Not const: it holds the cursor to resume from, which belongs
 /// to the host (see `ultrahuman_link.dart`) the same way Oura's cursor and
 /// anchor do.
@@ -188,6 +194,7 @@ class UltrahumanAdapter extends BandAdapter {
             !await link.write(
                 kUltrahumanWriteChar, ultrahumanCmdGetRecordings(cursor))) {
           link.log('ultrahuman: history request refused; ending the drain.');
+          yield const BandNote(kUltrahumanDrainFailedNote, 'request_refused');
           return;
         }
         final got = await _collectPull(inbox, cursor, latest);
@@ -225,6 +232,7 @@ class UltrahumanAdapter extends BandAdapter {
           if (!confirmed) {
             link.log('ultrahuman: batch was not confirmed; leaving the cursor '
                 'where it is.');
+            yield const BandNote(kUltrahumanDrainFailedNote, 'unconfirmed');
             return;
           }
           cursor = newCursor;

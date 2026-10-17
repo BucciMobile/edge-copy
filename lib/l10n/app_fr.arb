@@ -169,6 +169,10 @@
   "@devicesOuraKeyRefused": {
     "description": "Snackbar : échec de la synchronisation Oura — la bague a refusé la clé d'appairage."
   },
+  "devicesBandKeyRefused": "Le bracelet a refusé la clé. Réappairez-le pour installer une clé qu'il accepte.",
+  "@devicesBandKeyRefused": {
+    "description": "Snackbar : échec de la synchronisation Mi Band — le bracelet a refusé la clé d'appairage."
+  },
   "devicesOuraStorageFailed": "La synchronisation n'a pas pu être enregistrée entièrement. Resynchronisez.",
   "@devicesOuraStorageFailed": {
     "description": "Snackbar : échec de la synchronisation Oura — le commit de stockage a échoué."

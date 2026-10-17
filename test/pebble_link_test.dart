@@ -58,6 +58,13 @@ void main() {
     final steps = await db.query('observation');
     expect(steps.single['value'], 25.0);
     expect(await LocalDb.getCursorInt('pebble_steps_hw:$_deviceId'), ts);
+    expect(PebbleLink.instance.lastSyncHeard, isTrue);
+  });
+
+  test('a watch that sends nothing for the whole window is not a sync',
+      () async {
+    await PebbleLink.instance.ingestForTest(_deviceId, const []);
+    expect(PebbleLink.instance.lastSyncHeard, isFalse);
   });
 
   test('a failed step write withholds the ACK and the high-water mark',

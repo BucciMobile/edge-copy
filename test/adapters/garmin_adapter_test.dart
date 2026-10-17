@@ -227,7 +227,7 @@ void main() {
   test('declines cleanly when REGISTER_ML is refused, no GFDI write follows',
       () async {
     final link = ReplayBandLink();
-    await replay(adapter, link, whileRunning: (l) async {
+    final events = await replay(adapter, link, whileRunning: (l) async {
       l.feed(kGarminNotifyChar, _closeAllAck(), atSec: 1_800_000_000);
       await Future<void>.delayed(Duration.zero);
       // 13 bytes: a refusal carries no handle.
@@ -241,6 +241,13 @@ void main() {
     });
     expect(link.writes, hasLength(2)); // CLOSE_ALL, REGISTER_ML — no third
     expect(link.logs.any((m) => m.contains('status 1')), isTrue);
+    // Said out loud: the link must not report this as a sync that worked.
+    expect(
+        events
+            .whereType<BandNote>()
+            .where((n) => n.key == kGarminRefusedNote)
+            .map((n) => n.value),
+        ['declined:1']);
   });
 
   test('a register answer for another client is not ours', () async {
@@ -357,7 +364,9 @@ void main() {
     final events = await replay(quick, link,
         whileRunning: (_) => Future<void>.delayed(
             const Duration(milliseconds: 100)));
-    expect(events, isEmpty);
+    // No answer to REGISTER_ML either: the channel never opened.
+    expect(events.single, isA<BandNote>());
+    expect((events.single as BandNote).value, 'declined:null');
     expect(link.writes, hasLength(2)); // CLOSE_ALL, then REGISTER_ML
     expect(link.writes[1].$2.sublist(0, 2), [0, 0x00]);
   });
@@ -438,13 +447,17 @@ void main() {
     ];
     expect(samples, isEmpty);
     expect(events.whereType<OffloadCheckpoint>(), isEmpty);
+    // An open channel with nothing new to read is not a refusal.
+    expect(events.whereType<BandNote>().any((n) => n.key == kGarminRefusedNote),
+        isFalse);
   });
 
   test('a refused CLOSE_ALL write ends the session without hanging',
       () async {
     final link = ReplayBandLink()..writeSucceeds = false;
     final events = await replay(adapter, link);
-    expect(events, isEmpty);
+    expect(events.single, isA<BandNote>());
+    expect((events.single as BandNote).key, kGarminRefusedNote);
     expect(link.writes, hasLength(1)); // stops at the first refusal
   });
 

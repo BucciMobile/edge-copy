@@ -110,7 +110,8 @@ class GarminLink {
   /// Connect to the paired watch, hold the session for its bounded window,
   /// disconnect.
   ///
-  /// Returns false when nothing is paired or the connect failed. SERIALISED:
+  /// Returns false when nothing is paired, the connect failed, or the watch
+  /// never opened its data channel ([lastSyncRefused]). SERIALISED:
   /// a second call while one is in flight is a no-op rather than a second
   /// radio session over the same peripheral.
   Future<bool> sync() {
@@ -120,6 +121,7 @@ class GarminLink {
   }
 
   Future<bool> _sync() async {
+    lastSyncRefused = false;
     final row = await pairedRow();
     if (row == null) return false;
     final deviceId = row['id'] as String?;
@@ -170,11 +172,13 @@ class GarminLink {
               ));
           _host = host;
           await host.run(link);
-          return true;
         } finally {
           // Drop the link and DISCONNECT before the slot is released.
           await stop();
         }
+        // Read only after [stop]: notes ride the host's vendor-write chain,
+        // which stop drains. A connect alone is not a sync.
+        return !lastSyncRefused;
       });
     } catch (e) {
       debugPrint('[garmin] sync failed: $e');
@@ -230,8 +234,15 @@ class GarminLink {
   /// The adapter's latest read-file list; written only by a host commit.
   String? _readFiles;
 
+  /// The last session's watch never opened its data channel
+  /// ([kGarminRefusedNote]). Cleared at the start of every session.
+  bool lastSyncRefused = false;
+
   void _handleNote(String key, Object? value) {
     switch (key) {
+      case kGarminRefusedNote:
+        lastSyncRefused = true;
+        debugPrint('[garmin] $key = $value');
       case 'garmin_fit_files':
         // Read back by `_makeHost`'s `extraCursors` at the next commit,
         // never written on its own.
@@ -257,6 +268,7 @@ class GarminLink {
     required int Function() nowSeconds,
   }) async {
     _deviceId = deviceId;
+    lastSyncRefused = false;
     final link = ReplayBandLink();
     final host = _makeHost(
         deviceId,

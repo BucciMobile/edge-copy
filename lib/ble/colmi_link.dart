@@ -77,7 +77,8 @@ class ColmiLink {
 
   /// Connect to the paired ring, walk its rolling history window, disconnect.
   ///
-  /// Returns false when nothing is paired or the connect failed. SERIALISED:
+  /// Returns false when nothing is paired, the connect failed, or the ring
+  /// answered nothing ([lastSyncUnanswered]). SERIALISED:
   /// a second call while one is in flight is a no-op rather than a second
   /// radio session over the same peripheral.
   Future<bool> sync() {
@@ -87,6 +88,7 @@ class ColmiLink {
   }
 
   Future<bool> _sync() async {
+    lastSyncUnanswered = false;
     final row = await pairedRingRow();
     if (row == null) return false;
     final deviceId = row['id'] as String?;
@@ -130,7 +132,6 @@ class ColmiLink {
           );
           _host = host;
           await host.run(link);
-          return true;
         } finally {
           // Drop the link and DISCONNECT before the slot is released — same
           // ordering `OuraLink._sync` uses and for the same reason: held in
@@ -139,6 +140,9 @@ class ColmiLink {
           // one was still disconnecting.
           await stop();
         }
+        // A connect alone is not a sync: a ring that never answered ends the
+        // session as quietly as one with nothing new.
+        return !lastSyncUnanswered;
       });
     } catch (e) {
       debugPrint('[colmi] sync failed: $e');
@@ -163,8 +167,13 @@ class ColmiLink {
     }
   }
 
+  /// The last session's ring answered neither its clock nor its battery
+  /// request ([kColmiNoReplyNote]). Cleared at the start of every session.
+  bool lastSyncUnanswered = false;
+
   void _handleNote(String key, Object? value) {
     if (key == 'battery' && value is int) _batteryPct = value;
+    if (key == kColmiNoReplyNote) lastSyncUnanswered = true;
   }
 
   /// Bank one reply verbatim (owner rulings R1-R3): a 16-byte Service A
@@ -209,6 +218,7 @@ class ColmiLink {
     Duration quietTimeout = const Duration(milliseconds: 20),
   }) async {
     _deviceId = deviceId;
+    lastSyncUnanswered = false;
     final link = ReplayBandLink();
     final now = nowSeconds ?? (() => DateTime.now().millisecondsSinceEpoch ~/ 1000);
     _anchorSec = now();

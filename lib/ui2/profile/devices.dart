@@ -65,7 +65,8 @@ import '../../ble/colmi_link.dart' show ColmiLink;
 import '../../ble/coros_link.dart' show CorosLink;
 import '../../ble/garmin_link.dart' show GarminLink;
 import '../../ble/hrs_link.dart' show HrsLink, HrsReading;
-import '../../ble/miband_link.dart' show MiBand234Link, pairMiBand234;
+import '../../ble/miband_link.dart'
+    show MiBand234Link, MiBand234SyncFailure, pairMiBand234;
 import '../../ble/oura_link.dart'
     show OuraLink, OuraSyncCategory, pairOuraRing;
 import '../../ble/pebble_link.dart' show PebbleLink;
@@ -1974,11 +1975,19 @@ Future<void> _syncMiband(BuildContext c) async {
       SnackBar(content: Text(l?.devicesSyncing ?? 'Syncing')));
   final ok = await MiBand234Link.instance.sync();
   if (!c.mounted) return;
+  // A rejected key needs a re-pair, which no amount of moving closer fixes.
+  final keyRejected = !ok &&
+      MiBand234Link.instance.lastSyncFailure ==
+          MiBand234SyncFailure.keyRejected;
   messenger?.showSnackBar(SnackBar(
     content: Text(ok
         ? (l?.devicesSynced ?? 'Synced.')
-        : 'Could not reach the band. It has to be nearby, and not '
-            'connected to another app.'),
+        : keyRejected
+            ? (l?.devicesBandKeyRefused ??
+                'The band rejected the key. Re-pair it to install a key it '
+                    'accepts.')
+            : 'Could not reach the band. It has to be nearby, and not '
+                'connected to another app.'),
   ));
 }
 

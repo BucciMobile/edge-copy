@@ -638,6 +638,40 @@ void main() {
         isFalse);
     expect(link.writes.where((w) => w.$2.first == kUltrahumanOpGetRecordings),
         hasLength(1));
+    // Said out loud, so the link does not report this as a sync that worked.
+    expect(
+        events
+            .whereType<BandNote>()
+            .where((n) => n.key == kUltrahumanDrainFailedNote)
+            .map((n) => n.value),
+        ['unconfirmed']);
+  });
+
+  test('a refused history request ends the drain with a failure note, not '
+      'quietly', () async {
+    final link = ReplayBandLink()..writeSucceeds = false;
+    final events = await _adapter().run(link).toList();
+    expect(
+        events
+            .whereType<BandNote>()
+            .where((n) => n.key == kUltrahumanDrainFailedNote)
+            .map((n) => n.value),
+        ['request_refused']);
+  });
+
+  test('a ring with nothing new ends without a failure note', () async {
+    final (events, _) = await _drive(_adapter(startIndex: 3), (i, v) {
+      if (v.first == kUltrahumanOpGetEarliestIndex) {
+        return _index(kUltrahumanOpGetEarliestIndex, 1);
+      }
+      if (v.first == kUltrahumanOpGetLatestIndex) {
+        return _index(kUltrahumanOpGetLatestIndex, 2);
+      }
+      return const [];
+    });
+    expect(
+        events.whereType<BandNote>().any((n) => n.key == kUltrahumanDrainFailedNote),
+        isFalse);
   });
 
   test('battery reaches the host as a note, never as a sample', () async {

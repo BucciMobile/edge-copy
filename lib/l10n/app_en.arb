@@ -772,6 +772,10 @@
   "@devicesOuraKeyRefused": {
     "description": "Snackbar: Oura sync failed — the ring explicitly refused the pairing key."
   },
+  "devicesBandKeyRefused": "The band rejected the key. Re-pair it to install a key it accepts.",
+  "@devicesBandKeyRefused": {
+    "description": "Snackbar: Mi Band sync failed — the band explicitly refused the pairing key."
+  },
   "devicesOuraStorageFailed": "The sync could not be saved completely. Please try syncing again.",
   "@devicesOuraStorageFailed": {
     "description": "Snackbar: Oura sync failed — the durable storage commit failed."

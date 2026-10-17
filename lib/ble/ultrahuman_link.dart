@@ -131,6 +131,7 @@ class UltrahumanLink {
   }
 
   Future<bool> _sync() async {
+    _drainFailed = false;
     final row = await pairedRingRow();
     if (row == null) return false;
     final deviceId = row['id'] as String?;
@@ -192,11 +193,13 @@ class UltrahumanLink {
           );
           _host = host;
           await host.run(link);
-          return true;
         } finally {
           // Drop the link and DISCONNECT before the slot is released.
           await stop();
         }
+        // Read only after [stop]: notes ride the host's vendor-write chain,
+        // which stop drains.
+        return !_drainFailed;
       });
     } catch (e) {
       debugPrint('[ultrahuman] sync failed: $e');
@@ -234,6 +237,10 @@ class UltrahumanLink {
         nowSeconds: _now,
       );
 
+  /// The last drain stopped short (see [kUltrahumanDrainFailedNote]), or the
+  /// host could not commit a batch. Cleared at the start of every sync.
+  bool _drainFailed = false;
+
   void _handleNote(String key, Object? value) {
     switch (key) {
       case 'ultrahuman_cursor':
@@ -242,6 +249,9 @@ class UltrahumanLink {
         if (value is int) _writeCursor(value);
       case 'battery':
         if (value is int) _batteryPct = value;
+      case kUltrahumanDrainFailedNote || 'host_commit_failed':
+        _drainFailed = true;
+        debugPrint('[ultrahuman] $key = $value');
       default:
         debugPrint('[ultrahuman] $key = $value');
     }

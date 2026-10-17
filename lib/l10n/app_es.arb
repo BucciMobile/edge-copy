@@ -169,6 +169,10 @@
   "@devicesOuraKeyRefused": {
     "description": "Aviso: la sincronización de Oura falló — el anillo rechazó la clave de emparejamiento."
   },
+  "devicesBandKeyRefused": "La pulsera rechazó la clave. Vuelve a emparejarla para instalar una clave que acepte.",
+  "@devicesBandKeyRefused": {
+    "description": "Aviso: la sincronización de la Mi Band falló — la pulsera rechazó la clave de emparejamiento."
+  },
   "devicesOuraStorageFailed": "La sincronización no se pudo guardar por completo. Vuelve a sincronizar.",
   "@devicesOuraStorageFailed": {
     "description": "Aviso: la sincronización de Oura falló — falló el commit de almacenamiento."

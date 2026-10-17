@@ -96,7 +96,8 @@ class PebbleLink {
   static const Duration _defaultWindow = Duration(seconds: 60);
 
   /// Connect to the paired watch, drive [kPebbleAdapter] for [window], then
-  /// disconnect. Returns false when nothing is paired or the connect failed.
+  /// disconnect. Returns false when nothing is paired, the connect failed, or
+  /// the watch sent nothing for the whole window ([lastSyncHeard]).
   /// SERIALISED: a second call while one is in flight is a no-op rather than a
   /// second radio session over the same peripheral.
   Future<bool> sync({Duration window = _defaultWindow}) {
@@ -106,6 +107,7 @@ class PebbleLink {
   }
 
   Future<bool> _sync(Duration window) async {
+    lastSyncHeard = false;
     final row = await pairedWatchRow();
     if (row == null) return false;
     final deviceId = row['id'] as String?;
@@ -151,11 +153,13 @@ class PebbleLink {
             host.run(link),
             Future<void>.delayed(window),
           ]);
-          return true;
         } finally {
           // Drop the link and DISCONNECT before the slot is released.
           await stop();
         }
+        // Read only after [stop]: the note rides the host's vendor-write
+        // chain, which stop drains. A connect alone is not a sync.
+        return lastSyncHeard;
       });
     } catch (e) {
       debugPrint('[pebble] sync failed: $e');
@@ -203,6 +207,10 @@ class PebbleLink {
   /// stored for this watch, the newest minute already counted and the recent
   /// sleep periods, so a day's total and a night carry forward across
   /// sessions (the watch never re-sends an ACKed message).
+  /// The watch sent something during the last session ([kPebbleHeardNote]).
+  /// Cleared at the start of every session.
+  bool lastSyncHeard = false;
+
   Future<BandHost> _makeHost(String deviceId, int Function() now) async {
     final hw = await LocalDb.getCursorInt(_stepsHwItem(deviceId)) ?? 0;
     final prior = <DateTime, int>{};
@@ -223,6 +231,9 @@ class PebbleLink {
               await LocalDb.getCursor(_overlaysItem(deviceId)))),
       deviceId: deviceId,
       onLog: (m) => debugPrint('[pebble] $m'),
+      onNote: (key, _) {
+        if (key == kPebbleHeardNote) lastSyncHeard = true;
+      },
       // An ACK deletes the message on the watch: none goes out before the
       // message's steps and sleep rows landed, or after one failed.
       notesAfterVendorWrites: true,
@@ -243,6 +254,7 @@ class PebbleLink {
     List<List<int>> Function(int endpoint, List<int> payload)? reply,
   }) async {
     final now = nowSeconds ?? () => 1800000000;
+    lastSyncHeard = false;
     final link = ReplayBandLink();
     final host = await _makeHost(deviceId, now);
     _host = host;

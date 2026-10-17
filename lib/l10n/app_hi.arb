@@ -169,6 +169,10 @@
   "@devicesOuraKeyRefused": {
     "description": "स्नैकबार: Oura सिंक विफल — रिंग ने पेयरिंग कुंजी अस्वीकार की।"
   },
+  "devicesBandKeyRefused": "बैंड ने कुंजी अस्वीकार कर दी। एक स्वीकार्य कुंजी इंस्टॉल करने के लिए इसे फिर से पेयर करें।",
+  "@devicesBandKeyRefused": {
+    "description": "स्नैकबार: Mi Band सिंक विफल — बैंड ने पेयरिंग कुंजी अस्वीकार की।"
+  },
   "devicesOuraStorageFailed": "सिंक पूरी तरह से नहीं सहेजा पा सका। कृपया फिर से सिंक करें।",
   "@devicesOuraStorageFailed": {
     "description": "स्नैकबार: Oura सिंक विफल — स्थायी स्टोरेज कमिट विफल।"

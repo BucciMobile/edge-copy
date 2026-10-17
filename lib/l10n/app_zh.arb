@@ -169,6 +169,10 @@
   "@devicesOuraKeyRefused": {
     "description": "快讯条：Oura 同步失败 — 戒指拒绝了配对密钥。"
   },
+  "devicesBandKeyRefused": "手环拒绝了密钥。请重新配对以安装其接受的密钥。",
+  "@devicesBandKeyRefused": {
+    "description": "快讯条：Mi Band 同步失败 — 手环拒绝了配对密钥。"
+  },
   "devicesOuraStorageFailed": "同步无法完整保存。请重新同步。",
   "@devicesOuraStorageFailed": {
     "description": "快讯条：Oura 同步失败 — 持久存储提交失败。"

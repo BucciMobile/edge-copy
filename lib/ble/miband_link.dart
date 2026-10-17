@@ -96,6 +96,16 @@ List<int>? _unhex(String s) {
   return out;
 }
 
+/// Why a Mi Band session ended before it could read anything.
+enum MiBand234SyncFailure {
+  /// The band answered the handshake with a refusal: the wrong key, or a
+  /// band still bound to another one. Re-pairing installs a key it accepts.
+  keyRejected,
+
+  /// The band stopped answering partway through the handshake.
+  authUnanswered,
+}
+
 /// The live link to a paired Mi Band. One instance; a second concurrent band
 /// is not a thing anyone asked for.
 ///
@@ -204,6 +214,7 @@ class MiBand234Link {
   }
 
   Future<bool> _sync(Duration window) async {
+    lastSyncFailure = null;
     final row = await pairedRow();
     if (row == null) return false;
     final deviceId = row['id'] as String?;
@@ -258,10 +269,12 @@ class MiBand234Link {
           final done = host.run(link);
           await Future.any(
               [done, Future<void>.delayed(window)]);
-          return true;
         } finally {
           await stop();
         }
+        // Read only after [stop]: the note rides the host's vendor-write
+        // chain, which stop drains.
+        return lastSyncFailure == null;
       });
     } catch (e) {
       debugPrint('[miband234] sync failed: $e');
@@ -298,6 +311,11 @@ class MiBand234Link {
         notesAfterVendorWrites: true,
         onNote: (key, value) {
           if (key == 'miband_since' && value is int) _pendingSince = value;
+          if (key == kMiBandAuthFailedNote) {
+            lastSyncFailure = value is int && value != 0x01
+                ? MiBand234SyncFailure.keyRejected
+                : MiBand234SyncFailure.authUnanswered;
+          }
         },
         // Read at commit time: the cursor lands with the rows it covers, or
         // not at all.
@@ -310,6 +328,12 @@ class MiBand234Link {
 
   /// The newest `miband_since` the adapter reported, not yet committed.
   int? _pendingSince;
+
+  /// Why the last session ended without authenticating, or null. A refused
+  /// handshake ends the adapter's stream quietly, so without this a band that
+  /// rejects the key reads as a sync that worked, and the remedy (re-pair)
+  /// never reaches the user. Cleared at the start of every session.
+  MiBand234SyncFailure? lastSyncFailure;
 
   /// Bank one optional-channel notification verbatim, undecoded (owner
   /// rulings R1-R3). The leading byte is [MiBand234Adapter]'s own archive
@@ -365,6 +389,7 @@ class MiBand234Link {
     _now = nowSeconds ?? _now;
     _deviceId = deviceId;
     _pendingSince = null;
+    lastSyncFailure = null;
     final link = ReplayBandLink();
     for (final (uuid, v) in extra) {
       link.feed(uuid, v, atSec: _now());
