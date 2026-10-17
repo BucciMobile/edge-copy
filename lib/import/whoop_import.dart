@@ -15,6 +15,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import '../compute/derivation_engine.dart' show kAlgoVersion, DerivationEngine;
 import '../compute/profile.dart';
 import '../compute/substrate.dart' show localDateLabel;
@@ -219,11 +221,18 @@ class WhoopImporter {
     // sleeps.csv lists naps as their own rows, filed under the same date as
     // the night that ended that morning. A nap is not the day's sleep.
     if (get(['nap']).toLowerCase() == 'true') return null;
-    final wakeTs = _parseTs(get(['wake onset', 'sleep onset', 'cycle start time']));
-    final cycleStart = _parseTs(get(['cycle start time', 'sleep onset']));
+    final zone = get(_zoneCols);
+    final wakeTs = parseExportTs(
+        get(['wake onset', 'sleep onset', 'cycle start time']), zone: zone);
+    final cycleStart =
+        parseExportTs(get(['cycle start time', 'sleep onset']), zone: zone);
     final anchor = wakeTs ?? cycleStart;
     if (anchor == null) return null;
-    final date = localDateLabel(anchor);
+    // File the day under the date the user lived it in the export's own zone,
+    // not under whatever zone the phone is in at import time: a night slept in
+    // Paris and imported in Los Angeles still belongs to the Paris morning.
+    final off = zoneOffset(zone);
+    final date = off == null ? localDateLabel(anchor) : _wallDateLabel(anchor, off);
 
     num? n(List<String> names) => double.tryParse(get(names));
     return (date, {
@@ -244,8 +253,8 @@ class WhoopImporter {
       // need, a different number; _pick takes the first column that exists,
       // so listing it here stored performance as efficiency.
       'effPct': n(['sleep efficiency %']),
-      'sleepOnset': _parseTs(get(['sleep onset'])),
-      'sleepWake': _parseTs(get(['wake onset'])),
+      'sleepOnset': parseExportTs(get(['sleep onset']), zone: zone),
+      'sleepWake': parseExportTs(get(['wake onset']), zone: zone),
     });
   }
 
@@ -389,8 +398,10 @@ class WhoopImporter {
 
   static Future<bool> _writeWorkout(_Row row) async {
     String get(List<String> names) => row.get(names);
-    final start = _parseTs(get(['workout start time', 'start time']));
-    final end = _parseTs(get(['workout end time', 'end time']));
+    final zone = get(_zoneCols);
+    final start =
+        parseExportTs(get(['workout start time', 'start time']), zone: zone);
+    final end = parseExportTs(get(['workout end time', 'end time']), zone: zone);
     if (start == null) return false;
     num? n(List<String> names) => double.tryParse(get(names));
     final id = 'whoop_$start';
@@ -429,23 +440,66 @@ class WhoopImporter {
     return _Kind.unknown;
   }
 
+  /// The export writes wall-clock times with no offset ("2024-03-09 23:10:00")
+  /// and puts the offset they were recorded in in a separate column.
+  static const List<String> _zoneCols = ['cycle timezone', 'timezone'];
+
+  /// "UTC+01:00" / "UTC-0800" / "GMT+5:30" / "+01:00" / "UTC" → its offset
+  /// from UTC; null for anything else (blank, an IANA name we can't resolve
+  /// without a tz database), which falls back to the phone's own zone.
+  @visibleForTesting
+  static Duration? zoneOffset(String tz) {
+    final t = tz.trim().toUpperCase();
+    if (t == 'UTC' || t == 'GMT' || t == 'Z') return Duration.zero;
+    final m = RegExp(r'^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$').firstMatch(t);
+    if (m == null) return null;
+    final h = int.parse(m.group(2)!);
+    final min = int.parse(m.group(3) ?? '0');
+    if (h > 14 || min > 59) return null;
+    final d = Duration(hours: h, minutes: min);
+    return m.group(1) == '-' ? -d : d;
+  }
+
+  static String _wallDateLabel(int epochSec, Duration off) {
+    final w = DateTime.fromMillisecondsSinceEpoch(epochSec * 1000, isUtc: true)
+        .add(off);
+    String two(int x) => x.toString().padLeft(2, '0');
+    return '${w.year.toString().padLeft(4, '0')}-${two(w.month)}-${two(w.day)}';
+  }
+
   /// Lenient timestamp → unix seconds. Handles ISO ("2024-01-15T06:30:12Z" /
   /// "+00:00"), the export's "2024-01-15 06:30:12", and "+0000" offsets.
-  static int? _parseTs(String s) {
+  ///
+  /// An offset-less time is read in [zone] (the row's "Cycle timezone") when
+  /// that parses. Reading it in the phone's current zone instead put every
+  /// night or workout recorded elsewhere at the wrong instant — a Paris night
+  /// imported in Los Angeles landed in Apple Health nine hours late.
+  @visibleForTesting
+  static int? parseExportTs(String s, {String zone = ''}) {
     if (s.isEmpty) return null;
     var t = s.trim();
     // Normalise "+0000" → "+00:00" so DateTime.parse accepts it.
     final m = RegExp(r'([+-]\d{2})(\d{2})$').firstMatch(t);
     if (m != null) t = '${t.substring(0, m.start)}${m.group(1)}:${m.group(2)}';
+    final off = zoneOffset(zone);
+    final hasOwnOffset = RegExp(r'(Z|[+-]\d{2}:\d{2})$').hasMatch(t);
+    if (off != null && !hasOwnOffset) {
+      final asUtc = DateTime.tryParse('${t}Z');
+      if (asUtc != null) return asUtc.subtract(off).millisecondsSinceEpoch ~/ 1000;
+    }
     final dt = DateTime.tryParse(t);
     if (dt != null) return dt.millisecondsSinceEpoch ~/ 1000;
-    // Fallback: pull a yyyy-mm-dd and treat as local midnight.
+    // Fallback: pull a yyyy-mm-dd and treat as midnight in the row's zone
+    // (local midnight when it has none).
     final d = RegExp(r'(\d{4})-(\d{2})-(\d{2})').firstMatch(t);
     if (d != null) {
-      return DateTime(int.parse(d.group(1)!), int.parse(d.group(2)!),
-                  int.parse(d.group(3)!))
-              .millisecondsSinceEpoch ~/
-          1000;
+      final y = int.parse(d.group(1)!);
+      final mo = int.parse(d.group(2)!);
+      final da = int.parse(d.group(3)!);
+      final mid = off != null
+          ? DateTime.utc(y, mo, da).subtract(off)
+          : DateTime(y, mo, da);
+      return mid.millisecondsSinceEpoch ~/ 1000;
     }
     return null;
   }
