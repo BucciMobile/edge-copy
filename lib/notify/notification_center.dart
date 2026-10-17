@@ -844,16 +844,39 @@ class NotificationCenter {
     return DateTime(y, m, d, 0, s.slotMin);
   }
 
+  /// Whether an AI slot at [slotMin] should be armed by a pass running at
+  /// [nowMin] (both local minutes of day). Every armed slot is a ONE-SHOT at
+  /// the next occurrence of its time.
+  ///
+  /// The nightly sweep is armed only when its slot is still ahead TODAY. A
+  /// daily REPEAT would re-announce tonight's finding every night for the life
+  /// of the install, because the body is a fact about one specific day, and a
+  /// one-shot that rolled over to tomorrow would announce today's finding
+  /// about a day it did not happen on. Nothing is armed instead — this re-runs
+  /// on the next foreground pass, which is where the finding is recomputed.
+  ///
+  /// The morning briefing's body names no day, so it rolls to tomorrow. With
+  /// the same today-only rule it was armed only by a pass before its time:
+  /// a user whose last foreground of the day came after 08:00 (and on
+  /// Android the foreground service keeps the process alive overnight, so
+  /// init never re-runs) got no briefing the next morning.
+  @visibleForTesting
+  static bool aiSlotArmable(int id, int slotMin, int nowMin) {
+    if (id == NotificationService.idMorningBrief) return true;
+    return slotMin > nowMin;
+  }
+
   /// Re-assert the three AI slots (morning briefing, nightly sweep, pre-sleep
   /// journal prompt).
   ///
-  /// Only the nightly sweep is armed. It earns the interruption the same way
-  /// the weekly lookback does — [sweepHeadline] is a finding that already
-  /// exists, computed on-device before this is called, and it IS the
-  /// notification's body. The morning briefing and the journal prompt are
-  /// still nudges with no finding behind them; [aiReminderPlan] still describes
-  /// them (it is the plan, not the policy) and
-  /// [NotificationService.maySchedule] still refuses them, quietly, right here.
+  /// The nightly sweep earns the interruption the same way the weekly
+  /// lookback does — [sweepHeadline] is a finding that already exists,
+  /// computed on-device before this is called, and it IS the notification's
+  /// body. The morning briefing is armed for a BYOK user with the switch on;
+  /// its body is static. The journal prompt is a nudge with no finding behind
+  /// it; [aiReminderPlan] still describes it (it is the plan, not the policy)
+  /// and [NotificationService.maySchedule] still refuses it, quietly, right
+  /// here.
   ///
   /// The cancels stay unconditional: they are what clears yesterday's slot when
   /// today has nothing to say, and what clears whatever an older build left.
@@ -882,16 +905,7 @@ class NotificationCenter {
     await svc.ensureTimezone();
     final nowMin = DateTime.now().hour * 60 + DateTime.now().minute;
     for (final s in plan) {
-      // ONE-SHOT, and only when the slot is still ahead TODAY.
-      //
-      // Both halves matter and both are the same bug the weekly lookback
-      // already carries a comment about. A daily REPEAT would re-announce
-      // tonight's finding every night for the life of the install, because the
-      // body is a fact about one specific day. And a one-shot that rolled over
-      // to tomorrow would announce today's finding about a day it did not
-      // happen on. Nothing is armed instead — this re-runs on the next
-      // foreground pass, which is where the finding is recomputed anyway.
-      if (s.hour * 60 + s.minute <= nowMin) continue;
+      if (!aiSlotArmable(s.id, s.hour * 60 + s.minute, nowMin)) continue;
       await svc.scheduleOnce(
         id: s.id,
         category: NotifCategory.reminders,
