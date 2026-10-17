@@ -3996,9 +3996,9 @@
   "@nutritionLabelBalance": {
     "description": "Nutrition Week tab: all-caps inline metric label for the eaten-minus-burned balance"
   },
-  "nutritionEatenMeanNote": "Eaten is the mean of {days} complete days. Burned is today only.",
+  "nutritionEatenMeanNote": "Eaten and burned are both means over the same {days} complete days.",
   "@nutritionEatenMeanNote": {
-    "description": "Nutrition Week tab: footnote explaining the eaten mean is over N complete days while burned is today only",
+    "description": "Nutrition Week tab: footnote explaining eaten and burned are both means over the same N complete days",
     "placeholders": {
       "days": {
         "type": "int"

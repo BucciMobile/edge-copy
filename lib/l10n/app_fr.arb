@@ -804,7 +804,7 @@
   "nutritionLabelEaten": "MANGÉ",
   "nutritionLabelBurned": "BRÛLÉ",
   "nutritionLabelBalance": "BILAN",
-  "nutritionEatenMeanNote": "Le mangé est la moyenne sur {days} jours complets. Le brûlé est celui d'aujourd'hui seulement.",
+  "nutritionEatenMeanNote": "Le mangé et le brûlé sont deux moyennes sur les mêmes {days} jours complets.",
   "nutritionEnergyLoggedTitle": "Énergie enregistrée",
   "nutritionPartialFootnote": "{n} partiel(s), exclu(s) des moyennes ci-dessous.",
   "nutritionNothingLoggedYet": "Rien d'enregistré pour l'instant",

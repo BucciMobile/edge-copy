@@ -833,7 +833,7 @@
   "nutritionLabelEaten": "GEGESSEN",
   "nutritionLabelBurned": "VERBRANNT",
   "nutritionLabelBalance": "BILANZ",
-  "nutritionEatenMeanNote": "„Gegessen“ ist der Durchschnitt aus {days} vollständigen Tagen. „Verbrannt“ gilt nur für heute.",
+  "nutritionEatenMeanNote": "„Gegessen“ und „Verbrannt“ sind beide Durchschnitte über dieselben {days} vollständigen Tage.",
   "nutritionEnergyLoggedTitle": "Eingetragene Energie",
   "nutritionPartialFootnote": "{n} unvollständig, in den Durchschnitten unten nicht enthalten.",
   "nutritionNothingLoggedYet": "Noch nichts eingetragen",

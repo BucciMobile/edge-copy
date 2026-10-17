@@ -1727,7 +1727,7 @@
   "nutritionLabelEaten": "СЪЕДЕНО",
   "nutritionLabelBurned": "ПОТРАЧЕНО",
   "nutritionLabelBalance": "БАЛАНС",
-  "nutritionEatenMeanNote": "Съедено — среднее за {days} полных дней. Израсходовано — только за сегодня.",
+  "nutritionEatenMeanNote": "Съедено и израсходовано — средние за одни и те же {days} полных дней.",
   "@nutritionEatenMeanNote": {
     "placeholders": {
       "days": {

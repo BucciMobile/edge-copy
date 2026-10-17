@@ -456,6 +456,39 @@ class NutritionWindow {
   NutrientMean get meanFibre => _mean((d) => d.fibre);
 }
 
+/// Eaten against burned over the SAME days.
+///
+/// The balance used to be the seven-day eaten mean minus today's burn so far.
+/// Today's burn is a running total — basal is pro-rated over the minutes the
+/// day has covered — so at 08:00 a maintenance week read as a ~1,700 kcal
+/// surplus that only shrank to the truth near midnight. Only a counted day
+/// with a derived total burn goes in, and today never counts, so both sides
+/// are whole days and the difference means something.
+class EnergyBalance {
+  const EnergyBalance(this.eaten, this.burned, this.days);
+  final double eaten;
+  final double burned;
+  final int days;
+  double get balance => eaten - burned;
+}
+
+/// [burnedByDate] maps a local day label to that day's total burn. Null when
+/// no counted day has one — the card then has nothing honest to subtract.
+EnergyBalance? weeklyEnergyBalance(
+  NutritionWindow w,
+  Map<String, double> burnedByDate,
+) {
+  var eaten = 0.0, burned = 0.0, n = 0;
+  for (final d in w.counted) {
+    final b = burnedByDate[d.date];
+    if (b == null || !d.kcal.complete) continue;
+    eaten += d.kcal.value!;
+    burned += b;
+    n++;
+  }
+  return n == 0 ? null : EnergyBalance(eaten / n, burned / n, n);
+}
+
 // ══════════════════ STORE ══════════════════
 
 class NutritionDb {
