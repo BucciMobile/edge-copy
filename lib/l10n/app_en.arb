@@ -7400,6 +7400,18 @@
       }
     }
   },
+  "homeNoDataThisDayTitle": "No data for this day",
+  "@homeNoDataThisDayTitle": {
+    "description": "Today tab, stepped back to a past day: title shown when that day has nothing recorded."
+  },
+  "homeNoDataThisDayBody": "Nothing was recorded on this day.",
+  "@homeNoDataThisDayBody": {
+    "description": "Today tab, stepped back to a past day: body shown when that day has nothing recorded."
+  },
+  "homeSomeDayDataMissingTitle": "Some of this day's data is missing",
+  "@homeSomeDayDataMissingTitle": {
+    "description": "Today tab, stepped back to a past day: one card listing every missing reading and why."
+  },
   "homeReadinessNotScoredTitle": "Recovery is not scored today",
   "@homeReadinessNotScoredTitle": {
     "description": "Title of the card shown when readiness has no score today."

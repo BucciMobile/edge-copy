@@ -12,6 +12,7 @@ import 'package:provider/provider.dart';
 
 import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/data/local_repository.dart';
+import 'package:openstrap_edge/l10n/app_localizations.dart';
 import 'package:openstrap_edge/state/app_state.dart';
 import 'package:openstrap_edge/theme/theme_controller.dart';
 import 'package:openstrap_edge/ui2/screens/screens.dart';
@@ -190,6 +191,54 @@ void main() {
     expect(find.text('Sync the band'), findsNothing);
   });
 
+  testWidgets('the past-day empty card follows the app language', (t) async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    app.repo = _EmptyPastRepo();
+
+    await t.pumpWidget(MaterialApp(
+      theme: buildTheme(Brightness.light),
+      locale: const Locale('de'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: const Scaffold(body: HomeScreen(hour: 9)),
+      ),
+    ));
+    await _settle(t);
+
+    final l = AppLocalizations.of(t.element(find.byType(HomeScreen)))!;
+    await t.tap(find.bySemanticsLabel(l.metricDetailPreviousDay));
+    await _settle(t);
+
+    expect(find.text('Keine Daten für diesen Tag'), findsOneWidget);
+    expect(find.text('No data for this day'), findsNothing);
+  });
+
+  testWidgets('a past day with gaps does not call itself today', (t) async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    app.repo = _PartialPastRepo();
+
+    await t.pumpWidget(MaterialApp(
+      theme: buildTheme(Brightness.light),
+      home: ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: const Scaffold(body: HomeScreen(hour: 9)),
+      ),
+    ));
+    await _settle(t);
+    await t.tap(find.bySemanticsLabel('Previous day'));
+    await _settle(t);
+
+    final title = find.text('Some of this day\'s data is missing');
+    await t.scrollUntilVisible(title, 300,
+        scrollable: find.byType(Scrollable).first);
+    expect(title, findsOneWidget);
+    expect(find.text('Some of today\'s data is missing'), findsNothing);
+  });
+
   testWidgets('a failed read still shows the alarm door', (t) async {
     // The alarm lives on AppState, not HomeData, so the error card must not
     // take it down with it.
@@ -251,4 +300,15 @@ class _EmptyPastRepo extends LocalRepository {
 class _FailingRepo extends _EmptyPastRepo {
   @override
   Future<List<String>> availableDays() async => throw StateError('read failed');
+}
+
+/// Yesterday has a readiness and a strain but no resting HR and no
+/// calories, so the glance has more than one absence to summarise.
+class _PartialPastRepo extends _EmptyPastRepo {
+  @override
+  Future<Map<String, dynamic>> getDayOverview(String date) async =>
+      {'readiness': 42};
+  @override
+  Future<Map<String, dynamic>> getDayStrain(String date) async =>
+      {'strain': 9.9};
 }

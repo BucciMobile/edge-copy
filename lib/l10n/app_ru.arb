@@ -3375,6 +3375,9 @@
   "homeProfileSettings": "Профиль и настройки",
   "homeNothingTodayTitle": "За сегодня ничего не записано",
   "homeNothingTodayBody": "Последняя оценённая ночь: {day}. С тех пор данные не поступали.",
+  "homeNoDataThisDayTitle": "Нет данных за этот день",
+  "homeNoDataThisDayBody": "В этот день ничего не было записано.",
+  "homeSomeDayDataMissingTitle": "Часть данных за этот день отсутствует",
   "@homeNothingTodayBody": {
     "placeholders": {
       "day": {

@@ -1695,9 +1695,9 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     // install's live pipeline catching up, which has nothing to do with a day
     // the switcher stepped back onto.
     if (pastDay) {
-      return const StatusCard(
-        'No data for this day',
-        'Nothing was recorded on this day.',
+      return StatusCard(
+        l?.homeNoDataThisDayTitle ?? 'No data for this day',
+        l?.homeNoDataThisDayBody ?? 'Nothing was recorded on this day.',
         fix: '',
         icon: LucideIcons.calendarOff,
       );
@@ -2265,7 +2265,13 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         else if (absent.length > 1) ...[
           const SizedBox(height: S.x3),
           StatusCard(
-            l?.homeSomeDataMissingTitle ?? 'Some of today\'s data is missing',
+            // The glance also renders for a day the switcher stepped back
+            // onto, where "today's" names the wrong day.
+            isToday
+                ? (l?.homeSomeDataMissingTitle ??
+                    'Some of today\'s data is missing')
+                : (l?.homeSomeDayDataMissingTitle ??
+                    'Some of this day\'s data is missing'),
             [
               for (final s in absent)
                 [s.what, s.why, s.fix].where((t) => t.isNotEmpty).join('. '),
