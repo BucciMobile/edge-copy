@@ -329,11 +329,12 @@ ResumeLinkAction resumeLinkAction(
 /// garbage, a misread offset. True of WHOOP, which carries a settable RTC.
 /// FALSIFIED BY: a source whose time base is uptime-since-boot, a sequence
 /// number, or milliseconds — each lands permanently under the floor.
-/// WHEN WRONG: every record is refused. Nothing is LOST (`TrimAckPolicy`
-/// correctly refuses the trim on a drop-only burst, so the band keeps its
-/// flash) but nothing is stored either, and the same chunk is re-delivered
-/// forever. [RecordGate.timeBaseNotWallClock] is what makes that case tellable
-/// from a transient wandering clock, which looks identical at the gate.
+/// WHEN WRONG: every record is refused from decoding. Its bytes land in
+/// `raw_archive` and a burst that is ALL below-floor drops is trimmed once
+/// they are committed (`TrimAckPolicy`), so nothing is lost and the drain
+/// moves on — but no day is ever derived from them.
+/// [RecordGate.timeBaseNotWallClock] is what makes that case tellable from a
+/// transient wandering clock, which looks identical at the gate.
 /// HOW TO CHECK: `gate_dropped_total` climbing while `records_seen` stays flat,
 /// with `RecordGate.droppedBelowFloor == RecordGate.dropped`.
 // ponytail: an absolute floor, so a relative time base cannot be rescued here

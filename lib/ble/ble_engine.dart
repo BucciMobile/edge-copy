@@ -2416,6 +2416,10 @@ class BleEngine {
   // said" apart from "we correctly, silently rejected some as implausible
   // (stale-clock block) and never tallied them." See _handleSyncMarker.
   int _burstDroppedAtStart = 0;
+  // Same snapshot for `_recordGate.droppedBelowFloor`: the trim gate needs to
+  // know whether THIS burst's drops were all below the absolute floor, and the
+  // gate's own counters span the whole connection.
+  int _burstDroppedBelowFloorAtStart = 0;
   // Consecutive HISTORY_END refuses where the burst banked nothing durable
   // but the RecordGate dropped samples. After a short streak we re-issue
   // SET_CLOCK and bounce — the usual cause is a bad post-reconnect window
@@ -3084,6 +3088,7 @@ class BleEngine {
       // banked. The startless HISTORY_END is expected, not hypothetical: the
       // historyEnd branch has its own `history_end_while_not_syncing` terminal.
       _burstDroppedAtStart = 0;
+      _burstDroppedBelowFloorAtStart = 0;
       // Re-seed the counter-regression watch from the durable counter_hw
       // cursor so a reboot is caught even across the reconnect it usually
       // causes, instead of only within a single unbroken connection.
@@ -7120,6 +7125,7 @@ class BleEngine {
       // live traffic from here.
       _historyAwaitingFirstStart = false;
       _burstDroppedAtStart = _recordGate.dropped;
+      _burstDroppedBelowFloorAtStart = _recordGate.droppedBelowFloor;
       d?.rearm();
       // The one place a new burst is really declared — the only safe point to
       // clear the discarded-burst poison (see DrainController.beginBurst).
@@ -7184,6 +7190,8 @@ class BleEngine {
       // kGateDroppedReason archives, but that path deliberately skips the
       // burst count for them, so they never entered currentBurstPacketCount.
       final droppedThisBurst = _recordGate.dropped - _burstDroppedAtStart;
+      final droppedBelowFloorThisBurst =
+          _recordGate.droppedBelowFloor - _burstDroppedBelowFloorAtStart;
       // Read before validateBurst, which zeroes the counter on a pass — this is
       // the attempt number, and the slack, the gate actually judged this burst
       // under.
@@ -7337,10 +7345,15 @@ class BleEngine {
       //
       // This only decides whether the band may TRIM. Archives are committed in
       // the same transaction regardless — except on the no-progress path, which
-      // returns before commit precisely because there is nothing to bank.
+      // returns before commit. A burst whose drops are ALL below the absolute
+      // floor is not that path: those records can never become plausible, so
+      // their archives are committed and the chunk trimmed (#601).
       final hadDurableRows = d.bufferedRecords > 0 ||
           d.bufferedProgressArchives > 0 ||
           d.bufferedEcgRaw > 0;
+      // Snapshot: the commit below clears the buffer, and the post-commit
+      // re-gate must judge the same burst.
+      final gateDropArchives = d.bufferedGateDropArchives;
       _log(
         '[SYNC] HistoryEnd batch=${m.batchId} records=${d.records} '
         'expected=${m.expectedPacketCount} '
@@ -7370,6 +7383,8 @@ class BleEngine {
         commitDurable: true,
         hadDurableRows: hadDurableRows,
         droppedThisBurst: droppedThisBurst,
+        droppedBelowFloorThisBurst: droppedBelowFloorThisBurst,
+        gateDropArchives: gateDropArchives,
       );
       if (progressVerdict != TrimAckVerdict.send) {
         await _refuseHistoryEndTrim(
@@ -7405,6 +7420,8 @@ class BleEngine {
         commitDurable: durable,
         hadDurableRows: hadDurableRows,
         droppedThisBurst: droppedThisBurst,
+        droppedBelowFloorThisBurst: droppedBelowFloorThisBurst,
+        gateDropArchives: gateDropArchives,
         // The count gate already refused a short burst (failure result
         // + band re-offer) before this point, so the one-shot shortfall
         // refusal is never spent here.
@@ -9347,6 +9364,10 @@ class DrainController {
   /// been preserved and may be trimmed; a burst we merely distrusted has not.
   int get bufferedProgressArchives =>
       _archives.where((a) => a.reason != kGateDroppedReason).length;
+
+  /// The plausibility drops buffered for the next commit.
+  int get bufferedGateDropArchives =>
+      _archives.where((a) => a.reason == kGateDroppedReason).length;
   int get lastProgressMs => _lastProgressAt.millisecondsSinceEpoch;
 
   /// Min/max real record time (rec_ts) currently buffered for this batch — lets

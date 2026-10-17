@@ -316,6 +316,74 @@ void main() {
       );
     });
 
+    // #601: records stamped before the absolute floor (a band revived after
+    // years flat, or an RTC that reset and logged before the next SET_CLOCK)
+    // can never become plausible — SET_CLOCK does not re-stamp flash and a
+    // reconnect re-delivers the same chunk. Refusing their trim wedged the
+    // drain on that chunk forever. Once their bytes are archived they are
+    // durable, so the trim is safe.
+    test('an all-below-floor drop burst whose drops are archived may ACK', () {
+      expect(
+        TrimAckPolicy.evaluate(
+          sessionCurrent: true,
+          burstDiscarded: false,
+          commitDurable: true,
+          hadDurableRows: false,
+          droppedThisBurst: 300,
+          droppedBelowFloorThisBurst: 300,
+          gateDropArchives: 300,
+        ),
+        TrimAckVerdict.send,
+      );
+    });
+
+    test('a drop burst with ANY future/window drop still refuses', () {
+      expect(
+        TrimAckPolicy.evaluate(
+          sessionCurrent: true,
+          burstDiscarded: false,
+          commitDurable: true,
+          hadDurableRows: false,
+          droppedThisBurst: 300,
+          droppedBelowFloorThisBurst: 299,
+          gateDropArchives: 300,
+        ),
+        TrimAckVerdict.blockedNoDurableProgress,
+        reason: 'a wandering clock can come back; those bytes must stay on '
+            'the band',
+      );
+    });
+
+    test('below-floor drops that were not all archived still refuse', () {
+      expect(
+        TrimAckPolicy.evaluate(
+          sessionCurrent: true,
+          burstDiscarded: false,
+          commitDurable: true,
+          hadDurableRows: false,
+          droppedThisBurst: 300,
+          droppedBelowFloorThisBurst: 300,
+          gateDropArchives: 0,
+        ),
+        TrimAckVerdict.blockedNoDurableProgress,
+      );
+    });
+
+    test('below-floor drops never outrank a failed commit', () {
+      expect(
+        TrimAckPolicy.evaluate(
+          sessionCurrent: true,
+          burstDiscarded: false,
+          commitDurable: false,
+          hadDurableRows: false,
+          droppedThisBurst: 5,
+          droppedBelowFloorThisBurst: 5,
+          gateDropArchives: 5,
+        ),
+        TrimAckVerdict.blockedCommitFailed,
+      );
+    });
+
     test('empty burst with zero drops may still ACK (console-only)', () {
       expect(
         TrimAckPolicy.evaluate(

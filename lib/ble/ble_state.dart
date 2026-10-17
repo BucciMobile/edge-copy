@@ -503,8 +503,9 @@ class RecordGate {
   /// (`ts < kMinPlausibleUnix`) rather than the future or session-window tests.
   /// The two have opposite prognoses: an unset or wandering RTC drifts back
   /// into range (or SET_CLOCK pulls it back), while a source whose time base is
-  /// not a wall-clock epoch at all never will. Counted, never acted on — the
-  /// gate's verdict is identical either way, and must stay so.
+  /// not a wall-clock epoch at all never will. The gate's verdict is identical
+  /// either way, and must stay so; only [TrimAckPolicy] reads the split, to let
+  /// an archived below-floor-only burst be trimmed instead of re-offered forever.
   int droppedBelowFloor = 0;
 
   RecordGate({this.frontierTs = 0});
@@ -513,11 +514,11 @@ class RecordGate {
   /// the absolute floor — the signature of a source that does not stamp
   /// wall-clock time (uptime-since-boot, a sequence number, milliseconds).
   ///
-  /// Worth reporting apart from a transient clock problem because the stall is
-  /// PERMANENT: no retry, reconnect or SET_CLOCK resolves it, and the visible
-  /// symptom (records seen, nothing banked, the chunk re-delivered forever) is
-  /// identical to the transient case. See the `kMinPlausibleUnix` assumption
-  /// block in `sync_policy.dart` for the upgrade path.
+  /// Worth reporting apart from a transient clock problem because no retry,
+  /// reconnect or SET_CLOCK makes those records plausible: they are archived
+  /// and trimmed, never decoded (see [TrimAckPolicy]). See the
+  /// `kMinPlausibleUnix` assumption block in `sync_policy.dart` for the
+  /// upgrade path.
   bool get timeBaseNotWallClock => dropped > 0 && dropped == droppedBelowFloor;
 
   /// Should this record be stored? Records with no decodable time ([tsEpoch]
@@ -697,6 +698,10 @@ class TrimAckPolicy {
   /// [droppedThisBurst] — RecordGate rejects during this burst. Combined with
   ///                     `!hadDurableRows`, refuses trim so gate-only bursts
   ///                     cannot delete flash we never stored.
+  /// [droppedBelowFloorThisBurst] — of [droppedThisBurst], the ones that failed
+  ///                     the ABSOLUTE floor (`kMinPlausibleUnix`).
+  /// [gateDropArchives] — plausibility drops buffered as raw archives for the
+  ///                     commit this verdict covers.
   /// [shortfallRetry]  — the caller has budget to spend one refusal
   ///                     on this token's positive shortfall. Pass `false` on
   ///                     the PRE-commit call: this refusal must happen only
@@ -708,6 +713,8 @@ class TrimAckPolicy {
     required bool commitDurable,
     bool hadDurableRows = true,
     int droppedThisBurst = 0,
+    int droppedBelowFloorThisBurst = 0,
+    int gateDropArchives = 0,
     bool shortfallRetry = false,
   }) {
     // Order is deliberate: a stale session must be refused before anything
@@ -717,7 +724,19 @@ class TrimAckPolicy {
     if (burstDiscarded) return TrimAckVerdict.blockedDiscardedBurst;
     if (!commitDurable) return TrimAckVerdict.blockedCommitFailed;
     if (!hadDurableRows && droppedThisBurst > 0) {
-      return TrimAckVerdict.blockedNoDurableProgress;
+      // Records under the absolute floor never become plausible: SET_CLOCK
+      // does not re-stamp what is already in flash, and a reconnect re-offers
+      // the same chunk. Refusing them wedged the drain on the oldest chunk
+      // forever (a band revived after years flat, or an RTC that reset and
+      // logged before the next SET_CLOCK), so nothing newer was ever offloaded.
+      // Once every one of them rides the commit as a raw archive (never
+      // pruned) the bytes are durable and the trim is safe. A future-dated or
+      // session-window drop keeps the refusal — a wandering clock can recover.
+      final floorOnly = droppedBelowFloorThisBurst == droppedThisBurst;
+      final allArchived = gateDropArchives >= droppedThisBurst;
+      if (!floorOnly || !allArchived) {
+        return TrimAckVerdict.blockedNoDurableProgress;
+      }
     }
     // Last: everything above is a reason the chunk must not be trimmed at all.
     // This one is a reason to ask for it AGAIN, and only once.
