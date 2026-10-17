@@ -444,13 +444,13 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
       // field written since. Open Wellness, go and write your journal from the
       // compose screen, come back without the tab reloading, tick one habit,
       // and the journal entry was gone.
-      final next = {...await repo.getJournalMetrics(_date)};
-      if (v == null) {
-        next.remove(key);
-      } else {
-        next[key] = JournalMetricValue(v);
-      }
-      await repo.postJournalMetrics(_date, next);
+      await repo.editJournalMetrics(_date, (next) {
+        if (v == null) {
+          next.remove(key);
+        } else {
+          next[key] = JournalMetricValue(v);
+        }
+      });
       await _wrote();
     } finally {
       if (mounted) setState(() => _writingField = false);

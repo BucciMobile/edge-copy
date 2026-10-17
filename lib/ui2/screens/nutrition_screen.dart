@@ -169,24 +169,25 @@ class _NutritionScreenState extends State<NutritionScreen> with RevisionReload {
       // out is what "no answer today" looks like on disk — and spreading the
       // old map back in is exactly what made this un-clearable.
       final date = _date;
-      final fields = {...await repo.getJournalMetrics(date)};
-      final v = fields.remove('water_ml')?.value;
       final spec = _waterSpec;
       double? next;
-      if (dir > 0) {
-        next = ((v ?? 0) + spec.step).clamp(0, spec.max).toDouble();
-      } else {
-        final down = (v ?? 0) - spec.step;
-        next = down <= 0 ? (v == null || v == 0 ? null : 0.0) : down;
-      }
+      await repo.editJournalMetrics(date, (fields) {
+        final v = fields.remove('water_ml')?.value;
+        if (dir > 0) {
+          next = ((v ?? 0) + spec.step).clamp(0, spec.max).toDouble();
+        } else {
+          final down = (v ?? 0) - spec.step;
+          next = down <= 0 ? (v == null || v == 0 ? null : 0.0) : down;
+        }
+        final n = next;
+        if (n != null) fields['water_ml'] = JournalMetricValue(n);
+      });
       if (mounted) {
         setState(() {
           _waterMl = next;
           _waterDate = date;
         });
       }
-      if (next != null) fields['water_ml'] = JournalMetricValue(next);
-      await repo.postJournalMetrics(date, fields);
       await _load();
     } finally {
       // Cleared unconditionally; the setState is only for the repaint. Gating

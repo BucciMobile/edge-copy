@@ -5405,13 +5405,15 @@ class AppState extends ChangeNotifier {
       final spec = kJournalFieldsByKey['water_ml']!;
       final date = todayLabel();
       // Inside the try: the READ can throw too, and a guard set before it would
-      // stay set forever. Spread into a fresh map — postJournalMetrics rewrites
-      // the whole day from what it is handed.
-      final fields = {...await r.getJournalMetrics(date)};
-      final now = fields['water_ml']?.value ?? 0;
-      fields['water_ml'] =
-          JournalMetricValue((now + spec.step).clamp(0, spec.max).toDouble());
-      await r.postJournalMetrics(date, fields);
+      // stay set forever. Through editJournalMetrics, not get-then-post: the
+      // tap can land while a screen or the coach is writing the same day, and
+      // whichever replaced the day second would erase the other's field.
+      await r.editJournalMetrics(date, (fields) {
+        final now = fields['water_ml']?.value ?? 0;
+        fields['water_ml'] = JournalMetricValue(
+          (now + spec.step).clamp(0, spec.max).toDouble(),
+        );
+      });
       _log('[gesture] water logged (+${spec.step.round()} ${spec.unit})');
       await HapticFeedback.mediumImpact();
     } catch (e) {

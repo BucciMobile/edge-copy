@@ -3714,8 +3714,38 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, JournalMetricValue>> getJournalMetrics(String date) =>
       LocalDb.journalMetricsForDay(date);
 
+  /// Tail of the journal_metric write queue. Static because the store is one
+  /// process-wide database and more than one repository instance can be alive
+  /// (the strap gesture, the screens and the coach each hold one).
+  static Future<void> _journalMetricWrites = Future<void>.value();
+
+  /// Run [body] after every earlier journal_metric write has finished.
+  /// `putJournalMetrics` deletes the day and re-inserts what it is handed, so
+  /// a read-modify-write that interleaves with another one on the same date
+  /// silently drops the other writer's field.
+  static Future<T> _serialJournalMetrics<T>(Future<T> Function() body) {
+    final run = _journalMetricWrites.then((_) => body());
+    _journalMetricWrites = run.then<void>((_) {}, onError: (Object _) {});
+    return run;
+  }
+
   @override
   Future<void> postJournalMetrics(
+    String date,
+    Map<String, JournalMetricValue> fields,
+  ) => _serialJournalMetrics(() => _putJournalMetricsClamped(date, fields));
+
+  @override
+  Future<void> editJournalMetrics(
+    String date,
+    void Function(Map<String, JournalMetricValue> day) edit,
+  ) => _serialJournalMetrics(() async {
+    final day = {...await LocalDb.journalMetricsForDay(date)};
+    edit(day);
+    await _putJournalMetricsClamped(date, day);
+  });
+
+  Future<void> _putJournalMetricsClamped(
     String date,
     Map<String, JournalMetricValue> fields,
   ) async {
