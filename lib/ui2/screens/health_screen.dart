@@ -774,7 +774,11 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
         LucideIcons.brain,
         C.purple,
         l?.healthRowStress ?? 'Stress',
-        ofNight((stressBlock is Map ? stressBlock['level']?.toString() : null) ??
+        // The level is analytics' English token; it goes through the same
+        // localized mapping Wellness uses, or a German row read 'elevated'.
+        ofNight((stressBlock is Map && stressBlock['level'] is String
+                ? stressLevelLabel(l, stressBlock['level'] as String)
+                : null) ??
             (l?.healthRowStress ?? 'Stress')),
         stressScore == null ? '' : '${stressScore.round()}',
         // 0–100, and the scale has to be on the row. Wellness has always shown
