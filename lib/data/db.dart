@@ -2800,9 +2800,27 @@ class LocalDb {
   /// Forget one device. The MEASUREMENTS it wrote are untouched — "this
   /// removes the source, not the data", which is what the forget dialog
   /// promises and what `decoded_*` keeping its `device_id` makes possible.
+  ///
+  /// Its `signal_priority` rows go with it, in the same transaction. The
+  /// resolver's band-day filter drops a paired non-derivable device by its
+  /// adapter, and a forgotten id has no row to read an adapter from, so a
+  /// surviving user-set rank would make the forgotten device a candidate
+  /// again: it would own every window its `device_coverage` spans, masking
+  /// the band's HR/RR there while its own rows never load on a band day.
+  /// The primary slot keeps its rows — it is refilled by whichever band
+  /// pairs next and is always a candidate anyway.
   static Future<void> deleteDevice([String id = kPrimaryDeviceId]) async {
     final db = await instance;
-    await db.delete('device', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('device', where: 'id = ?', whereArgs: [id]);
+      if (id != kPrimaryDeviceId) {
+        await txn.delete(
+          'signal_priority',
+          where: 'device_id = ?',
+          whereArgs: [id],
+        );
+      }
+    });
   }
 
   // ── OBSERVATIONS (vendor-computed / typed-in / imported scalars) ───────────
