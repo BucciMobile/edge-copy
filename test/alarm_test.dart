@@ -460,6 +460,34 @@ void main() {
           AlarmEffect.fired);
     });
 
+    test('a fire delivered hours late is consumed but not announced', () {
+      // Armed 22:00 for 06:30; the phone is out of range at wake time and
+      // the strap delivers the 57 (stamped 06:30) on the 13:00 reconnect.
+      const wake = 1792218600;
+      const late = wake + 390 * 60;
+      final a = AlarmConfirmation()..set(wake, (wake - 8 * 3600) * 1000);
+      expect(
+          a.onEvent(AlarmConfirmation.kEvtStrapExecuted, late * 1000,
+              tsSec: wake),
+          AlarmEffect.fired);
+      expect(a.firedJustNow(late * 1000), isFalse);
+      expect(a.firedNoticeKey, 'alarm_fired:${wake * 1000}');
+
+      // A fire received as it happens is still news, and keyed the same way
+      // whatever moment it was received at.
+      final b = AlarmConfirmation()..set(wake, (wake - 8 * 3600) * 1000);
+      b.onEvent(AlarmConfirmation.kEvtStrapExecuted, (wake + 5) * 1000,
+          tsSec: wake);
+      expect(b.firedJustNow((wake + 5) * 1000), isTrue);
+      expect(b.firedNoticeKey, a.firedNoticeKey);
+
+      // An unplaceable stamp can't be judged late.
+      final c = AlarmConfirmation()..set(wake, 0);
+      c.onEvent(AlarmConfirmation.kEvtStrapExecuted, late * 1000, tsSec: 5000);
+      expect(c.firedJustNow(late * 1000), isTrue);
+      expect(c.firedNoticeKey, 'alarm_fired:${late * 1000}');
+    });
+
     test('an unrelated event returns null and changes nothing', () {
       final a = AlarmConfirmation();
       a.set(1750000000, 0);

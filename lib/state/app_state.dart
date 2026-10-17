@@ -4997,9 +4997,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _notifyAlarmFired() async {
+    if (!_alarm.firedJustNow(DateTime.now().millisecondsSinceEpoch)) {
+      _log('[alarm] fire delivered late (stamped ${_alarm.firedTsSec}), '
+          'not notifying.');
+      return;
+    }
     try {
       await NotificationCenter.instance.emit(NotificationEvent(
-        dedupeKey: 'alarm_fired:${_alarm.firedAt ?? 0}',
+        dedupeKey: _alarm.firedNoticeKey,
         category: NotifCategory.reminders,
         priority: NotifPriority.critical,
         title: 'Alarm',

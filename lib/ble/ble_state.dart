@@ -1367,6 +1367,7 @@ class AlarmConfirmation {
   int? setAtMs; // wall-ms of the SET write (for the grace window)
   int? lastEventId; // most recent alarm event seen
   int? firedAt; // wall-ms of the last EXECUTED event
+  int? firedTsSec; // that event's own stamp (wall sec), null when unplaceable
 
   /// Record a SET write (awaiting the strap's confirmation event).
   void set(int epoch, int nowMs) {
@@ -1399,6 +1400,24 @@ class AlarmConfirmation {
   /// is the ceiling).
   static const int replaySlackSec = 120;
 
+  /// How long after the band fired a 57 may arrive and still be announced as
+  /// "just fired". A phone out of range at wake time gets the event on the
+  /// next reconnect, hours later; the fire still has to be consumed (the slot
+  /// is spent) but a critical alert that bypasses quiet hours at that point is
+  /// noise about something the band already did.
+  static const int lateFireNoticeSec = 600;
+
+  /// Whether the last fire is recent enough at [nowMs] to notify about. An
+  /// unplaceable stamp can't be judged and is taken as current.
+  bool firedJustNow(int nowMs) =>
+      firedTsSec == null || nowMs ~/ 1000 - firedTsSec! <= lateFireNoticeSec;
+
+  /// Dedupe key for the fired notification. Keyed on the band's own stamp so
+  /// the same fire delivered twice collapses; receive time differs per
+  /// delivery and never would.
+  String get firedNoticeKey =>
+      'alarm_fired:${firedTsSec != null ? firedTsSec! * 1000 : (firedAt ?? 0)}';
+
   /// Feed a strap event. Returns the resulting [AlarmEffect] the caller acts on,
   /// or null when the event is unrelated to the alarm (or belongs to an
   /// earlier arm).
@@ -1426,6 +1445,7 @@ class AlarmConfirmation {
         if (before(targetEpoch ?? nowMs ~/ 1000)) return null;
         lastEventId = id;
         firedAt = nowMs;
+        firedTsSec = known ? tsSec : null;
         return AlarmEffect.fired;
       case kEvtAppExecuted:
         // RUN_ALARM (smart wake early buzz, test buzz). The armed SET_ALARM
