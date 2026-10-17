@@ -141,6 +141,8 @@
   "dataDatabaseShared": "Datenbank geteilt. Sie enthält alle Daten.",
   "dataEncryptedBackupShared": "Verschlüsseltes Backup geteilt. Ohne die Passphrase kann es niemand öffnen – weder diese App noch wir.",
   "dataDaysReanalyzed": "{n, plural, one{1 Tag neu analysiert.} other{{n} Tage neu analysiert.}}",
+  "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
   "dataBackupFailed": "Backup fehlgeschlagen: {error}",
   "dataBackupSkipped": "Backup übersprungen.",
   "dataBackedUpTo": "Gesichert nach {path}",

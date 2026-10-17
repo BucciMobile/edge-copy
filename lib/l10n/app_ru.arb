@@ -208,6 +208,22 @@
       }
     }
   },
+  "dataReanalyzeFailed": "Повторный анализ не удался: {error}",
+  "@dataReanalyzeFailed": {
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dataReanalyzeDaysFailed": "{n, plural, one{Не удалось проанализировать {n} день. Если это повторяется, пожалуйста, сообщите об этом.} few{Не удалось проанализировать {n} дня. Если это повторяется, пожалуйста, сообщите об этом.} many{Не удалось проанализировать {n} дней. Если это повторяется, пожалуйста, сообщите об этом.} other{Не удалось проанализировать {n} дня. Если это повторяется, пожалуйста, сообщите об этом.}}",
+  "@dataReanalyzeDaysFailed": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "dataBackupFailed": "Ошибка резервного копирования: {error}",
   "@dataBackupFailed": {
     "placeholders": {

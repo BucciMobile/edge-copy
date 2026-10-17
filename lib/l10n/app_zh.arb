@@ -138,6 +138,8 @@
   "dataDatabaseShared": "数据库已分享。这是完整的副本。",
   "dataEncryptedBackupShared": "加密备份已分享。没有该密码短语任何人都无法打开它——包括本应用，也包括我们。",
   "dataDaysReanalyzed": "{n, plural, other{已重新分析 {n} 天。}}",
+  "dataReanalyzeFailed": "重新分析失败：{error}",
+  "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
   "dataBackupFailed": "备份失败：{error}",
   "dataBackupSkipped": "已跳过备份。",
   "dataBackedUpTo": "已备份到 {path}",

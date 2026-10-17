@@ -196,6 +196,10 @@ bool recoveryNightSettled({
   );
 }
 
+/// What "Re-analyze data" did: days derived, days the pass could not derive,
+/// and the error when the pass itself failed.
+typedef ReanalyzeOutcome = ({int days, int failedDays, String? error});
+
 class AppState extends ChangeNotifier {
   late final BleEngine engine;
 
@@ -2418,10 +2422,13 @@ class AppState extends ChangeNotifier {
   }
 
   /// User-initiated "Re-analyze data": force-derive EVERY day that has raw,
-  /// ignoring the derived cursor, then refresh the UI. Returns the number of days
-  /// derived (for a result message). Use when screens are empty despite stored raw.
-  Future<int> reanalyzeAll() async {
-    if (reanalyzing) return 0;
+  /// ignoring the derived cursor, then refresh the UI. Returns the days derived,
+  /// the days that could not be, and the error when the pass itself failed (for
+  /// a result message). Use when screens are empty despite stored raw — which
+  /// is exactly when a failing derive is the likely cause, so a failure must
+  /// not come back looking like an ordinary "0 days".
+  Future<ReanalyzeOutcome> reanalyzeAll() async {
+    if (reanalyzing) return (days: 0, failedDays: 0, error: null);
     reanalyzing = true;
     reanalyzeProgress = 'Analyzing…';
     notifyListeners();
@@ -2452,10 +2459,14 @@ class AppState extends ChangeNotifier {
       );
       await LocalDb.refreshComputeFreshness();
       bumpInsights();
-      return n;
+      return (
+        days: n,
+        failedDays: _derive.lastRunFailedDays,
+        error: _derive.lastRunError,
+      );
     } catch (e) {
       _log('[derive] reanalyze failed: $e');
-      return 0;
+      return (days: 0, failedDays: 0, error: '$e');
     } finally {
       reanalyzing = false;
       reanalyzeProgress = '';

@@ -615,6 +615,24 @@
       }
     }
   },
+  "dataReanalyzeFailed": "Re-analysis failed: {error}",
+  "@dataReanalyzeFailed": {
+    "description": "Re-analyze result: the pass itself failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 day could not be analyzed. If this keeps happening, please report it.} other{{n} days could not be analyzed. If this keeps happening, please report it.}}",
+  "@dataReanalyzeDaysFailed": {
+    "description": "Re-analyze result: N days could not be derived.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "dataBackupFailed": "Backup failed: {error}",
   "@dataBackupFailed": {
     "description": "Backup result: failed.",

@@ -138,6 +138,8 @@
   "dataDatabaseShared": "डेटाबेस साझा किया गया। यह पूरी प्रति है।",
   "dataEncryptedBackupShared": "एन्क्रिप्टेड बैकअप साझा किया गया। उस पासफ़्रेज़ के बिना कोई इसे नहीं खोल सकता — यह ऐप भी नहीं, और हम भी नहीं।",
   "dataDaysReanalyzed": "{n, plural, one{1 दिन फिर से विश्लेषित।} other{{n} दिन फिर से विश्लेषित।}}",
+  "dataReanalyzeFailed": "फिर से विश्लेषण विफल: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 दिन का विश्लेषण नहीं हो सका। अगर यह बार-बार हो, तो कृपया इसकी रिपोर्ट करें।} other{{n} दिनों का विश्लेषण नहीं हो सका। अगर यह बार-बार हो, तो कृपया इसकी रिपोर्ट करें।}}",
   "dataBackupFailed": "बैकअप विफल: {error}",
   "dataBackupSkipped": "बैकअप छोड़ दिया गया।",
   "dataBackedUpTo": "{path} पर बैकअप लिया गया",

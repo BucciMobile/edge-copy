@@ -2994,6 +2994,14 @@ class DerivationEngine {
 
   Map<String, dynamic> snapshot() => Map<String, dynamic>.from(_diag);
 
+  /// What the last [run] that actually started could not do. Its return value
+  /// is the days it derived, so a pass that threw and a pass with nothing to
+  /// derive both come back as 0; a caller reporting the outcome to the user
+  /// reads these to tell them apart. Reset when a run takes the latch, so a
+  /// run dropped by the latch leaves the previous run's values in place.
+  String? lastRunError;
+  int lastRunFailedDays = 0;
+
   /// Run a derivation pass. [heavy]=false runs a bounded light pass over the
   /// freshness-critical day: TODAY when raw has reached today, else the latest
   /// pending day. [heavy]=true sweeps every recomputable day.
@@ -3031,7 +3039,9 @@ class DerivationEngine {
       ..['active_days'] = <String>[]
       ..['concurrency'] = _deriveConcurrency
       ..['last_error'] = null;
-      
+    lastRunError = null;
+    lastRunFailedDays = 0;
+
     FirebaseTraceHandle? runTrace;
     try {
       // Heavy/force passes only. Light passes run many times a day (including
@@ -3280,9 +3290,11 @@ class DerivationEngine {
           );
         }
       }
+      lastRunFailedDays = failures;
       return done;
     } catch (e, st) {
       _diag['last_error'] = '$e';
+      lastRunError = '$e';
       _log('derive ERROR: $e\n$st');
       return 0;
     } finally {

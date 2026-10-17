@@ -138,6 +138,8 @@
   "dataDatabaseShared": "Base de datos compartida. Es la copia completa.",
   "dataEncryptedBackupShared": "Copia de seguridad cifrada compartida. Sin esa frase de contraseña nadie puede abrirla, ni siquiera esta app, ni nosotros.",
   "dataDaysReanalyzed": "{n, plural, one{1 día reanalizado.} other{{n} días reanalizados.}}",
+  "dataReanalyzeFailed": "El reanálisis falló: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "dataBackupFailed": "Copia de seguridad fallida: {error}",
   "dataBackupSkipped": "Copia de seguridad omitida.",
   "dataBackedUpTo": "Copia de seguridad en {path}",
