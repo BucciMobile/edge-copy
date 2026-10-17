@@ -3833,12 +3833,21 @@ class LocalRepositoryImpl extends LocalRepository {
       maps[key] = m;
     }
 
-    // The union of journal dates (the days we can attribute behaviours on),
-    // sorted oldest-first — the shared index for journal + outcome arrays.
-    final dates = <String>{
+    // The days we can attribute behaviours on.
+    final journalDates = <String>{
       for (final j in journal)
         if (j['date'] is String) j['date'] as String,
-    }.toList()..sort();
+    };
+    // The outcome axis also needs each journal day's NEXT day: a lag-1 tag
+    // (alcohol, late meal) is paired with the night that follows it, and
+    // analytics looks that night up on this axis. Journal days alone would
+    // drop every tagged evening whose next day had no entry of its own — a
+    // user who journals only on the nights they drink would get no finding.
+    final dates = <String>{
+      ...journalDates,
+      for (final d in journalDates) ?ana.shiftDayLabel(d, 1),
+    }.toList()
+      ..sort();
 
     final numericInsights = await _numericJournalInsights(
       metricsByDay: metricsByDay,
@@ -3849,7 +3858,7 @@ class LocalRepositoryImpl extends LocalRepository {
     // The tag pass needs four tagged days before it says anything. The numeric
     // pass has its own, stricter floor and is already computed, so an early
     // return here must not take it down with it.
-    if (dates.length < 4) {
+    if (journalDates.length < 4) {
       return {'insights': const [], 'numeric_insights': numericInsights};
     }
 
@@ -3859,8 +3868,11 @@ class LocalRepositoryImpl extends LocalRepository {
       if (d == null) continue;
       (tagsByDate[d] ??= <String>{}).addAll(_decodeStrList(j['tags_json']));
     }
+    // The real rows only. A next-day padding date has no row and must stay
+    // unknown, not become an untagged day.
     final jdays = <ana.JournalDay>[
-      for (final d in dates) ana.JournalDay(d, tagsByDate[d] ?? const {}),
+      for (final d in journalDates)
+        ana.JournalDay(d, tagsByDate[d] ?? const {}),
     ];
     final outcomes = <String, List<double?>>{
       for (final od in outcomeDefs)
