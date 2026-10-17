@@ -4876,7 +4876,12 @@ class AppState extends ChangeNotifier {
   /// in `alarm_schedule` can silently re-arm this on the next connect/sync.
   Future<void> disableAlarm() async {
     if (!isConnected) throw Exception('Connect to your strap first');
-    await engine.disableAlarm();
+    // A timed-out or dropped write leaves the alarm armed on the strap. Keep
+    // the schedule and epoch so the app still shows it (and the next sync can
+    // retry) instead of reporting a cancel the band never received.
+    if (!await engine.disableAlarm()) {
+      throw Exception("Couldn't reach your strap, so the alarm is still set");
+    }
     _savedAlarm = null;
     device.alarmEpoch = null;
     _alarm.disable();

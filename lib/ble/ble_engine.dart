@@ -8623,7 +8623,10 @@ class BleEngine {
   /// (the earlier `[0x00]` body was ACKed but did not clear the alarm); gen5
   /// needs revision 2 plus the alarm id, defaulting to "all slots" — see
   /// [AlarmPayloads.disableForBand].
-  Future<void> disableAlarm({int? id}) {
+  ///
+  /// Returns whether the write reached the band. Callers must not forget an
+  /// armed alarm on false: the strap still holds it and will buzz.
+  Future<bool> disableAlarm({int? id}) {
     final isGen5 = _session?.band.isGen5 ?? false;
     return _send(
       Cmd.disableAlarm,

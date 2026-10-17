@@ -194,7 +194,7 @@ DateTime alarmRearmFrom(DateTime now, int? firedEpoch) {
 /// Result of [armNextScheduledOccurrence]. [epoch] is the newly-armed unix
 /// instant, or null when nothing changed on the strap (no enabled day and
 /// already unarmed, the target already matches what's armed, or the write
-/// was refused/failed). [disabled] is true only when this call actively sent
+/// was refused/failed). [disabled] is true only when this call delivered
 /// DISABLE_ALARM because the schedule now has nothing enabled but the strap
 /// still held a live arm — the case a caller must clear its own
 /// persisted/optimistic epoch for.
@@ -219,7 +219,10 @@ Future<AlarmArmResult> armNextScheduledOccurrence({
     // an explicit cancel-all) must not leave the strap holding its last arm
     // forever — nothing else in this flow ever tells the band to give it up.
     if (currentArmedEpoch == null) return (epoch: null, disabled: false);
-    await engine.disableAlarm();
+    // Only report the disable once it reached the band: the caller clears
+    // the armed epoch on `disabled`, and with it gone this branch never
+    // runs again, so a failed write would leave the strap armed for good.
+    if (!await engine.disableAlarm()) return (epoch: null, disabled: false);
     return (epoch: null, disabled: true);
   }
   final epoch = next.millisecondsSinceEpoch ~/ 1000;
