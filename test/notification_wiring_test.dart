@@ -162,6 +162,7 @@ void main() {
           NotificationCenter.alarmNightCheckSlot(
               const NotificationPrefs(alarmNightCheckEnabled: false),
               armedTonight: false,
+              expectedTonight: true,
               nowMin: 12 * 60),
           isNull);
     });
@@ -172,6 +173,7 @@ void main() {
           NotificationCenter.alarmNightCheckSlot(
               const NotificationPrefs(alarmNightCheckEnabled: true),
               armedTonight: true,
+              expectedTonight: true,
               nowMin: 12 * 60),
           isNull);
     });
@@ -181,8 +183,20 @@ void main() {
           NotificationCenter.alarmNightCheckSlot(
               const NotificationPrefs(alarmNightCheckEnabled: true),
               armedTonight: false,
+              expectedTonight: true,
               nowMin: 12 * 60),
           NotificationCenter.alarmNightCheckHour * 60);
+    });
+
+    test('no alarm expected tonight (never set one, or a night left off) '
+        'stays silent', () {
+      expect(
+          NotificationCenter.alarmNightCheckSlot(
+              const NotificationPrefs(alarmNightCheckEnabled: true),
+              armedTonight: false,
+              expectedTonight: false,
+              nowMin: 12 * 60),
+          isNull);
     });
 
     test('after 19:00 today, nothing is armed — a one-shot would land a day '
@@ -191,6 +205,7 @@ void main() {
           NotificationCenter.alarmNightCheckSlot(
               const NotificationPrefs(alarmNightCheckEnabled: true),
               armedTonight: false,
+              expectedTonight: true,
               nowMin: 20 * 60),
           isNull);
     });

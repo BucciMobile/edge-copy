@@ -276,6 +276,27 @@ bool alarmArmsTonight(int? armedEpochSec, DateTime now) {
   return at.isBefore(endOfTonight);
 }
 
+/// Whether the user's own weekly schedule has a wake alarm due tonight — an
+/// enabled slot whose next occurrence lands in the same "tonight" window
+/// [alarmArmsTonight] uses. False for someone who never set an alarm (every
+/// slot defaults to off) and for a night deliberately left off, e.g. Friday
+/// for a weekdays-only schedule. The 7pm "no alarm set for tonight" check is
+/// only meaningful when this is true: without it, it went off every evening
+/// for everyone who does not use the band alarm at all.
+///
+/// Searched from noon when [now] is earlier, so a still-ahead alarm THIS
+/// morning cannot shadow tomorrow morning's slot.
+bool scheduleExpectsAlarmTonight(
+  List<AlarmScheduleEntry> schedule,
+  DateTime now,
+) {
+  final noon = DateTime(now.year, now.month, now.day, 12);
+  final from = now.isBefore(noon) ? noon : now;
+  final next = nextAlarmOccurrence(schedule, from);
+  if (next == null) return false;
+  return alarmArmsTonight(next.millisecondsSinceEpoch ~/ 1000, now);
+}
+
 /// Whether the latch-failure safety notification should fire for [epoch]: the
 /// toggle is on, [epoch] is STILL the confirmation machine's current target (a
 /// newer arm, or a cancel, superseded it), and the strap never confirmed it.

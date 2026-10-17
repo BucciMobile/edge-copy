@@ -3033,6 +3033,8 @@ class AppState extends ChangeNotifier {
         medDefs: meds.defs,
         medDosesToday: meds.doses,
         armedTonight: _alarmArmedTonight,
+        alarmExpectedTonight:
+            scheduleExpectsAlarmTonight(_schedule, DateTime.now()),
       );
       // The strap-buzz half of the medication reminder, off the SAME schedule
       // read the OS dose slots above were armed from — one read feeds both
@@ -4521,6 +4523,10 @@ class AppState extends ChangeNotifier {
     );
     await _loadAlarmSchedule();
     notifyListeners();
+    // The 7pm "no alarm set for tonight" check keys off the schedule: a night
+    // just switched off must not still be warned about, and one just switched
+    // on must be.
+    unawaited(_ensureRemindersScheduled());
     if (isConnected) await _armNextAlarmOccurrence();
   }
 
@@ -4892,6 +4898,9 @@ class AppState extends ChangeNotifier {
     await LocalDb.clearAlarmSchedule();
     _schedule = fillDefaultAlarmSchedule(const []);
     notifyListeners();
+    // Nothing is scheduled now, so the 7pm "no alarm set for tonight" check
+    // armed earlier today must go too.
+    unawaited(_ensureRemindersScheduled());
   }
 
   /// Retained name for the UI's "clear alarm" affordance — delegates to

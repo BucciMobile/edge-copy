@@ -220,6 +220,10 @@ class NotificationCenter {
   /// `checkInDoneToday`/`medDefs`, it costs no extra read (AppState already
   /// holds the armed epoch), so there is no "caller doesn't know" case to
   /// preserve through.
+  ///
+  /// [alarmExpectedTonight]: whether the weekly schedule has an enabled slot
+  /// due tonight (`scheduleExpectsAlarmTonight`). Defaults to false so a
+  /// caller that does not know never arms the check.
   /// Public entry point — serialized through [_synchronized] so two
   /// overlapping callers (e.g. a foreground resume racing a sync-completion
   /// callback) can't interleave their cancel/re-arm passes and have a stale
@@ -232,6 +236,7 @@ class NotificationCenter {
     List<MedDef>? medDefs,
     Map<String, Map<int, Map<String, Object?>>> medDosesToday = const {},
     bool armedTonight = false,
+    bool alarmExpectedTonight = false,
   }) =>
       _synchronized(() => _scheduleStandingReminders(
             prefs,
@@ -241,6 +246,7 @@ class NotificationCenter {
             medDefs: medDefs,
             medDosesToday: medDosesToday,
             armedTonight: armedTonight,
+            alarmExpectedTonight: alarmExpectedTonight,
           ));
 
   Future<void> _scheduleStandingReminders(
@@ -251,6 +257,7 @@ class NotificationCenter {
     List<MedDef>? medDefs,
     Map<String, Map<int, Map<String, Object?>>> medDosesToday = const {},
     bool armedTonight = false,
+    bool alarmExpectedTonight = false,
   }) async {
     final svc = NotificationService.instance;
     await svc.cancel(NotificationService.idWeeklyRecap);
@@ -327,7 +334,9 @@ class NotificationCenter {
     final meds =
         medPromptSlots(prefs, medDefs ?? const [], medDosesToday, now: now);
     final nightCheck = alarmNightCheckSlot(prefs,
-        armedTonight: armedTonight, nowMin: now.hour * 60 + now.minute);
+        armedTonight: armedTonight,
+        expectedTonight: alarmExpectedTonight,
+        nowMin: now.hour * 60 + now.minute);
     if (water.isEmpty &&
         !wantWeekly &&
         windDownMin == null &&
@@ -353,7 +362,9 @@ class NotificationCenter {
     // hour boundary (19:00) a stale `nowMin` could cross mid-call.
     final freshNow = DateTime.now();
     final freshNightCheck = alarmNightCheckSlot(prefs,
-        armedTonight: armedTonight, nowMin: freshNow.hour * 60 + freshNow.minute);
+        armedTonight: armedTonight,
+        expectedTonight: alarmExpectedTonight,
+        nowMin: freshNow.hour * 60 + freshNow.minute);
     if (freshNightCheck != null) {
       await _armAlarmNightCheck(svc, freshNightCheck);
     }
@@ -365,6 +376,9 @@ class NotificationCenter {
   /// The check-in's wall-clock minute, or null when it must not be armed: the
   /// toggle is off, an alarm IS armed for tonight (the honest gate — the whole
   /// point is to catch the GAP, not to nag someone who already has one set),
+  /// no alarm is EXPECTED tonight (no enabled schedule slot falls tonight —
+  /// someone who never uses the band alarm, or a night deliberately left off,
+  /// has no gap to be warned about; this was firing every evening for them),
   /// or 19:00 has already passed today (a one-shot rolled to tomorrow would
   /// warn about TONIGHT a day late). No quiet-hours cap like windDown/checkIn:
   /// 19:00 is fixed and outside the default quiet window, and moving it to
@@ -372,9 +386,12 @@ class NotificationCenter {
   static int? alarmNightCheckSlot(
     NotificationPrefs prefs, {
     required bool armedTonight,
+    required bool expectedTonight,
     required int nowMin,
   }) {
-    if (!prefs.alarmNightCheckEnabled || armedTonight) return null;
+    if (!prefs.alarmNightCheckEnabled || armedTonight || !expectedTonight) {
+      return null;
+    }
     final t = alarmNightCheckHour * 60;
     if (nowMin >= t) return null;
     return t;
