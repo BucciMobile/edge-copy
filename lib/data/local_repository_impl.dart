@@ -2975,6 +2975,16 @@ class LocalRepositoryImpl extends LocalRepository {
     if (existing['status'] == 'live') {
       throw StateError('setWorkoutWindow: session $id is still live');
     }
+    // The rescore reads only the 1 Hz substrate, which is pruned after
+    // `rawRetentionDays` and never existed for an imported session. With none
+    // over the new window the replace-write would land every banked figure as
+    // null — strain, calories, HR, zones, the frozen trace — and nothing could
+    // rebuild them. Refuse before touching the Health store or the row.
+    if (_hasBankedScore(existing) &&
+        (await LocalDb.hrSamplesInRange(startTs, endTs)).isEmpty) {
+      throw const ManualWindowException(
+          ManualWindowError.scoreNotRecomputable);
+    }
     // Clear the OLD Health window before the retimed row overwrites it — the
     // caller's subsequent exportWorkoutId only deletes inside the NEW window,
     // so a narrowed/moved retime would otherwise leave the previous sample
@@ -2994,6 +3004,13 @@ class LocalRepositoryImpl extends LocalRepository {
       validateAgainstId: id,
     );
   }
+
+  static bool _hasBankedScore(Map<String, dynamic> row) =>
+      row['strain'] != null ||
+      row['calories'] != null ||
+      row['max_hr'] != null ||
+      row['avg_hr'] != null ||
+      row['trace_json'] != null;
 
   /// Shared writer for both user-timed paths: score the window from the 1 Hz
   /// substrate, persist, and retire any auto-detect suggestion it covers.
