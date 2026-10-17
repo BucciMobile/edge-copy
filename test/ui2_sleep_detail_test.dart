@@ -8,6 +8,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/l10n/app_localizations.dart';
 import 'package:openstrap_edge/models/metric.dart';
 import 'package:openstrap_edge/ui2/screens/screens.dart';
@@ -403,11 +404,8 @@ void main() {
         find.textContaining('Longest unbroken stretch 2h 42m'), findsOneWidget);
   });
 
-  testWidgets('tonight is one takeaway, not six numbers', (t) async {
-    await _pump(
-      t,
-      SleepData(
-        day: '2026-05-20',
+  SleepData planned(String day) => SleepData(
+        day: day,
         night: _night(),
         need: const Metric(
             value: 462, unit: 'min', confidence: .7, tier: MetricTier.estimate),
@@ -415,11 +413,55 @@ void main() {
             value: 22, unit: 'min', confidence: .7, tier: MetricTier.estimate),
         bedtime:
             const Metric(value: 1360, confidence: .7, tier: MetricTier.estimate),
-      ),
-    );
+      );
+
+  testWidgets('tonight is one takeaway, not six numbers', (t) async {
+    await _pump(t, planned(todayLabel()));
     expect(find.text('lights out'), findsOneWidget);
     expect(find.textContaining('Your need is 7h 42m'), findsOneWidget);
     expect(find.textContaining('22m down'), findsOneWidget);
+  });
+
+  // Need, debt and bedtime are today's rollup whichever night is selected.
+  testWidgets('a past night carries no plan for tonight', (t) async {
+    await _pump(t, planned('2026-05-20'));
+    expect(find.text('lights out'), findsNothing);
+    expect(find.textContaining('Your need is'), findsNothing);
+  });
+
+  group('the Sleep tab', () {
+    Future<void> tab(WidgetTester t, String day) async {
+      t.view.physicalSize = const Size(390 * 3, 5200 * 3);
+      t.view.devicePixelRatio = 3;
+      addTearDown(t.view.reset);
+      await t.pumpWidget(MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: Scaffold(
+          body: SleepDetail(
+            embedded: true,
+            data: planned(day),
+            todayFooter: const [Text('the sleep plan')],
+            footer: const [Text('alarm and body clock')],
+          ),
+        ),
+      ));
+      await t.pumpAndSettle();
+    }
+
+    testWidgets('leaves tonight to the plan below instead of saying it twice',
+        (t) async {
+      await tab(t, todayLabel());
+      expect(find.text('lights out'), findsNothing);
+      expect(find.text('the sleep plan'), findsOneWidget);
+      expect(find.text('alarm and body clock'), findsOneWidget);
+    });
+
+    testWidgets('drops the plan under a past night, keeps the links',
+        (t) async {
+      await tab(t, '2026-05-20');
+      expect(find.text('the sleep plan'), findsNothing);
+      expect(find.text('alarm and body clock'), findsOneWidget);
+    });
   });
 
   group('correctedSleepWindow', () {

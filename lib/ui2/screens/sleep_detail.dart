@@ -368,16 +368,22 @@ class SleepDetail extends StatefulWidget {
 
   /// The Sleep tab's root rather than a pushed screen: a tab header with the
   /// profile avatar instead of a back arrow, pull to re-read, and [footer]
-  /// (the sleep plan, alarm and body clock) under the night.
+  /// (alarm and body clock) under the night.
   final bool embedded;
   final List<Widget> footer;
+
+  /// Rendered above [footer], and only while the night on screen is the
+  /// latest one. The sleep plan is advice for tonight; under a night stepped
+  /// back to two weeks ago it read as that night's advice.
+  final List<Widget> todayFooter;
 
   const SleepDetail(
       {super.key,
       this.data,
       this.day,
       this.embedded = false,
-      this.footer = const []});
+      this.footer = const [],
+      this.todayFooter = const []});
 
   @override
   State<SleepDetail> createState() => _SleepDetailState();
@@ -391,6 +397,11 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
 
   @override
   void reload() => _load();
+
+  /// Whether [day] is today's night (or unknown, which is what a screen with
+  /// no day yet is showing). Advice about tonight only belongs under this one.
+  static bool _onLatestNight(String? day) =>
+      (daysBehind(_noonOf(day)) ?? 0) <= 0;
 
   /// The pushed screen's scaffold, or the tab's own header and footer.
   Widget _frame(BuildContext c, String title, List<Widget> body,
@@ -411,6 +422,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               child: Text(sub, style: F.over.copyWith(color: p.ink3)),
             ),
           ...body,
+          if (_onLatestNight(_d?.day ?? _day)) ...widget.todayFooter,
           ...widget.footer,
         ],
       ),
@@ -704,7 +716,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       // printed over a night that could be days old.
       if (unusual != null)
         Section(
-            (daysBehind(_noonOf(d.day)) ?? 0) <= 0
+            _onLatestNight(d.day)
                 ? (l?.sleepDetailUnusualLastNight ?? 'Unusual last night')
                 : (l?.sleepDetailUnusualOnDay(prettyDay(d.day, l)) ??
                     'Unusual on ${prettyDay(d.day, l)}'),
@@ -715,7 +727,12 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
           _overnight(c, p, d)),
 
       // ── 7 · ONE TAKEAWAY ──
-      Section(l?.sleepDetailTonightSection ?? 'Tonight', _tonight(c, p, d)),
+      // Tonight's need, debt and bedtime come from today's cross-day rollup
+      // whichever night is selected, so on a past night they are not that
+      // night's numbers. The tab carries the full plan in its footer, and
+      // printing it here too said the same thing twice on one scroll.
+      if (_onLatestNight(d.day) && !widget.embedded)
+        Section(l?.sleepDetailTonightSection ?? 'Tonight', _tonight(c, p, d)),
 
       const SizedBox(height: S.x5),
       // The night this screen is steered to, not the newest one. Dropping it
