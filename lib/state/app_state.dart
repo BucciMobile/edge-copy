@@ -2547,7 +2547,7 @@ class AppState extends ChangeNotifier {
     // became durable, and it is the only path that sees every commit.
     _sync.markSyncActivity();
     unawaited(() async {
-      final recTsHw = await LocalDb.getCursorInt('rec_ts_hw');
+      final recTsHw = await LocalDb.getRecordFrontier();
       if (recTsHw != null && recTsHw > (_lastRecTs ?? 0)) {
         _lastRecTs = recTsHw;
       }
@@ -2665,8 +2665,7 @@ class AppState extends ChangeNotifier {
     // every record commitSyncBatch durably persists, decoded_onehz-eligible
     // or not, so it's the honest frontier (same one RecordGate/backfill
     // policies already trust).
-    _lastRecTs =
-        await LocalDb.getCursorInt('rec_ts_hw') ?? lastSynced?.tsEpoch;
+    _lastRecTs = await LocalDb.getRecordFrontier() ?? lastSynced?.tsEpoch;
     await LocalDb.refreshComputeFreshness();
     final alarmPrefs = await SharedPreferences.getInstance();
     _savedAlarm = alarmPrefs.getInt('alarm_epoch');

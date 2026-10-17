@@ -3875,6 +3875,14 @@ class LocalDb {
     return v == null ? null : int.tryParse(v);
   }
 
+  /// The primary device's durable record frontier (`rec_ts_hw`), or null when
+  /// no record has been banked. Builds before the commit guard could persist
+  /// '0' from a record-less commit, so a non-positive value reads as unset.
+  static Future<int?> getRecordFrontier() async {
+    final v = await getCursorInt('rec_ts_hw');
+    return (v == null || v <= 0) ? null : v;
+  }
+
   /// Read a cursor int through a specific executor (used inside a transaction so
   /// the read shares the open txn instead of contending on the global handle).
   static Future<int?> _cursorIntVia(DatabaseExecutor ex, String name) async {
@@ -4384,8 +4392,16 @@ class LocalDb {
           toleranceSec: coverageToleranceSec,
           deviceFamily: deviceFamily,
         );
-        await setCursor(kCounter, '$maxCounter', txn: txn);
-        await setCursor(kRecTs, '$maxRecTs', txn: txn);
+        // Only a real record moves the frontier. A commit that banked none (a
+        // bare HISTORY_END token, gate-dropped archives) on an install with no
+        // cursor yet would otherwise persist '0', which every `?? fallback`
+        // reader takes as a real frontier at the 1970 epoch.
+        if (maxCounter > 0) {
+          await setCursor(kCounter, '$maxCounter', txn: txn);
+        }
+        if (maxRecTs > 0) {
+          await setCursor(kRecTs, '$maxRecTs', txn: txn);
+        }
         if (trimToken != null) {
           await setCursor(cursorKeyFor('strap_trim', deviceId), trimToken,
               txn: txn);
