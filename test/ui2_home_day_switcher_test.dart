@@ -209,6 +209,17 @@ void main() {
     expect(find.text('Today could not be read'), findsOneWidget);
     expect(find.text('Set an alarm'), findsOneWidget);
   });
+
+  // Home is never disposed (the shell's IndexedStack), so "Back to today"
+  // storing today's literal date left the tab pinned to that date once the
+  // clock crossed midnight.
+  test('stepping onto today stores "today", not a date that goes stale', () {
+    final evening = DateTime(2026, 10, 16, 22);
+    expect(homeSwitcherDay('2026-10-16', now: evening), isNull);
+    expect(homeSwitcherDay('2026-10-15', now: evening), '2026-10-15');
+    expect(homeSwitcherDay(_today), isNull);
+    expect(homeSwitcherDay(_yesterday), _yesterday);
+  });
 }
 
 /// Today has a real reading; every past day is genuinely bare (no bundle at

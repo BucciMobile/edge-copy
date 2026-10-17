@@ -1518,6 +1518,15 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
+/// What Home's switcher stores for [day]: null when it is today, so "today"
+/// keeps following the clock. Home lives in the shell's IndexedStack and is
+/// never disposed — a literal today's date stored by "Back to today" turned
+/// into yesterday at midnight, and the tab silently became a past-day view
+/// (no plan, no alarm, pull-to-refresh no longer synced).
+@visibleForTesting
+String? homeSwitcherDay(String day, {DateTime? now}) =>
+    day == todayLabel(now) ? null : day;
+
 class _HomeScreenState extends State<HomeScreen> with RevisionReload {
   HomeData? _d;
   bool _loading = true;
@@ -1611,7 +1620,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
   /// already restricts the arrows to [_days] — so this just re-loads for it.
   void _goDay(String day) {
     setState(() {
-      _day = day;
+      _day = homeSwitcherDay(day);
       _loading = true;
     });
     _load();
