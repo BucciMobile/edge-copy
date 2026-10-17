@@ -1964,6 +1964,7 @@
   "activitySummaryTotalVolume": "Volumen total",
   "activitySummaryElapsedTime": "Tiempo transcurrido",
   "activitySummaryClimbed": "+{m} m de ascenso",
+  "activitySummaryClimbedFt": "+{ft} ft de ascenso",
   "activitySummaryLapsCaption": "{n, plural, one{{n} largo} other{{n} largos}}",
   "activitySummaryNoRouteTitle": "No hay ruta para esta sesión",
   "activitySummaryNoRouteBody": "La ubicación estaba desactivada, o esta actividad no se registró con GPS.",

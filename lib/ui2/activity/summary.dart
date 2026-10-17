@@ -546,6 +546,11 @@ String grouped(num v) => NumberFormat.decimalPattern(
   LocaleController.displayLanguageCode,
 ).format(v.round());
 
+/// "120 m" / "394 ft" — an elevation in the reader's unit, grouped. Null [u]
+/// (a golden) is metric, which is what the store holds.
+String elevationText(double meters, UnitsController? u) =>
+    '${grouped(u?.elevationValue(meters) ?? meters)} ${u?.elevationUnit ?? 'm'}';
+
 // ── THE SUPPORTING STATS ───────────────────────────────────────────────────
 
 /// The glyph for a stat name.
@@ -605,7 +610,8 @@ List<(String, String)> sessionStats(ActivityResult r, UnitsController? u) {
     case Arch.laps:
       add('Laps', r.lapCount?.toString());
     case Arch.journey:
-      add('Elevation', r.gainM == null ? null : '+${r.gainM!.round()} m');
+      add('Elevation',
+          r.gainM == null ? null : '+${elevationText(r.gainM!, u)}');
     case Arch.interval:
       add('Rounds', r.rounds.isEmpty ? null : '${r.rounds.length}');
     case Arch.flow:
@@ -788,6 +794,27 @@ class _ActivitySummaryState extends State<ActivitySummary> {
   }
 
   String get _distanceUnit => _u?.distanceUnit ?? 'km';
+
+  /// The hero caption under a journey's distance. Feet get their own string
+  /// rather than a unit placeholder: several locales spell the metre out
+  /// ("米", "मी", "м") inside the sentence.
+  String _climbed(AppLocalizations? l, double gainM) {
+    final u = _u;
+    if (u != null && u.isImperial) {
+      final ft = u.elevationValue(gainM).round();
+      return l?.activitySummaryClimbedFt(ft) ?? '+$ft ft climbed';
+    }
+    return l?.activitySummaryClimbed(gainM.round()) ??
+        '+${gainM.round()} m climbed';
+  }
+
+  /// An altitude series in the user's elevation unit.
+  List<double> _elevSeries(List<double> m) {
+    final u = _u;
+    return u == null ? m : [for (final v in m) u.elevationValue(v)];
+  }
+
+  String get _elevUnit => _u?.elevationUnit ?? 'm';
 
   // ─────────────────── TS-09 · SESSION RPE ───────────────────
   //
@@ -1276,8 +1303,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
               _distance!.$1.toStringAsFixed(2),
               _distance!.$2,
               arch == Arch.journey && r.gainM != null
-                  ? (l?.activitySummaryClimbed(r.gainM!.round()) ??
-                      '+${r.gainM!.round()} m climbed')
+                  ? _climbed(l, r.gainM!)
                     : a.displayName(context),
               ),
       Arch.strength => r.strength.volumeKg == null
@@ -1526,35 +1552,36 @@ class _ActivitySummaryState extends State<ActivitySummary> {
             ),
           ];
         }
+        final elev = _elevSeries(r.elevationM);
         final peak = r.elevationM.reduce((x, y) => x > y ? x : y);
-        final axis = AxisSpec.of(r.elevationM);
+        final axis = AxisSpec.of(elev);
         return [
           Surface(
             child: Column(children: [
               ChartFrame(
                 title: l?.activitySummaryElevationTitle ?? 'Elevation',
-                unit: 'm',
+                unit: _elevUnit,
                 height: 130,
                 yAxis: axis,
                 xLabels: [
                   l?.activitySummaryStart ?? 'Start',
                   l?.activitySummaryFinish ?? 'Finish',
                 ],
-                series: r.elevationM,
+                series: elev,
                 child: CustomPaint(
                     size: Size.infinite,
-                    painter: Elevation(r.elevationM, p.on(C.green),
+                    painter: Elevation(elev, p.on(C.green),
                         markerInk: p.card, axis: axis)),
               ),
               const SizedBox(height: S.x4),
               InlineMetrics([
                 if (r.gainM != null)
                   (l?.activitySummaryGain ?? 'Gain',
-                      '+${r.gainM!.round()} m', C.green),
+                      '+${elevationText(r.gainM!, _u)}', C.green),
                 if (r.lossM != null)
                   (l?.activitySummaryLoss ?? 'Loss',
-                      '−${r.lossM!.round()} m', C.orange),
-                (l?.activitySummaryPeak ?? 'Peak', '${grouped(peak)} m',
+                      '−${elevationText(r.lossM!, _u)}', C.orange),
+                (l?.activitySummaryPeak ?? 'Peak', elevationText(peak, _u),
                     C.n500),
               ]),
             ]),
@@ -2186,7 +2213,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
     final series = <(String, String, Color, List<double?>)>[
       if (r.hr.length > 1) ('Heart rate', 'bpm', C.red, r.hr),
       if (r.elevationM.length > 1)
-        ('Elevation', 'm', C.teal, r.elevationM),
+        ('Elevation', _elevUnit, C.teal, _elevSeries(r.elevationM)),
     ];
     if (series.isEmpty) {
       // Same distinction the overview draws: a session with one minute in it

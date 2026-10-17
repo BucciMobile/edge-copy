@@ -2015,6 +2015,7 @@
   "activitySummaryTotalVolume": "Gesamtvolumen",
   "activitySummaryElapsedTime": "Gesamtzeit",
   "activitySummaryClimbed": "+{m} m Anstieg",
+  "activitySummaryClimbedFt": "+{ft} ft Anstieg",
   "activitySummaryLapsCaption": "{n, plural, one{{n} Bahn} other{{n} Bahnen}}",
   "activitySummaryNoRouteTitle": "Keine Route für dieses Training",
   "activitySummaryNoRouteBody": "Der Standort war deaktiviert, oder diese Aktivität wurde nicht mit GPS aufgezeichnet.",

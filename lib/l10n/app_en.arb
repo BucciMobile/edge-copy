@@ -10125,6 +10125,15 @@
       }
     }
   },
+  "activitySummaryClimbedFt": "+{ft} ft climbed",
+  "@activitySummaryClimbedFt": {
+    "description": "Hero caption showing feet climbed on a journey/hike session, for imperial units",
+    "placeholders": {
+      "ft": {
+        "type": "int"
+      }
+    }
+  },
   "activitySummaryLapsCaption": "{n, plural, one{{n} lap} other{{n} laps}}",
   "@activitySummaryLapsCaption": {
     "description": "Hero caption showing lap count on a swim/row session",

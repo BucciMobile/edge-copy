@@ -1952,6 +1952,7 @@
   "activitySummaryTotalVolume": "总训练量",
   "activitySummaryElapsedTime": "已用时间",
   "activitySummaryClimbed": "+{m} 米爬升",
+  "activitySummaryClimbedFt": "+{ft} 英尺爬升",
   "activitySummaryLapsCaption": "{n, plural, other{{n} 趟}}",
   "activitySummaryNoRouteTitle": "此次记录没有路线",
   "activitySummaryNoRouteBody": "定位功能未开启，或此次活动未使用 GPS 记录。",

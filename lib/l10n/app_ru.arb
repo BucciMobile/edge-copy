@@ -4710,6 +4710,14 @@
       }
     }
   },
+  "activitySummaryClimbedFt": "Набор высоты: +{ft} фт",
+  "@activitySummaryClimbedFt": {
+    "placeholders": {
+      "ft": {
+        "type": "int"
+      }
+    }
+  },
   "activitySummaryLapsCaption": "{n, plural, one{{n} круг} few{{n} круга} many{{n} кругов} other{{n} круга}}",
   "@activitySummaryLapsCaption": {
     "placeholders": {

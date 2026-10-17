@@ -1952,6 +1952,7 @@
   "activitySummaryTotalVolume": "कुल आयतन",
   "activitySummaryElapsedTime": "बीता हुआ समय",
   "activitySummaryClimbed": "+{m} मी चढ़ाई",
+  "activitySummaryClimbedFt": "+{ft} फ़ुट चढ़ाई",
   "activitySummaryLapsCaption": "{n, plural, one{{n} चक्कर} other{{n} चक्कर}}",
   "activitySummaryNoRouteTitle": "इस सत्र के लिए कोई मार्ग नहीं है",
   "activitySummaryNoRouteBody": "लोकेशन बंद थी, या यह गतिविधि GPS के साथ दर्ज नहीं की गई।",

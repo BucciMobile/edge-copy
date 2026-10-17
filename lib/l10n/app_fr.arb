@@ -1952,6 +1952,7 @@
   "activitySummaryTotalVolume": "Volume total",
   "activitySummaryElapsedTime": "Temps écoulé",
   "activitySummaryClimbed": "+{m} m de dénivelé",
+  "activitySummaryClimbedFt": "+{ft} pi de dénivelé",
   "activitySummaryLapsCaption": "{n, plural, one{{n} longueur} other{{n} longueurs}}",
   "activitySummaryNoRouteTitle": "Aucun itinéraire pour cette séance",
   "activitySummaryNoRouteBody": "La localisation était désactivée, ou cette activité n'a pas été enregistrée avec le GPS.",

@@ -434,7 +434,7 @@ List<(String, String)> _available(ActivityResult r, [UnitsController? u]) => [
   if (r.avgHr != null) ('Heart rate', '${r.avgHr} bpm'),
   // With its unit. A bare "612" on a card is a number nobody can read back.
   if (r.calories != null) ('Calories', '${grouped(r.calories!)} kcal'),
-  if (r.gainM != null) ('Elevation', '+${r.gainM!.round()} m'),
+  if (r.gainM != null) ('Elevation', '+${elevationText(r.gainM!, u)}'),
   if (r.strength.volumeKg != null)
     (
       'Volume',
@@ -459,7 +459,7 @@ List<(String, String)> _available(ActivityResult r, [UnitsController? u]) => [
               u?.distanceUnit ?? 'km',
               r.gainM == null
                   ? r.activity.name
-                  : '+${r.gainM!.round()} m elevation',
+                  : '+${elevationText(r.gainM!, u)} elevation',
             ),
     Arch.strength =>
       r.strength.volumeKg == null
