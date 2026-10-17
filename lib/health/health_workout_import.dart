@@ -320,9 +320,11 @@ class HealthWorkoutImporter {
 
   /// Read the window, store the workouts, then fetch each one's route on Apple.
   ///
-  /// Never throws: an empty store, a denied permission and a locked device all
-  /// come back as a zero result, which the caller reports as "nothing to
-  /// import" rather than as a failure.
+  /// An empty store (and, on Apple, a denied read, which HealthKit hands back
+  /// as an empty list) is a zero result. A read that THROWS — a Health Connect
+  /// quota or SecurityException, the provider updating mid-read — propagates:
+  /// swallowing it into the same zero told the user the store held no
+  /// workouts when it was never read at all.
   ///
   /// [prompt] is true only from the manual Import tap: it lets the route
   /// fetch ask for the separate workoutRoute grant. The auto path leaves it
@@ -332,28 +334,23 @@ class HealthWorkoutImporter {
     final start = end.subtract(Duration(
       days: _isApple ? kImportWindowDaysApple : kImportWindowDaysAndroid,
     ));
-    List<ImportedWorkoutRow> rows;
+    final List<ImportedWorkoutRow> rows;
     final ownSources = <String>{}, ownUuids = <String>{};
+    await _health.configure();
+    final points = await _health.getHealthDataFromTypes(
+      types: types,
+      startTime: start,
+      endTime: end,
+    );
+    String? ownApp;
     try {
-      await _health.configure();
-      final points = await _health.getHealthDataFromTypes(
-        types: types,
-        startTime: start,
-        endTime: end,
-      );
-      String? ownApp;
-      try {
-        ownApp = (await PackageInfo.fromPlatform()).packageName;
-      } catch (_) {}
-      rows = workoutsFrom(points, ownApp: ownApp);
-      for (final p in points) {
-        if (p.type != HealthDataType.WORKOUT || !_isOwn(p, ownApp)) continue;
-        ownSources.add(p.sourceName);
-        ownUuids.add(p.uuid);
-      }
-    } catch (e) {
-      debugPrint('[imported_workout] read: $e');
-      return WorkoutImportResult(routesSupported: routesSupported);
+      ownApp = (await PackageInfo.fromPlatform()).packageName;
+    } catch (_) {}
+    rows = workoutsFrom(points, ownApp: ownApp);
+    for (final p in points) {
+      if (p.type != HealthDataType.WORKOUT || !_isOwn(p, ownApp)) continue;
+      ownSources.add(p.sourceName);
+      ownUuids.add(p.uuid);
     }
     // Imports from before the own-app filter stored one copy of every band
     // session per export pass, each under a uuid the store no longer has, so
