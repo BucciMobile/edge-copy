@@ -1133,22 +1133,23 @@ class HealthExporter {
 
     // Sleep is the smallest, highest-value write. Native replace owns cleanup
     // on both stores (Health Connect SleepSessionRecord; HealthKit inBed+Core).
+    // No night today means a clear, which must stop short of yesterday's
+    // night if that one woke after noon.
+    Future<DateTime?> previousWake() async {
+      if (normalizeHealthSleepSession(b) != null) return null;
+      final prev = DateTime(dayStart.year, dayStart.month, dayStart.day - 1);
+      final pb = _decode(
+        (await LocalDb.dayResult(dayLabelOf(prev)))?['payload_json'],
+      );
+      return pb == null ? null : normalizeHealthSleepSession(pb)?.end;
+    }
+
     if (Platform.isAndroid && !androidSleepAlreadyWritten) {
       try {
-        // No night today means a clear, which must stop short of yesterday's
-        // night if that one woke after noon.
-        DateTime? previousWake;
-        if (normalizeHealthSleepSession(b) == null) {
-          final prev = DateTime(dayStart.year, dayStart.month, dayStart.day - 1);
-          final pb = _decode(
-            (await LocalDb.dayResult(dayLabelOf(prev)))?['payload_json'],
-          );
-          if (pb != null) previousWake = normalizeHealthSleepSession(pb)?.end;
-        }
         if (!await _androidSleep.replace(
           b,
           dayStart: dayStart,
-          previousWake: previousWake,
+          previousWake: await previousWake(),
         )) {
           debugPrint('[health] write Android sleep session returned false');
           success = false;
@@ -1163,7 +1164,7 @@ class HealthExporter {
         if (!await _appleSleep.replace(
           bundle: b,
           dayStart: dayStart,
-          dayEnd: dayEnd,
+          previousWake: await previousWake(),
         )) {
           debugPrint('[health] write Apple sleep session returned false');
           success = false;

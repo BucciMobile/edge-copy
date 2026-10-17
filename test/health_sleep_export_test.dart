@@ -292,22 +292,91 @@ void main() {
       // copy, which is the truncation and the duplicate bars both.
       expect(night.start.isBefore(dayStart), isTrue);
 
-      final window = sleepCleanupWindow(
-        dayStart: dayStart,
-        dayEnd: dayEnd,
-        night: night,
-      );
+      final window = sleepCleanupWindow(dayStart: dayStart, night: night)!;
       expect(window.start, DateTime(2026, 8, 4, 12));
       expect(window.end, DateTime(2026, 8, 5, 12), reason:
           'noon-to-noon only — the old calendar-day union reached into the '
           'previous night and deleted samples nothing ever rewrites');
 
-      // No night to write — nothing to widen for, and the day window still has
-      // to be swept so stale samples from an earlier export go.
-      final none = sleepCleanupWindow(dayStart: dayStart, dayEnd: dayEnd);
-      expect(none.start, dayStart);
-      expect(none.end, dayEnd);
+      // No night to write — stale samples from an earlier export still have
+      // to go, but only from the noon-to-noon window this day's night owns.
+      // HealthKit deletes on overlap, and tomorrow's night starts this
+      // evening: a calendar-day sweep deleted its in-bed and pre-midnight
+      // stages.
+      final none = sleepCleanupWindow(dayStart: dayStart)!;
+      expect(none.start, DateTime(2026, 8, 4, 12));
+      expect(none.end, DateTime(2026, 8, 5, 12));
+      final tomorrowsNightStart = DateTime(2026, 8, 5, 23, 10);
+      expect(none.end.isBefore(tomorrowsNightStart), isTrue);
+      expect(none.end.isBefore(dayEnd), isTrue);
+
+      // Yesterday's night woke after noon: start after it.
+      final clamped = sleepCleanupWindow(
+        dayStart: dayStart,
+        previousWake: DateTime(2026, 8, 4, 22),
+      )!;
+      expect(clamped.start, DateTime(2026, 8, 4, 22, 0, 1));
+      expect(
+        sleepCleanupWindow(
+          dayStart: dayStart,
+          previousWake: DateTime(2026, 8, 5, 13),
+        ),
+        isNull,
+      );
     });
+
+    test(
+      'Apple replace on a no-night day leaves the next night alone',
+      () async {
+        const channel = MethodChannel('openstrap/test_healthkit_sleep_none');
+        final calls = <MethodCall>[];
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, (call) async {
+              calls.add(call);
+              return true;
+            });
+        addTearDown(() {
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+              .setMockMethodCallHandler(channel, null);
+        });
+        final exporter = HealthKitSleepSessionExporter(
+          writer: MethodChannelHealthKitSleepSessionWriter(channel: channel),
+        );
+        final noWindow = _overnightBundle()..remove('sleep');
+
+        expect(
+          await exporter.replace(
+            bundle: noWindow,
+            dayStart: DateTime(2026, 8, 5),
+            previousWake: DateTime(2026, 8, 4, 7),
+          ),
+          isTrue,
+        );
+        final args = (calls.single.arguments as Map).cast<String, Object?>();
+        expect(
+          args['cleanupStartTime'],
+          DateTime(2026, 8, 4, 12).millisecondsSinceEpoch,
+        );
+        expect(
+          args['cleanupEndTime'],
+          DateTime(2026, 8, 5, 12).millisecondsSinceEpoch,
+          reason: 'a calendar-day sweep overlaps tomorrow\'s night, which '
+              'starts this evening, and HealthKit deletes on overlap',
+        );
+
+        // Nothing left to clear: no native call, and not a failure.
+        calls.clear();
+        expect(
+          await exporter.replace(
+            bundle: noWindow,
+            dayStart: DateTime(2026, 8, 5),
+            previousWake: DateTime(2026, 8, 5, 13),
+          ),
+          isTrue,
+        );
+        expect(calls, isEmpty);
+      },
+    );
 
     test('Apple and Android share one hypnogram stage vocabulary', () {
       expect(healthSleepStageOf('wake'), HealthSleepStage.awake);
@@ -934,7 +1003,6 @@ void main() {
         await exporter.replace(
           bundle: bundle,
           dayStart: DateTime(2026, 8, 5),
-          dayEnd: DateTime(2026, 8, 6),
         ),
         isTrue,
       );
@@ -971,7 +1039,6 @@ void main() {
           await exporter.replace(
             bundle: _overnightBundle(),
             dayStart: DateTime(2026, 8, 5),
-            dayEnd: DateTime(2026, 8, 6),
           ),
           isTrue,
         );
