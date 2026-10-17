@@ -747,8 +747,12 @@ bool _isFreeDay(String? date) {
 /// four-week luteal phase — it stops counting.
 List<bool> _lutealFlags(List<String> dates, List<String> cycleStartDates) {
   final out = List<bool>.filled(dates.length, false);
+  // Labels parsed as UTC midnight, as in [_isNextDay]: at local midnight a
+  // span holding the 23 h spring-forward day floors one day short in `inDays`,
+  // which shortens that cycle and moves its midpoint night.
+  DateTime? day(String s) => DateTime.tryParse('${s}T00:00:00Z');
   final starts = <DateTime>[
-    for (final s in cycleStartDates) ?DateTime.tryParse(s),
+    for (final s in cycleStartDates) ?day(s),
   ]..sort();
   if (starts.isEmpty) return out;
 
@@ -759,7 +763,7 @@ List<bool> _lutealFlags(List<String> dates, List<String> cycleStartDates) {
   final medianGap = _median(gaps);
 
   for (var i = 0; i < dates.length; i++) {
-    final d = DateTime.tryParse(dates[i]);
+    final d = day(dates[i]);
     if (d == null) continue;
     // Nearest PRECEDING start (inclusive: the start day is cycle day 1).
     var si = -1;
