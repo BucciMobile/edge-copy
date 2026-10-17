@@ -4424,6 +4424,15 @@
   "@coachModelHint": {
     "description": "Coach AI settings: placeholder hint in the model search field"
   },
+  "coachModelSelected": "Saving model: {model}",
+  "@coachModelSelected": {
+    "description": "Coach AI settings: line under the model field naming the model Save will store when nothing is typed",
+    "placeholders": {
+      "model": {
+        "type": "String"
+      }
+    }
+  },
   "coachModelLabel": "Model",
   "@coachModelLabel": {
     "description": "Coach AI settings: text field label for searching or typing a model id"

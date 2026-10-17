@@ -1956,6 +1956,14 @@
   "coachLocalSub": "В этой сети. Данные не покидают ваш компьютер.",
   "coachMenuSemantic": "Чаты и настройки ИИ",
   "coachModelHint": "найдите или введите идентификатор",
+  "coachModelSelected": "Будет сохранена модель: {model}",
+  "@coachModelSelected": {
+    "placeholders": {
+      "model": {
+        "type": "String"
+      }
+    }
+  },
   "coachModelLabel": "Модель",
   "coachModelsFound": "{n, plural, one{Найдена {n} модель. Выберите её.} few{Найдено {n} модели. Выберите одну.} many{Найдено {n} моделей. Выберите одну.} other{Найдено {n} модели. Выберите одну.}}",
   "@coachModelsFound": {

@@ -883,6 +883,7 @@
   "coachLocalSub": "在本地网络中运行，不会离开你的设备。",
   "coachMenuSemantic": "聊天记录与 AI 设置",
   "coachModelHint": "搜索或输入 ID",
+  "coachModelSelected": "将保存的模型：{model}",
   "coachModelLabel": "模型",
   "coachModelsFound": "共 {n} 个模型，点选其中一个。",
   "coachNavTitle": "教练",

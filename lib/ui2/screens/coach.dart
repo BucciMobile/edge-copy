@@ -864,7 +864,12 @@ class _CoachSetupState extends State<CoachSetup> {
   late final TextEditingController _search;
   late final TextEditingController _timeout;
   late CoachApi _api;
+  /// The model Save will store when nothing has been typed: the saved one at
+  /// first, then whatever list row was last tapped. Typing in [_search]
+  /// clears it (see [_onSearchChanged]) so a typed id is never silently
+  /// overridden by a selection the form wasn't showing.
   String _model = '';
+  String _lastSearch = '';
   List<String> _models = const [];
   bool _loading = false;
   String? _msg;
@@ -899,11 +904,7 @@ class _CoachSetupState extends State<CoachSetup> {
     _keyOrigin = coachEndpointOrigin(cfg.baseUrl);
     // The base URL decides which preset is lit and whether a key is needed, and
     // the search box filters the list — both are read during build, so both
-    // have to rebuild it.
-    void redraw() {
-      if (mounted) setState(() {});
-    }
-
+    // have to rebuild it (both listeners call setState).
     _base.addListener(_onBaseChanged);
     // Deliberately NOT tracked via a _key listener: an early attempt cleared
     // _pendingKeyDelete as soon as the user typed a replacement, but typing
@@ -912,7 +913,23 @@ class _CoachSetupState extends State<CoachSetup> {
     // already derives "is there a real replacement right now" correctly by
     // checking the trimmed text itself; _pendingKeyDelete only needs to say
     // whether the endpoint changed, not track the field's history.
-    _search.addListener(redraw);
+    _search.addListener(_onSearchChanged);
+  }
+
+  /// The model field is both a filter and a free-text id, and Save prefers
+  /// [_model]. Left set, a saved 'gpt-4o' would win over anything typed, so a
+  /// retyped id (or a local model typed after pointing the base URL at
+  /// Ollama) was dropped while the screen still closed as if it had saved.
+  /// Tapping a row after filtering doesn't touch the text, so that pick
+  /// survives. Only a real text edit counts — the controller also notifies on
+  /// cursor and selection moves.
+  void _onSearchChanged() {
+    final text = _search.text;
+    if (text != _lastSearch) {
+      _lastSearch = text;
+      _model = '';
+    }
+    if (mounted) setState(() {});
   }
 
   /// Clears a carried-over key rather than letting Save silently send it to a
@@ -925,6 +942,10 @@ class _CoachSetupState extends State<CoachSetup> {
     if (origin != _keyOrigin) {
       _keyOrigin = origin;
       _api = CoachApi.defaultFor(_base.text);
+      // A list fetched from the old endpoint names models the new one may
+      // not serve. The selected model itself stays, shown under the Model
+      // field, so a same-provider URL edit doesn't force retyping it.
+      _models = const [];
       _pendingKeyDelete = true;
       if (_key.text.isNotEmpty) _key.clear();
       _msg = 'The API key was cleared because the endpoint changed.';
@@ -1195,6 +1216,13 @@ class _CoachSetupState extends State<CoachSetup> {
                     label: l?.coachModelLabel ?? 'Model',
                     hint: l?.coachModelHint ?? 'search, or type an id',
                   ),
+                  if (_model.isNotEmpty) ...[
+                    const SizedBox(height: S.x2),
+                    Text(
+                      l?.coachModelSelected(_model) ?? 'Saving model: $_model',
+                      style: F.cap.copyWith(color: p.ink3),
+                    ),
+                  ],
                   const SizedBox(height: S.x1),
                   Builder(
                     builder: (_) => Padding(

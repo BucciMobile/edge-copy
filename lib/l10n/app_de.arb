@@ -912,6 +912,7 @@
   "coachLocalSub": "In diesem Netzwerk. Nichts verlässt deinen Rechner.",
   "coachMenuSemantic": "Chats und KI-Einstellungen",
   "coachModelHint": "Suchen oder ID eingeben",
+  "coachModelSelected": "Gespeichertes Modell: {model}",
   "coachModelLabel": "Modell",
   "coachModelsFound": "{n, plural, one{{n} Modell. Zum Auswählen antippen.} other{{n} Modelle. Zum Auswählen antippen.}}",
   "coachNavTitle": "Coach",

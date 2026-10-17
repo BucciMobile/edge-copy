@@ -883,6 +883,7 @@
   "coachLocalSub": "इसी नेटवर्क पर। आपकी मशीन से कुछ भी बाहर नहीं जाता।",
   "coachMenuSemantic": "चैट और AI सेटिंग्स",
   "coachModelHint": "खोजें, या एक आईडी टाइप करें",
+  "coachModelSelected": "सहेजा जाने वाला मॉडल: {model}",
   "coachModelLabel": "मॉडल",
   "coachModelsFound": "{n} मॉडल मिले। किसी एक पर टैप करें।",
   "coachNavTitle": "कोच",

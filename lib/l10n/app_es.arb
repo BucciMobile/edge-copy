@@ -883,6 +883,7 @@
   "coachLocalSub": "En esta red. Nada sale de tu máquina.",
   "coachMenuSemantic": "Chats y ajustes de IA",
   "coachModelHint": "buscar, o escribir un id",
+  "coachModelSelected": "Modelo que se guardará: {model}",
   "coachModelLabel": "Modelo",
   "coachModelsFound": "{n, plural, one{{n} modelo. Toca uno.} other{{n} modelos. Toca uno.}}",
   "coachNavTitle": "Coach",
