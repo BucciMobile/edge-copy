@@ -352,12 +352,29 @@ Future<PrioritySleepExportResult> exportPrioritySleepBeforeBulk({
   required Future<bool> Function(Map<String, dynamic>) write,
   required Future<void> Function(String? androidSleepAlreadyWritten) exportBulk,
 }) async {
-  final priorityResult = await exportNewestPrioritySleep(
-    newestFirstDays: newestFirstDays,
-    write: write,
-  );
-  if (!priorityResult.succeeded) return priorityResult;
-  await exportBulk(priorityResult.date);
+  PrioritySleepExportResult priorityResult;
+  try {
+    priorityResult = await exportNewestPrioritySleep(
+      newestFirstDays: newestFirstDays,
+      write: write,
+    );
+  } catch (e) {
+    debugPrint('[health] write priority Android sleep session: $e');
+    priorityResult = PrioritySleepExportResult(
+      date: newestFirstDays
+          .where((d) => normalizeHealthSleepSession(d.value) != null)
+          .firstOrNull
+          ?.key,
+      succeeded: false,
+    );
+  }
+  // A failed sleep write must not hold the rest of the export. Health Connect
+  // grants each type separately, so a user who leaves Sleep off (another app
+  // owns it) fails this write on every pass; holding bulk behind it meant no
+  // heart rate, RHR, HRV, energy or workouts ever reached the store. Bulk is
+  // told nothing was written, so it retries the sleep as part of that day and
+  // the day stays out of the cursor until the whole day lands.
+  await exportBulk(priorityResult.succeeded ? priorityResult.date : null);
   return priorityResult;
 }
 
@@ -898,7 +915,10 @@ class HealthExporter {
               lastAttemptMs = null;
             }
             final nowMs = DateTime.now().millisecondsSinceEpoch;
-            final shouldAttempt = shouldAttemptHealthExport(
+            // The same gate bulk applies to this day, so a day that is due here
+            // is due there too: when the sleep write fails, bulk retries the
+            // whole day and its retry entry is the one accounting for it.
+            final shouldAttempt = shouldAttemptHealthBulkExport(
               attempts: attempts,
               maxAttempts: _kMaxExportAttempts,
               now: DateTime.fromMillisecondsSinceEpoch(nowMs),
@@ -906,6 +926,7 @@ class HealthExporter {
                   ? null
                   : DateTime.fromMillisecondsSinceEpoch(lastAttemptMs),
               backoff: _backoffFor(attempts),
+              prioritySleepAlreadyWritten: false,
               lastSuccess: okMs == null
                   ? null
                   : DateTime.fromMillisecondsSinceEpoch(okMs),
@@ -914,58 +935,25 @@ class HealthExporter {
                   : _kNonFinalizedRewriteInterval,
               force: forceRetry,
             );
-            if (!shouldAttempt) {
-              // The priority day is held back by the CAP or by the success-side
-              // rewrite throttle (it exported cleanly &lt;30 min ago) — in either
-              // case its sleep session is already in the store and is not what's
-              // blocking, so still export every OTHER pending day. Only a
-              // genuine retry backoff (recent FAILURE, still under the cap) holds
-              // bulk, matching the pre-throttle behaviour. A day with `ok_ms` set
-              // carries no pending failure (the success branch clears
-              // attempts/last_ms), so the two conditions are mutually exclusive.
-              final throttledBySuccess = okMs != null &&
-                  !pendingPriorityDay.finalized &&
-                  nowMs - okMs < _kNonFinalizedRewriteInterval.inMilliseconds;
-              if (attempts >= _kMaxExportAttempts || throttledBySuccess) {
-                return exportBulk(null);
-              }
-              return 0;
-            }
-            Future<void> recordPriorityFailure() async {
-              // A timed-out (unavailable) store isn't a failed export; don't
-              // spend an attempt on it.
-              if (_storeHung) return;
-              retryState[priorityDay!.key] = {
-                'attempts': attempts + 1,
-                'last_ms': nowMs,
-                'finalized': pendingPriorityDay.finalized,
-              };
-              await LocalDb.setCursor(_kRetryCursor, jsonEncode(retryState));
-            }
+            // Not due (backoff, cap, or it exported cleanly moments ago): the
+            // other pending days still go out. Holding them behind this one
+            // day's backoff is what kept every metric out of Health Connect
+            // whenever the sleep write alone was failing.
+            if (!shouldAttempt) return exportBulk(null);
 
             var bulkDone = 0;
-            try {
-              final priorityResult = await exportPrioritySleepBeforeBulk(
-                // `exportNewestPrioritySleep` returns the first day carrying a
-                // sleep session, and the scan above already found exactly that
-                // day — so one entry is equivalent to the whole list, without
-                // holding 400 decoded bundles to re-derive the same answer.
-                newestFirstDays: [priorityDay],
-                write: _androidSleep.replace,
-                exportBulk: (androidSleepAlreadyWritten) async {
-                  bulkDone = await exportBulk(androidSleepAlreadyWritten);
-                },
-              );
-              if (!priorityResult.succeeded) {
-                await recordPriorityFailure();
-                return 0;
-              }
-              return bulkDone;
-            } catch (e) {
-              debugPrint('[health] write priority Android sleep session: $e');
-              await recordPriorityFailure();
-              return 0;
-            }
+            await exportPrioritySleepBeforeBulk(
+              // `exportNewestPrioritySleep` returns the first day carrying a
+              // sleep session, and the scan above already found exactly that
+              // day — so one entry is equivalent to the whole list, without
+              // holding 400 decoded bundles to re-derive the same answer.
+              newestFirstDays: [priorityDay],
+              write: _androidSleep.replace,
+              exportBulk: (androidSleepAlreadyWritten) async {
+                bulkDone = await exportBulk(androidSleepAlreadyWritten);
+              },
+            );
+            return bulkDone;
           }
         }
         return exportBulk(null);

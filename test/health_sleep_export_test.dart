@@ -135,49 +135,71 @@ void main() {
       expect(writes, 1);
     });
 
-    test('failed priority sleep never invokes the bulk callback', () async {
-      var priorityWrites = 0;
-      var bulkWrites = 0;
+    test(
+      'failed priority sleep still runs bulk without claiming the night',
+      () async {
+        // Health Connect grants Sleep separately: with it denied this write
+        // fails every pass, and holding bulk behind it kept heart rate, RHR,
+        // HRV, energy and workouts out of the store indefinitely.
+        var priorityWrites = 0;
+        final bulkPriorityDates = <String?>[];
+
+        final result = await exportPrioritySleepBeforeBulk(
+          newestFirstDays: [MapEntry('2026-08-05', _overnightBundle())],
+          write: (bundle) async {
+            priorityWrites++;
+            return false;
+          },
+          exportBulk: (androidSleepAlreadyWritten) async {
+            bulkPriorityDates.add(androidSleepAlreadyWritten);
+          },
+        );
+
+        expect(result.date, '2026-08-05');
+        expect(result.succeeded, isFalse);
+        expect(priorityWrites, 1);
+        expect(
+          bulkPriorityDates,
+          [null],
+          reason: 'bulk must retry the sleep itself, not skip it as written',
+        );
+      },
+    );
+
+    test('thrown priority sleep still runs bulk without claiming the night',
+        () async {
+      final bulkPriorityDates = <String?>[];
 
       final result = await exportPrioritySleepBeforeBulk(
         newestFirstDays: [MapEntry('2026-08-05', _overnightBundle())],
-        write: (bundle) async {
-          priorityWrites++;
-          return false;
-        },
+        write: (bundle) async => throw StateError('priority write failed'),
         exportBulk: (androidSleepAlreadyWritten) async {
-          bulkWrites++;
+          bulkPriorityDates.add(androidSleepAlreadyWritten);
         },
       );
 
       expect(result.date, '2026-08-05');
       expect(result.succeeded, isFalse);
-      expect(priorityWrites, 1);
-      expect(bulkWrites, 0);
+      expect(bulkPriorityDates, [null]);
     });
 
-    test('thrown priority sleep never invokes the bulk callback', () async {
-      var bulkWrites = 0;
-
-      await expectLater(
-        exportPrioritySleepBeforeBulk(
-          newestFirstDays: [MapEntry('2026-08-05', _overnightBundle())],
-          write: (bundle) async => throw StateError('priority write failed'),
-          exportBulk: (androidSleepAlreadyWritten) async {
-            bulkWrites++;
-          },
-        ),
-        throwsA(isA<StateError>()),
+    test('the priority day never holds bulk behind its own backoff', () {
+      final source = File('lib/health/health_export.dart').readAsStringSync();
+      final priorityPath = source.substring(
+        source.indexOf('Future<int> exportPriorityOrBulk() async {'),
+        source.indexOf('exportBulk = (String? androidSleepAlreadyWritten)'),
       );
 
-      expect(bulkWrites, 0);
+      expect(priorityPath, isNot(contains('return 0;')));
+      expect(priorityPath, contains('shouldAttemptHealthBulkExport('));
+      expect(priorityPath, isNot(contains('shouldAttemptHealthExport(')));
     });
 
     test('priority success leaves shared retry state for the bulk export', () {
       final source = File('lib/health/health_export.dart').readAsStringSync();
       final priorityCallback = source.substring(
         source.indexOf(
-          'final priorityResult = await exportPrioritySleepBeforeBulk(',
+          'await exportPrioritySleepBeforeBulk(',
         ),
         source.indexOf('exportBulk = (String? androidSleepAlreadyWritten)'),
       );
