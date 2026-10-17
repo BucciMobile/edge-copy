@@ -2299,8 +2299,9 @@ class BleEngine {
   bool _bootstrapClockWrite = false;
   // Proactive RTC recheck timestamp for long-lived connections — see
   // kRtcReverifyIntervalSeconds. Every other clock recheck is symptom-driven.
-  // On _monotonicSecs(): a backward wall-clock step would otherwise push
-  // the next re-verify out by the size of the step.
+  // _wallSecs(), not the stopwatch: the stopwatch stops while the phone is
+  // suspended, so a mostly-asleep phone would push the re-verify out by days.
+  // A backward wall step is handled by rtcReverifyDue.
   double? _lastClockVerifyAt;
   int? _sessionOldestUnix; // strap's banked-data window (GET_DATA_RANGE)
   int? _sessionNewestUnix;
@@ -2394,10 +2395,12 @@ class BleEngine {
   // Run-state for a chain of auto-continued offload rounds: how many
   // consecutive rounds banked nothing, and when the chain started.
   final AutoContinueRun _autoContinue = AutoContinueRun();
-  // _monotonicSecs() of the last offload trigger; null = none this connection.
-  // Wall time here let a backward phone-clock step (NTP correcting a fast
-  // phone) refuse every periodic and foreground offload until wall time
-  // caught up again.
+  // _wallSecs() of the last offload trigger; null = none this connection.
+  // Wall time, not the stopwatch: the stopwatch stops while the phone sleeps,
+  // so after a night locked the morning catch-up and the sync button would
+  // see only the few awake seconds since the stamp and be floored. A backward
+  // wall step (NTP correcting a fast phone) is absorbed by BackfillPolicy
+  // treating a negative elapsed as the floor being spent.
   double? _lastBackfillAt;
   double? _lastHistoricalSendAt; // last actual SEND_HISTORICAL_DATA wall time
   int _emptyStreak = 0; // consecutive empty offloads (BackfillPolicy backoff)
@@ -3051,7 +3054,7 @@ class BleEngine {
   Future<bool> _finishConnect(_Session session) async {
     try {
       // Fresh clock verification stamp — see kRtcReverifyIntervalSeconds.
-      _lastClockVerifyAt = _monotonicSecs();
+      _lastClockVerifyAt = _wallSecs();
       // Per-connection policy reset. Marginal-radio + post-bond-loop are NOT reset
       // here — they count consecutive bad cycles across reconnects and self-reset on
       // a healthy disconnect. Empty-sync + stuck are per-connection.
@@ -3287,7 +3290,7 @@ class BleEngine {
     // Only a real drain spends the backfill floor; a deferred one leaves it
     // open so a foreground trigger can retry as soon as the phone corrects.
     final floorBeforeInit = _lastBackfillAt;
-    if (drainOnInit) _lastBackfillAt = _monotonicSecs();
+    if (drainOnInit) _lastBackfillAt = _wallSecs();
     // Both are pre-armed above because seq4 IS the drain trigger and the
     // flood can start before the write even returns. If INIT did not go out
     // there is no flood: hand the state back, or `_offloadActive` stays set
@@ -4111,9 +4114,8 @@ class BleEngine {
     // gets an independent periodic GET_CLOCK; the existing clock_epoch
     // response handler does the actual drift comparison + bounded re-issue.
     final lastVerify = _lastClockVerifyAt;
-    if (lastVerify == null ||
-        _monotonicSecs() - lastVerify >= kRtcReverifyIntervalSeconds) {
-      _lastClockVerifyAt = _monotonicSecs();
+    if (rtcReverifyDue(_wallSecs(), lastVerify)) {
+      _lastClockVerifyAt = _wallSecs();
       _log('[SYNC] Periodic RTC re-verify (long-lived connection).');
       unawaited(getClock());
     }
@@ -4231,7 +4233,7 @@ class BleEngine {
     if (_session?.connected != true || d == null) return false;
     if (!BackfillPolicy.shouldRun(
       trigger,
-      _monotonicSecs(),
+      _wallSecs(),
       _lastBackfillAt,
       _emptyStreak,
     )) {
@@ -4245,7 +4247,7 @@ class BleEngine {
     // blocked, which is exactly the window the deferral is short enough to
     // ride out.
     final floorBefore = _lastBackfillAt;
-    _lastBackfillAt = _monotonicSecs();
+    _lastBackfillAt = _wallSecs();
     final sent = await _startHistoricalRefresh(
       trigger: trigger,
       reason: trigger.name,

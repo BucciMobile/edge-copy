@@ -230,6 +230,20 @@ void main() {
     });
   });
 
+  group('rtcReverifyDue', () {
+    test('due with no stamp, not before the interval, due at it', () {
+      const t = 1.8e9;
+      expect(rtcReverifyDue(t, null), isTrue);
+      expect(rtcReverifyDue(t + kRtcReverifyIntervalSeconds - 1, t), isFalse);
+      expect(rtcReverifyDue(t + kRtcReverifyIntervalSeconds, t), isTrue);
+    });
+
+    test('a clock stepped back behind the stamp does not suspend it', () {
+      const t = 1.8e9;
+      expect(rtcReverifyDue(t - 6 * 3600 + 60, t), isTrue);
+    });
+  });
+
   group('HistoricalSyncCommandPolicy', () {
     test('first historical send is immediate', () {
       expect(HistoricalSyncCommandPolicy.waitSeconds(null, 100), 0);

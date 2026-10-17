@@ -117,6 +117,17 @@ const int kLivenessFuseSeconds = 120; // no data for >fuse ⇒ bounce the link
 // the drift comparison + bounded SET_CLOCK re-issue, so this only supplies
 // the missing periodic trigger, not new drift-correction logic.
 const int kRtcReverifyIntervalSeconds = 6 * 3600; // 6h
+
+/// Whether the proactive RTC re-verify is due. Both times are wall seconds:
+/// a suspend-paused stopwatch would let a mostly-asleep phone go days without
+/// one. A negative elapsed (the phone clock stepped backward) counts as due,
+/// otherwise the re-verify would be suspended for the size of the step on top
+/// of the interval.
+bool rtcReverifyDue(double nowWall, double? lastVerifyWall) {
+  if (lastVerifyWall == null) return true;
+  final elapsed = nowWall - lastVerifyWall;
+  return elapsed < 0 || elapsed >= kRtcReverifyIntervalSeconds;
+}
 const int kHistoricalSendFloorSeconds = 5; // official app floors 0x16 to 5s
 const int kHistoricalAbortRetryDelaySeconds =
     3; // official app retries 3s after abort
