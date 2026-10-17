@@ -989,7 +989,8 @@ bool shouldRenotifyStaleness(
 ///   * [remedyAfter] refusals in a row ⇒ try the remedy (SET_CLOCK + bounce).
 ///     The usual cause is a poisoned post-reconnect plausibility window.
 ///   * [giveUpAfter] remedies that did NOT work ⇒ stop assuming the next
-///     SET_CLOCK will fix it and tell the user. Still never ACKs.
+///     SET_CLOCK will fix it and tell the user. Still never ACKs, and later
+///     remedies back off exponentially ([nextRemedyThreshold]).
 ///
 /// Counting must span RECONNECTS. The remedy IS a reconnect, so a
 /// per-connection reset makes the escalation unreachable — the session is torn
@@ -999,7 +1000,14 @@ class NoDurableProgressEscalation {
   final int remedyAfter;
   final int giveUpAfter;
 
-  NoDurableProgressEscalation({this.remedyAfter = 3, this.giveUpAfter = 3});
+  /// Cap on how many times the post-give-up refusal threshold doubles.
+  final int maxBackoffDoublings;
+
+  NoDurableProgressEscalation({
+    this.remedyAfter = 3,
+    this.giveUpAfter = 3,
+    this.maxBackoffDoublings = 6,
+  });
 
   int _refusals = 0;
   int _remedies = 0;
@@ -1009,11 +1017,26 @@ class NoDurableProgressEscalation {
   int get remedies => _remedies;
   bool get gaveUp => _gaveUp;
 
+  /// Refusals needed before the next remedy. Flat [remedyAfter] until the
+  /// remedy has failed [giveUpAfter] times; after that it doubles per further
+  /// failed remedy, capped by [maxBackoffDoublings]. Without the backoff a loop
+  /// already declared unfixable kept writing SET_CLOCK and bouncing the link
+  /// every [remedyAfter] refusals for as long as the band stayed in range —
+  /// all night on Android, where the foreground service keeps reconnecting —
+  /// burning both batteries for no progress. It still retries occasionally,
+  /// because a later reconnect can genuinely clear the gate window.
+  int get nextRemedyThreshold {
+    if (_remedies < giveUpAfter) return remedyAfter;
+    var doublings = _remedies - giveUpAfter + 1;
+    if (doublings > maxBackoffDoublings) doublings = maxBackoffDoublings;
+    return remedyAfter << doublings;
+  }
+
   /// Feed one refused HISTORY_END. Returns true when the caller should run the
   /// remedy (and resets the refusal streak so the next run needs a fresh one).
   bool trimRefused() {
     _refusals++;
-    if (_refusals < remedyAfter) return false;
+    if (_refusals < nextRemedyThreshold) return false;
     _refusals = 0;
     _remedies++;
     return true;
