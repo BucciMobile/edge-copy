@@ -5920,7 +5920,7 @@
   "@cycleFromOneMeasuredGap": {
     "description": "Trailing clause of the prediction footnote when only one cycle gap has been measured."
   },
-  "cyclePastEndOfIt": "{days} days past the end of it · ",
+  "cyclePastEndOfIt": "{days, plural, one{1 day past the end of it} other{{days} days past the end of it}} · ",
   "@cyclePastEndOfIt": {
     "description": "Leading clause of the prediction footnote: the predicted window has already passed.",
     "placeholders": {
@@ -5954,7 +5954,7 @@
       }
     }
   },
-  "cycleLeadDaysLate": "{days} days late · ",
+  "cycleLeadDaysLate": "{days, plural, one{1 day late} other{{days} days late}} · ",
   "@cycleLeadDaysLate": {
     "description": "Leading clause used when the single measured-gap prediction is overdue.",
     "placeholders": {
@@ -5967,7 +5967,7 @@
   "@cycleLeadToday": {
     "description": "Leading clause used when the single measured-gap prediction is due today."
   },
-  "cycleLeadInDays": "in {days} days · ",
+  "cycleLeadInDays": "{days, plural, one{in 1 day} other{in {days} days}} · ",
   "@cycleLeadInDays": {
     "description": "Leading clause used when the single measured-gap prediction is still ahead.",
     "placeholders": {

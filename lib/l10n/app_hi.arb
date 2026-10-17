@@ -1182,7 +1182,7 @@
   "cycleHalfOfMeasuredGaps": "आपके {n} मापे गए अंतरालों में से आधे इतनी ही चौड़ी सीमा के भीतर आए",
   "cycleLeadDaysLate": "{days} दिन देर से · ",
   "cycleLeadToday": "आज · ",
-  "cycleLeadInDays": "{days} दिनों में · ",
+  "cycleLeadInDays": "{days, plural, one{{days} दिन में} other{{days} दिनों में}} · ",
   "cycleWhatYouUsuallyNotice": "आप आमतौर पर क्या महसूस करती हैं",
   "cycleSymptomShapeSummary": "चार आँकड़े, साइकल के हर हफ़्ते के लिए एक, आपकी अपनी दर्ज शुरुआतों से गिने गए। {cycles} साइकल में आपने हर हफ़्ते {daysByWeek} दिन कुछ न कुछ दर्ज किया — यही एकमात्र दिन हैं जो यहाँ गिने जाते हैं।",
   "cycleRemoveLoggedDay": "{date} हटाएँ",
