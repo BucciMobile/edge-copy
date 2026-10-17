@@ -848,11 +848,23 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // every number that leans on it below is served at half confidence and
   // marked provisional. Always false on a band, so its payload is unchanged.
   final tempProvisional = settledTemp.value?.provisional ?? false;
+  // The nightly mean every LATER night is measured against. A night the strap
+  // spent partly warming up (or half off the wrist) reads hundreds of counts
+  // low; readiness already refuses it as tonight's input, but banking it as
+  // `skin_temp_adc` would sit in the next 28 nights' baseline, drag the median
+  // down and roughly double the SD — normal nights then read warm and a real
+  // elevation's skin_temp_z is damped below 2. So an unsettled night neither
+  // enters the series nor gets a z of its own. A null fraction (no settle band
+  // for the family) is unmeasured, not unsettled, and passes as before.
+  final double? skinTempBanked = (skinTempSettledFrac != null &&
+          skinTempSettledFrac < kMinSettledFraction)
+      ? null
+      : skinTempAdc;
   // STEP 2 — z-score today's RAW mean against the RAW-ADC baseline history (NOT
   // the previously-computed z-scores; that unit mismatch was the bug). Gated on
   // ≥3 prior raw means.
   double? skinTempZ;
-  if (skinTempAdc != null && d.skinTempAdcHistory.length >= 3) {
+  if (skinTempBanked != null && d.skinTempAdcHistory.length >= 3) {
     final base = _mean(d.skinTempAdcHistory)!;
     final sd = _stddev(d.skinTempAdcHistory);
     // Quantum floor matches analytics' tempInput(quantum: 1) guard
@@ -860,7 +872,7 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     // oscillating between two adjacent ADC counts has a nonzero but
     // sub-quantum SD, which standardizes ordinary quantization noise into
     // an inflated z. Below 1 ADC count of dispersion, abstain instead.
-    if (sd != null && sd >= 1) skinTempZ = (skinTempAdc - base) / sd;
+    if (sd != null && sd >= 1) skinTempZ = (skinTempBanked - base) / sd;
   }
 
   // WHOOP 5 stores skin temperature in real °C (centi-°C in this array), so
@@ -1660,7 +1672,7 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     'resp': baselineBlock(d.respHistory, respToday, Baselines.respCfg),
     'skin_temp': baselineBlock(
       d.skinTempAdcHistory,
-      skinTempAdc,
+      skinTempBanked,
       _skinTempAdcCfg,
     ),
   };
@@ -1773,7 +1785,8 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
       // skin_temp_z. ALWAYS present when there's sleep+temp data (even while z is
       // still null in the ≤3-day bootstrap), so the series fills and z starts
       // computing from ~day 4. This is the series _attachHistory must feed back.
-      'skin_temp_adc': skinTempAdc,
+      // Null on an unsettled night (see `skinTempBanked`).
+      'skin_temp_adc': skinTempBanked,
       // WHOOP 5 only: °C above (+) or below (-) the user's usual night.
       // Key only when present: no new key on every other night.
       if (skinTempDevC != null) 'skin_temp_dev_c': _round(skinTempDevC, 2),
