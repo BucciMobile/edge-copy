@@ -132,6 +132,7 @@ class UltrahumanLink {
 
   Future<bool> _sync() async {
     _drainFailed = false;
+    BandHost? host;
     final row = await pairedRingRow();
     if (row == null) return false;
     final deviceId = row['id'] as String?;
@@ -187,19 +188,20 @@ class UltrahumanLink {
             device.createBond,
             isAndroid: Platform.isAndroid,
           );
-          final host = _makeHost(
+          final h = host = _makeHost(
             deviceId,
             UltrahumanAdapter(startIndex: cursor),
           );
-          _host = host;
-          await host.run(link);
+          _host = h;
+          await h.run(link);
         } finally {
           // Drop the link and DISCONNECT before the slot is released.
           await stop();
         }
         // Read only after [stop]: notes ride the host's vendor-write chain,
-        // which stop drains.
-        return !_drainFailed;
+        // which stop drains. A failed vendor write holds every later note
+        // back, the failure notes included, so it is read off the host.
+        return !_drainFailed && !(host?.vendorWriteFailed ?? false);
       });
     } catch (e) {
       debugPrint('[ultrahuman] sync failed: $e');

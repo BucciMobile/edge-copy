@@ -203,14 +203,14 @@ class PebbleLink {
     );
   }
 
-  /// This session's host: the adapter starts from the step totals already
-  /// stored for this watch, the newest minute already counted and the recent
-  /// sleep periods, so a day's total and a night carry forward across
-  /// sessions (the watch never re-sends an ACKed message).
   /// The watch sent something during the last session ([kPebbleHeardNote]).
   /// Cleared at the start of every session.
   bool lastSyncHeard = false;
 
+  /// This session's host: the adapter starts from the step totals already
+  /// stored for this watch, the newest minute already counted and the recent
+  /// sleep periods, so a day's total and a night carry forward across
+  /// sessions (the watch never re-sends an ACKed message).
   Future<BandHost> _makeHost(String deviceId, int Function() now) async {
     final hw = await LocalDb.getCursorInt(_stepsHwItem(deviceId)) ?? 0;
     final prior = <DateTime, int>{};

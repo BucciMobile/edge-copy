@@ -370,6 +370,12 @@ class BandHost {
   /// whose write failed ([notesAfterVendorWrites]).
   bool _vendorFailed = false;
 
+  /// A vendor scalar or hypnogram write failed this session. With
+  /// [notesAfterVendorWrites] every later note is held back, including any
+  /// failure note the adapter sends, so a link that reports its outcome off
+  /// notes has to read this too. Settled once [stop] returns.
+  bool get vendorWriteFailed => _vendorFailed;
+
   /// Bank one device's vendor scalars. Returns rows written.
   ///
   /// NOT part of the commit-then-confirm chain. A vendor scalar is not
