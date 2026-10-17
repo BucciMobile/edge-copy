@@ -20,7 +20,7 @@ List<Map<String, Object?>> _rows(int secondaries,
     [
       if (band) {'id': LocalDb.kPrimaryDeviceId, 'adapter_id': null},
       for (var i = 0; i < secondaries; i++)
-        {'id': 'hrs:$i', 'adapter_id': adapter},
+        {'id': 'hrs:$i', 'adapter_id': adapter, 'remote_id': 'R-$i'},
     ];
 
 const _limitText = 'This phone will pair at most $kMaxConcurrentSecondaryLinks '
@@ -56,7 +56,7 @@ void main() {
     test('the ring has one row, so any ring pair rewrites it', () {
       final rows = [
         ..._rows(kMaxConcurrentSecondaryLinks - 1),
-        {'id': 'oura-1', 'adapter_id': kOura.id},
+        {'id': 'oura-1', 'adapter_id': kOura.id, 'remote_id': 'R-oura'},
       ];
       expect(sensorCapReached(rows, adapterId: kOura.id), isFalse);
       // A strap of the same kind is not single-slot: a new one is a new row.

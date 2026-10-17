@@ -10624,6 +10624,24 @@ class LocalDb {
                   }
                   continue;
                 }
+                // A SENSOR'S HANDLE IS NOT PORTABLE EITHER, for the same
+                // reason, but its row is: it names the `device_id` its
+                // history carries. So the row comes across WITHOUT the
+                // `remote_id`. Kept verbatim, it would never connect, and
+                // because a sensor's id is minted from that handle
+                // (`HrsLink.mintDeviceId`) re-pairing the same strap here
+                // writes a NEW row instead of overwriting it — two such rows
+                // filled the sensor cap and refused every pair until each was
+                // forgotten by hand. Every link already refuses to arm a row
+                // with no handle, and `sensorCapReached` does not count one.
+                // A row this phone already has is its own live pairing and
+                // stays untouched: replacing it would blank a working handle.
+                if (t == 'device') {
+                  final local = await txn.query('device',
+                      columns: ['id'], where: 'id = ?', whereArgs: [row['id']]);
+                  if (local.isNotEmpty) continue;
+                  row['remote_id'] = null;
+                }
                 if (t == 'sync_cursor') {
                   final name = '${row['name']}';
                   if (localCursors.containsKey(name)) {

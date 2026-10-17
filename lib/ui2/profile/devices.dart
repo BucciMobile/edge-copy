@@ -1293,8 +1293,14 @@ final List<({BandEntry entry, String blurb, Future<String?> Function(BluetoothDe
 /// row and is counted.
 bool sensorCapReached(Iterable<Map<String, Object?>> deviceRows,
     {String? repairingId, String? adapterId, bool anyOfAdapter = false}) {
-  final secondary =
-      deviceRows.where((r) => r['id'] != LocalDb.kPrimaryDeviceId).toList();
+  // A row with no `remote_id` holds no link — a backup restore brings a
+  // sensor's row across without the old phone's handle — so it cannot take
+  // a slot, and counting it would refuse the very re-pair that replaces it.
+  final secondary = deviceRows
+      .where((r) =>
+          r['id'] != LocalDb.kPrimaryDeviceId &&
+          ((r['remote_id'] as String?) ?? '').isNotEmpty)
+      .toList();
   final sameAdapterRewrites =
       adapterId != null && (anyOfAdapter || adapterId == kOura.id);
   for (final r in secondary) {
