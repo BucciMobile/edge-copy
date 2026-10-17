@@ -952,6 +952,46 @@ SourceTier? tierNamed(Object? name) {
 /// The sources that actually exist right now. Nothing is listed that cannot
 /// produce a number today — everything else is in [kNotYet], with its reason.
 ///
+double? sensorRowBatteryPct(Map<String, Object?> r) =>
+    (r['battery_pct'] as num?)?.toDouble();
+
+/// Last time a sync committed data (or the pairing, before any).
+DateTime? sensorRowLastData(Map<String, Object?> r) => r['last_seen'] == null
+    ? null
+    : DateTime.fromMillisecondsSinceEpoch((r['last_seen'] as num).toInt() * 1000);
+
+/// [s] with the battery and last-data values its `device` row holds now.
+///
+/// A sensor's page is pushed holding the row as it was when tapped, and a sync
+/// or battery report only rewrites the row. Without this the page kept saying
+/// "3 days ago" right after a manual sync reported "Synced.", which read as a
+/// sync that did nothing. Only the row's own columns are taken: `connected`
+/// and `flagOff` come from elsewhere and stay as the snapshot had them. A row
+/// that is gone (forgotten while the page was open) leaves [s] as it was.
+HealthSource refreshedSensorSource(
+    HealthSource s, List<Map<String, Object?>> rows) {
+  if (s.isBand || s.deviceId == null) return s;
+  final r = rows.where((r) => r['id'] == s.deviceId).firstOrNull;
+  if (r == null) return s;
+  return HealthSource(
+    name: s.name,
+    nameIsFallback: s.nameIsFallback,
+    kind: s.kind,
+    tier: s.tier,
+    icon: s.icon,
+    connected: s.connected,
+    syncing: s.syncing,
+    batteryPct: sensorRowBatteryPct(r),
+    charging: s.charging,
+    batteryPackPct: s.batteryPackPct,
+    lastData: sensorRowLastData(r),
+    isBand: s.isBand,
+    deviceId: s.deviceId,
+    family: s.family,
+    flagOff: s.flagOff,
+  );
+}
+
 /// [liveAdapterIds] names which paired sensors' links are up THIS INSTANT, by
 /// `adapter_id`. It is passed in rather than read off the links here because
 /// it changes on every beat: routing it through [AppState] would notify every
@@ -1006,12 +1046,8 @@ List<HealthSource> liveSources(AppState app,
           // marks an unrelated paired Oura row as connected just because
           // some sensor happens to be live right now.
           connected: liveAdapterIds.contains(r['adapter_id']),
-          batteryPct: (r['battery_pct'] as num?)?.toDouble(),
-          // Last time a sync committed data (or the pairing, before any).
-          lastData: r['last_seen'] == null
-              ? null
-              : DateTime.fromMillisecondsSinceEpoch(
-                  (r['last_seen'] as num).toInt() * 1000),
+          batteryPct: sensorRowBatteryPct(r),
+          lastData: sensorRowLastData(r),
           isBand: false,
           deviceId: r['id'] as String?,
           family: r['adapter_id'] as String?,
@@ -1841,8 +1877,12 @@ class _DeviceDetailState extends State<DeviceDetail> {
 
   @override
   Widget build(BuildContext c) {
-    final s = widget.s;
-    final app = s.isBand ? c.watch<AppState>() : null;
+    final app = widget.s.isBand ? c.watch<AppState>() : null;
+    // A sensor page listens to its own row only, not every AppState tick.
+    final s = widget.s.isBand
+        ? widget.s
+        : refreshedSensorSource(
+            widget.s, c.select<AppState, List<Map<String, Object?>>>((a) => a.sensors));
     return DeviceDetailView(
       s,
       status: app?.engine.bandStatus,
