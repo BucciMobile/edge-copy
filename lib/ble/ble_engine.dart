@@ -2299,7 +2299,9 @@ class BleEngine {
   bool _bootstrapClockWrite = false;
   // Proactive RTC recheck timestamp for long-lived connections — see
   // kRtcReverifyIntervalSeconds. Every other clock recheck is symptom-driven.
-  DateTime? _lastClockVerifyAt;
+  // On _monotonicSecs(): a backward wall-clock step would otherwise push
+  // the next re-verify out by the size of the step.
+  double? _lastClockVerifyAt;
   int? _sessionOldestUnix; // strap's banked-data window (GET_DATA_RANGE)
   int? _sessionNewestUnix;
   Map<String, dynamic>? _lastPagesBehind;
@@ -2392,7 +2394,11 @@ class BleEngine {
   // Run-state for a chain of auto-continued offload rounds: how many
   // consecutive rounds banked nothing, and when the chain started.
   final AutoContinueRun _autoContinue = AutoContinueRun();
-  double _lastBackfillAt = 0; // monotonic-ish secs of the last offload trigger
+  // _monotonicSecs() of the last offload trigger; null = none this connection.
+  // Wall time here let a backward phone-clock step (NTP correcting a fast
+  // phone) refuse every periodic and foreground offload until wall time
+  // caught up again.
+  double? _lastBackfillAt;
   double? _lastHistoricalSendAt; // last actual SEND_HISTORICAL_DATA wall time
   int _emptyStreak = 0; // consecutive empty offloads (BackfillPolicy backoff)
   // ONE shared per-record gate (plausibility + frontier + drop counter) used by
@@ -3045,7 +3051,7 @@ class BleEngine {
   Future<bool> _finishConnect(_Session session) async {
     try {
       // Fresh clock verification stamp — see kRtcReverifyIntervalSeconds.
-      _lastClockVerifyAt = DateTime.now();
+      _lastClockVerifyAt = _monotonicSecs();
       // Per-connection policy reset. Marginal-radio + post-bond-loop are NOT reset
       // here — they count consecutive bad cycles across reconnects and self-reset on
       // a healthy disconnect. Empty-sync + stuck are per-connection.
@@ -3055,7 +3061,7 @@ class BleEngine {
       _crcFailuresThisSession = 0;
       _burstMismatchStreak = 0;
       _autoContinue.end();
-      _lastBackfillAt = 0;
+      _lastBackfillAt = null;
       _successfulBursts = 0;
       // _noDurableProgress is deliberately NOT reset here — like _marginalRadio
       // and _postBondLoop above, it counts consecutive bad cycles ACROSS
@@ -3281,7 +3287,7 @@ class BleEngine {
     // Only a real drain spends the backfill floor; a deferred one leaves it
     // open so a foreground trigger can retry as soon as the phone corrects.
     final floorBeforeInit = _lastBackfillAt;
-    if (drainOnInit) _lastBackfillAt = _wallSecs();
+    if (drainOnInit) _lastBackfillAt = _monotonicSecs();
     // Both are pre-armed above because seq4 IS the drain trigger and the
     // flood can start before the write even returns. If INIT did not go out
     // there is no flood: hand the state back, or `_offloadActive` stays set
@@ -4106,9 +4112,8 @@ class BleEngine {
     // response handler does the actual drift comparison + bounded re-issue.
     final lastVerify = _lastClockVerifyAt;
     if (lastVerify == null ||
-        DateTime.now().difference(lastVerify).inSeconds >=
-            kRtcReverifyIntervalSeconds) {
-      _lastClockVerifyAt = DateTime.now();
+        _monotonicSecs() - lastVerify >= kRtcReverifyIntervalSeconds) {
+      _lastClockVerifyAt = _monotonicSecs();
       _log('[SYNC] Periodic RTC re-verify (long-lived connection).');
       unawaited(getClock());
     }
@@ -4226,7 +4231,7 @@ class BleEngine {
     if (_session?.connected != true || d == null) return false;
     if (!BackfillPolicy.shouldRun(
       trigger,
-      _wallSecs(),
+      _monotonicSecs(),
       _lastBackfillAt,
       _emptyStreak,
     )) {
@@ -4240,7 +4245,7 @@ class BleEngine {
     // blocked, which is exactly the window the deferral is short enough to
     // ride out.
     final floorBefore = _lastBackfillAt;
-    _lastBackfillAt = _wallSecs();
+    _lastBackfillAt = _monotonicSecs();
     final sent = await _startHistoricalRefresh(
       trigger: trigger,
       reason: trigger.name,
@@ -7685,8 +7690,11 @@ class BleEngine {
     }
 
     // Stuck-strap: frontier frozen ≥10 min while the strap is >5 min ahead.
+    // Elapsed time on the monotonic clock: a forward wall step (a phone fixing
+    // its clock after a dead-battery reboot) would otherwise read as ten
+    // frozen minutes at once.
     if (_stuckStrap.observe(
-        _sessionNewestUnix, _recordGate.frontierTs, _wallSecs())) {
+        _sessionNewestUnix, _recordGate.frontierTs, _monotonicSecs())) {
       state.strapNeedsReboot = true;
       onState(state);
       _log('[SYNC] stuck-strap tripped — defensive SET_CLOCK.');

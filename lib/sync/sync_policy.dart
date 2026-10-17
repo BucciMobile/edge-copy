@@ -528,6 +528,12 @@ class BackfillPolicy {
   ) {
     if (lastBackfillAt == null) return true;
     final elapsed = now - lastBackfillAt;
+    // A negative elapsed means `now` is on a different clock than the stamp,
+    // or that clock stepped backward. Treat the floor as spent: refusing
+    // would hold every floored trigger until the clock caught up again,
+    // which after an NTP correction can be hours of a healthy link not
+    // syncing.
+    if (elapsed < 0) return true;
     final backoff = emptyStreak >= emptyBackoffThreshold
         ? math
               .pow(2.0, (emptyStreak - emptyBackoffThreshold + 1).toDouble())

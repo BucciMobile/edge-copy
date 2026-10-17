@@ -209,6 +209,25 @@ void main() {
         isTrue,
       );
     });
+
+    test('a clock stepped back behind the last run does not hold the floor', () {
+      // Last run stamped at T; the clock then steps back 6 h. Every floored
+      // trigger used to be refused until the clock caught up with T again.
+      const t = 1.8e9;
+      const stepped = t - 6 * 3600 + 900;
+      for (final trigger in [
+        BackfillTrigger.periodic,
+        BackfillTrigger.foreground,
+        BackfillTrigger.connect,
+        BackfillTrigger.strap,
+      ]) {
+        expect(
+          BackfillPolicy.shouldRun(trigger, stepped, t, 0),
+          isTrue,
+          reason: trigger.name,
+        );
+      }
+    });
   });
 
   group('HistoricalSyncCommandPolicy', () {
