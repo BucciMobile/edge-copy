@@ -3933,9 +3933,18 @@ class LocalRepositoryImpl extends LocalRepository {
   }) async {
     if (metricsByDay.isEmpty) return const [];
 
-    final dates = metricsByDay.keys.toList()..sort();
+    final logged = metricsByDay.keys.toList()..sort();
+    // The outcome axis also needs each logged day's NEXT day: a behaviour field
+    // is paired with the night that follows it (MIND-02), and analytics looks
+    // that night up on this same axis. Logged days alone would drop every
+    // evening whose next day had no entry of its own.
+    final dates = <String>{
+      ...logged,
+      for (final d in logged) ?ana.shiftDayLabel(d, 1),
+    }.toList()
+      ..sort();
     final days = <ana.JournalNumericDay>[
-      for (final d in dates)
+      for (final d in logged)
         ana.JournalNumericDay(d, {
           for (final e in metricsByDay[d]!.entries) e.key: e.value.value,
           // MT-06 — the last cup, as a clock time, alongside the day's total.
@@ -3964,6 +3973,9 @@ class LocalRepositoryImpl extends LocalRepository {
       journal: days,
       dates: dates,
       outcomes: outcomes,
+      // Keyed by this app's field keys; analytics' own map uses generic names
+      // that match none of them, which paired every behaviour at lag 0.
+      fieldLagDays: kJournalFieldLagDays,
     );
 
     // Custom field definitions so a user-invented field reads by its own name

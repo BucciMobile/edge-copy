@@ -20,7 +20,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
-import 'package:openstrap_analytics/onehz.dart' show journalFieldLagDays;
 import 'package:provider/provider.dart';
 
 import '../../data/db.dart';
@@ -1718,11 +1717,7 @@ class _JournalFindingsState extends State<JournalFindings> {
   String _alignment(AppLocalizations? l, Map<String, dynamic> r) {
     // Read from the same constant analytics paired on, so the sentence cannot
     // drift away from the arithmetic.
-    final field = (r['field'] ?? '').toString();
-    // The two derived caffeine-timing keys carry caffeine's own lag.
-    final lag =
-        journalFieldLagDays[field] ??
-        (field.startsWith('caffeine') ? journalFieldLagDays['caffeine'] : null);
+    final lag = journalFieldLag((r['field'] ?? '').toString());
     if (lag == null) {
       return l?.wellnessMatchedSameDay ?? 'Matched against the same day\'s numbers.';
     }
