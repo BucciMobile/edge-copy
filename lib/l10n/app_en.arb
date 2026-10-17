@@ -3680,6 +3680,18 @@
   "@journalComposeSaveFailed": {
     "description": "Snackbar shown when saving a new custom journal field fails."
   },
+  "journalComposeEntrySaveFailed": "Not saved — your entry is still here. Try again.",
+  "@journalComposeEntrySaveFailed": {
+    "description": "Snackbar shown when saving the day's journal entry fails; the screen stays open with the entry intact."
+  },
+  "journalComposeLoadFailed": "Could not open this day's journal.",
+  "@journalComposeLoadFailed": {
+    "description": "Shown in place of the journal form when reading the day's entry fails."
+  },
+  "journalComposeTryAgain": "Try again",
+  "@journalComposeTryAgain": {
+    "description": "Button that retries loading the journal entry after a failure."
+  },
   "journalComposeWhenWasLastOne": "When was the last one?",
   "@journalComposeWhenWasLastOne": {
     "description": "Time picker help text when logging the time of the last dose of a journal field."
