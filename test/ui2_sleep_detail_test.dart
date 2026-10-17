@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/data/day_label.dart';
+import 'package:openstrap_edge/data/local_repository.dart';
 import 'package:openstrap_edge/l10n/app_localizations.dart';
 import 'package:openstrap_edge/models/metric.dart';
 import 'package:openstrap_edge/ui2/screens/screens.dart';
@@ -404,8 +405,9 @@ void main() {
         find.textContaining('Longest unbroken stretch 2h 42m'), findsOneWidget);
   });
 
-  SleepData planned(String day) => SleepData(
+  SleepData planned(String day, {String? latest}) => SleepData(
         day: day,
+        latestDay: latest,
         night: _night(),
         need: const Metric(
             value: 462, unit: 'min', confidence: .7, tier: MetricTier.estimate),
@@ -429,8 +431,38 @@ void main() {
     expect(find.textContaining('Your need is'), findsNothing);
   });
 
+  // The landing view sits on a held-over night whenever one is served, which
+  // is a day or more behind the calendar. Tonight's plan still belongs there.
+  testWidgets('a held-over night the screen opened on keeps tonight',
+      (t) async {
+    await _pump(t, planned('2026-05-20', latest: '2026-05-20'));
+    expect(find.text('lights out'), findsOneWidget);
+  });
+
+  testWidgets('a night older than the held-over one carries no plan',
+      (t) async {
+    await _pump(t, planned('2026-05-18', latest: '2026-05-20'));
+    expect(find.text('lights out'), findsNothing);
+  });
+
+  group('SleepData.load', () {
+    test('the newest night on offer is the held-over one, not the calendar',
+        () async {
+      final repo = _HeldOverRepo();
+      final opened = await SleepData.load(repo);
+      expect(opened.day, '2026-05-20');
+      expect(opened.latestDay, '2026-05-20');
+      expect(opened.isLatestNight, isTrue);
+
+      final stepped = await SleepData.load(repo, want: '2026-05-19');
+      expect(stepped.day, '2026-05-19');
+      expect(stepped.latestDay, '2026-05-20');
+      expect(stepped.isLatestNight, isFalse);
+    });
+  });
+
   group('the Sleep tab', () {
-    Future<void> tab(WidgetTester t, String day) async {
+    Future<void> tab(WidgetTester t, String day, {String? latest}) async {
       t.view.physicalSize = const Size(390 * 3, 5200 * 3);
       t.view.devicePixelRatio = 3;
       addTearDown(t.view.reset);
@@ -439,7 +471,7 @@ void main() {
         home: Scaffold(
           body: SleepDetail(
             embedded: true,
-            data: planned(day),
+            data: planned(day, latest: latest),
             todayFooter: const [Text('the sleep plan')],
             footer: const [Text('alarm and body clock')],
           ),
@@ -454,6 +486,12 @@ void main() {
       expect(find.text('lights out'), findsNothing);
       expect(find.text('the sleep plan'), findsOneWidget);
       expect(find.text('alarm and body clock'), findsOneWidget);
+    });
+
+    testWidgets('keeps the plan on a held-over night it opened on',
+        (t) async {
+      await tab(t, '2026-05-20', latest: '2026-05-20');
+      expect(find.text('the sleep plan'), findsOneWidget);
     });
 
     testWidgets('drops the plan under a past night, keeps the links',
@@ -613,4 +651,39 @@ void main() {
     expect(find.text('Marked as not sleep'), findsOneWidget);
     expect(find.text('I was asleep'), findsNothing);
   });
+}
+
+/// `getToday` holding the 2026-05-20 night over, with older nights on disk.
+class _HeldOverRepo extends LocalRepository {
+  @override
+  Future<Map<String, dynamic>> getToday() async => {
+        'status': {
+          'today_day': '2026-05-22',
+          'showing_prior_overnight': true,
+          'overnight_day': '2026-05-20',
+        },
+      };
+
+  @override
+  Future<List<String>> availableDays() async =>
+      ['2026-05-22', '2026-05-20', '2026-05-19'];
+
+  @override
+  Future<Map<String, dynamic>> getDaySleepV2(String date) async => {};
+
+  @override
+  Future<Map<String, dynamic>> getDayTimeline(String date) async => {};
+
+  @override
+  Future<Map<String, dynamic>> getInsights() async => {};
+
+  @override
+  Future<Map<String, dynamic>> getChart(String metric,
+          {int? from, int? to, Set<String> signals = const {}}) async =>
+      {};
+
+  @override
+  Future<List<Map<String, dynamic>>> sleepWindows(
+          {int days = 60, String? before}) async =>
+      [];
 }

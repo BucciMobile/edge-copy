@@ -178,6 +178,14 @@ String _capitalise(String s) =>
 class SleepData {
   final String? day;
 
+  /// The night this screen opens on when nobody asked for one: the night
+  /// `getToday` served (a held-over night before the first sync of the day
+  /// or across a gap), else today. Tonight's plan belongs under this night
+  /// and anything newer, and under nothing older. Comparing [day] against
+  /// the wall-clock date instead hid the plan on the landing view every
+  /// morning a night was held over.
+  final String? latestDay;
+
   /// Every day this install has derived, newest first — what [DayNav] steers
   /// over. Empty in a fixture, which is why a golden shows no stepper.
   final List<String> days;
@@ -206,6 +214,7 @@ class SleepData {
 
   const SleepData({
     this.day,
+    this.latestDay,
     this.days = const [],
     this.night = const {},
     this.timeline = const {},
@@ -224,6 +233,18 @@ class SleepData {
   });
 
   bool get hasNight => night['duration_min'] is num;
+
+  /// Whether tonight's need, debt and bedtime belong under this night. They
+  /// come from today's cross-day rollup whichever night is selected, so on
+  /// an older night they are not that night's numbers. Without [latestDay]
+  /// (a fixture) the calendar decides.
+  bool get isLatestNight {
+    final d = day;
+    if (d == null) return true;
+    final top = latestDay;
+    if (top != null) return d.compareTo(top) >= 0;
+    return (daysBehind(_noonOf(d)) ?? 0) <= 0;
+  }
 
   /// Stage samples for the painter — the segment list resampled onto a fixed
   /// number of columns so a four-hour segment and a four-minute one stay in
@@ -290,12 +311,11 @@ class SleepData {
     // off overnight and the card said "7h 04m" while this screen answered "No
     // night to show" about the same tap.
     final days = await repo.availableDays();
-    final day = pickDay(
-        days,
-        want,
-        heldOverNightOf(today) ??
-            (today['status'] as Map?)?['today_day']?.toString());
-    if (day == null) return SleepData(days: days);
+    final prefer = heldOverNightOf(today) ??
+        (today['status'] as Map?)?['today_day']?.toString();
+    final latest = pickDay(days, null, prefer);
+    final day = pickDay(days, want, prefer);
+    if (day == null) return SleepData(days: days, latestDay: latest);
 
     final night = await repo.getDaySleepV2(day);
     var deviceNights = const <Map<String, Object?>>[];
@@ -339,6 +359,7 @@ class SleepData {
 
     return SleepData(
       day: day,
+      latestDay: latest,
       days: days,
       night: night,
       timeline: timeline,
@@ -398,11 +419,6 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   @override
   void reload() => _load();
 
-  /// Whether [day] is today's night (or unknown, which is what a screen with
-  /// no day yet is showing). Advice about tonight only belongs under this one.
-  static bool _onLatestNight(String? day) =>
-      (daysBehind(_noonOf(day)) ?? 0) <= 0;
-
   /// The pushed screen's scaffold, or the tab's own header and footer.
   Widget _frame(BuildContext c, String title, List<Widget> body,
       {String sub = ''}) {
@@ -422,7 +438,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               child: Text(sub, style: F.over.copyWith(color: p.ink3)),
             ),
           ...body,
-          if (_onLatestNight(_d?.day ?? _day)) ...widget.todayFooter,
+          if (_d?.isLatestNight ?? _day == null) ...widget.todayFooter,
           ...widget.footer,
         ],
       ),
@@ -716,7 +732,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       // printed over a night that could be days old.
       if (unusual != null)
         Section(
-            _onLatestNight(d.day)
+            (daysBehind(_noonOf(d.day)) ?? 0) <= 0
                 ? (l?.sleepDetailUnusualLastNight ?? 'Unusual last night')
                 : (l?.sleepDetailUnusualOnDay(prettyDay(d.day, l)) ??
                     'Unusual on ${prettyDay(d.day, l)}'),
@@ -731,7 +747,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       // whichever night is selected, so on a past night they are not that
       // night's numbers. The tab carries the full plan in its footer, and
       // printing it here too said the same thing twice on one scroll.
-      if (_onLatestNight(d.day) && !widget.embedded)
+      if (d.isLatestNight && !widget.embedded)
         Section(l?.sleepDetailTonightSection ?? 'Tonight', _tonight(c, p, d)),
 
       const SizedBox(height: S.x5),
