@@ -1389,9 +1389,13 @@ class HomeData {
   static Future<HomeData> loadForDay(LocalRepository repo, String date,
       [AppLocalizations? l]) async {
     final profile = await repo.getProfile();
-    final overview = await repo.getDayOverview(date);
-    final strain = await repo.getDayStrain(date);
-    final sleep = await repo.getDaySleepV2(date);
+    // The three getters read the same stored day: decode it once, not three
+    // times per arrow tap.
+    final (overview, strain, sleep) = await repo.sharingDayReads(() async => (
+          await repo.getDayOverview(date),
+          await repo.getDayStrain(date),
+          await repo.getDaySleepV2(date),
+        ));
     final readiness = metricOf(overview['readiness']);
     // Same lookup [load] does for today, for the same reason: the ring's
     // shortfall explanation needs the stored diagnostic, and a day the
