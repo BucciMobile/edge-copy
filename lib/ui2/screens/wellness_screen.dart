@@ -1060,15 +1060,13 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
     // on screen, produced by the app rather than by the person.
     final picked = await pickMedSchedule(c);
     if (picked == null || !mounted) return;
-    await MedDb.putDef(
+    // A new medication's dose is left null — "as directed" is a real answer,
+    // and demanding a number to get a reminder is how a checklist stops being
+    // used. An existing one keeps its dose and gains this time.
+    await MedDb.addScheduledTime(
       await LocalDb.instance,
-      MedDef(
-        key: MedDb.keyFor(name),
-        label: name,
-        // Dose is left null — "as directed" is a real answer, and demanding a
-        // number to get a reminder is how a checklist stops being used.
-        schedule: [MedSchedule(picked.minuteOfDay, picked.days)],
-      ),
+      name,
+      MedSchedule(picked.minuteOfDay, picked.days),
     );
     await _wrote();
   }

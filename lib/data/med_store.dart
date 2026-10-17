@@ -309,6 +309,53 @@ class MedDb {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  /// Add one scheduled time to the medication called [name], creating it if
+  /// there is none.
+  ///
+  /// The Wellness screen's "Add a medication" used to build a fresh [MedDef]
+  /// and hand it to [putDef]. [keyFor] is deterministic, so typing an existing
+  /// name to add an evening dose REPLACED that medication: its other times of
+  /// day left the schedule (and adherence), and its dose, unit, kind and note
+  /// were blanked, with no warning. Matched by label too, because a med saved
+  /// before [keyFor] kept non-ASCII letters has an older key and would
+  /// otherwise get a second row with the same name.
+  static Future<void> addScheduledTime(
+    Database db,
+    String name,
+    MedSchedule slot,
+  ) async {
+    final label = name.trim();
+    final key = keyFor(label);
+    final existing = (await defs(db, activeOnly: false))
+        .where(
+          (d) =>
+              d.key == key ||
+              d.label.trim().toLowerCase() == label.toLowerCase(),
+        )
+        .firstOrNull;
+    // Same time of day twice is one entry, the newer day-set winning.
+    final schedule = [
+      ...?existing?.schedule.where((e) => e.minuteOfDay != slot.minuteOfDay),
+      slot,
+    ]..sort((x, y) => x.minuteOfDay.compareTo(y.minuteOfDay));
+    await putDef(
+      db,
+      MedDef(
+        key: existing?.key ?? key,
+        label: existing?.label ?? label,
+        doseValue: existing?.doseValue,
+        doseUnit: existing?.doseUnit ?? '',
+        kind: existing?.kind ?? 'medication',
+        schedule: schedule,
+        note: existing?.note ?? '',
+        // Deliberately active: the screen lists only active medications, so
+        // adding a time to one that stayed inactive would appear to do nothing.
+        active: true,
+        createdAt: existing?.createdAt,
+      ),
+    );
+  }
+
   static Future<void> deleteDef(Database db, String key) async {
     await db.delete('med_def', where: 'key = ?', whereArgs: [key]);
     // The dose history stays: those doses were still taken, and a re-added key
