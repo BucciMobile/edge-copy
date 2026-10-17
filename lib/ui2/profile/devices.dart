@@ -949,9 +949,7 @@ SourceTier? tierNamed(Object? name) {
   return null;
 }
 
-/// The sources that actually exist right now. Nothing is listed that cannot
-/// produce a number today — everything else is in [kNotYet], with its reason.
-///
+/// Battery percentage a sensor's `device` row holds, or null if never reported.
 double? sensorRowBatteryPct(Map<String, Object?> r) =>
     (r['battery_pct'] as num?)?.toDouble();
 
@@ -992,6 +990,9 @@ HealthSource refreshedSensorSource(
   );
 }
 
+/// The sources that actually exist right now. Nothing is listed that cannot
+/// produce a number today — everything else is in [kNotYet], with its reason.
+///
 /// [liveAdapterIds] names which paired sensors' links are up THIS INSTANT, by
 /// `adapter_id`. It is passed in rather than read off the links here because
 /// it changes on every beat: routing it through [AppState] would notify every
