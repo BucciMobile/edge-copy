@@ -2563,10 +2563,10 @@ class AppState extends ChangeNotifier {
     final sleep = await repo!.getDaySleep(date);
     final onset = (sleep['onset_ts'] as num?)?.toInt();
     final offset = (sleep['wake_ts'] as num?)?.toInt();
-    // The rejected window is stored for the record, same as a rejected nap —
-    // it is never read back once source is 'rejected' (staging is skipped
-    // outright), so an absent detected window falls back to a harmless
-    // same-day placeholder rather than blocking the rejection.
+    // The rejected window is stored like a rejected nap. Staging never reads
+    // it (it is skipped outright); nap detection does, so the same stretch is
+    // not offered back as a nap. An absent detected window falls back to a
+    // one-second placeholder rather than blocking the rejection.
     final fallback = DateTime.parse(date).millisecondsSinceEpoch ~/ 1000;
     await _requireSleepSubstrate(date, sleepSource: 'rejected');
     await LocalDb.putSleepOverride(

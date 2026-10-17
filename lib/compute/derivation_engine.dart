@@ -5677,6 +5677,7 @@ class DerivationEngine {
         dataNowSec: dataNowSec,
         tonightSleepOnsetSec: day.tonightSleepOnsetSec,
         tonightSleepOffsetSec: day.tonightSleepOffsetSec,
+        rejectedSleepSpans: await _rejectedSleepSpans(day.date, day.endSec),
       );
       await debugSecondHalfHook?.call(day.date);
       final blocks =
@@ -9276,6 +9277,7 @@ class DerivationEngine {
     int? napExcludeEndSec,
     int tonightSleepOnsetSec = 0,
     int tonightSleepOffsetSec = 0,
+    List<List<int>> rejectedSleep = const [],
   }) {
     try {
       final n = s.length;
@@ -9359,6 +9361,15 @@ class DerivationEngine {
             t0 + nap.startSec < tonightSleepOffsetSec &&
             t0 + nap.endSec > tonightSleepOnsetSec) {
           return false;
+        }
+        // A night the user marked 'Not sleep' leaves no main window behind,
+        // so the detector finds the same still, low-HR stretch again and
+        // would ask "did you nap?" about the time they just said was not
+        // sleep.
+        for (final r in rejectedSleep) {
+          if (t0 + nap.startSec < r[1] && t0 + nap.endSec > r[0]) {
+            return false;
+          }
         }
         if (attributionEndSec == null) return true;
         return t0 + nap.startSec < attributionEndSec;
@@ -9663,6 +9674,7 @@ class DerivationEngine {
       napExcludeEndSec: inp.napExcludeEndSec ?? offset,
       tonightSleepOnsetSec: inp.tonightSleepOnsetSec,
       tonightSleepOffsetSec: inp.tonightSleepOffsetSec,
+      rejectedSleep: inp.rejectedSleepSpans,
     );
     bundlePatch['sleep_periods'] = _sleepPeriods(
       onset,
@@ -10259,6 +10271,24 @@ class DerivationEngine {
           Substrate s, int endSec) =>
       _hrrForBout(s, endSec);
 
+  /// Main-sleep windows the user rejected for this day's night and for
+  /// tonight's (the next label's, which can begin inside this day's nap
+  /// window). Read on the main isolate; the worker has no database.
+  static Future<List<List<int>>> _rejectedSleepSpans(
+      String date, int dayEndSec) async {
+    final out = <List<int>>[];
+    for (final label in {date, localDateLabel(dayEndSec)}) {
+      final ov = await LocalDb.getSleepOverride(label);
+      if (ov == null || ov['source'] != 'rejected') continue;
+      final on = (ov['onset_ts'] as num).toInt();
+      final off = (ov['offset_ts'] as num).toInt();
+      // A reject with no detected window stores a one-second placeholder at
+      // midnight; it marks nothing and must not knock out a nap spanning it.
+      if (off - on > 60) out.add([on, off]);
+    }
+    return out;
+  }
+
   /// Test seam for [_attachNaps] — the day-boundary attribution rules (drop
   /// tomorrow's leading nap, drop yesterday's trailing one) decide which day a
   /// nap's minutes are credited to, and are cheap to state directly.
@@ -10278,6 +10308,7 @@ class DerivationEngine {
     int? napExcludeEndSec,
     int tonightSleepOnsetSec = 0,
     int tonightSleepOffsetSec = 0,
+    List<List<int>> rejectedSleep = const [],
   }) =>
       _attachNaps(
         bundle,
@@ -10294,6 +10325,7 @@ class DerivationEngine {
         napExcludeEndSec: napExcludeEndSec,
         tonightSleepOnsetSec: tonightSleepOnsetSec,
         tonightSleepOffsetSec: tonightSleepOffsetSec,
+        rejectedSleep: rejectedSleep,
       );
 
   void _log(String m) {
@@ -10415,6 +10447,10 @@ class _DayBlocksInput {
   /// See `PreparedDerivationDay.tonightSleepOnsetSec`. 0 = none.
   final int tonightSleepOnsetSec;
   final int tonightSleepOffsetSec;
+
+  /// Windows the user marked 'Not sleep' (this night and tonight's), as
+  /// `[startSec, endSec]`. Nap suggestions overlapping one are dropped.
+  final List<List<int>> rejectedSleepSpans;
   const _DayBlocksInput({
     required this.daySub,
     required this.napSub,
@@ -10436,6 +10472,7 @@ class _DayBlocksInput {
     this.quietHrrHistory = const [],
     required this.savedSessions,
     this.napEdits = const [],
+    this.rejectedSleepSpans = const [],
     required this.wristOffSpans,
     required this.chargingSpans,
     required this.mainTstMin,
