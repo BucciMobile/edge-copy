@@ -1044,6 +1044,11 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       if (mounted) setState(() => _saving = false);
     }
     final before = _source;
+    // Opened without a day, the screen reloads onto whichever night Home
+    // treats as last night, and an edit (Not sleep above all) can change
+    // that answer to another night. Pin the edited night unless the user has
+    // already stepped away from it.
+    if (_day == null && _d?.day == day) _day = day;
     if (mounted) await _load();
     if (!mounted) return;
     // EVERY failure below this screen is silent: the forced re-derive catches

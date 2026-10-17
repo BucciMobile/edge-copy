@@ -11537,7 +11537,14 @@ class LocalDb {
           nowSec: nowSec,
         )?.wire;
       }
+      final flags = decoded['flags'];
+      // 'Not sleep' is the user's own verdict on the night, so it needs no
+      // settling and is as final an overnight as a detected absence. Without
+      // this a rejected today was never the overnight day: Home held the
+      // previous night over as "still being worked out" for the rest of it.
+      final rejected = flags is List && flags.contains('SLEEP_REJECTED');
       if (dayId == today &&
+          !rejected &&
           !overnightSettled(
             sleepOffsetSec: wakeSec,
             dataEdgeSec: edgeSec,
@@ -11553,9 +11560,9 @@ class LocalDb {
       if (latestOvernightDay == null) {
         final sleep =
             ((decoded['sleep'] as Map?)?['accounting'] as Map?)?['value'];
-        final flags = decoded['flags'];
         final hasSleep = sleep is Map && sleep['tst_sec'] != null;
-        final noSleep = flags is List && flags.contains('NO_SLEEP_DETECTED');
+        final noSleep = rejected ||
+            (flags is List && flags.contains('NO_SLEEP_DETECTED'));
         if (hasSleep || noSleep) {
           latestOvernightDay = dayId;
           latestOvernightComputedAt = (row['computed_at'] as num?)?.toInt();
