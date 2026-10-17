@@ -240,7 +240,12 @@ class WhoopImporter {
       'rhr': n(['resting heart rate (bpm)', 'resting heart rate']),
       'rmssd': n(['heart rate variability (ms)', 'heart rate variability (rmssd) (ms)']),
       'strain': n(['day strain', 'strain']),
-      'calories': _kcal(get(_energyCols), row.header(_energyCols)),
+      // The cycle's 'Energy burned' is WHOOP's whole-day expenditure, resting
+      // metabolism included. That is `calories_total` (TDEE) here, not
+      // `calories` (active energy over the wake span): filed as active, Health
+      // export wrote the full ~2,500 kcal as ACTIVE_ENERGY_BURNED every day.
+      // WHOOP's export has no active/basal split, so active stays absent.
+      'caloriesTotal': _kcal(get(_energyCols), row.header(_energyCols)),
       'resp': n(['respiratory rate (rpm)', 'respiratory rate']),
       'spo2': _pct(n(['blood oxygen %', 'blood oxygen']), 70),
       'asleepMin': n(['asleep duration (min)', 'asleep duration (minutes)']),
@@ -275,7 +280,7 @@ class WhoopImporter {
     final rhr = f['rhr'] as num?;
     final rmssd = f['rmssd'] as num?;
     final strain = f['strain'] as num?;
-    final calories = f['calories'] as num?;
+    final caloriesTotal = f['caloriesTotal'] as num?;
     final resp = f['resp'] as num?;
     final spo2 = f['spo2'] as num?;
     final asleepMin = f['asleepMin'] as num?;
@@ -347,7 +352,7 @@ class WhoopImporter {
         'readiness': recovery,
         'strain': strain,
         'resp_rate': resp,
-        'calories': calories,
+        'calories_total': caloriesTotal,
         'spo2': spo2,
         // no skin_temp_z: WHOOP exports absolute °C and every reader of that
         // key treats it as SDs off your own baseline (33 °C showed as +33 SD).
@@ -384,7 +389,7 @@ class WhoopImporter {
         'readiness': d(recovery),
         'strain': d(strain),
         'resp_rate': d(resp),
-        'calories': d(calories),
+        'calories_total': d(caloriesTotal),
         'spo2': d(spo2),
         'tst_min': d(asleepMin),
         'rem_min': d(remMin),
