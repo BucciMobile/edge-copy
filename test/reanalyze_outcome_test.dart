@@ -23,9 +23,19 @@ void main() {
 
   test('a pass that throws reports its error, not just 0 days', () async {
     final eng = DerivationEngine(log: (_) {});
-    final n = await eng.run(const Profile(), heavy: true, force: true);
+    String? reported;
+    final n = await eng.run(
+      const Profile(),
+      heavy: true,
+      force: true,
+      onOutcome: (_, error) => reported = error,
+    );
     expect(n, 0);
     expect(eng.lastRunError, isNotNull);
+    // The per-call outcome survives a later pass on the same engine resetting
+    // the shared fields.
+    eng.lastRunError = null;
+    expect(reported, isNotNull);
   });
 
   test('reanalyzeAll hands a failed pass back as an error', () async {
@@ -52,9 +62,24 @@ void main() {
     // Left over from a failed pass on the same engine: a clean run resets it.
     eng.lastRunError = 'stale';
     eng.lastRunFailedDays = 3;
-    final n = await eng.run(const Profile(), heavy: true, force: true);
+    var called = false;
+    int? failed;
+    String? error = 'unset';
+    final n = await eng.run(
+      const Profile(),
+      heavy: true,
+      force: true,
+      onOutcome: (f, e) {
+        called = true;
+        failed = f;
+        error = e;
+      },
+    );
     expect(n, 0);
     expect(eng.lastRunError, isNull);
     expect(eng.lastRunFailedDays, 0);
+    expect(called, isTrue);
+    expect(failed, 0);
+    expect(error, isNull);
   });
 }

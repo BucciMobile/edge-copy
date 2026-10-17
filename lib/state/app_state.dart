@@ -2444,10 +2444,20 @@ class AppState extends ChangeNotifier {
         }
         await LocalDb.releaseFrozenHeadline(LocalDb.localDayLabelNow());
       } while (_derive.running);
+      // The outcome comes back through onOutcome rather than the engine's
+      // lastRun* fields: run() releases its latch before this resumes, and a
+      // drain's light pass taking it during the awaits below would reset those
+      // fields and hand its result back as this re-analysis's.
+      var failedDays = 0;
+      String? runError;
       final n = await _derive.run(
         _profile,
         heavy: true,
         force: true,
+        onOutcome: (failed, error) {
+          failedDays = failed;
+          runError = error;
+        },
         // Per-day callback: surface progress AND refresh the UI so each real day's
         // metrics appear as soon as it's derived (Today fills in one day at a time).
         onDayDone: (day, index, total) async {
@@ -2461,8 +2471,8 @@ class AppState extends ChangeNotifier {
       bumpInsights();
       return (
         days: n,
-        failedDays: _derive.lastRunFailedDays,
-        error: _derive.lastRunError,
+        failedDays: failedDays,
+        error: runError,
       );
     } catch (e) {
       _log('[derive] reanalyze failed: $e');

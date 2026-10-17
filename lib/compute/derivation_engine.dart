@@ -2999,6 +2999,9 @@ class DerivationEngine {
   /// derive both come back as 0; a caller reporting the outcome to the user
   /// reads these to tell them apart. Reset when a run takes the latch, so a
   /// run dropped by the latch leaves the previous run's values in place.
+  /// Any later pass on this shared engine (a drain's light pass) resets them
+  /// too, so a caller that must attribute the outcome to its own run passes
+  /// [run]'s `onOutcome` instead of reading these after other awaits.
   String? lastRunError;
   int lastRunFailedDays = 0;
 
@@ -3014,6 +3017,7 @@ class DerivationEngine {
     bool heavy = false,
     bool force = false,
     void Function(String day, int index, int total)? onDayDone,
+    void Function(int failedDays, String? error)? onOutcome,
   }) async {
     if (_running) return 0;
     _running = true;
@@ -3298,6 +3302,9 @@ class DerivationEngine {
       _log('derive ERROR: $e\n$st');
       return 0;
     } finally {
+      // Before any await: this run still holds the latch, so the fields are
+      // its own on every exit path, early returns included.
+      onOutcome?.call(lastRunFailedDays, lastRunError);
       // Storage housekeeping runs here, after everything, still holding
       // `_running`. See _runStorageHousekeeping — this is the only place every
       // entry path and every early return actually reaches.
