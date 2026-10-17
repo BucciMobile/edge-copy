@@ -2669,6 +2669,8 @@
   "dataReanalyzeFailed": "फिर से विश्लेषण विफल: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{1 दिन का विश्लेषण नहीं हो सका। अगर यह बार-बार हो, तो कृपया इसकी रिपोर्ट करें।} other{{n} दिनों का विश्लेषण नहीं हो सका। अगर यह बार-बार हो, तो कृपया इसकी रिपोर्ट करें।}}",
   "napsInFuture": "यह झपकी अभी खत्म नहीं हुई है। जागने के बाद इसे दर्ज करें।",
+  "workoutLoadFailedTitle": "गतिविधि पढ़ी नहीं जा सकी",
+  "workoutLoadFailedBody": "आपके सत्र लोड नहीं हो सके। कुछ भी हटाया नहीं गया — यह पढ़ने में हुई गड़बड़ी है, डेटा गायब नहीं है।",
   "notifRecoveryReadyBody": "रिकवरी {score}.",
   "notifRecoveryReadySleptBody": "रिकवरी {score}, नींद {hours} घं {minutes} मि.",
   "notifStepGoalBody": "आपने लगभग {steps} कदम पूरे किए — आपके {goal} के लक्ष्य जितने या उससे ज़्यादा।",

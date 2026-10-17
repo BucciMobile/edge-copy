@@ -7561,6 +7561,8 @@
     }
   },
   "napsInFuture": "Этот дневной сон ещё не закончился. Запишите его, когда проснётесь.",
+  "workoutLoadFailedTitle": "Не удалось прочитать активность",
+  "workoutLoadFailedBody": "Не удалось загрузить ваши тренировки. Ничего не удалено — это ошибка чтения, а не отсутствие данных.",
   "notifRecoveryReadyBody": "Восстановление {score}.",
   "@notifRecoveryReadyBody": {
     "placeholders": {

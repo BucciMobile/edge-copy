@@ -2669,6 +2669,8 @@
   "dataReanalyzeFailed": "La réanalyse a échoué : {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{{n} jour n’a pas pu être analysé. Si cela se reproduit, merci de le signaler.} other{{n} jours n’ont pas pu être analysés. Si cela se reproduit, merci de le signaler.}}",
   "napsInFuture": "Cette sieste n'est pas encore terminée. Enregistrez-la une fois réveillé.",
+  "workoutLoadFailedTitle": "Impossible de lire l'activité",
+  "workoutLoadFailedBody": "Vos séances n'ont pas pu être chargées. Rien n'a été supprimé : c'est une lecture qui a échoué, pas des données manquantes.",
   "notifRecoveryReadyBody": "Récupération {score}.",
   "notifRecoveryReadySleptBody": "Récupération {score}, sommeil {hours} h {minutes} min.",
   "notifStepGoalBody": "Vous avez fait environ {steps} pas, au moins votre objectif de {goal}.",

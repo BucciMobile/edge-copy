@@ -2794,6 +2794,8 @@
   "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
   "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
+  "workoutLoadFailedTitle": "Aktivität konnte nicht gelesen werden",
+  "workoutLoadFailedBody": "Deine Einheiten konnten nicht geladen werden. Nichts wurde gelöscht – das ist ein fehlgeschlagener Lesevorgang, keine fehlenden Daten.",
   "notifRecoveryReadyBody": "Erholung {score}.",
   "notifRecoveryReadySleptBody": "Erholung {score}, geschlafen {hours} h {minutes} min.",
   "notifStepGoalBody": "Du hast etwa {steps} Schritte erreicht – mindestens dein Ziel von {goal}.",

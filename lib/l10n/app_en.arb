@@ -15872,6 +15872,14 @@
   "@napsInFuture": {
     "description": "Validation error when a manually logged nap ends after the current time."
   },
+  "workoutLoadFailedTitle": "Activity could not be read",
+  "@workoutLoadFailedTitle": {
+    "description": "Title of the card shown on the Activity tab when the sessions failed to load from the database."
+  },
+  "workoutLoadFailedBody": "Your sessions failed to load. Nothing was deleted — this is a read that went wrong, not missing data.",
+  "@workoutLoadFailedBody": {
+    "description": "Body of the card shown on the Activity tab when the sessions failed to load from the database."
+  },
   "notifRecoveryReadyBody": "Recovery {score}.",
   "@notifRecoveryReadyBody": {
     "description": "OS notification body when the day's recovery score is ready.",

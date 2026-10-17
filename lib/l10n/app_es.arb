@@ -2698,6 +2698,8 @@
   "dataReanalyzeFailed": "El reanálisis falló: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
+  "workoutLoadFailedTitle": "No se pudo leer la actividad",
+  "workoutLoadFailedBody": "Tus sesiones no se pudieron cargar. No se ha borrado nada: es una lectura que falló, no datos que falten.",
   "notifRecoveryReadyBody": "Recuperación {score}.",
   "notifRecoveryReadySleptBody": "Recuperación {score}, dormiste {hours} h {minutes} min.",
   "notifStepGoalBody": "Llegaste a unos {steps} pasos, al menos tu objetivo de {goal}.",

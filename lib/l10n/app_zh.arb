@@ -2669,6 +2669,8 @@
   "dataReanalyzeFailed": "重新分析失败：{error}",
   "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
   "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
+  "workoutLoadFailedTitle": "无法读取活动",
+  "workoutLoadFailedBody": "你的训练记录加载失败。没有删除任何内容——这是读取出错，不是数据缺失。",
   "notifRecoveryReadyBody": "恢复 {score}。",
   "notifRecoveryReadySleptBody": "恢复 {score}，睡眠 {hours} 小时 {minutes} 分钟。",
   "notifStepGoalBody": "你走了约 {steps} 步，达到或超过 {goal} 步的目标。",

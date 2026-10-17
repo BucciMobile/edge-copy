@@ -90,6 +90,36 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
       builder: (c, snap) {
         final loc = AppLocalizations.of(c);
         final d = snap.data ?? const _WorkoutData.empty();
+        // The first open of the tab has no data yet, and the empty dataset is
+        // not "no data": drawn as fact it said "No sessions recorded yet" to
+        // someone with forty, asked for a weight already on file, and handed
+        // a null weight to any setup screen tapped open in that window. Only
+        // the first load gets here — a reload keeps the previous snapshot.
+        final List<Widget> body;
+        if (snap.hasData) {
+          body = switch (tab) {
+            0 => _forYou(c, d),
+            1 => _activities(c, d),
+            _ => _history(c, d),
+          };
+        } else if (snap.hasError) {
+          body = [
+            StatusCard(
+              loc?.workoutLoadFailedTitle ?? 'Activity could not be read',
+              loc?.workoutLoadFailedBody ??
+                  'Your sessions failed to load. Nothing was deleted — this '
+                      'is a read that went wrong, not missing data.',
+              icon: LucideIcons.triangleAlert,
+              fix: loc?.homeTryAgain ?? 'Try again',
+              onFix: reload,
+            ),
+          ];
+        } else {
+          body = const [
+            SizedBox(height: S.x8),
+            Center(child: CircularProgressIndicator()),
+          ];
+        }
         // THE LIST DROPS ITS SIDE PADDING and hands it to each child instead,
         // so the hero card can be the one child that does not get it and runs
         // edge to edge. Two earlier attempts had the CARD escape its parent —
@@ -106,11 +136,7 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
               SubTabs(_tabs(loc), tab, (i) => setState(() => tab = i),
                   color: C.domMove),
               const SizedBox(height: S.x5),
-              ...switch (tab) {
-                0 => _forYou(c, d),
-                1 => _activities(c, d),
-                _ => _history(c, d),
-              },
+              ...body,
             ])
               if (w is StartCard)
                 w
