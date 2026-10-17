@@ -390,6 +390,7 @@ class WidgetService {
         // A Siri "enable tomorrow's alarm" request pending before the wipe
         // is not one we still owe anybody either.
         'enable_tomorrow_alarm_weekday',
+        'enable_tomorrow_alarm_requested_at',
       ]) {
         await HomeWidget.saveWidgetData<int>(k, -1);
       }
@@ -526,41 +527,60 @@ class WidgetService {
   }
 
   /// A weekday column (0=Mon..6=Sun), once and clearing, if
-  /// EnableTomorrowAlarmIntent asked to turn on that slot in the weekly
-  /// alarm schedule — or null if nothing is pending. The weekday is
-  /// COMPUTED ON THE SWIFT SIDE, at the moment Siri actually ran the intent,
-  /// not here: consuming this after a launch/resume that crossed local
-  /// midnight must still mean the day the user asked for. Same
-  /// App-Group-flag pattern as [consumeEndSessionFlag] — the widget process
-  /// cannot reach the band itself (no BLE), so it only latches the request;
-  /// AppState.checkPendingSiriRoute does the real `setScheduleDay` write on
-  /// launch/resume, and calls [relatchEnableTomorrowAlarm] if that write
-  /// throws so a failure doesn't silently drop the request.
-  static Future<int?> consumeEnableTomorrowAlarmWeekday() async {
+  /// A pending EnableTomorrowAlarmIntent (Siri/Shortcuts) request, or null if
+  /// nothing is pending. Consumed on read.
+  ///
+  /// The intent latches the unix second it ran at ([requestedAt]); the caller
+  /// resolves which weekday that means against the schedule
+  /// (siriTomorrowAlarmWeekday), using that instant rather than the time of
+  /// this launch/resume, which may be after midnight. [weekday] is set instead
+  /// only for a request an older build latched as a fixed weekday before an
+  /// update, so it isn't dropped. Same App-Group-flag pattern as
+  /// [consumeEndSessionFlag] — the widget process cannot reach the band itself
+  /// (no BLE), so it only latches the request; AppState.checkPendingSiriRoute
+  /// does the real `setScheduleDay` write on launch/resume, and calls
+  /// [relatchEnableTomorrowAlarm] if that write throws so a failure doesn't
+  /// silently drop the request.
+  static Future<({int? requestedAt, int? weekday})?>
+      consumeEnableTomorrowAlarmRequest() async {
     try {
       await init();
-      final v = await HomeWidget.getWidgetData<int>(
+      final at = await HomeWidget.getWidgetData<int>(
+        'enable_tomorrow_alarm_requested_at',
+        defaultValue: -1,
+      );
+      final legacy = await HomeWidget.getWidgetData<int>(
         'enable_tomorrow_alarm_weekday',
         defaultValue: -1,
       );
-      if (v != null && v >= 0 && v <= 6) {
-        await HomeWidget.saveWidgetData<int>(
-            'enable_tomorrow_alarm_weekday', -1);
-        return v;
-      }
+      final hasAt = at != null && at > 0;
+      final hasLegacy = legacy != null && legacy >= 0 && legacy <= 6;
+      if (!hasAt && !hasLegacy) return null;
+      await HomeWidget.saveWidgetData<int>(
+          'enable_tomorrow_alarm_requested_at', -1);
+      await HomeWidget.saveWidgetData<int>('enable_tomorrow_alarm_weekday', -1);
+      if (hasAt) return (requestedAt: at, weekday: null);
+      return (requestedAt: null, weekday: legacy);
     } catch (_) {}
     return null;
   }
 
-  /// Re-latches [weekday] after [consumeEnableTomorrowAlarmWeekday] consumed
-  /// it but the `setScheduleDay` write it was for threw — so the Siri
-  /// request survives to retry on the next launch/resume instead of being
-  /// silently dropped on a transient DB/BLE failure.
-  static Future<void> relatchEnableTomorrowAlarm(int weekday) async {
+  /// Re-latches a request after [consumeEnableTomorrowAlarmRequest] consumed
+  /// it but the `setScheduleDay` write it was for threw — so the Siri request
+  /// survives to retry on the next launch/resume instead of being silently
+  /// dropped on a transient DB/BLE failure. The original [requestedAt] is
+  /// kept, so the retry resolves the same weekday.
+  static Future<void> relatchEnableTomorrowAlarm(
+      ({int? requestedAt, int? weekday}) request) async {
     try {
       await init();
-      await HomeWidget.saveWidgetData<int>(
-          'enable_tomorrow_alarm_weekday', weekday);
+      if (request.requestedAt != null) {
+        await HomeWidget.saveWidgetData<int>(
+            'enable_tomorrow_alarm_requested_at', request.requestedAt);
+      } else if (request.weekday != null) {
+        await HomeWidget.saveWidgetData<int>(
+            'enable_tomorrow_alarm_weekday', request.weekday);
+      }
     } catch (_) {}
   }
 

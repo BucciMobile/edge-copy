@@ -295,24 +295,15 @@ struct EnableTomorrowAlarmIntent: AppIntent {
   static var openAppWhenRun = true
 
   func perform() async throws -> some IntentResult & ProvidesDialog {
-    // "Tomorrow" is fixed HERE, at the moment Siri actually ran this, not
-    // whenever AppState happens to consume the latch — a request made just
-    // before local midnight must still mean the day the user asked for, even
-    // if the app doesn't launch/resume until after midnight has rolled over.
-    // Calendar's `.weekday` is 1=Sun..7=Sat; AlarmScheduleEntry's column
-    // (lib/state/alarm_schedule.dart) is 0=Mon..6=Sun — `(weekday + 5) % 7`
-    // converts one to the other (Mon 2→0 … Sat 7→5, Sun 1→6).
-    //
-    // Before local noon "tomorrow" means the morning still ahead: asked at
-    // 00:40 on Tuesday, the user is going to bed and wants Tuesday's alarm,
-    // not Wednesday's. Same noon cut-off as alarmArmsTonight.
-    let cal = Calendar.current
-    let now = Date()
-    let target = cal.component(.hour, from: now) < 12
-      ? now
-      : (cal.date(byAdding: .day, value: 1, to: now) ?? now)
-    let column = (cal.component(.weekday, from: target) + 5) % 7
-    OpenStrapShared.defaults()?.set(column, forKey: "enable_tomorrow_alarm_weekday")
+    // Latch WHEN the request was made, not a weekday. Which slot "tomorrow"
+    // means depends on the schedule: asked at 00:40 on a Tuesday with a
+    // 07:00 Tuesday alarm, it is that morning's; asked at 09:00 after that
+    // alarm has passed, it is Wednesday's. Only the Dart side has the
+    // schedule, so it resolves the weekday (siriTomorrowAlarmWeekday in
+    // lib/state/alarm_schedule.dart) against this instant — not against
+    // whenever the app happens to launch/resume, which may be after midnight.
+    let requestedAt = Int(Date().timeIntervalSince1970)
+    OpenStrapShared.defaults()?.set(requestedAt, forKey: "enable_tomorrow_alarm_requested_at")
     // Same App Group route latch StartBreathingIntent uses, so the user lands
     // on the Alarm screen and can see the toggle actually flipped rather than
     // wondering whether Siri did anything.

@@ -173,6 +173,39 @@ DateTime? nextAlarmOccurrence(List<AlarmScheduleEntry> schedule, DateTime now) {
   return best;
 }
 
+/// The schedule column (0=Mon..6=Sun) a Siri "enable tomorrow's alarm"
+/// request made at [requestedAt] (local time) means.
+///
+/// Normally the next calendar day's. The exception is a request made before
+/// local noon while today's slot is still ahead: asked at 00:40 on a Tuesday
+/// with a 07:00 Tuesday slot, the user is going to bed and the morning they
+/// mean is Tuesday's. Once today's slot time has passed (09:00, already up),
+/// "tomorrow" is the next calendar day again. A fixed hour cut-off gets one of
+/// those two windows wrong; the slot time itself is the boundary. Noon still
+/// bounds it so an evening slot ahead (asked at 15:00 about a 22:00 one) never
+/// reads as "tomorrow". A weekday with no row uses the same default time
+/// [setScheduleDay] would give it.
+int siriTomorrowAlarmWeekday(
+    List<AlarmScheduleEntry> schedule, DateTime requestedAt) {
+  final todayCol = requestedAt.weekday - 1;
+  if (requestedAt.hour < 12) {
+    final today = schedule.firstWhere(
+      (e) => e.weekday == todayCol,
+      orElse: () => AlarmScheduleEntry(
+          weekday: todayCol,
+          hour: defaultAlarmHour,
+          minute: defaultAlarmMinute,
+          enabled: false),
+    );
+    final slot = DateTime(requestedAt.year, requestedAt.month,
+        requestedAt.day, today.hour, today.minute);
+    if (slot.isAfter(requestedAt)) return todayCol;
+  }
+  return DateTime(requestedAt.year, requestedAt.month, requestedAt.day + 1)
+          .weekday -
+      1;
+}
+
 /// The instant to compute the re-arm from right after the alarm armed for
 /// [firedEpoch] (unix sec) fired. The strap fires on its own RTC, which can
 /// run a second or more ahead of the phone (whole-second drift, sub-tolerance
