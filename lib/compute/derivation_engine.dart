@@ -5836,10 +5836,13 @@ class DerivationEngine {
       if (_isRealDayResult(existing)) {
         final prev = _decodeBundle(existing!['payload_json']);
         if (prev != null) {
-          final recovered = carryForwardDetail(prev, bundle);
+          final sleepMoved = sleepWindowChanged(prev, bundle);
+          final recovered =
+              carryForwardDetail(prev, bundle, carrySleep: !sleepMoved);
           final prevVersion = (existing['algo_version'] as num?)?.toInt();
           final outcome = recoveryOutcome(
             recovered: recovered,
+            sleepMoved: sleepMoved,
             prevPartial: (existing['partial'] as num?)?.toInt() == 1,
             prevVersion: prevVersion,
             prevFinalized: (existing['finalized'] as num?)?.toInt() == 1,
@@ -6222,14 +6225,23 @@ class DerivationEngine {
   /// explicitly and a null there is a real "we could not measure this today"
   /// that must survive. Only keys the failed second half never got to add are
   /// restored — a freshly computed value always wins.
+  ///
+  /// [carrySleep] false withholds the blocks the second half derives from the
+  /// main sleep window ([kSleepOwnedDetailKeys], plus `nap_min`). When the
+  /// night was retimed or rejected since [prev] was written, those blocks
+  /// describe the OLD night: carried onto the new window they listed a rejected
+  /// stretch as a sleep period, and put the old period times beside the new
+  /// hypnogram.
   @visibleForTesting
   static bool carryForwardDetail(
     Map<String, dynamic> prev,
-    Map<String, dynamic> next,
-  ) {
+    Map<String, dynamic> next, {
+    bool carrySleep = true,
+  }) {
     var carried = false;
     for (final e in prev.entries) {
       if (e.key == 'scalars' || e.key == 'series') continue;
+      if (!carrySleep && kSleepOwnedDetailKeys.contains(e.key)) continue;
       if (next.containsKey(e.key) || e.value == null) continue;
       next[e.key] = e.value;
       carried = true;
@@ -6256,6 +6268,7 @@ class DerivationEngine {
       // only replaced when something was actually carried into it.)
       Map<String, dynamic>? merged;
       for (final e in p.entries) {
+        if (!carrySleep && sub == 'scalars' && e.key == 'nap_min') continue;
         if (n.containsKey(e.key) || e.value == null) continue;
         (merged ??= Map<String, dynamic>.from(n))[e.key] = e.value;
         carried = true;
@@ -6263,6 +6276,38 @@ class DerivationEngine {
       if (merged != null) next[sub] = merged;
     }
     return carried;
+  }
+
+  /// Second-half bundle keys computed against the main sleep window. Only the
+  /// offloaded second half writes them, so a failed pass has none of its own.
+  @visibleForTesting
+  static const kSleepOwnedDetailKeys = {
+    'sleep_periods',
+    'sleep_charging',
+    'naps',
+    'restlessness',
+    'restlessness_map',
+    'wrist_orientation',
+    'advanced_sleep',
+    'daytime_hrv',
+  };
+
+  /// Whether the main sleep window in [next] (isolate 1's, always present)
+  /// differs from the one [prev] was derived against — a retimed night, a
+  /// rejected one, or a cleared override. Both absent is no change.
+  @visibleForTesting
+  static bool sleepWindowChanged(
+    Map<String, dynamic> prev,
+    Map<String, dynamic> next,
+  ) {
+    (Object?, Object?) edges(Map<String, dynamic> b) {
+      final v = ((b['sleep'] as Map?)?['window'] as Map?)?['value'];
+      // An absent envelope stores '—', not a window object.
+      if (v is! Map) return (null, null);
+      return (v['onset_ms'], v['offset_ms']);
+    }
+
+    return edges(prev) != edges(next);
   }
 
   /// A night staged off a paired device's records (its hypnogram, or our
@@ -6354,6 +6399,10 @@ class DerivationEngine {
   /// those blocks are computed differently now. A cross-version carry therefore
   /// stays partial and unfinalized, so a later pass recomputes it for real
   /// instead of locking last version's curves in under this version's number.
+  ///
+  /// [sleepMoved]: the night changed since [prevPartial]'s row, so its sleep
+  /// blocks were withheld and the new night has none yet. That row is thinner
+  /// than the one it replaces and must stay open for a pass that completes.
   @visibleForTesting
   static ({bool partial, bool finalized}) recoveryOutcome({
     required bool recovered,
@@ -6361,9 +6410,10 @@ class DerivationEngine {
     required int? prevVersion,
     required bool prevFinalized,
     required bool finalizedByAge,
+    bool sleepMoved = false,
   }) {
     final sameVersion = prevVersion == kAlgoVersion;
-    if (!recovered || prevPartial || !sameVersion) {
+    if (!recovered || prevPartial || !sameVersion || sleepMoved) {
       // Stays partial, but keep whatever the caller had already decided about
       // finalizing: an IMPORT force-finalizes even a partial day, because there
       // is no stored raw to ever recompute it from.
