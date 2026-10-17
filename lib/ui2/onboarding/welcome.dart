@@ -113,6 +113,15 @@ class ImportOutcome {
       corruptTables.isNotEmpty ||
       archiveBucketsSkipped > 0;
 
+  /// Rows landed, but part of the import was refused or left half-done. On a
+  /// first run this report is the only place the user ever hears about it, so
+  /// the gate waits for them instead of moving on to pairing.
+  bool get needsReading =>
+      lostSomething ||
+      rejectedRows.isNotEmpty ||
+      readError != null ||
+      rollupError != null;
+
   /// Nothing at all landed. A zero under a green tick is a no-op that reads as
   /// a success, which is the one thing an import report must never do.
   bool get nothingLanded =>
@@ -254,6 +263,11 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   bool _busy = false;
   ImportOutcome? _outcome;
 
+  /// Rows landed but the report has something to say. Onboarding is finished
+  /// only once the user moves on, because finishing it swaps this screen for
+  /// pairing in the same frame and the report is never drawn.
+  bool _holding = false;
+
   Future<void> _import() async {
     final app = context.read<AppState>();
     FilePickerResult? picked;
@@ -276,16 +290,18 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     setState(() {
       _busy = true;
       _outcome = null;
+      _holding = false;
     });
     try {
       final outcome = await runImport(app, paths,
           askPassphrase: () => askBackupPassphrase(context));
       if (!mounted) return;
-      setState(() => _outcome = outcome);
-      // Anything that landed counts as bringing history in — a workouts-only
-      // vendor export writes sessions and no days, and the gate used to sit
-      // there as though the import had not happened.
-      if (!outcome.nothingLanded) await app.completeImportOnboard();
+      final hold = await settleOnboardImport(app, outcome);
+      if (!mounted) return;
+      setState(() {
+        _outcome = outcome;
+        _holding = hold;
+      });
     } on PassphraseCancelled {
       // Closing the prompt is a decision, not a failure. Say nothing.
     } catch (e) {
@@ -299,12 +315,31 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   }
 
   @override
-  Widget build(BuildContext c) => WelcomeView(
-        busy: _busy,
-        outcome: _outcome,
-        onNew: () => context.read<AppState>().chooseNewUser(),
-        onImport: _import,
-      );
+  Widget build(BuildContext c) {
+    final app = context.read<AppState>();
+    return WelcomeView(
+      busy: _busy,
+      outcome: _outcome,
+      // History already landed, so "Set up my band" from here is the same
+      // step as Continue, and the choice on record stays 'imported'.
+      onNew: _holding ? app.completeImportOnboard : app.chooseNewUser,
+      onImport: _import,
+      onContinue: _holding ? app.completeImportOnboard : null,
+    );
+  }
+}
+
+/// Finish onboarding after an import, unless the report has to be read first.
+/// Returns true when it held back so the caller can offer Continue.
+///
+/// Anything that landed counts as bringing history in — a workouts-only
+/// vendor export writes sessions and no days, and the gate used to sit there
+/// as though the import had not happened.
+Future<bool> settleOnboardImport(AppState app, ImportOutcome outcome) async {
+  if (outcome.nothingLanded) return false;
+  if (outcome.needsReading) return true;
+  await app.completeImportOnboard();
+  return false;
 }
 
 /// Route [paths] to the importer that understands them and normalise the
@@ -562,12 +597,17 @@ class WelcomeView extends StatelessWidget {
   final VoidCallback onNew;
   final VoidCallback onImport;
 
+  /// Shown under the report when the import landed but the report has to be
+  /// read before the gate moves on to pairing.
+  final VoidCallback? onContinue;
+
   const WelcomeView({
     super.key,
     required this.onNew,
     required this.onImport,
     this.busy = false,
     this.outcome,
+    this.onContinue,
   });
 
   @override
@@ -632,6 +672,13 @@ class WelcomeView extends StatelessWidget {
             if (o != null) ...[
               const SizedBox(height: S.x6),
               ImportReport(o),
+              if (onContinue != null) ...[
+                const SizedBox(height: S.x4),
+                BigButton(l?.actionContinue ?? 'Continue',
+                    icon: LucideIcons.arrowRight,
+                    color: C.green,
+                    onTap: busy ? null : onContinue),
+              ],
             ],
           ],
         ),
