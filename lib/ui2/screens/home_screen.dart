@@ -2152,6 +2152,12 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     // was held over from an older night. It cannot be an older night any more
     // — the loader refuses those — so every tile in this row is today's and
     // none of them needs a date.
+    //
+    // On a past day every tile is THAT day's, and the trend screen opens on
+    // today's window — tapping "11,204" landed on today's count. A past day's
+    // tile opens the screen for the day it is showing instead.
+    Widget detail(String key) =>
+        isToday || _day == null ? MetricDetail(key) : metricDayScreen(key, _day!);
 
     // Sleep is a RING now, duration and all — the card here was the same
     // number twice on one screen, and the ring is the one that says what the
@@ -2162,7 +2168,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           '${d.rhr.value!.round()}',
           unit: 'bpm',
           sub: l?.homeRestingSub ?? 'Resting',
-          onTap: () => go(c, const MetricDetail('resting_hr'))),
+          onTap: () => go(c, detail('resting_hr'))),
       // "no sleep was recorded" was stated as fact, unconditionally — and it
       // was rendered directly beside a Sleep card showing that night's
       // duration. Sleep duration and nocturnal RHR are gated separately: a
@@ -2202,7 +2208,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
                     '${((d.steps.value! / d.stepGoal) * 100).clamp(0, 999).round()}% of goal',
               ?stepSensorLabel(d.steps, l),
             ].join(' · '),
-      onTap: () => go(c, const MetricDetail('steps')),
+      onTap: () => go(c, detail('steps')),
       trailing: d.steps.value == null || d.stepGoal <= 0
           ? null
           : SizedBox(
@@ -2224,7 +2230,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
               ? (l?.homeCaloriesEstimated ?? 'Estimated')
               : (l?.homeCaloriesTotal(thousands(d.caloriesTotal.value)) ??
                   '${thousands(d.caloriesTotal.value)} total'),
-          onTap: () => go(c, const MetricDetail('calories'))),
+          onTap: () => go(c, detail('calories'))),
       // No `why:`. It said "Needs your weight and age" — and the measured run
       // printed that to a profile carrying both, because energy had gone absent
       // for an entirely different reason that the card never asked for.

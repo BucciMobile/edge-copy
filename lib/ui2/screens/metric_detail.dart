@@ -682,6 +682,22 @@ bool _labelSources(MetricData d) {
   return false;
 }
 
+/// Where one day of a metric opens. Each metric lands on the screen that
+/// actually shows that day — Nerd stats is the fallback because it is the one
+/// screen that exists for every key.
+///
+/// Shared with Home: a tile on a PAST day has to open that day, and
+/// [MetricDetail] is anchored to today, so it cannot.
+Widget metricDayScreen(String key, String day) => switch (key) {
+      'sleep' ||
+      'deep' ||
+      'rem' ||
+      'efficiency' =>
+        SleepDetail(day: day),
+      'steps' => DayStepsDetail(day: day),
+      _ => Investigate(key, day: day),
+    };
+
 class MetricDetail extends StatefulWidget {
   final String metricKey;
   final MetricData? data;
@@ -708,8 +724,9 @@ class _MetricDetailState extends State<MetricDetail> {
     ];
   }
 
-  /// TODAY. A tile on Home shows today's number, so the screen behind that tap
-  /// opens on today's number — anything else is a different question than the
+  /// TODAY. A tile on Home showing today shows today's number, so the screen
+  /// behind that tap opens on today's number (a past day's tile opens
+  /// [metricDayScreen] instead) — anything else is a different question than the
   /// one that was asked.
   ///
   /// It used to open on 30 days, and worse, on the WIDEST range the install had
@@ -1651,18 +1668,7 @@ class _MetricDetailState extends State<MetricDetail> {
     );
   }
 
-  /// Where a day opens. Each metric lands on the screen that actually shows
-  /// that day — Nerd stats is the fallback because it is the one screen that
-  /// exists for every key.
-  Widget _dayScreen(String key, String day) => switch (key) {
-        'sleep' ||
-        'deep' ||
-        'rem' ||
-        'efficiency' =>
-          SleepDetail(day: day),
-        'steps' => DayStepsDetail(day: day),
-        _ => Investigate(key, day: day),
-      };
+  Widget _dayScreen(String key, String day) => metricDayScreen(key, day);
 
   /// [latestTs] is the stamp on the newest STORED point — the day the rank was
   /// computed for. `metric_series` gets a row only on a day that derives and

@@ -138,6 +138,53 @@ void main() {
         _yesterday);
   });
 
+  // The glance tiles show the switcher's day, so the screen behind a tap has
+  // to be that day too. They used to open the trend screen on today's window:
+  // a past day's "2,500" steps landed on today's count.
+  for (final (label, key) in [
+    ('2,500', 'steps'),
+    ('60', 'resting_hr'),
+    ('300', 'calories'),
+  ]) {
+    testWidgets('on a past day the $key tile opens THAT day', (t) async {
+      final app = AppState.forTesting();
+      addTearDown(app.dispose);
+      app.repo = _Repo();
+
+      await t.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<AppState>.value(value: app),
+          ChangeNotifierProvider<ThemeController>.value(
+              value: ThemeController.seed(
+                  AppThemeChoice.light, Brightness.light)),
+        ],
+        child: MaterialApp(
+          theme: buildTheme(Brightness.light),
+          home: const Scaffold(body: HomeScreen(hour: 9)),
+        ),
+      ));
+      await _settle(t);
+      await t.tap(find.bySemanticsLabel('Previous day'));
+      await _settle(t);
+
+      final tile = find.text(label);
+      await t.scrollUntilVisible(tile, 300,
+          scrollable: find.byType(Scrollable).first);
+      await t.tap(tile);
+      await _settle(t);
+
+      expect(find.byType(MetricDetail), findsNothing);
+      if (key == 'steps') {
+        expect(t.widget<DayStepsDetail>(find.byType(DayStepsDetail)).day,
+            _yesterday);
+      } else {
+        final inv = t.widget<Investigate>(find.byType(Investigate));
+        expect(inv.metricKey, key);
+        expect(inv.day, _yesterday);
+      }
+    });
+  }
+
   testWidgets('back on today the sleep ring opens the held-over night',
       (t) async {
     final app = AppState.forTesting();
