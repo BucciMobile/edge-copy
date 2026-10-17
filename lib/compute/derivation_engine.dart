@@ -2717,6 +2717,17 @@ class _BaselineHistoryCache {
     return [for (var i = from; i < end; i++) series[i].value];
   }
 
+  /// The `yyyy-MM-dd` dates of exactly the entries [valuesBefore] returns for
+  /// the same arguments, index for index. A rows window can't tell a night
+  /// from yesterday from one three weeks back across a wear gap; the dates
+  /// let a calendar-windowed baseline drop the stale ones.
+  List<String> datesBefore(String key, String beforeDate, {String? family}) {
+    final series = _seriesFor(key, family);
+    final end = _beforeIndex(series, beforeDate);
+    final from = end <= _baselineWindowDays ? 0 : end - _baselineWindowDays;
+    return [for (var i = from; i < end; i++) series[i].date];
+  }
+
   static List<double> _trailing(List<_DatedValue> samples) {
     final from = samples.length <= _baselineWindowDays
         ? 0
@@ -6403,6 +6414,8 @@ class DerivationEngine {
     List<double> before(String key) => history.valuesBefore(key, date,
         family: _baselineFamily(key, input.deviceFamily));
     m['ln_rmssd_history'] = before('ln_rmssd');
+    m['ln_rmssd_dates'] = history.datesBefore('ln_rmssd', date,
+        family: _baselineFamily('ln_rmssd', input.deviceFamily));
     m['rhr_history'] = before('rhr');
     m['resp_history'] = before('resp_rate');
     // Robust nocturnal RMSSD history (the `rmssd` series) — feeds the EWMA hrv

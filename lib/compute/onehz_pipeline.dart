@@ -347,6 +347,11 @@ class DayBundleInput {
   // ── profile + trailing baseline history ───────────────────────────────────
   final Map<String, dynamic> profile;
   final List<double> lnRmssdHistory;
+
+  /// `yyyy-MM-dd` dates parallel to [lnRmssdHistory]. Without them the Plews
+  /// rolling-7 baseline is the last 7 ROWS, which after a wear gap are nights
+  /// from weeks ago scored as if they were last week.
+  final List<String> lnRmssdDates;
   final List<double> rhrHistory;
   final List<double> respHistory;
 
@@ -428,6 +433,7 @@ class DayBundleInput {
     this.tonightSleepOnsetSec = 0,
     required this.profile,
     this.lnRmssdHistory = const [],
+    this.lnRmssdDates = const [],
     this.rhrHistory = const [],
     this.respHistory = const [],
     this.rmssdHistory = const [],
@@ -461,6 +467,7 @@ class DayBundleInput {
     'tonight_sleep_onset_sec': tonightSleepOnsetSec,
     'profile': profile,
     'ln_rmssd_history': lnRmssdHistory,
+    'ln_rmssd_dates': lnRmssdDates,
     'rhr_history': rhrHistory,
     'resp_history': respHistory,
     'rmssd_history': rmssdHistory,
@@ -513,6 +520,7 @@ class DayBundleInput {
           (m['tonight_sleep_onset_sec'] as num?)?.toInt() ?? 0,
       profile: ((m['profile'] as Map?) ?? const {}).cast<String, dynamic>(),
       lnRmssdHistory: dbls('ln_rmssd_history'),
+      lnRmssdDates: strs('ln_rmssd_dates'),
       rhrHistory: dbls('rhr_history'),
       respHistory: dbls('resp_history'),
       rmssdHistory: dbls('rmssd_history'),
@@ -961,8 +969,15 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // (`_attachHistory` → `_BaselineHistoryCache.valuesBefore`), which is what
   // makes this single append the correct, non-duplicating one.
   final lnHist = [...d.lnRmssdHistory, ?lnToday];
+  // Dated so the rolling 7 is 7 CALENDAR nights: after a wear gap the last 7
+  // rows are weeks old, and scoring tonight against them gave a confident
+  // band against a stale centre instead of abstaining until it refills.
+  // Only when the dates line up with the values; otherwise the rows window.
+  final lnDates = d.lnRmssdDates.length == d.lnRmssdHistory.length
+      ? [...d.lnRmssdDates, if (lnToday != null) d.date]
+      : null;
   final lnReadiness = lnHist.length >= 4
-      ? readinessLnRmssd(lnHist)
+      ? readinessLnRmssd(lnHist, dates: lnDates)
       : Metric<ReadinessLnRmssd>.absent(
           tier: Tier.high,
           inputs_used: const ['ln_rmssd_history'],
