@@ -1007,8 +1007,9 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
       for (final sch in s.def.schedule)
         if (sch.minuteOfDay != s.slotMin) sch,
     ];
+    final db = await LocalDb.instance;
     await MedDb.putDef(
-      await LocalDb.instance,
+      db,
       MedDef(
         key: s.def.key,
         label: s.def.label,
@@ -1021,6 +1022,16 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
         schedule: [...rest, MedSchedule(picked.minuteOfDay, picked.days)],
       ),
     );
+    // Another slot already at the picked minute owns the doses there; merging
+    // this slot's history into it would count them twice.
+    if (!rest.any((sch) => sch.minuteOfDay == picked.minuteOfDay)) {
+      await MedDb.retimeSlot(
+        db,
+        medKey: s.def.key,
+        fromMin: s.slotMin,
+        toMin: picked.minuteOfDay,
+      );
+    }
     await _wrote();
   }
 

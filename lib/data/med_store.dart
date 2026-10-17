@@ -356,6 +356,28 @@ class MedDb {
     );
   }
 
+  /// Moves a slot's recorded doses with the slot when its time changes.
+  ///
+  /// [slotsForDay] resolves every day, past ones included, against the def's
+  /// CURRENT schedule and looks doses up by minute. Left keyed at the old
+  /// minute, every dose taken before a retime became unreachable and each of
+  /// those days read the new time as missed: moving an 08:00 dose to 08:30
+  /// turned 7/7 adherence into 0/7. A day that already has a row at [toMin]
+  /// keeps it (OR IGNORE) — that one was recorded against the new time.
+  static Future<void> retimeSlot(
+    Database db, {
+    required String medKey,
+    required int fromMin,
+    required int toMin,
+  }) async {
+    if (fromMin == toMin) return;
+    await db.rawUpdate(
+      'UPDATE OR IGNORE med_dose SET slot_min = ? '
+      'WHERE med_key = ? AND slot_min = ?',
+      [toMin, medKey, fromMin],
+    );
+  }
+
   static Future<void> deleteDef(Database db, String key) async {
     await db.delete('med_def', where: 'key = ?', whereArgs: [key]);
     // The dose history stays: those doses were still taken, and a re-added key
