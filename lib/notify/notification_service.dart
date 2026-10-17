@@ -400,13 +400,26 @@ class NotificationService {
   /// Every producer writes its copy in English, and the OS renders it as-is:
   /// a user on a translated UI got English on the lock screen, which is the
   /// only place these events are ever shown. Translate at this one boundary,
-  /// in the language the UI is presented in. Never throws — an untranslatable
-  /// string goes out in English rather than being dropped.
-  static String osText(String text) {
+  /// in the language the app is set to — read from the saved setting when the
+  /// UI isn't running (see [LocaleController.presentationLanguageCode]).
+  /// Never throws — an untranslatable string goes out in English rather than
+  /// being dropped.
+  static Future<String> osText(String text) async =>
+      osTextIn(await _osLocalizations(), text);
+
+  static Future<AppLocalizations?> _osLocalizations() async {
     try {
-      return localizedNotificationText(
-          lookupAppLocalizations(Locale(LocaleController.displayLanguageCode)),
-          text);
+      return lookupAppLocalizations(
+          Locale(await LocaleController.presentationLanguageCode()));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String osTextIn(AppLocalizations? l, String text) {
+    if (l == null) return text;
+    try {
+      return localizedNotificationText(l, text);
     } catch (_) {
       return text;
     }
@@ -460,8 +473,8 @@ class NotificationService {
       // NotificationEvent.osId).
       await _plugin.show(
         e.osId ?? await NotificationIds.instance.idFor(e),
-        osText(e.title),
-        e.body.isEmpty ? null : osText(e.body),
+        await osText(e.title),
+        e.body.isEmpty ? null : await osText(e.body),
         _details(e.category),
         payload: e.route,
       );
@@ -526,8 +539,8 @@ class NotificationService {
       }
       await _plugin.zonedSchedule(
         id,
-        osText(title),
-        osText(body),
+        await osText(title),
+        await osText(body),
         when,
         _details(category),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
@@ -555,8 +568,8 @@ class NotificationService {
       await ensureTimezone();
       await _plugin.zonedSchedule(
         id,
-        osText(title),
-        osText(body),
+        await osText(title),
+        await osText(body),
         _nextInstanceOf(hour, minute, weekday: weekday),
         _details(category),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
@@ -590,8 +603,8 @@ class NotificationService {
       final when = tz.TZDateTime.from(at, tz.local);
       await _plugin.zonedSchedule(
         id,
-        osText(title),
-        osText(body),
+        await osText(title),
+        await osText(body),
         when,
         _details(category),
         androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
