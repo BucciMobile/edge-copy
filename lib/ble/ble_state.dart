@@ -279,9 +279,13 @@ BandStatus bandStatusFor({
       'Reconnecting has been paused',
       'The band refused the pairing key $bondRefusals times in a row, so the '
           'app stopped retrying rather than pin the radio and drain both '
-          'batteries on a link that will not open. Nothing is reconnecting '
-          'until you act.',
-      fix: repairFix,
+          'batteries on a link that will not open. It will try again on its '
+          'own in about 30 minutes.',
+      // BondRefusalGiveUp re-arms after its cooldown, and a refusal streak is
+      // often a transient OEM stack condition, so re-pairing (and the key
+      // churn it causes) is only the fix if the pause trips again.
+      fix: 'If it pauses again, forget the band in the phone’s Bluetooth '
+          'settings, then pair it again here',
       bondRefusals: bondRefusals,
     );
   }

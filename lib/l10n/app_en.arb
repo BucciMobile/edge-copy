@@ -11860,7 +11860,7 @@
   "@bandStatusReconnectPausedTitle": {
     "description": "BandStatus card title: auto-reconnect paused after repeated bond refusals"
   },
-  "bandStatusReconnectPausedReason": "The band refused the pairing key {n, plural, one{{n} time} other{{n} times}} in a row, so the app stopped retrying to save battery. Nothing reconnects until you act.",
+  "bandStatusReconnectPausedReason": "The band refused the pairing key {n, plural, one{{n} time} other{{n} times}} in a row, so the app stopped retrying to save battery. It will try again on its own in about 30 minutes.",
   "@bandStatusReconnectPausedReason": {
     "description": "BandStatus card body: auto-reconnect paused, with the refusal count",
     "placeholders": {
@@ -11876,6 +11876,10 @@
   "bandStatusRepairNeededReason": "The band rejects this phone’s encryption key, so no data moves. Your recordings are safe on the band; pair it again to continue.",
   "@bandStatusRepairNeededReason": {
     "description": "BandStatus card body: band needs re-pairing"
+  },
+  "bandStatusReconnectPausedFix": "If it pauses again, forget the band in the phone’s Bluetooth settings, then pair it again here",
+  "@bandStatusReconnectPausedFix": {
+    "description": "BandStatus fix action for the reconnect-paused state: re-pair only if the pause trips again after the automatic retry"
   },
   "bandStatusRepairFix": "Forget the band in the phone’s Bluetooth settings, then pair it again here",
   "@bandStatusRepairFix": {
