@@ -743,6 +743,7 @@
   "journalComposeLoadFailed": "无法打开这一天的日志。",
   "journalComposeTryAgain": "重试",
   "journalComposeWhenWasLastOne": "上一次是什么时候？",
+  "journalComposeAddToJournal": "添加到日志",
   "journalComposeTitle": "日志",
   "journalComposeTodaySection": "今天",
   "journalComposeTrackSomethingElse": "记录其他内容",

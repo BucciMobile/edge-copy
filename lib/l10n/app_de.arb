@@ -772,6 +772,7 @@
   "journalComposeLoadFailed": "Das Journal für diesen Tag konnte nicht geöffnet werden.",
   "journalComposeTryAgain": "Erneut versuchen",
   "journalComposeWhenWasLastOne": "Wann war das letzte Mal?",
+  "journalComposeAddToJournal": "Ins Journal übernehmen",
   "journalComposeTitle": "Journal",
   "journalComposeTodaySection": "Heute",
   "journalComposeTrackSomethingElse": "Etwas anderes erfassen",

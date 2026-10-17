@@ -743,6 +743,7 @@
   "journalComposeLoadFailed": "Impossible d'ouvrir le journal de ce jour.",
   "journalComposeTryAgain": "Réessayer",
   "journalComposeWhenWasLastOne": "Quand était la dernière fois ?",
+  "journalComposeAddToJournal": "Ajouter au journal",
   "journalComposeTitle": "Journal",
   "journalComposeTodaySection": "Aujourd'hui",
   "journalComposeTrackSomethingElse": "Suivre autre chose",

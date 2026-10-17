@@ -3696,6 +3696,10 @@
   "@journalComposeWhenWasLastOne": {
     "description": "Time picker help text when logging the time of the last dose of a journal field."
   },
+  "journalComposeAddToJournal": "Add to journal",
+  "@journalComposeAddToJournal": {
+    "description": "Journal AI chat sheet: primary button that copies the proposed tags and note into the day's entry."
+  },
   "journalComposeTitle": "Journal",
   "@journalComposeTitle": {
     "description": "Journal compose screen title."

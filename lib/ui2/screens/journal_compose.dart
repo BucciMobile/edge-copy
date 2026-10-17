@@ -1250,6 +1250,8 @@ class _JournalAiSheetState extends State<_JournalAiSheet> {
                     const SizedBox(width: S.x2),
                     Pressable(
                       onTap: _busy ? null : () => unawaited(_send()),
+                      semanticLabel:
+                          AppLocalizations.of(c)?.coachSendLabel ?? 'Send',
                       child: Container(
                         width: 44,
                         height: 44,
@@ -1274,7 +1276,8 @@ class _JournalAiSheetState extends State<_JournalAiSheet> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(S.x4, 0, S.x4, S.x4),
                 child: BigButton(
-                  'Add to journal',
+                  AppLocalizations.of(c)?.journalComposeAddToJournal ??
+                      'Add to journal',
                   icon: LucideIcons.check,
                   color: C.domMind,
                   onTap: last == null

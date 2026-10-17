@@ -1590,6 +1590,7 @@
   "journalComposeLoadFailed": "Не удалось открыть дневник за этот день.",
   "journalComposeTryAgain": "Повторить",
   "journalComposeWhenWasLastOne": "Когда это было в последний раз?",
+  "journalComposeAddToJournal": "Добавить в дневник",
   "journalComposeTitle": "Дневник",
   "journalComposeTodaySection": "Сегодня",
   "journalComposeTrackSomethingElse": "Добавить свой показатель",

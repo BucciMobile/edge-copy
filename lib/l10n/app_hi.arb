@@ -743,6 +743,7 @@
   "journalComposeLoadFailed": "इस दिन का जर्नल नहीं खुल सका।",
   "journalComposeTryAgain": "फिर से कोशिश करें",
   "journalComposeWhenWasLastOne": "पिछली बार कब हुआ था?",
+  "journalComposeAddToJournal": "जर्नल में जोड़ें",
   "journalComposeTitle": "जर्नल",
   "journalComposeTodaySection": "आज",
   "journalComposeTrackSomethingElse": "कुछ और ट्रैक करें",
