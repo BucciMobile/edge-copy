@@ -1227,33 +1227,56 @@ final List<({BandEntry entry, String blurb, Future<String?> Function(BluetoothDe
   ),
 ];
 
+/// Whether the paired `device` rows already hold as many secondary sensors as
+/// this phone will pair alongside its band — the rows minus the primary one.
+///
+/// PAIRED ROWS, NOT LIVE SLOTS, and deliberately: admission is a question
+/// about the sensors this phone manages, not about who holds a GATT link in
+/// this instant. Live slot state is transient — `OuraLink` holds one only from
+/// connect through `stop()`, `HrsLink` only for a workout — so reading it would
+/// admit or refuse the same pairing depending on the second it was tapped, and
+/// a slot freed a moment later cannot un-refuse anything. The same constant
+/// bounds both because the number is the same number.
+///
+/// [repairingId] is the row a pair would write, when the caller knows it. A
+/// sensor that already has its row is being paired again (a lost bond, a
+/// reset), not added, so it never counts against the cap.
+bool sensorCapReached(Iterable<Map<String, Object?>> deviceRows,
+    {String? repairingId}) {
+  final ids = deviceRows
+      .map((r) => r['id'])
+      .where((id) => id != LocalDb.kPrimaryDeviceId)
+      .toList();
+  if (repairingId != null && ids.contains(repairingId)) return false;
+  return ids.length >= kMaxConcurrentSecondaryLinks;
+}
+
+/// Shows the sensor-limit sheet and returns true when [sensorCapReached].
+///
+/// Called before EVERY sensor pair, not only on the way into the picker: the
+/// picker stays open after a pair for the next one, and onboarding and
+/// `RePair` open it without passing through [addSensor] at all, so a check at
+/// the door alone let one visit pair any number of sensors.
+Future<bool> refuseIfSensorCapReached(BuildContext c,
+    {String? repairingId}) async {
+  if (!sensorCapReached(await LocalDb.deviceRows(), repairingId: repairingId)) {
+    return false;
+  }
+  if (!c.mounted) return true;
+  // DERIVED FROM THE CONSTANT the check uses. Hardcoded, the sentence states a
+  // different rule from the one enforced the moment the cap moves.
+  await showReasonSheet(
+      c,
+      AppLocalizations.of(c)
+              ?.devicesSensorLimit(kMaxConcurrentSecondaryLinks) ??
+          'This phone will pair at most $kMaxConcurrentSecondaryLinks '
+              'sensors alongside your band. Remove one to add another.');
+  return true;
+}
+
 /// Choose which kind of sensor to pair, then hand off to the pairing screen.
 Future<void> addSensor(BuildContext c) async {
-  // Count paired secondary devices (the `device` table minus the primary row).
-  //
-  // PAIRED ROWS, NOT LIVE SLOTS, and deliberately: admission here is a
-  // question about the sensors this phone manages, not about who holds a GATT
-  // link in this instant. Live slot state is transient — `OuraLink` holds one
-  // only from connect through `stop()`, `HrsLink` only for a workout — so
-  // reading it would admit or refuse the same pairing depending on the second
-  // it was tapped, and a slot freed a moment later cannot un-refuse anything.
-  // The same constant bounds both because the number is the same number; the
-  // sentence below states the PAIRING rule, which is the one enforced here.
-  final secondaryCount = (await LocalDb.deviceRows())
-      .where((r) => r['id'] != LocalDb.kPrimaryDeviceId)
-      .length;
-  if (secondaryCount >= kMaxConcurrentSecondaryLinks) {
-    if (!c.mounted) return;
-    // DERIVED FROM THE CONSTANT the check above uses. Hardcoded, the sentence
-    // states a different rule from the one enforced the moment the cap moves.
-    await showReasonSheet(
-        c,
-        AppLocalizations.of(c)
-                ?.devicesSensorLimit(kMaxConcurrentSecondaryLinks) ??
-            'This phone will pair at most $kMaxConcurrentSecondaryLinks '
-                'sensors alongside your band. Remove one to add another.');
-    return;
-  }
+  if (await refuseIfSensorCapReached(c)) return;
   if (!c.mounted) return;
   // `includeBand: false` — this phone already has its one primary band;
   // re-pairing it is `RePair`'s job, not a row beside a chest strap here.

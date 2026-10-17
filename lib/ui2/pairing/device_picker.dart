@@ -47,7 +47,8 @@ import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
 import '../onboarding/pairing.dart' show PairingScreen;
 import '../ui2.dart';
-import '../profile/devices.dart' show kPairableSensors, sensorIcon;
+import '../profile/devices.dart'
+    show kPairableSensors, refuseIfSensorCapReached, sensorIcon;
 import '../profile/pair_sensor.dart' show PairSensorScreen;
 import '../profile/profile.dart' show SetRow;
 
@@ -156,6 +157,14 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
     // Only the ring's own screen asks for the key it may already hold; a
     // direct pair here would install a new one and steer the user to a reset.
     if (sensor.entry.id == kOura.id) return _openEntry(sensor.entry);
+    // Re-checked on every pair: this screen stays open after one for the
+    // next, so `addSensor`'s check at the door does not bound a visit.
+    if (await refuseIfSensorCapReached(context,
+            repairingId:
+                HrsLink.mintDeviceId(sensor.entry, cand.device.remoteId.str)) ||
+        !mounted) {
+      return;
+    }
     setState(() {
       _busy = cand.device.remoteId.str;
       _problem = null;
@@ -212,6 +221,9 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
           'That device cannot be paired from this screen.');
       return;
     }
+    // Re-checked on every tap: this screen stays open after a pair, and the
+    // onboarding and re-pair routes reach it without `addSensor`'s check.
+    if (await refuseIfSensorCapReached(context) || !mounted) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => PairSensorScreen(
         entry: sensor.entry,
