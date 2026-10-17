@@ -2470,14 +2470,42 @@ class AppState extends ChangeNotifier {
   /// rows or the active wearable's rows); once retention prunes a day's raw,
   /// nothing re-stages it, so an override stored for it would never show and
   /// "Re-analyze everything" couldn't apply it either.
-  Future<bool> sleepCorrectable(String date) async =>
-      (await substrateDays()).contains(date);
+  ///
+  /// The prune cuts on local midnight, so the oldest kept day still has its
+  /// own rows but lost the evening half of its night. The derive declines to
+  /// overwrite a stored night from that partial window, so on that day a
+  /// correction only lands when the night it asks for doesn't reach below the
+  /// cut: [sleepSource] is what the night would become ('rejected', 'manual',
+  /// 'confirmed', or 'auto' when clearing) and [onsetSec] the user's bedtime
+  /// for a user-set window.
+  Future<bool> sleepCorrectable(
+    String date, {
+    String sleepSource = 'auto',
+    int? onsetSec,
+  }) async =>
+      (await substrateDays()).contains(date) &&
+      !await DerivationEngine.pruneDeclinesSleepRederive(
+        date,
+        sleepSource: sleepSource,
+        sleepOnsetSec: onsetSec,
+      );
 
-  /// Refuses a correction on a day [sleepCorrectable] rules out, before
-  /// anything is written: the row would sit in sleep_override unapplied.
-  Future<void> _requireSleepSubstrate(String date) async {
-    if (!await sleepCorrectable(date)) {
+  /// Refuses a correction [sleepCorrectable] rules out, before anything is
+  /// written: the row would sit in sleep_override unapplied.
+  Future<void> _requireSleepSubstrate(
+    String date, {
+    required String sleepSource,
+    int? onsetSec,
+  }) async {
+    if (!(await substrateDays()).contains(date)) {
       throw SleepCorrectionUnavailable(date);
+    }
+    if (await DerivationEngine.pruneDeclinesSleepRederive(
+      date,
+      sleepSource: sleepSource,
+      sleepOnsetSec: onsetSec,
+    )) {
+      throw SleepCorrectionUnavailable(date, eveningPruned: true);
     }
   }
 
@@ -2493,7 +2521,7 @@ class AppState extends ChangeNotifier {
     final onsetSec = onset.millisecondsSinceEpoch ~/ 1000;
     final offsetSec = offset.millisecondsSinceEpoch ~/ 1000;
     if (offsetSec <= onsetSec) return;
-    await _requireSleepSubstrate(date);
+    await _requireSleepSubstrate(date, sleepSource: source, onsetSec: onsetSec);
     await LocalDb.putSleepOverride(
       dayId: date,
       onsetTs: onsetSec,
@@ -2512,7 +2540,8 @@ class AppState extends ChangeNotifier {
     final onset = (sleep['onset_ts'] as num?)?.toInt();
     final offset = (sleep['wake_ts'] as num?)?.toInt();
     if (onset == null || offset == null || offset <= onset) return;
-    await _requireSleepSubstrate(date);
+    await _requireSleepSubstrate(date,
+        sleepSource: 'confirmed', onsetSec: onset);
     await LocalDb.putSleepOverride(
       dayId: date,
       onsetTs: onset,
@@ -2539,7 +2568,7 @@ class AppState extends ChangeNotifier {
     // outright), so an absent detected window falls back to a harmless
     // same-day placeholder rather than blocking the rejection.
     final fallback = DateTime.parse(date).millisecondsSinceEpoch ~/ 1000;
-    await _requireSleepSubstrate(date);
+    await _requireSleepSubstrate(date, sleepSource: 'rejected');
     await LocalDb.putSleepOverride(
       dayId: date,
       onsetTs: onset ?? fallback,
@@ -2553,15 +2582,16 @@ class AppState extends ChangeNotifier {
   /// Refused on a pruned day like the others: deleting the row there would
   /// leave the derived night still showing the user's window.
   Future<void> clearSleepOverride(String date) async {
-    await _requireSleepSubstrate(date);
+    await _requireSleepSubstrate(date, sleepSource: 'auto');
     await LocalDb.deleteSleepOverride(date);
     await _reanalyzeForOverride(date);
   }
 
   /// Force-derive after a sleep-override change so the affected day restages from
   /// the user's window. A force pass re-derives finalized override days, but
-  /// only among days that still have substrate — callers check that first
-  /// ([sleepCorrectable]).
+  /// only among days that still have substrate, and it keeps the stored night
+  /// when the prune has cut into the asked-for window — callers check both
+  /// first ([sleepCorrectable]).
   Future<void> _reanalyzeForOverride([String? editedDay]) async {
     // run() returns 0 without queueing while ANY pass holds the derive latch
     // (a drain's light pass, the post-drain rescan, another edit), and only a
@@ -5404,11 +5434,15 @@ class AppState extends ChangeNotifier {
   }
 }
 
-/// A sleep correction on a day whose substrate has been pruned: no re-derive
-/// can reach it, so nothing was written.
+/// A sleep correction no re-derive can apply, so nothing was written: the
+/// day's substrate has been pruned, or ([eveningPruned]) the day is the oldest
+/// one kept and the night asked for starts before the midnight prune cut.
 class SleepCorrectionUnavailable implements Exception {
-  SleepCorrectionUnavailable(this.day);
+  SleepCorrectionUnavailable(this.day, {this.eveningPruned = false});
   final String day;
+  final bool eveningPruned;
   @override
-  String toString() => 'no recordings left to re-analyse $day';
+  String toString() => eveningPruned
+      ? 'the evening before $day is no longer recorded'
+      : 'no recordings left to re-analyse $day';
 }

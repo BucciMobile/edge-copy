@@ -436,6 +436,12 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   /// Unknown counts as correctable, which is how the screen behaved before.
   bool _correctable = true;
 
+  /// Whether the night's whole derive window is still kept. False on the
+  /// oldest kept day: the prune cut at its midnight took the evening half, so
+  /// confirming the detected times or going back to automatic would be
+  /// declined; only a bedtime after midnight, or Not sleep, can land.
+  bool _wholeNightKept = true;
+
   /// Last night's state against the user's own nights, when it was rough enough
   /// to say so and has not been dismissed. See `rough_night.dart` — it REPLACES
   /// the elevated-sleeping-HR card rather than joining it, so one night can
@@ -501,9 +507,13 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     try {
       final d = await SleepData.load(repo, want: _day);
       var correctable = true;
+      var wholeNightKept = true;
       if (app != null && d.day != null) {
         try {
-          correctable = await app.sleepCorrectable(d.day!);
+          correctable =
+              await app.sleepCorrectable(d.day!, sleepSource: 'rejected');
+          wholeNightKept =
+              correctable && await app.sleepCorrectable(d.day!);
         } catch (_) {}
       }
       // LAST NIGHT ONLY. The card names the luteal phase, and `getCycle` knows
@@ -520,6 +530,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               _d = d,
               _rough = rough,
               _correctable = correctable,
+              _wholeNightKept = wholeNightKept,
               _loading = false,
             ));
       }
@@ -581,9 +592,10 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               'Wear the band overnight and sync in the morning'),
           icon: rejected ? LucideIcons.undo2 : LucideIcons.moon,
         ),
-        if (rejectedDay != null && !_correctable) ...[
+        // Undo goes back to automatic, which needs the whole night window.
+        if (rejectedDay != null && (!_correctable || !_wholeNightKept)) ...[
           const SizedBox(height: S.x2),
-          _uncorrectableNote(c, l),
+          _correctable ? _eveningPrunedNote(c, l) : _uncorrectableNote(c, l),
         ] else if (rejected) ...[
           const SizedBox(height: S.x2),
           TextButton(
@@ -867,7 +879,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
             _uncorrectableNote(c, l)
           else
           Wrap(spacing: S.x2, children: [
-            if (fallback)
+            if (fallback && _wholeNightKept)
               TextButton(
                 onPressed: busy ? null : () => _confirmWindow(day),
                 child: Text(l?.sleepDetailConfirmTimes ?? 'These times are right'),
@@ -878,7 +890,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
                   ? (l?.sleepDetailChangeTimes ?? 'Change the times')
                   : (l?.sleepDetailSetTimesMyself ?? 'Set the times myself')),
             ),
-            if (mine)
+            if (mine && _wholeNightKept)
               TextButton(
                 onPressed: busy ? null : () => _clearWindow(day),
                 child:
@@ -892,6 +904,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               child: Text(l?.sleepDetailNotSleep ?? 'Not sleep'),
             ),
           ]),
+          if (_correctable && !_wholeNightKept) _eveningPrunedNote(c, l),
           if (busy) ...[
             const SizedBox(height: S.x2),
             Text(l?.sleepDetailReanalysing ?? 'Re-analysing the night…',
@@ -917,6 +930,14 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         l?.sleepDetailCorrectionUnavailable ??
             'This night\u2019s detailed recordings are no longer on the phone, '
                 'so its sleep can\u2019t be corrected now.',
+        style: F.cap.copyWith(color: P.of(c).ink3),
+      );
+
+  /// On the oldest kept night: says why only some corrections are offered.
+  Widget _eveningPrunedNote(BuildContext c, AppLocalizations? l) => Text(
+        l?.sleepDetailCorrectionEveningPruned ??
+            'The evening before this night is no longer on the phone, so only '
+                'a bedtime after midnight, or Not sleep, can be applied.',
         style: F.cap.copyWith(color: P.of(c).ink3),
       );
 
@@ -1000,17 +1021,22 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       _saving = true;
       _overrideFailed = null;
     });
-    final unavailable =
-        AppLocalizations.of(context)?.sleepDetailCorrectionUnavailable;
+    final l = AppLocalizations.of(context);
     String? failed;
     try {
       await write();
-    } on SleepCorrectionUnavailable {
-      // Nothing was written, and re-analysing everything can't reach this day
-      // either, so the generic "tap Re-analyze everything" advice is wrong.
-      failed = unavailable ??
-          'This night\u2019s detailed recordings are no longer on the phone, '
-              'so its sleep can\u2019t be corrected now.';
+    } on SleepCorrectionUnavailable catch (e) {
+      // Nothing was written, and re-analysing everything can't reach this
+      // night either, so the generic "tap Re-analyze everything" advice is
+      // wrong.
+      failed = e.eveningPruned
+          ? (l?.sleepDetailCorrectionEveningPruned ??
+              'The evening before this night is no longer on the phone, so '
+                  'only a bedtime after midnight, or Not sleep, can be '
+                  'applied.')
+          : (l?.sleepDetailCorrectionUnavailable ??
+              'This night\u2019s detailed recordings are no longer on the '
+                  'phone, so its sleep can\u2019t be corrected now.');
     } catch (e) {
       failed = '$e';
     } finally {
@@ -1032,7 +1058,6 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         ? applied(_d?.night ?? const <String, dynamic>{})
         : _source != before;
     if (failed != null || !took) {
-      final l = AppLocalizations.of(context);
       setState(() => _overrideFailed = failed ??
           l?.sleepDetailReanalyseFailed ??
           'The night wasn’t re-analysed; another run was busy or it failed. Your times are saved: open Your data and tap Re-analyze everything.');

@@ -203,4 +203,82 @@ void main() {
     await _seedDay(day);
     expect(await app.sleepCorrectable(day), isTrue);
   });
+
+  test('on the oldest kept night only a correction the prune leaves whole is '
+      'offered or stored', () async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    // The prune cuts on local midnight: the day keeps its own rows but the
+    // evening before is gone, and the stored night came from the whole window.
+    const day = '2026-08-10';
+    final midnight = DateTime(2026, 8, 10).millisecondsSinceEpoch ~/ 1000;
+    await _seedDay(day);
+    await LocalDb.setCursor('decoded_pruned_before', '$midnight');
+    addTearDown(() async => (await LocalDb.instance).delete('sync_cursor',
+        where: 'name = ?', whereArgs: ['decoded_pruned_before']));
+    await LocalDb.putDayResult(
+      dayId: day,
+      algoVersion: kAlgoVersion,
+      payloadJson: '{}',
+      windowJson: '{}',
+      rhr: 52,
+    );
+
+    // Back to automatic / confirming a bedtime from the evening before would
+    // be declined by the derive and keep the stored night.
+    expect(await app.sleepCorrectable(day), isFalse);
+    expect(
+        await app.sleepCorrectable(day,
+            sleepSource: 'confirmed', onsetSec: midnight - 3600),
+        isFalse);
+    // Not sleep and a bedtime after midnight still land.
+    expect(await app.sleepCorrectable(day, sleepSource: 'rejected'), isTrue);
+    expect(
+        await app.sleepCorrectable(day,
+            sleepSource: 'manual', onsetSec: midnight + 1800),
+        isTrue);
+
+    await expectLater(
+      app.setSleepOverride(
+          day, DateTime(2026, 8, 9, 23), DateTime(2026, 8, 10, 7)),
+      throwsA(isA<SleepCorrectionUnavailable>()
+          .having((e) => e.eveningPruned, 'eveningPruned', isTrue)),
+    );
+    expect(await LocalDb.getSleepOverride(day), isNull);
+
+    await LocalDb.putSleepOverride(
+      dayId: day,
+      onsetTs: midnight + 1800,
+      offsetTs: midnight + 7 * 3600,
+      source: 'manual',
+    );
+    await expectLater(
+      app.clearSleepOverride(day),
+      throwsA(isA<SleepCorrectionUnavailable>()
+          .having((e) => e.eveningPruned, 'eveningPruned', isTrue)),
+    );
+    expect(await LocalDb.getSleepOverride(day), isNotNull,
+        reason: 'refused before the row was deleted');
+    await LocalDb.deleteSleepOverride(day);
+  });
+
+  test('the prune guard spares a rejected night and keeps a user window on '
+      'its own onset', () {
+    const day = '2026-08-10';
+    final midnight = DateTime(2026, 8, 10).millisecondsSinceEpoch ~/ 1000;
+    expect(DerivationEngine.sleepWindowTruncatedByPrune(day, midnight), isTrue);
+    expect(
+        DerivationEngine.sleepWindowTruncatedByPrune(day, midnight,
+            sleepSource: 'rejected'),
+        isFalse);
+    expect(
+        DerivationEngine.sleepWindowTruncatedByPrune(day, midnight,
+            sleepSource: 'manual', sleepOnsetSec: midnight + 60),
+        isFalse);
+    expect(
+        DerivationEngine.sleepWindowTruncatedByPrune(day, midnight,
+            sleepSource: 'confirmed', sleepOnsetSec: midnight - 60),
+        isTrue);
+    expect(DerivationEngine.sleepWindowTruncatedByPrune(day, null), isFalse);
+  });
 }

@@ -1700,6 +1700,7 @@
   "sleepDetailWakeTimeHelp": "AUFGESTANDEN UM",
   "sleepDetailReanalyseFailed": "Die Nacht wurde nicht neu ausgewertet – entweder lief bereits eine andere Auswertung, oder sie ist fehlgeschlagen. Deine Zeiten sind gespeichert; „Alles neu analysieren“ unter „Deine Daten“ wendet sie an.",
   "sleepDetailCorrectionUnavailable": "Die detaillierten Aufzeichnungen dieser Nacht sind nicht mehr auf dem Telefon, daher lässt sich ihr Schlaf nicht mehr korrigieren.",
+  "sleepDetailCorrectionEveningPruned": "Der Abend vor dieser Nacht ist nicht mehr auf dem Telefon, daher lassen sich nur eine Schlafenszeit nach Mitternacht oder „Kein Schlaf“ übernehmen.",
   "sleepDetailNoHypnogramTitle": "Kein Hypnogramm für diese Nacht",
   "sleepDetailNoHypnogramBody": "Für die Schlafphasen werden Bewegung und Herzschlag-Abstände benötigt. Eines davon fehlte.",
   "sleepDetailThroughTheNight": "Im Verlauf der Nacht",

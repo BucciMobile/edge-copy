@@ -1650,6 +1650,7 @@
   "sleepDetailWakeTimeHelp": "HEURE DU LEVER",
   "sleepDetailReanalyseFailed": "La nuit n'a pas été réanalysée : une autre réanalyse était déjà en cours, ou elle a échoué. Les horaires que vous avez définis sont enregistrés ; « Tout réanalyser » dans Vos données les appliquera.",
   "sleepDetailCorrectionUnavailable": "Les enregistrements détaillés de cette nuit ne sont plus sur le téléphone, son sommeil ne peut donc plus être corrigé.",
+  "sleepDetailCorrectionEveningPruned": "La soirée précédant cette nuit n’est plus sur le téléphone : on peut seulement indiquer une heure de coucher après minuit, ou marquer la nuit comme n’étant pas du sommeil.",
   "sleepDetailNoHypnogramTitle": "Aucun hypnogramme pour cette nuit",
   "sleepDetailNoHypnogramBody": "L'analyse des phases nécessite le mouvement et le rythme cardiaque. L'un des deux manquait.",
   "sleepDetailThroughTheNight": "Au fil de la nuit",

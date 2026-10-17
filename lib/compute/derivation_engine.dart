@@ -4945,6 +4945,49 @@ class DerivationEngine {
               _localDayLabelToSec(dayId) - kNocturnalSearchLookbackSec) <
           prunedBeforeSec;
 
+  /// [windowTruncatedByPrune] as the derive's prune guard applies it to a day
+  /// whose night came from [sleepSource]: a rejected night has nothing to
+  /// protect, and a user-set window ('manual'/'confirmed') only needs its own
+  /// onset ([sleepOnsetSec]) kept.
+  static bool sleepWindowTruncatedByPrune(
+    String dayId,
+    int? prunedBeforeSec, {
+    String? sleepSource,
+    int? sleepOnsetSec,
+  }) =>
+      sleepSource != 'rejected' &&
+      windowTruncatedByPrune(
+        dayId,
+        prunedBeforeSec,
+        forcedOnsetSec: sleepSource == 'manual' || sleepSource == 'confirmed'
+            ? sleepOnsetSec
+            : null,
+      );
+
+  /// Whether a re-derive of [dayId] with its night from [sleepSource] (and
+  /// [sleepOnsetSec] for a user-set window) would be declined by the prune
+  /// guard in [_derivePreparedDay] and keep the stored row. Lets a sleep
+  /// correction be refused up front instead of stored and never applied.
+  static Future<bool> pruneDeclinesSleepRederive(
+    String dayId, {
+    required String sleepSource,
+    int? sleepOnsetSec,
+  }) async {
+    if (!sleepWindowTruncatedByPrune(
+      dayId,
+      await LocalDb.getCursorInt(_prunedBeforeCursor),
+      sleepSource: sleepSource,
+      sleepOnsetSec: sleepOnsetSec,
+    )) {
+      return false;
+    }
+    final existing = await LocalDb.dayResult(dayId);
+    return existing != null &&
+        (existing['rhr'] != null ||
+            existing['rmssd'] != null ||
+            existing['readiness'] != null);
+  }
+
   /// A stable, cheap signature of the CURRENT rolling baseline — the same inputs
   /// the readiness/illness baselines fold over. We take the trailing
   /// _baselineWindowDays derived rows and the median of each baseline series
@@ -5418,14 +5461,11 @@ class DerivationEngine {
             // An import brings its own substrate, the prune can't have cut it.
             // A rejected night has nothing to protect either.
             (!suppliedSubstrate &&
-                day.sleepSource != 'rejected' &&
-                windowTruncatedByPrune(
+                sleepWindowTruncatedByPrune(
                   day.date,
                   await LocalDb.getCursorInt(_prunedBeforeCursor),
-                  forcedOnsetSec: day.sleepSource == 'manual' ||
-                          day.sleepSource == 'confirmed'
-                      ? day.sleepOnsetSec
-                      : null,
+                  sleepSource: day.sleepSource,
+                  sleepOnsetSec: day.sleepOnsetSec,
                 )))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
