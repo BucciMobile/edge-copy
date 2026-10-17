@@ -154,6 +154,16 @@ class HrsLink {
   /// it is ending has to remember it.
   String? get deviceId => _host?.deviceId;
 
+  /// Whether the live session — published OR still being armed — belongs to
+  /// the row [id]. [deviceId] alone is not enough: it is only set once the
+  /// host is published, after a slot wait with no timeout and a 12 s connect,
+  /// and an arm for [id] already in that window would otherwise finish and
+  /// write under a row that has just been forgotten.
+  bool ownsSession(String id) => deviceId == id || _armingDeviceId == id;
+
+  @visibleForTesting
+  String? get armingDeviceIdForTest => _armingDeviceId;
+
   /// Bank what the armed sensor has sent so far and stay armed (a workout's
   /// stop, with the recovery tail still to record). No-op when not armed.
   Future<void> flush() async => _host?.flush();
@@ -945,12 +955,14 @@ class HrsLink {
     // the same family can both be paired (each remote id mints its own row),
     // and only the newest-seen one is armed — forgetting the old strap must
     // not drop the new one's live session mid-workout.
+    // "This row's" covers an arm still connecting for it, not only a
+    // published session — see [ownsSession].
     if (row?['adapter_id'] == kPolarPmd.id) {
-      if (PolarPmdLink.instance.deviceId == id) {
+      if (PolarPmdLink.instance.ownsSession(id)) {
         await PolarPmdLink.instance.disarm();
       }
     } else if (row?['adapter_id'] == kBleHrsAdapter.id) {
-      if (instance.deviceId == id) await instance.disarm();
+      if (instance.ownsSession(id)) await instance.disarm();
     }
     await LocalDb.deleteDevice(id);
   }
@@ -1014,7 +1026,10 @@ class HrsLink {
     // filled it, and a cancelled attempt completing must not null out the
     // live one's memo.
     mine = _arm().whenComplete(() {
-      if (identical(_arming, mine)) _arming = null;
+      if (identical(_arming, mine)) {
+        _arming = null;
+        _armingDeviceId = null;
+      }
     });
     return _arming = mine;
   }
@@ -1034,6 +1049,11 @@ class HrsLink {
   /// The in-flight [arm], or null — cleared by [disarm], which is what makes a
   /// cancelled attempt un-reusable. See [arm].
   Future<bool>? _arming;
+
+  /// The row id the in-flight [arm] read, from the moment it reads the row
+  /// until it publishes or fails — the window where [deviceId] is still null.
+  /// Cleared with `_arming`. See [ownsSession].
+  String? _armingDeviceId;
 
   /// The in-flight [disarm] chain, or null when nothing is being torn down.
   /// [arm] waits on it; see its doc for what goes wrong otherwise.
@@ -1060,6 +1080,9 @@ class HrsLink {
           'device id — re-pair it with a minted id.');
       return false;
     }
+    // Only while this attempt is still the live one: a cancelled attempt
+    // must not re-label the slot a [disarm] just cleared.
+    if (_disarms == disarmsAtStart) _armingDeviceId = deviceId;
     // Declared OUT here so the catch can reach it: `_device` is not a
     // substitute, because the whole point of the cleanup below is the case
     // where a [disarm] has already nulled it (or a fresher arm has replaced
@@ -1224,6 +1247,7 @@ class HrsLink {
     // live attempt. `arm()` identity-guards its own clear, so this cannot
     // strand a LATER attempt's memo.
     _arming = null;
+    _armingDeviceId = null;
     final prev = _disarming;
     late final Future<void> mine;
     mine = _disarmAfter(prev).whenComplete(() {

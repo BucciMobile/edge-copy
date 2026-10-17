@@ -60,6 +60,11 @@ class PolarPmdLink {
   /// The armed sensor's `device_id`, or null when nothing is armed.
   String? get deviceId => _host?.deviceId;
 
+  /// Whether the live session — published OR still being armed — belongs to
+  /// the row [id]. Same reason as `HrsLink.ownsSession`: [deviceId] is null
+  /// until the host is published, after the slot wait and the connect.
+  bool ownsSession(String id) => deviceId == id || _armingDeviceId == id;
+
   /// Bank what the armed sensor has sent so far and stay armed (a workout's
   /// stop, with the recovery tail still to record). No-op when not armed.
   Future<void> flush() async => _host?.flush();
@@ -73,6 +78,9 @@ class PolarPmdLink {
   }
 
   Future<bool>? _arming;
+
+  /// The row id the in-flight [arm] read; cleared with `_arming`.
+  String? _armingDeviceId;
   Future<void>? _disarming;
   int _disarms = 0;
 
@@ -93,7 +101,10 @@ class PolarPmdLink {
     if (existing != null) return existing;
     late final Future<bool> mine;
     mine = _arm().whenComplete(() {
-      if (identical(_arming, mine)) _arming = null;
+      if (identical(_arming, mine)) {
+        _arming = null;
+        _armingDeviceId = null;
+      }
     });
     return _arming = mine;
   }
@@ -120,6 +131,7 @@ class PolarPmdLink {
       // interleave its seconds with the band's in one REPLACE-keyed table.
       return false;
     }
+    if (_disarms == disarmsAtStart) _armingDeviceId = deviceId;
     final device = BluetoothDevice.fromId(remoteId);
     try {
       _device = device;
@@ -195,6 +207,7 @@ class PolarPmdLink {
   Future<void> disarm() {
     _disarms++;
     _arming = null;
+    _armingDeviceId = null;
     final prev = _disarming;
     late final Future<void> mine;
     mine = _disarmAfter(prev).whenComplete(() {

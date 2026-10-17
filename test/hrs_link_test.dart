@@ -309,6 +309,57 @@ void main() {
       releaseSecondaryLinkSlot();
     }
 
+    test('forgetting the row an arm is still connecting for cancels it',
+        () async {
+      await takeBothSlots();
+      final a = HrsLink.instance.arm();
+      await pumpEventQueue();
+      // Parked on the slot: the row is read but nothing is published, so
+      // `deviceId` is still null. Gating forget on `deviceId` alone let this
+      // attempt finish and write under the row it had just deleted.
+      expect(HrsLink.instance.deviceId, isNull);
+      expect(HrsLink.instance.armingDeviceIdForTest, 'hrs-0a1b2c3d');
+
+      await HrsLink.forgetDevice('hrs-0a1b2c3d');
+
+      // The disarm cleared the memo, so a later arm is a fresh attempt —
+      // and with the row gone it has nothing to arm.
+      expect(HrsLink.instance.armingDeviceIdForTest, isNull);
+      final b = HrsLink.instance.arm();
+      expect(identical(a, b), isFalse);
+      releaseSecondaryLinkSlot();
+      releaseSecondaryLinkSlot();
+      expect(await a, isFalse);
+      expect(await b, isFalse);
+      await expectNoSlotLeak();
+    });
+
+    test('forgetting a different strap leaves an arm in flight alone',
+        () async {
+      await LocalDb.upsertDevice(
+        id: 'hrs-99999999',
+        adapterId: kBleHrs.id,
+        remoteId: '11:22:33:44:55:66',
+      );
+      await takeBothSlots();
+      final a = HrsLink.instance.arm();
+      await pumpEventQueue();
+      final armingFor = HrsLink.instance.armingDeviceIdForTest;
+      expect(armingFor, isNotNull);
+      final other =
+          armingFor == 'hrs-99999999' ? 'hrs-0a1b2c3d' : 'hrs-99999999';
+
+      await HrsLink.forgetDevice(other);
+
+      expect(HrsLink.instance.armingDeviceIdForTest, armingFor);
+      expect(identical(a, HrsLink.instance.arm()), isTrue,
+          reason: 'the in-flight attempt must not have been cancelled');
+      releaseSecondaryLinkSlot();
+      releaseSecondaryLinkSlot();
+      expect(await a, isFalse); // connect() has no plugin under a test
+      await expectNoSlotLeak();
+    });
+
     test('a sensor whose flag is off is never armed', () async {
       await LocalDb.setCursor(wearableEnabledCursor(kBleHrs.id), '0');
       await takeBothSlots();
