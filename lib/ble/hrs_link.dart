@@ -941,11 +941,16 @@ class HrsLink {
     // called unconditionally — this fallback used to run for ANY adapter
     // without its own branch above, which would tear down a live chest-strap
     // session while forgetting an unrelated device (e.g. a Colmi ring paired
-    // alongside one).
+    // alongside one). AND ON THE ARMED SESSION BEING THIS ROW'S: two straps of
+    // the same family can both be paired (each remote id mints its own row),
+    // and only the newest-seen one is armed — forgetting the old strap must
+    // not drop the new one's live session mid-workout.
     if (row?['adapter_id'] == kPolarPmd.id) {
-      await PolarPmdLink.instance.disarm();
+      if (PolarPmdLink.instance.deviceId == id) {
+        await PolarPmdLink.instance.disarm();
+      }
     } else if (row?['adapter_id'] == kBleHrsAdapter.id) {
-      await instance.disarm();
+      if (instance.deviceId == id) await instance.disarm();
     }
     await LocalDb.deleteDevice(id);
   }

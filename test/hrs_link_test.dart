@@ -205,6 +205,54 @@ void main() {
     });
   });
 
+  group('forgetting one of two paired straps', () {
+    setUpAll(() {
+      sqfliteFfiInit();
+      databaseFactory = databaseFactoryFfi;
+    });
+
+    setUp(() async {
+      await LocalDb.close();
+      LocalDb.dbName = 'hrs_link_two_straps_test.db';
+      final dir = await databaseFactory.getDatabasesPath();
+      await databaseFactory.deleteDatabase(p.join(dir, LocalDb.dbName));
+    });
+
+    tearDown(() async => LocalDb.close());
+
+    test('leaves the other strap\'s live session alone', () async {
+      // Each remote id mints its own `ble_hrs` row, so an old strap and a new
+      // one can both be paired while only the new one is armed. Forgetting
+      // the old one used to call `disarm()` on adapter alone and drop the new
+      // strap's live HR for the rest of the workout.
+      const oldId = 'ble_hrs-old11111';
+      const newId = 'ble_hrs-new22222';
+      await LocalDb.upsertDevice(
+        id: oldId,
+        adapterId: kBleHrs.id,
+        remoteId: 'AA:AA:AA:AA:AA:AA',
+      );
+      await LocalDb.upsertDevice(
+        id: newId,
+        adapterId: kBleHrs.id,
+        remoteId: 'BB:BB:BB:BB:BB:BB',
+      );
+      await HrsLink.instance.ingestForTest(newId, const [
+        (1_800_000_000, kHrWithTwoRr),
+      ]);
+      expect(HrsLink.instance.reading.value, isNotNull);
+
+      await HrsLink.forgetDevice(oldId);
+
+      // `disarm()` unconditionally nulls this on its way out.
+      expect(HrsLink.instance.reading.value, isNotNull);
+      final ids = (await LocalDb.deviceRows()).map((r) => r['id']).toSet();
+      expect(ids.contains(oldId), isFalse);
+      expect(ids.contains(newId), isTrue);
+      await HrsLink.instance.disarm();
+    });
+  });
+
   // WHY THESE LIVE AT THIS LEVEL. `flutter_blue_plus` has no simulator path,
   // so a test cannot hold a real 12 s connect open — but it does not have to.
   // `_arm` awaits a secondary-link slot immediately BEFORE `connect()`, so
