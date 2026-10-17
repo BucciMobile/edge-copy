@@ -93,6 +93,31 @@ class EdgeTrackingService : Service() {
             if (location != null) intent.putExtra(EXTRA_LOCATION, location)
             ContextCompat.startForegroundService(context, intent)
         }
+
+        /**
+         * [start] for callers that run with no foreground UI (broadcast
+         * receivers). On API 31+ a background FGS start is refused with
+         * ForegroundServiceStartNotAllowedException unless the app holds an
+         * exemption (CDM association or battery-optimization exemption), and
+         * both are optional. Thrown out of onReceive, that kills the process.
+         * Returns false when the start was refused.
+         */
+        @JvmStatic
+        fun startFromBackground(context: Context, caller: String): Boolean =
+            startGuarded({ start(context) }) { e ->
+                Log.w(caller, "EdgeTrackingService start refused: $e")
+            }
+
+        internal fun startGuarded(
+            start: () -> Unit,
+            onRefused: (Exception) -> Unit,
+        ): Boolean = try {
+            start()
+            true
+        } catch (e: Exception) {
+            onRefused(e)
+            false
+        }
     }
 
     override fun onCreate() {

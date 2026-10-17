@@ -76,9 +76,12 @@ class TaskerReceiver : BroadcastReceiver() {
         prefs.edit()
             .putBoolean(PENDING_BUZZ_KEY, true)
             .putInt(PENDING_PATTERN_KEY, pattern)
-            .apply()
+            // commit, not apply: if the service start below is refused the
+            // flag is the only record of this buzz, and the next app launch
+            // replays it from disk.
+            .commit()
 
-        EdgeTrackingService.start(context)
+        EdgeTrackingService.startFromBackground(context, TAG)
     }
 
     companion object {
