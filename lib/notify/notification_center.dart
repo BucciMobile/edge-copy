@@ -575,17 +575,22 @@ class NotificationCenter {
   /// could fill it. Priority: medical flags first (they are the sanctioned
   /// detections), then a plainly-stated resting-HR drift, then silence.
   static String? weeklyLookbackFinding(
-      List<Map<String, dynamic>> recentDays) {
-    // `recent[]` is the whole rollup window (90 days, oldest first); the
-    // lookback is the last week of it.
-    // ponytail: last 7 rows, not 7 calendar days; a gappy week reaches a bit
-    // further back.
-    final week = recentDays.length > 7
-        ? recentDays.sublist(recentDays.length - 7)
-        : recentDays;
-    final days = week
-        .where((d) => d['unsettled'] != true)
-        .toList(growable: false);
+      List<Map<String, dynamic>> recentDays,
+      {String? today}) {
+    // `recent[]` is the whole rollup window (90 days, oldest first) and holds
+    // DERIVED days only, so its tail is whatever was last derived — after a
+    // wear gap that can be weeks old. The copy says "this week", so the window
+    // is the last 7 calendar days ending today, by date, never the last 7 rows.
+    final end = today ?? todayLabel();
+    final start = dayLabelBefore(end, 7);
+    if (start == null) return null;
+    final days = recentDays.where((d) {
+      final date = d['date'];
+      return date is String &&
+          date.compareTo(start) > 0 &&
+          date.compareTo(end) <= 0 &&
+          d['unsettled'] != true;
+    }).toList(growable: false);
     if (days.isEmpty) return null;
 
     // Medical flags, counted per kind. These reuse the same detectors the

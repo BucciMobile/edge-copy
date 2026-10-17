@@ -10,6 +10,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:openstrap_edge/data/day_label.dart';
 import 'package:openstrap_edge/notify/notification_center.dart';
 import 'package:openstrap_edge/notify/notification_event.dart';
 import 'package:openstrap_edge/notify/notification_prefs.dart';
@@ -212,69 +213,95 @@ void main() {
   });
 
   group('weeklyLookbackFinding', () {
+    const today = '2026-04-15';
+    // [back] calendar days before [today].
+    String ago(int back) => dayLabelBefore(today, back)!;
+    String? find(List<Map<String, dynamic>> days) =>
+        NotificationCenter.weeklyLookbackFinding(days, today: today);
+
     test('an empty week says nothing', () {
-      expect(NotificationCenter.weeklyLookbackFinding(const []), isNull);
+      expect(find(const []), isNull);
     });
 
     test('unsettled nights are excluded from every count', () {
-      final f = NotificationCenter.weeklyLookbackFinding([
-        _day(date: 'a', illness: true, unsettled: true),
-        _day(date: 'b'),
-        _day(date: 'c'),
+      final f = find([
+        _day(date: ago(3), illness: true, unsettled: true),
+        _day(date: ago(2)),
+        _day(date: ago(1)),
       ]);
       expect(f, isNull, reason: 'the only flagged night was unsettled');
     });
 
     test('medical flags are named, per kind', () {
-      final f = NotificationCenter.weeklyLookbackFinding([
-        _day(date: 'a', illness: true),
-        _day(date: 'b', illness: true),
-        _day(date: 'c', temp: true),
-        _day(date: 'd'),
+      final f = find([
+        _day(date: ago(4), illness: true),
+        _day(date: ago(3), illness: true),
+        _day(date: ago(2), temp: true),
+        _day(date: ago(1)),
       ]);
       expect(f, contains('resting heart rate raised ×2'));
       expect(f, contains('elevated skin temperature ×1'));
     });
 
     test('a quiet week with stable RHR says nothing', () {
-      final f = NotificationCenter.weeklyLookbackFinding([
-        for (var i = 0; i < 7; i++) _day(date: '$i', rhr: 52.0),
+      final f = find([
+        for (var i = 6; i >= 0; i--) _day(date: ago(i), rhr: 52.0),
       ]);
       expect(f, isNull);
     });
 
     test('a ≥3 bpm RHR drift is stated plainly, both directions', () {
-      final up = NotificationCenter.weeklyLookbackFinding([
-        _day(date: '1', rhr: 50), _day(date: '2', rhr: 51),
-        _day(date: '3', rhr: 52), _day(date: '4', rhr: 53),
-        _day(date: '5', rhr: 56), _day(date: '6', rhr: 57),
-        _day(date: '7', rhr: 58),
+      final up = find([
+        _day(date: ago(6), rhr: 50), _day(date: ago(5), rhr: 51),
+        _day(date: ago(4), rhr: 52), _day(date: ago(3), rhr: 53),
+        _day(date: ago(2), rhr: 56), _day(date: ago(1), rhr: 57),
+        _day(date: ago(0), rhr: 58),
       ]);
       expect(up, contains('higher'));
-      final down = NotificationCenter.weeklyLookbackFinding([
-        _day(date: '1', rhr: 58), _day(date: '2', rhr: 57),
-        _day(date: '3', rhr: 56), _day(date: '4', rhr: 53),
-        _day(date: '5', rhr: 50), _day(date: '6', rhr: 49),
-        _day(date: '7', rhr: 48),
+      final down = find([
+        _day(date: ago(6), rhr: 58), _day(date: ago(5), rhr: 57),
+        _day(date: ago(4), rhr: 56), _day(date: ago(3), rhr: 53),
+        _day(date: ago(2), rhr: 50), _day(date: ago(1), rhr: 49),
+        _day(date: ago(0), rhr: 48),
       ]);
       expect(down, contains('lower'));
     });
 
     test('only the last week of the rollup counts', () {
-      final f = NotificationCenter.weeklyLookbackFinding([
-        _day(date: 'old', illness: true, rhr: 45),
-        for (var i = 0; i < 20; i++) _day(date: 'mid$i', rhr: 45),
-        for (var i = 0; i < 7; i++) _day(date: 'week$i', rhr: 52),
+      final f = find([
+        _day(date: ago(40), illness: true, rhr: 45),
+        for (var i = 30; i > 9; i--) _day(date: ago(i), rhr: 45),
+        for (var i = 6; i >= 0; i--) _day(date: ago(i), rhr: 52),
       ]);
       expect(f, isNull,
           reason: 'a flag and an RHR level from weeks ago are not this week');
     });
 
+    test('after a wear gap, the last derived days are not "this week"', () {
+      // Flags derived six weeks ago, nothing since: the tail of recent[] is
+      // old, and must not be presented as this week's review.
+      final f = find([
+        for (var i = 48; i >= 41; i--)
+          _day(date: ago(i), rhr: 52, illness: i <= 42),
+      ]);
+      expect(f, isNull);
+    });
+
+    test('a gappy week does not reach back past 7 calendar days', () {
+      final f = find([
+        _day(date: ago(9), illness: true),
+        _day(date: ago(8), illness: true),
+        _day(date: ago(2)),
+        _day(date: ago(1)),
+      ]);
+      expect(f, isNull);
+    });
+
     test('too few RHR nights stays silent even if the drift looks big', () {
-      final f = NotificationCenter.weeklyLookbackFinding([
-        _day(date: '1', rhr: 50),
-        _day(date: '2', rhr: 58),
-        _day(date: '3', rhr: 50),
+      final f = find([
+        _day(date: ago(2), rhr: 50),
+        _day(date: ago(1), rhr: 58),
+        _day(date: ago(0), rhr: 50),
       ]);
       expect(f, isNull);
     });
