@@ -1586,11 +1586,7 @@
   "dayTimelinePatternsNote": "Это совпадения в ваших записях, а не причины. Соседние события лишь произошли примерно в одно время — большего эта страница не утверждает.",
   "journalComposeNotReady": "Ещё не готово — сначала откройте приложение.",
   "journalComposeSaveFailed": "Не удалось сохранить. Проверьте свободное место и повторите.",
-  "journalComposeEntrySaveFailed": "Не сохранено — запись осталась на экране. Повторите попытку.",
-  "journalComposeLoadFailed": "Не удалось открыть дневник за этот день.",
-  "journalComposeTryAgain": "Повторить",
   "journalComposeWhenWasLastOne": "Когда это было в последний раз?",
-  "journalComposeAddToJournal": "Добавить в дневник",
   "journalComposeTitle": "Дневник",
   "journalComposeTodaySection": "Сегодня",
   "journalComposeTrackSomethingElse": "Добавить свой показатель",
@@ -7565,8 +7561,40 @@
     }
   },
   "napsInFuture": "Этот дневной сон ещё не закончился. Запишите его, когда проснётесь.",
+  "journalComposeEntrySaveFailed": "Не сохранено — запись осталась на экране. Повторите попытку.",
+  "journalComposeLoadFailed": "Не удалось открыть дневник за этот день.",
+  "journalComposeTryAgain": "Повторить",
+  "journalComposeAddToJournal": "Добавить в дневник",
   "workoutLoadFailedTitle": "Не удалось прочитать активность",
   "workoutLoadFailedBody": "Не удалось загрузить ваши тренировки. Ничего не удалено — это ошибка чтения, а не отсутствие данных.",
+  "liveHrNoReadingTitle": "Нет живых данных",
+  "liveHrNotPairedWhy": "Браслет не подключён к приложению.",
+  "liveHrNotPairedFix": "Подключите его в Профиле, чтобы видеть пульс в реальном времени.",
+  "liveHrNotConnectedWhy": "Браслет не на связи.",
+  "liveHrNotConnectedFix": "Для пульса в реальном времени нужно открытое соединение — приложение подключается, когда вы открываете его рядом с браслетом.",
+  "liveHrNoRecentBeatWhy": "Нет ударов за последние {seconds} с.",
+  "@liveHrNoRecentBeatWhy": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "liveHrStreamingFix": "Браслет передаёт данные, пока он на запястье и приложение открыто.",
+  "liveHrTraceCaption": "Последние значения ({count}) — {min}–{max} уд/мин. Не сохраняются: это поток в реальном времени, а не запись вашего дня.",
+  "@liveHrTraceCaption": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "min": {
+        "type": "int"
+      },
+      "max": {
+        "type": "int"
+      }
+    }
+  },
   "notifRecoveryReadyBody": "Восстановление {score}.",
   "@notifRecoveryReadyBody": {
     "placeholders": {

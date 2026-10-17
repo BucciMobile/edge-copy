@@ -3680,25 +3680,9 @@
   "@journalComposeSaveFailed": {
     "description": "Snackbar shown when saving a new custom journal field fails."
   },
-  "journalComposeEntrySaveFailed": "Not saved — your entry is still here. Try again.",
-  "@journalComposeEntrySaveFailed": {
-    "description": "Snackbar shown when saving the day's journal entry fails; the screen stays open with the entry intact."
-  },
-  "journalComposeLoadFailed": "Could not open this day's journal.",
-  "@journalComposeLoadFailed": {
-    "description": "Shown in place of the journal form when reading the day's entry fails."
-  },
-  "journalComposeTryAgain": "Try again",
-  "@journalComposeTryAgain": {
-    "description": "Button that retries loading the journal entry after a failure."
-  },
   "journalComposeWhenWasLastOne": "When was the last one?",
   "@journalComposeWhenWasLastOne": {
     "description": "Time picker help text when logging the time of the last dose of a journal field."
-  },
-  "journalComposeAddToJournal": "Add to journal",
-  "@journalComposeAddToJournal": {
-    "description": "Journal AI chat sheet: primary button that copies the proposed tags and note into the day's entry."
   },
   "journalComposeTitle": "Journal",
   "@journalComposeTitle": {
@@ -15888,6 +15872,22 @@
   "@napsInFuture": {
     "description": "Validation error when a manually logged nap ends after the current time."
   },
+  "journalComposeEntrySaveFailed": "Not saved — your entry is still here. Try again.",
+  "@journalComposeEntrySaveFailed": {
+    "description": "Snackbar shown when saving the day's journal entry fails; the screen stays open with the entry intact."
+  },
+  "journalComposeLoadFailed": "Could not open this day's journal.",
+  "@journalComposeLoadFailed": {
+    "description": "Shown in place of the journal form when reading the day's entry fails."
+  },
+  "journalComposeTryAgain": "Try again",
+  "@journalComposeTryAgain": {
+    "description": "Button that retries loading the journal entry after a failure."
+  },
+  "journalComposeAddToJournal": "Add to journal",
+  "@journalComposeAddToJournal": {
+    "description": "Journal AI chat sheet: primary button that copies the proposed tags and note into the day's entry."
+  },
   "workoutLoadFailedTitle": "Activity could not be read",
   "@workoutLoadFailedTitle": {
     "description": "Title of the card shown on the Activity tab when the sessions failed to load from the database."
@@ -15895,6 +15895,34 @@
   "workoutLoadFailedBody": "Your sessions failed to load. Nothing was deleted — this is a read that went wrong, not missing data.",
   "@workoutLoadFailedBody": {
     "description": "Body of the card shown on the Activity tab when the sessions failed to load from the database."
+  },
+  "liveHrNoReadingTitle": "No live reading",
+  "liveHrNotPairedWhy": "No band is paired.",
+  "liveHrNotPairedFix": "Pair one from Profile to read live beats.",
+  "liveHrNotConnectedWhy": "Your band is not connected.",
+  "liveHrNotConnectedFix": "Live beats need an open link — the app connects when you open it with the band in range.",
+  "liveHrNoRecentBeatWhy": "No beat in the last {seconds} seconds.",
+  "@liveHrNoRecentBeatWhy": {
+    "placeholders": {
+      "seconds": {
+        "type": "int"
+      }
+    }
+  },
+  "liveHrStreamingFix": "The band streams while it is on your wrist and the app is open.",
+  "liveHrTraceCaption": "The last {count} readings — {min}–{max} bpm. Not stored; this is the live stream, not a record of your day.",
+  "@liveHrTraceCaption": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      },
+      "min": {
+        "type": "int"
+      },
+      "max": {
+        "type": "int"
+      }
+    }
   },
   "notifRecoveryReadyBody": "Recovery {score}.",
   "@notifRecoveryReadyBody": {
