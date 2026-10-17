@@ -109,6 +109,77 @@ void main() {
     expect(scope.contains('lastSynced = null;'), isTrue);
   });
 
+  // ── the secondary sensors ─────────────────────────────────────────────────
+  //
+  // signOut's unpair reaches only the primary band. An armed chest strap or an
+  // Oura offload kept committing across the wipe, and the ring's and Mi Band's
+  // pairing keys stayed in the keychain with no device row left to find them.
+
+  test('resetAllData stops the secondary sensors before the wipe', () {
+    final body = src.substring(src.indexOf('Future<String?> resetAllData() async'));
+    final stop = body.indexOf('await _stopSecondaryLinksForReset();');
+    final ids = body.indexOf('await _secondaryDeviceIdsForReset();');
+    final wipe = body.indexOf('LocalDb.wipeAll()');
+    expect(stop, greaterThanOrEqualTo(0));
+    expect(stop, lessThan(wipe));
+    expect(ids, greaterThanOrEqualTo(0));
+    expect(ids, lessThan(wipe),
+        reason: 'the wipe deletes the device rows the key ids come from');
+
+    final helper = src.substring(
+        src.indexOf('Future<void> _stopSecondaryLinksForReset() async'));
+    final helperBody = helper.substring(0, helper.indexOf('\n  }\n'));
+    for (final call in [
+      '_workoutController.discardForReset',
+      'OuraLink.instance.stop',
+      'UltrahumanLink.instance.stop',
+      'ColmiLink.instance.stop',
+      'GarminLink.instance.stop',
+      'MiBand234Link.instance.stop',
+      'PebbleLink.instance.stop',
+      'CorosLink.instance.stop',
+      'SessionLink.all',
+    ]) {
+      expect(helperBody.contains(call), isTrue, reason: '$call not stopped');
+    }
+  });
+
+  test('resetAllData drops the sensor pairing keys', () {
+    final body = src.substring(src.indexOf('Future<String?> resetAllData() async'));
+    final scope = body.substring(0, body.indexOf('} finally {'));
+    expect(scope.contains('OuraLink.dropStoredKey(id)'), isTrue);
+    expect(scope.contains('MiBand234Link.dropStoredKey(id)'), isTrue);
+  });
+
+  test('BandHost refuses every database write during a reset', () {
+    final host = File('lib/ble/adapters/host.dart').readAsStringSync();
+    for (final write in [
+      'LocalDb.commitSyncBatch(',
+      'LocalDb.putObservations(',
+      'LocalDb.putVendorSleepEpochs(',
+    ]) {
+      var at = host.indexOf(write);
+      expect(at, greaterThanOrEqualTo(0), reason: '$write not found');
+      while (at >= 0) {
+        // The refusal sits inside the same try, just above the write.
+        final tryAt = host.lastIndexOf('try {', at);
+        final window = host.substring(tryAt, at);
+        expect(window.contains('_refuseDuringReset();'), isTrue,
+            reason: '$write at offset $at is not gated');
+        at = host.indexOf(write, at + write.length);
+      }
+    }
+  });
+
+  test('the headless piggyback does not sync secondaries during a reset', () {
+    final run = bg.substring(bg.indexOf('Future<bool> runHeadlessSync('));
+    final fin = run.substring(run.indexOf('} finally {'));
+    expect(fin.contains('if (!ResetGate.active) await _syncPairedSensors();'),
+        isTrue);
+    expect(fin.substring(0, fin.indexOf('\n}\n')).contains('.instance.sync()'),
+        isFalse, reason: 'every secondary sync goes through the gated helper');
+  });
+
   // ── the OTHER engine ──────────────────────────────────────────────────────
   //
   // `runHeadlessSync` builds its own BleEngine with callbacks wired straight to

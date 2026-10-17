@@ -137,6 +137,10 @@ class MiBand234Link {
   /// keychain/keystore exactly as reading one does — there is nothing for the
   /// user to redo, and a delete that cannot run now costs nothing left behind
   /// that this app itself can read.
+  /// [_dropKey] for "delete everything", which removes the `device` rows
+  /// [forgetBand] would need and so must drop the keys itself.
+  static Future<void> dropStoredKey(String deviceId) => _dropKey(deviceId);
+
   static Future<void> _dropKey(String deviceId) async {
     try {
       await _secure.delete(

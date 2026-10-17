@@ -358,74 +358,82 @@ Future<bool> runHeadlessSync({BandLease? lease}) async {
       '(${BandOwnership.debugState})',
     );
     BandOwnership.release(ownedLease);
-    // Piggyback paired sensors on the same OS wake window, after the band
-    // work is fully done so neither can ever delay or interfere with WHOOP's
-    // own timing. Both `sync()` calls already no-op when nothing is paired
-    // and never throw, but this is the one shared headless entry point (every
-    // wake source funnels through runHeadlessSync via HeadlessSyncGate) so a
-    // failure in either must not be allowed to escape and mark the WHOOP
-    // cycle as errored.
+    // Not during "delete everything": a secondary sync started now would
+    // bank a device the reset is removing into the store it just emptied.
+    if (!ResetGate.active) await _syncPairedSensors();
+  }
+}
+
+/// The paired sensors' piggyback on a headless wake. Runs after the band work
+/// is fully done so it can never delay or interfere with WHOOP's own timing.
+Future<void> _syncPairedSensors() async {
+  // Piggyback paired sensors on the same OS wake window, after the band
+  // work is fully done so neither can ever delay or interfere with WHOOP's
+  // own timing. Both `sync()` calls already no-op when nothing is paired
+  // and never throw, but this is the one shared headless entry point (every
+  // wake source funnels through runHeadlessSync via HeadlessSyncGate) so a
+  // failure in either must not be allowed to escape and mark the WHOOP
+  // cycle as errored.
+  try {
+    await OuraLink.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] oura sync skipped: $e');
+  }
+  // Same piggyback, same reasoning: CorosLink.sync() no-ops when nothing is
+  // paired and never throws, but this is the one shared headless entry
+  // point, so a failure here must not escape either.
+  try {
+    await CorosLink.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] coros sync skipped: $e');
+  }
+  // Same piggyback, same reasoning: GarminLink.sync() no-ops when nothing
+  // is paired and never throws, but this is the one shared headless entry
+  // point, so a failure here must not escape either.
+  try {
+    await GarminLink.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] garmin sync skipped: $e');
+  }
+  // Same piggyback, same reasoning: UltrahumanLink.sync() no-ops when
+  // nothing is paired and never throws, but this call must not be allowed
+  // to escape and mark the WHOOP cycle as errored either way.
+  try {
+    await UltrahumanLink.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] ultrahuman sync skipped: $e');
+  }
+  // Same reasoning, same slot, for a paired Mi Band: MiBand234Link.sync()
+  // also no-ops when nothing is paired and never throws, but guard it
+  // anyway so a surprise failure here still can't mark the WHOOP cycle
+  // errored.
+  try {
+    await MiBand234Link.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] miband234 sync skipped: $e');
+  }
+  // Same piggyback, same reasoning: a bounded connect-drain window that
+  // no-ops when nothing is paired and must never mark the WHOOP cycle
+  // errored on its own failure.
+  try {
+    await PebbleLink.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] pebble sync skipped: $e');
+  }
+  // Same piggyback, same reasoning: no-ops when unpaired, must never let a
+  // failure here mark the WHOOP cycle as errored.
+  try {
+    await ColmiLink.instance.sync();
+  } catch (e) {
+    debugPrint('[bgsync] colmi sync skipped: $e');
+  }
+  // Thermometer and scales: same piggyback; each no-ops when unpaired and
+  // only reaches a device that happens to be awake and nearby.
+  for (final link in SessionLink.all) {
     try {
-      await OuraLink.instance.sync();
+      await link.sync();
     } catch (e) {
-      debugPrint('[bgsync] oura sync skipped: $e');
-    }
-    // Same piggyback, same reasoning: CorosLink.sync() no-ops when nothing is
-    // paired and never throws, but this is the one shared headless entry
-    // point, so a failure here must not escape either.
-    try {
-      await CorosLink.instance.sync();
-    } catch (e) {
-      debugPrint('[bgsync] coros sync skipped: $e');
-    }
-    // Same piggyback, same reasoning: GarminLink.sync() no-ops when nothing
-    // is paired and never throws, but this is the one shared headless entry
-    // point, so a failure here must not escape either.
-    try {
-      await GarminLink.instance.sync();
-    } catch (e) {
-      debugPrint('[bgsync] garmin sync skipped: $e');
-    }
-    // Same piggyback, same reasoning: UltrahumanLink.sync() no-ops when
-    // nothing is paired and never throws, but this call must not be allowed
-    // to escape and mark the WHOOP cycle as errored either way.
-    try {
-      await UltrahumanLink.instance.sync();
-    } catch (e) {
-      debugPrint('[bgsync] ultrahuman sync skipped: $e');
-    }
-    // Same reasoning, same slot, for a paired Mi Band: MiBand234Link.sync()
-    // also no-ops when nothing is paired and never throws, but guard it
-    // anyway so a surprise failure here still can't mark the WHOOP cycle
-    // errored.
-    try {
-      await MiBand234Link.instance.sync();
-    } catch (e) {
-      debugPrint('[bgsync] miband234 sync skipped: $e');
-    }
-    // Same piggyback, same reasoning: a bounded connect-drain window that
-    // no-ops when nothing is paired and must never mark the WHOOP cycle
-    // errored on its own failure.
-    try {
-      await PebbleLink.instance.sync();
-    } catch (e) {
-      debugPrint('[bgsync] pebble sync skipped: $e');
-    }
-    // Same piggyback, same reasoning: no-ops when unpaired, must never let a
-    // failure here mark the WHOOP cycle as errored.
-    try {
-      await ColmiLink.instance.sync();
-    } catch (e) {
-      debugPrint('[bgsync] colmi sync skipped: $e');
-    }
-    // Thermometer and scales: same piggyback; each no-ops when unpaired and
-    // only reaches a device that happens to be awake and nearby.
-    for (final link in SessionLink.all) {
-      try {
-        await link.sync();
-      } catch (e) {
-        debugPrint('[bgsync] ${link.entry.id} sync skipped: $e');
-      }
+      debugPrint('[bgsync] ${link.entry.id} sync skipped: $e');
     }
   }
 }

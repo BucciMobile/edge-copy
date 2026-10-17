@@ -12,6 +12,7 @@ import 'package:openstrap_edge/ble/adapters/ble_hrs.dart';
 import 'package:openstrap_edge/ble/adapters/host.dart';
 import 'package:openstrap_edge/ble/adapters/signals.dart';
 import 'package:openstrap_edge/data/db.dart';
+import 'package:openstrap_edge/sync/reset_gate.dart';
 
 const List<int> kBpmOnly = <int>[0x00, 61];
 const List<int> kHrWithTwoRr = <int>[
@@ -173,6 +174,41 @@ void main() {
       isEmpty,
       reason: 'nothing from the failed transaction reached the table',
     );
+  });
+
+  test('a session still running during "delete everything" writes nothing '
+      'and never confirms', () async {
+    // A chest strap armed by a workout, or an Oura offload, is not stopped by
+    // the primary band's unpair. Whatever it commits after the wipe would put
+    // a deleted device's rows back into the fresh store.
+    addTearDown(ResetGate.resetForTest);
+    final notes = <String>[];
+    var confirmed = false;
+    final adapter = _CheckpointAdapter(() async {
+      confirmed = true;
+      return true;
+    });
+    final host = BandHost(
+      adapter: adapter,
+      deviceId: deviceId,
+      onNote: (key, _) => notes.add(key),
+    );
+    ResetGate.enter();
+    final link = ReplayBandLink();
+    final future = host.run(link);
+    await link.close();
+    await future;
+    await host.stop();
+    ResetGate.leave();
+
+    expect(confirmed, isFalse,
+        reason: 'the device keeps what was never banked');
+    expect(notes, contains('host_commit_failed'));
+    final db = await LocalDb.instance;
+    expect(await db.query('decoded_onehz'), isEmpty);
+    expect(await db.query('sync_cursor'), isEmpty);
+    expect(await db.query('compute_jobs'), isEmpty,
+        reason: 'no derive is queued over a wiped store');
   });
 
   test('the control case: a landed commit confirms and emits no '

@@ -34,6 +34,7 @@ import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 
 import '../../data/db.dart';
 import '../../data/models.dart';
+import '../../sync/reset_gate.dart';
 import '_registry.dart' show DeviceCategory, TimeAnchor;
 import 'adapter.dart';
 
@@ -200,6 +201,16 @@ class BandHost {
 
   static void _noLog(String _) {}
 
+  /// Every database write below refuses while "delete everything" runs. A
+  /// secondary session (an armed chest strap, an Oura offload) is not stopped
+  /// by the primary band's unpair, so a batch landing after the wipe would
+  /// put a deleted device's rows back into the fresh store. Thrown, not
+  /// skipped, so each site takes its own failure path: the buffer is kept,
+  /// the checkpoint is never confirmed, and the device still holds the data.
+  static void _refuseDuringReset() {
+    if (ResetGate.active) throw StateError('data reset in progress');
+  }
+
   /// Pokes the app's derive scheduler after a wearable's session banked
   /// something. Unset (a headless wake), the session queues the derive in
   /// `compute_jobs` itself, which the scheduler drains when the app opens.
@@ -293,7 +304,9 @@ class BandHost {
     if (_stored && adapter.entry.category == DeviceCategory.wearable) {
       _stored = false;
       final poke = onWearableStored;
-      if (poke != null) {
+      if (ResetGate.active) {
+        // Nothing to derive from: the rows it would read were just wiped.
+      } else if (poke != null) {
         poke();
       } else {
         await LocalDb.enqueueDeriveJob(
@@ -353,6 +366,7 @@ class BandHost {
           ];
           if (kept.isEmpty) return;
           try {
+            _refuseDuringReset();
             await LocalDb.putVendorSleepEpochs(kept,
                 deviceId: deviceId, source: source, wholeNights: wholeNights);
             _stored = true;
@@ -405,6 +419,7 @@ class BandHost {
         : {for (final c in e.cursors.entries) '${c.key}:$deviceId': c.value};
     if (rows.isEmpty && cursors.isEmpty) return 0;
     try {
+      _refuseDuringReset();
       final n = await LocalDb.putObservations(rows,
           deviceId: deviceId, cursors: cursors);
       _stored = true;
@@ -540,6 +555,7 @@ class BandHost {
         return true;
       }
       try {
+        _refuseDuringReset();
         await LocalDb.commitSyncBatch(const [], const [],
             deviceId: deviceId,
             deviceFamily: adapter.id,
@@ -573,6 +589,7 @@ class BandHost {
         ),
     ];
     try {
+      _refuseDuringReset();
       Future<void> commit() async => await LocalDb.commitSyncBatch(
             const [],
             const [],
@@ -632,6 +649,7 @@ class BandHost {
     String? deviceFamily,
   }) async {
     try {
+      _refuseDuringReset();
       await LocalDb.commitSyncBatch(
         raws,
         samples,

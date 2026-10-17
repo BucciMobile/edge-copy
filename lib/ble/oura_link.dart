@@ -74,6 +74,7 @@ import 'package:openstrap_protocol/openstrap_protocol.dart';
 import '../data/db.dart';
 import '../data/models.dart' show ArchiveRecord;
 import '../sync/paired_device.dart' show cleanDeviceLabel;
+import '../sync/reset_gate.dart';
 import 'adapters/_registry.dart';
 import 'adapters/adapter.dart';
 import 'adapters/gatt_link.dart';
@@ -317,6 +318,10 @@ class OuraLink {
   /// keychain/keystore exactly as [_readKey] does — there is nothing for the
   /// user to redo, and a delete that cannot run now costs nothing left behind
   /// that this app itself can read.
+  /// [_dropKey] for "delete everything", which removes the `device` rows
+  /// [forgetRing] would need and so must drop the keys itself.
+  static Future<void> dropStoredKey(String deviceId) => _dropKey(deviceId);
+
   static Future<void> _dropKey(String deviceId) async {
     try {
       await _secure.delete(
@@ -972,6 +977,10 @@ class OuraLink {
     // the end, which only ever gets there by going BACKWARDS. A guard that
     // refused to lower it would turn the one recoverable case into the
     // permanent stall it exists to fix.
+    // Refused during "delete everything": this write lands after the batches
+    // it follows, so a reset that began mid-sync would otherwise leave the
+    // deleted ring's bookmark in the wiped store.
+    if (ResetGate.active) throw StateError('data reset in progress');
     await LocalDb.setCursor(_cursorItem(deviceId), '$ds');
   }
 

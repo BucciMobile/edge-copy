@@ -1027,6 +1027,18 @@ class WorkoutController {
     LiveActivity.end();
   }
 
+  /// "Delete everything": end a live workout without saving it and disarm
+  /// the workout sensors, including a stopped workout's recovery tail. An
+  /// armed strap otherwise keeps banking beats into the database the reset
+  /// is emptying, and the primary band's unpair does not reach it.
+  Future<void> discardForReset() async {
+    if (activeWorkout != null) {
+      await _cancelActiveWorkoutTeardown();
+    } else {
+      await _disarmSensors();
+    }
+  }
+
   /// Delete a stored workout session and, if it happens to be the one
   /// currently tracked as "live", fully tear down that live state too (see
   /// [_cancelActiveWorkoutTeardown]). Previously the UI called

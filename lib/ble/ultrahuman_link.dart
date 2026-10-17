@@ -41,6 +41,7 @@ import 'package:openstrap_protocol/openstrap_protocol.dart';
 
 import '../data/db.dart';
 import '../data/models.dart' show ArchiveRecord;
+import '../sync/reset_gate.dart';
 import 'adapters/_registry.dart';
 import 'adapters/adapter.dart' show ReplayBandLink;
 import 'adapters/gatt_link.dart';
@@ -366,6 +367,8 @@ class UltrahumanLink {
     if (deviceId == null) return;
     // NOT MONOTONIC, and it must not be — see `oura_link.dart`'s identical
     // note on why 0 arriving here is the recoverable case, not a bug.
+    // Refused during "delete everything", for the same reason as Oura's.
+    if (ResetGate.active) throw StateError('data reset in progress');
     await LocalDb.setCursor(_cursorItem(deviceId), '$index');
   }
 }

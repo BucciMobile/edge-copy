@@ -42,6 +42,13 @@ import '../ble/ble_state.dart'
     show AlarmConfirmation, AlarmEffect, LiveStreamOwners;
 import '../ble/ios_ble_restore.dart';
 import '../ble/session_link.dart' show SessionLink;
+import '../ble/colmi_link.dart' show ColmiLink;
+import '../ble/coros_link.dart' show CorosLink;
+import '../ble/garmin_link.dart' show GarminLink;
+import '../ble/miband_link.dart' show MiBand234Link;
+import '../ble/oura_link.dart' show OuraLink;
+import '../ble/pebble_link.dart' show PebbleLink;
+import '../ble/ultrahuman_link.dart' show UltrahumanLink;
 import '../cloud/companion_client.dart';
 import '../compute/derivation_engine.dart';
 import '../compute/derive_scheduler.dart';
@@ -1292,6 +1299,15 @@ class AppState extends ChangeNotifier {
       // Cleanup waits for in-flight folder saves, including on failure.
       final folderToRelease = backupFolder;
 
+      // The secondary sensors next. signOut's unpair reaches only the primary
+      // band, so an armed chest strap or an Oura offload kept writing across
+      // the wipe. ResetGate already refuses their commits; this ends the
+      // sessions so nothing is left running against the emptied store.
+      await _stopSecondaryLinksForReset();
+      // Read before the wipe: it deletes the `device` rows, and those ids are
+      // the only way to find each sensor's pairing key afterwards.
+      final secondaryIds = await _secondaryDeviceIdsForReset();
+
       // 2 · every row in every table (see LocalDb.wipeAll for why it is not a
       // hand-written table list, and for the sync_cursor decision).
       await LocalDb.wipeAll();
@@ -1303,6 +1319,14 @@ class AppState extends ChangeNotifier {
         await coachConfig?.save(apiKey: ''); // deletes the keychain entry
       } catch (e) {
         _log('[reset] keychain clear failed: $e');
+      }
+      // The ring's and Mi Band's 16-byte pairing keys. iOS keeps keychain
+      // items across an uninstall, and a ring still holding the old key needs
+      // a factory reset before it pairs again. A delete of a key that was
+      // never written is a no-op, so every non-primary id is tried for both.
+      for (final id in secondaryIds) {
+        await OuraLink.dropStoredKey(id);
+        await MiBand234Link.dropStoredKey(id);
       }
 
       // 3 · the whole preference namespace, not a remembered subset — same
@@ -1358,6 +1382,44 @@ class AppState extends ChangeNotifier {
       // Never leave ingest refused if the reset threw part-way: a half-reset
       // install that silently drops every record is worse than the race.
       ResetGate.leave();
+    }
+  }
+
+  /// Ends every secondary sensor session for [resetAllData]. Best-effort and
+  /// bounded: a link that will not tear down must not hold the reset open,
+  /// and ResetGate already refuses whatever it might still try to write.
+  Future<void> _stopSecondaryLinksForReset() async {
+    Future<void> bounded(String what, Future<void> Function() stop) async {
+      try {
+        await stop().timeout(const Duration(seconds: 10));
+      } catch (e) {
+        _log('[reset] $what did not stop cleanly: $e');
+      }
+    }
+
+    await bounded('workout sensors', _workoutController.discardForReset);
+    await bounded('oura', OuraLink.instance.stop);
+    await bounded('ultrahuman', UltrahumanLink.instance.stop);
+    await bounded('colmi', ColmiLink.instance.stop);
+    await bounded('garmin', GarminLink.instance.stop);
+    await bounded('miband234', MiBand234Link.instance.stop);
+    await bounded('pebble', PebbleLink.instance.stop);
+    await bounded('coros', CorosLink.instance.stop);
+    for (final link in SessionLink.all) {
+      await bounded(link.entry.id, link.stop);
+    }
+  }
+
+  Future<List<String>> _secondaryDeviceIdsForReset() async {
+    try {
+      return [
+        for (final row in await LocalDb.deviceRows())
+          if (row['id'] is String && row['id'] != LocalDb.kPrimaryDeviceId)
+            row['id']! as String,
+      ];
+    } catch (e) {
+      _log('[reset] could not list paired sensors: $e');
+      return const [];
     }
   }
 
