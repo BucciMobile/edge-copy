@@ -221,6 +221,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
               uiText(c, _u.isImperial ? 'in' : 'cm'),
               l?.profileSetupHeightConsequence ??
                     'Without it: stride length, and distance from steps.',
+              decimal: true,
             ),
             _Field(
               _weight,
@@ -228,6 +229,7 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
               uiText(c, _u.isImperial ? 'lb' : 'kg'),
               l?.profileSetupWeightConsequence ??
                     'Without it: calories and training load.',
+              decimal: true,
             ),
             // Offered to everyone, on by default for a female profile.
             // Changeable any time in Settings; switching it off keeps what
@@ -293,7 +295,12 @@ class _Choice extends StatelessWidget {
 class _Field extends StatelessWidget {
   final TextEditingController controller;
   final String label, unit, consequence;
-  const _Field(this.controller, this.label, this.unit, this.consequence);
+
+  /// Height and weight take a decimal; age does not. A plain number keyboard
+  /// on iOS has no separator key at all, so 72.5 kg could not be typed.
+  final bool decimal;
+  const _Field(this.controller, this.label, this.unit, this.consequence,
+      {this.decimal = false});
 
   @override
   Widget build(BuildContext c) {
@@ -309,7 +316,9 @@ class _Field extends StatelessWidget {
         const SizedBox(height: S.x1),
         TextField(
           controller: controller,
-          keyboardType: TextInputType.number,
+          keyboardType: decimal
+              ? const TextInputType.numberWithOptions(decimal: true)
+              : TextInputType.number,
           style: F.head.copyWith(color: p.ink),
           decoration: InputDecoration(
             hintText: unit,

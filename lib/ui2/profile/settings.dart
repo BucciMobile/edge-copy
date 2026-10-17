@@ -1737,7 +1737,9 @@ class _EditProfileViewState extends State<EditProfileView> {
                     l?.localeName.startsWith('ru') == true
                         ? uiText(c, _u.heightLabel)
                         : uiText(c, _u.heightLabel).toUpperCase(),
-                    TextInputType.number,
+                    // A plain number keyboard on iOS is digits only, so a weight
+                    // pre-filled as 72.5 could not be retyped as 73.4.
+                    const TextInputType.numberWithOptions(decimal: true),
                   ),
                   const SizedBox(height: S.x4),
                   _text(
@@ -1746,7 +1748,7 @@ class _EditProfileViewState extends State<EditProfileView> {
                     l?.localeName.startsWith('ru') == true
                         ? uiText(c, _u.weightLabel)
                         : uiText(c, _u.weightLabel).toUpperCase(),
-                    TextInputType.number,
+                    const TextInputType.numberWithOptions(decimal: true),
                   ),
                   ..._importBlock(p, c),
                   const SizedBox(height: S.x6),
