@@ -46,6 +46,7 @@ import '../import/import_container.dart';
 import 'coverage_resolver.dart' show CoverageInterval;
 import 'day_label.dart';
 import 'activity_store.dart';
+import 'attach_copy.dart';
 import '../models/activity_suggestion.dart';
 import '../compute/accepted_naps.dart';
 import '../compute/nap_edits.dart' show NapEditKind;
@@ -9236,6 +9237,9 @@ class LocalDb {
   /// Uses `VACUUM INTO` (NOT a raw file copy) so the snapshot is transactionally
   /// consistent — a plain copy of a live SQLite file can produce torn pages
   /// (a corrupt export). VACUUM INTO also defragments, so the file is small.
+  /// SQLite older than 3.27 has no VACUUM INTO (Android 8-10: the framework
+  /// ships 3.18/3.22 and sqflite uses it), so there the copy is built table by
+  /// table through [attachCopy] instead, inside one read transaction.
   ///
   /// [includeSubstrateArchive] false empties `substrate_archive` in the COPY
   /// (never the live database). Automatic backups pass false: they keep five
@@ -9253,7 +9257,11 @@ class LocalDb {
     if (await f.exists()) await f.delete(); // VACUUM INTO requires a fresh path
     Database? copy;
     try {
-      await db.execute('VACUUM INTO ?', [dest]);
+      if (!debugForceAttachExport && await _vacuumIntoSupported(db)) {
+        await db.execute('VACUUM INTO ?', [dest]);
+      } else {
+        await attachCopy(db.path, dest, (_, _) async => '');
+      }
       if (!includeSubstrateArchive) {
         copy = await openDatabase(dest, singleInstance: false);
         if (debugFailExportStrip) throw StateError('test: strip failed');
@@ -9279,6 +9287,30 @@ class LocalDb {
   /// Test seam: fail [exportCopy] after the copy exists, before it is cleaned.
   @visibleForTesting
   static bool debugFailExportStrip = false;
+
+  /// Test seam: take the pre-3.27 [attachCopy] path even on a newer SQLite.
+  @visibleForTesting
+  static bool debugForceAttachExport = false;
+
+  static bool? _vacuumInto;
+
+  static Future<bool> _vacuumIntoSupported(Database db) async {
+    final cached = _vacuumInto;
+    if (cached != null) return cached;
+    final v = await db.rawQuery('SELECT sqlite_version() AS v');
+    return _vacuumInto = sqliteHasVacuumInto(v.first['v'] as String);
+  }
+
+  /// Whether SQLite [version] ("3.22.0") parses `VACUUM INTO` (3.27.0+).
+  @visibleForTesting
+  static bool sqliteHasVacuumInto(String version) {
+    final parts = [
+      for (final x in version.trim().split('.')) int.tryParse(x) ?? 0,
+    ];
+    final major = parts.isNotEmpty ? parts[0] : 0;
+    final minor = parts.length > 1 ? parts[1] : 0;
+    return major > 3 || (major == 3 && minor >= 27);
+  }
 
   static Future<int> databaseFileBytes() async {
     final dir = await getDatabasesPath();
