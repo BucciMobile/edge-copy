@@ -27,6 +27,7 @@ import '../ai/ai_prefs.dart';
 import '../ai/briefing.dart';
 import '../ai/briefing_engine.dart';
 import '../ai/nightly_sweep.dart';
+import '../ai/reminder_plan.dart';
 import '../coach/coach_config.dart';
 import '../coach/coach_engine.dart';
 import '../models/app_status.dart';
@@ -3079,7 +3080,7 @@ class AppState extends ChangeNotifier {
       await NotificationCenter.instance.scheduleAiReminders(
         prefs,
         ai,
-        aiConfigured: coachConfig?.hasKey ?? false,
+        aiConfigured: aiRemindersConfigured(coachConfig),
         bedtimeMinOfDay: cd.bedtimeMin,
         journalDoneToday: BriefingStore.journalDoneToday(),
         sweepHeadline: await _sweepHeadlineNow(),
