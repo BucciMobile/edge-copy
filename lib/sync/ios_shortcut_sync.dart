@@ -66,11 +66,28 @@ class IosShortcutSync {
         case 'cancel':
           if (_active?.id == args['id']) _active?.stop('cancelled');
           return null;
+        case 'buzz':
+          return buzz();
         default:
           throw MissingPluginException();
       }
     });
     _listening = true;
+  }
+
+  /// Buzzes the strap over the link the app already holds. A buzz is only
+  /// worth anything right now (a rest timer ending), so this never starts a
+  /// connect or a headless session to deliver one late.
+  static Future<String> buzz() async {
+    final engine = foregroundEngine?.call();
+    if (engine == null || !engine.isConnected) return 'notConnected';
+    try {
+      await engine.buzz();
+      return 'buzzed';
+    } catch (e) {
+      debugPrint('[shortcut-sync] buzz: $e');
+      return 'failed';
+    }
   }
 
   static Future<ShortcutSyncResult> run(String id, Duration budget) async {

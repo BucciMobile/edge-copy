@@ -40,6 +40,20 @@ base class _AdapterTurningOn extends FlutterBluePlusPlatform {
   Stream<BmBluetoothAdapterState> get onAdapterStateChanged => changes.stream;
 }
 
+class _BuzzEngine extends BleEngine {
+  _BuzzEngine({required this.connected})
+    : super(onRecord: (_, _) async {}, onState: (_) {});
+
+  final bool connected;
+  int buzzes = 0;
+
+  @override
+  bool get isConnected => connected;
+
+  @override
+  Future<void> buzz() async => buzzes++;
+}
+
 class _LiveEngine extends BleEngine {
   _LiveEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
 
@@ -315,5 +329,23 @@ void main() {
     );
     expect(result.status, 'partial');
     expect(result.records, 3);
+  });
+
+  test('a Shortcut buzz goes out over the app\'s live link', () async {
+    final engine = _BuzzEngine(connected: true);
+    IosShortcutSync.foregroundEngine = () => engine;
+    addTearDown(() => IosShortcutSync.foregroundEngine = null);
+    expect(await IosShortcutSync.buzz(), 'buzzed');
+    expect(engine.buzzes, 1);
+  });
+
+  test('a Shortcut buzz never connects to deliver itself', () async {
+    final engine = _BuzzEngine(connected: false);
+    IosShortcutSync.foregroundEngine = () => engine;
+    addTearDown(() => IosShortcutSync.foregroundEngine = null);
+    expect(await IosShortcutSync.buzz(), 'notConnected');
+    expect(engine.buzzes, 0);
+    IosShortcutSync.foregroundEngine = null;
+    expect(await IosShortcutSync.buzz(), 'notConnected');
   });
 }

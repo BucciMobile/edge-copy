@@ -263,6 +263,24 @@ struct OpenEdgeAndSyncIntent: AppIntent {
   }
 }
 
+/// Buzzes the band once, e.g. at the end of a rest timer in another app.
+/// Runs in the app process without opening it and only uses a connection the
+/// app already has; it never throws, so a missed buzz doesn't stop the
+/// calling shortcut.
+@available(iOS 16.0, *)
+struct BuzzBandIntent: AppIntent {
+  static var title: LocalizedStringResource = "Buzz Band"
+  static var description = IntentDescription(
+    "Buzz your band once over Edge's existing connection. Nothing happens if Edge isn't connected to the band at that moment.")
+  static var openAppWhenRun = false
+  static var authenticationPolicy: IntentAuthenticationPolicy = .alwaysAllowed
+
+  @MainActor
+  func perform() async throws -> some IntentResult & ReturnsValue<String> {
+    .result(value: await ShortcutSyncBridge.shared.buzz().message)
+  }
+}
+
 /// Flutter consumes the breathing route on launch and resume because opening
 /// the app does not guarantee a fresh process.
 @available(iOS 16.0, *)
@@ -372,5 +390,14 @@ struct OpenStrapShortcuts: AppShortcutsProvider {
       ],
       shortTitle: "Tomorrow's Alarm",
       systemImageName: "alarm")
+
+    AppShortcut(
+      intent: BuzzBandIntent(),
+      phrases: [
+        "Buzz my band with \(.applicationName)",
+        "\(.applicationName) buzz",
+      ],
+      shortTitle: "Buzz Band",
+      systemImageName: "waveform")
   }
 }

@@ -40,6 +40,20 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(runs, 1)
   }
 
+  func testBuzzRelaysDartAnswerAndTimesOutWithoutOne() async {
+    var methods: [String] = []
+    let bridge = ShortcutSyncBridge { method, _, reply in
+      methods.append(method)
+      if methods.count == 1 { reply("notConnected") }
+    }
+    XCTAssertEqual(await bridge.buzz(timeout: 0.2), .timedOut)
+    XCTAssertTrue(methods.isEmpty)
+    ready(bridge)
+    XCTAssertEqual(await bridge.buzz(timeout: 1), .notConnected)
+    XCTAssertEqual(await bridge.buzz(timeout: 0.2), .timedOut)
+    XCTAssertEqual(methods, ["buzz", "buzz"])
+  }
+
   func testOverlappingRequestsDoNotStartAnotherSync() async throws {
     var reply: FlutterResult?
     let bridge = ShortcutSyncBridge { _, _, result in reply = result }
