@@ -40,7 +40,7 @@
   "pairingNotFoundAdviceFix": "强制退出其他应用，然后重新扫描",
   "pairingBondRefusedAdviceTitle": "先在蓝牙设置中忘记该腕带",
   "pairingBondRefusedAdviceBody": "打开手机的蓝牙设置，忘记该腕带，然后在此重新扫描。被拒绝的密钥是旧的配对记录，只有系统才能清除它。",
-  "pairingBondRefusedAdviceFix": "打开蓝牙设置",
+  "pairingBondRefusedAdviceFix": "然后返回并点按“重试”",
   "pairingFailedAdviceTitle": "找到了腕带，但会话未完成",
   "pairingFailedAdviceBody": "从一米距离再次扫描通常有效。",
   "profileSetupTitle": "关于你",

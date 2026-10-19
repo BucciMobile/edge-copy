@@ -39,7 +39,7 @@
   "pairingNotFoundAdviceFix": "Закройте другое приложение и повторите поиск",
   "pairingBondRefusedAdviceTitle": "Сначала удалите браслет в настройках Bluetooth",
   "pairingBondRefusedAdviceBody": "В настройках Bluetooth телефона забудьте браслет и снова запустите поиск здесь. Старую запись о сопряжении может удалить только система.",
-  "pairingBondRefusedAdviceFix": "Открыть настройки Bluetooth",
+  "pairingBondRefusedAdviceFix": "Затем вернитесь и нажмите «Повторить»",
   "pairingFailedAdviceTitle": "Браслет найден, но подключение не завершилось",
   "pairingFailedAdviceBody": "Обычно помогает повторный поиск с расстояния около метра.",
   "profileSetupTitle": "О вас",

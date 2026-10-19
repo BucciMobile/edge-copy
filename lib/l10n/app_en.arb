@@ -160,7 +160,7 @@
   "@pairingBondRefusedAdviceBody": {
     "description": "Advice card body: bond refused."
   },
-  "pairingBondRefusedAdviceFix": "Open Bluetooth settings",
+  "pairingBondRefusedAdviceFix": "Then come back and tap Try again",
   "@pairingBondRefusedAdviceFix": {
     "description": "Advice card fix: bond refused."
   },

@@ -40,7 +40,7 @@
   "pairingNotFoundAdviceFix": "अन्य ऐप को फ़ोर्स-क्विट करें, फिर दोबारा स्कैन करें",
   "pairingBondRefusedAdviceTitle": "पहले ब्लूटूथ सेटिंग्स में बैंड को भूल जाएं",
   "pairingBondRefusedAdviceBody": "फ़ोन की ब्लूटूथ सेटिंग्स खोलें, बैंड को भूलें, फिर यहां दोबारा स्कैन करें। अस्वीकृत कुंजी पुराना पेयरिंग रिकॉर्ड है, और केवल सिस्टम ही इसे साफ़ कर सकता है।",
-  "pairingBondRefusedAdviceFix": "ब्लूटूथ सेटिंग्स खोलें",
+  "pairingBondRefusedAdviceFix": "फिर वापस आकर फिर से प्रयास करें पर टैप करें",
   "pairingFailedAdviceTitle": "बैंड मिल गया लेकिन सत्र पूरा नहीं हुआ",
   "pairingFailedAdviceBody": "एक मीटर की दूरी से दोबारा स्कैन करना आमतौर पर काम करता है।",
   "profileSetupTitle": "आपके बारे में",

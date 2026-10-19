@@ -40,7 +40,7 @@
   "pairingNotFoundAdviceFix": "Andere App beenden und erneut suchen",
   "pairingBondRefusedAdviceTitle": "Band zuerst in den Bluetooth-Einstellungen entfernen",
   "pairingBondRefusedAdviceBody": "Öffne die Bluetooth-Einstellungen deines Smartphones, entferne das Band und suche dann hier erneut. Der abgelehnte Schlüssel stammt aus der alten Kopplung, und nur das System kann ihn löschen.",
-  "pairingBondRefusedAdviceFix": "Bluetooth-Einstellungen öffnen",
+  "pairingBondRefusedAdviceFix": "Dann zurückkommen und auf „Erneut versuchen“ tippen",
   "pairingFailedAdviceTitle": "Band gefunden, aber Verbindung nicht abgeschlossen",
   "pairingFailedAdviceBody": "Meist klappt es, wenn du aus etwa einem Meter Entfernung erneut suchst.",
   "profileSetupTitle": "Über dich",

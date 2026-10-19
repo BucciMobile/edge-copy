@@ -40,7 +40,7 @@
   "pairingNotFoundAdviceFix": "Cierra la otra app por completo y vuelve a buscar",
   "pairingBondRefusedAdviceTitle": "Primero olvida la banda en los ajustes de Bluetooth",
   "pairingBondRefusedAdviceBody": "Abre los ajustes de Bluetooth del teléfono, olvida la banda y vuelve a buscar aquí. La clave rechazada es el registro de emparejamiento antiguo, y solo el sistema puede borrarlo.",
-  "pairingBondRefusedAdviceFix": "Abrir ajustes de Bluetooth",
+  "pairingBondRefusedAdviceFix": "Luego vuelve y toca Intentar de nuevo",
   "pairingFailedAdviceTitle": "Se encontró la banda pero la sesión no terminó",
   "pairingFailedAdviceBody": "Volver a buscar desde un metro de distancia suele funcionar.",
   "profileSetupTitle": "Sobre ti",

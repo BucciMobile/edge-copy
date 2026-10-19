@@ -40,7 +40,7 @@
   "pairingNotFoundAdviceFix": "Forcez la fermeture de l’autre application, puis relancez la recherche",
   "pairingBondRefusedAdviceTitle": "Oubliez d’abord le bracelet dans les réglages Bluetooth",
   "pairingBondRefusedAdviceBody": "Ouvrez les réglages Bluetooth du téléphone, oubliez le bracelet, puis relancez la recherche ici. La clé refusée est l’ancien enregistrement de jumelage, et seul le système peut l’effacer.",
-  "pairingBondRefusedAdviceFix": "Ouvrir les réglages Bluetooth",
+  "pairingBondRefusedAdviceFix": "Revenez ensuite et touchez Réessayer",
   "pairingFailedAdviceTitle": "Le bracelet a été trouvé mais la session ne s’est pas terminée",
   "pairingFailedAdviceBody": "Relancer la recherche à un mètre de distance fonctionne généralement.",
   "profileSetupTitle": "À propos de vous",
