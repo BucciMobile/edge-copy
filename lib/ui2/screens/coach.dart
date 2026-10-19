@@ -712,7 +712,7 @@ class _Bubble extends StatelessWidget {
       case CoachItemKind.assistant:
         return Padding(
           padding: const EdgeInsets.only(bottom: S.x4),
-          child: GptMarkdown(
+          child: CoachAnswerText(
             item.text ?? '',
             style: F.body.copyWith(color: p.ink, height: 1.5),
           ),
@@ -737,6 +737,35 @@ class _Bubble extends StatelessWidget {
           ),
         );
     }
+  }
+}
+
+/// The markdown body of a coach answer.
+///
+/// The text is model output, so it is untrusted: it reflects whatever provider
+/// or proxy is configured and anything that was in the model's context. Left to
+/// its defaults, GptMarkdown renders `![](url)` with a NetworkImage, which makes
+/// the phone GET that URL the moment the bubble paints, and again every time a
+/// saved conversation reopens. A reply could carry health values it just read
+/// over SQL out in the query string to any host, without a tap. Images are
+/// therefore drawn as an inert placeholder and never fetched.
+class CoachAnswerText extends StatelessWidget {
+  const CoachAnswerText(this.text, {super.key, this.style});
+
+  final String text;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    return GptMarkdown(
+      text,
+      style: style,
+      imageBuilder: (context, url, width, height) => Icon(
+        LucideIcons.imageOff,
+        size: 18,
+        color: P.of(context).ink3,
+      ),
+    );
   }
 }
 
