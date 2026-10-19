@@ -28,6 +28,7 @@ import '../ai/briefing.dart';
 import '../ai/briefing_engine.dart';
 import '../ai/nightly_sweep.dart';
 import '../coach/coach_config.dart';
+import '../coach/coach_engine.dart';
 import '../models/app_status.dart';
 import '../ble/accessory_setup.dart';
 import '../ble/adapters/_registry.dart' show kBleHrs, kPolarPmd, kWhoopGen4;
@@ -1341,6 +1342,13 @@ class AppState extends ChangeNotifier {
         await coachConfig?.save(apiKey: ''); // deletes the keychain entry
       } catch (e) {
         _log('[reset] keychain clear failed: $e');
+      }
+      // Coach chats are files, not rows, so wipeAll does not reach them.
+      try {
+        final left = await CoachEngine.deleteAllSavedSessions();
+        if (left > 0) _log('[reset] $left coach chat files not deleted');
+      } catch (e) {
+        _log('[reset] coach chat delete failed: $e');
       }
       // The ring's and Mi Band's 16-byte pairing keys. iOS keeps keychain
       // items across an uninstall, and a ring still holding the old key needs

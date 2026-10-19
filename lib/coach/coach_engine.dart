@@ -321,6 +321,29 @@ class CoachEngine {
   Future<File> _indexFile() async => File('${(await _dir()).path}/coach_idx_$storageKey.json');
   String _newId() => '${DateTime.now().millisecondsSinceEpoch}';
 
+  /// Deletes every saved chat for every storage key. The transcripts live as
+  /// files beside the database, not in it, so wiping the database leaves
+  /// them, and the key is the same 'local' after a reset — the next profile
+  /// would reopen the previous one's conversations, tool results included.
+  /// Returns the number of files that could not be deleted.
+  static Future<int> deleteAllSavedSessions() async {
+    final dir = await getApplicationDocumentsDirectory();
+    if (!await dir.exists()) return 0;
+    var failed = 0;
+    await for (final e in dir.list(followLinks: false)) {
+      if (e is! File) continue;
+      final name = e.uri.pathSegments.last;
+      if (!name.endsWith('.json')) continue;
+      if (!name.startsWith('coach_s_') && !name.startsWith('coach_idx_')) continue;
+      try {
+        await e.delete();
+      } catch (_) {
+        failed++;
+      }
+    }
+    return failed;
+  }
+
   /// All saved sessions for this user, most recent first.
   Future<List<CoachSessionMeta>> listSessions() async {
     try {
