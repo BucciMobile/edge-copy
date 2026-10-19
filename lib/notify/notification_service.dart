@@ -27,7 +27,10 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show Locale;
+import 'package:android_intent_plus/android_intent.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:geolocator/geolocator.dart' show Geolocator;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
@@ -372,6 +375,36 @@ class NotificationService {
   Future<bool> Function()? debugRequestPermission;
   @visibleForTesting
   Future<bool> Function()? debugProbePermission;
+  @visibleForTesting
+  Future<void> Function()? debugOpenSettings;
+
+  /// Open the OS page where the user can switch our notifications back on.
+  /// After a denial neither platform will show the request dialog again (iOS
+  /// returns the stored answer silently; Android 13+ stops after two refusals),
+  /// so this is the only thing a "turn them on" button can usefully do.
+  /// Android goes straight to the app's notification page; anywhere that
+  /// fails, and on iOS, it opens the app's settings page. Never throws.
+  Future<void> openSystemSettings() async {
+    final hook = debugOpenSettings;
+    if (hook != null) return hook();
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final pkg = (await PackageInfo.fromPlatform()).packageName;
+        await AndroidIntent(
+          action: 'android.settings.APP_NOTIFICATION_SETTINGS',
+          arguments: {'android.provider.extra.APP_PACKAGE': pkg},
+        ).launch();
+        return;
+      } catch (e) {
+        debugPrint('[notify] open notification settings: $e');
+      }
+    }
+    try {
+      await Geolocator.openAppSettings();
+    } catch (e) {
+      debugPrint('[notify] open app settings: $e');
+    }
+  }
 
   /// Non-mutating: whether notifications are currently enabled, WITHOUT ever
   /// showing the OS authorization prompt. Safe to call from any context,
