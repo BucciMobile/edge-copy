@@ -215,6 +215,23 @@ describe("POST /v1/reports", () => {
     expect((await post(meta())).status).toBe(201);
     spy.mockRestore();
   });
+
+  it("keeps reporter text from mentioning users or cross-referencing other repos", async () => {
+    e.GITHUB_TOKEN = "t"; e.GITHUB_REPO = "OpenStrap/reports";
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("{}", { status: 201 }));
+    const description = "ping @victim and @org/team, see owner/other#1\n```\n@escaped https://github.com/o/r/issues/2";
+    const r = await post(meta({ title: "@victim owner/other#1", description, deviceModel: "@phone #3" }));
+    expect(r.status).toBe(201);
+    const id = ((await r.json()) as any).id;
+    const body = JSON.parse((spy.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(body.title).toBe(`[${id}] sync: @\u200bvictim owner/other#\u200b1`);
+    expect(body.body).toContain("````text\n" + description + "\n````");
+    expect(body.body).toContain("` 0.10.3+72 (ios 19.0, @phone #3) `");
+    // nothing reporter-typed sits outside the code block / span
+    const outside = body.body.replace(/````text\n[\s\S]*?\n````/, "").replace(/` [^`]* `/g, "");
+    expect(outside).not.toMatch(/@|#|github\.com/);
+    spy.mockRestore();
+  });
 });
 
 describe("DELETE /v1/reports/:id", () => {

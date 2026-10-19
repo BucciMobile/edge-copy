@@ -84,22 +84,47 @@ export function validateMeta(raw: unknown): Meta | null {
 const expiry = (createdIso: string, hasDb: boolean) =>
   new Date(Date.parse(createdIso) + (hasDb ? LIMITS.dbTtlDays : LIMITS.blobTtlDays) * DAY).toISOString();
 
+/*
+ * Everything in Meta is typed by whoever calls POST /v1/reports, which needs no key. Rendered as plain
+ * markdown, "@user", "@org/team", "owner/repo#1" or an issue URL would become real mentions and
+ * cross-references made with the maintainers' token. GitHub does not process those inside code, so
+ * free text goes into a code span/block whose fence is longer than any backtick run in it; the title
+ * cannot hold code, so "@" and "#" get a zero-width space after them there instead.
+ */
+const fence = (s: string, min: number) => {
+  const longest = Math.max(0, ...(s.match(/`+/g) ?? []).map((r) => r.length));
+  return "`".repeat(Math.max(min, longest + 1));
+};
+export const codeSpan = (s: string) => {
+  const f = fence(s, 1);
+  return `${f} ${s.replace(/[\r\n]+/g, " ")} ${f}`;
+};
+export const codeBlock = (s: string) => {
+  const f = fence(s, 3);
+  return `${f}text\n${s}\n${f}`;
+};
+export const inertTitle = (s: string) => s.replace(/[@#]/g, "$&\u200b");
+
+export function issueBody(id: string, m: Meta): string {
+  return [
+    `**Report:** ${id}`, `**Category:** ${m.category}`,
+    `**App:** ${codeSpan(`${m.appVersion} (${m.platform} ${m.osVersion}, ${m.deviceModel})`)}`,
+    `**Database attached:** ${m.hasDatabase ? "yes" : "no"} | **Screenshot:** ${m.hasScreenshot ? "yes" : "no"}`,
+    "", m.description ? codeBlock(m.description) : "(no description)",
+  ].join("\n");
+}
+
 async function createIssue(env: Env, id: string, m: Meta): Promise<string | null> {
   if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) return null;
   try {
-    const body = [
-      `**Report:** ${id}`, `**Category:** ${m.category}`,
-      `**App:** ${m.appVersion} (${m.platform} ${m.osVersion}, ${m.deviceModel})`,
-      `**Database attached:** ${m.hasDatabase ? "yes" : "no"} | **Screenshot:** ${m.hasScreenshot ? "yes" : "no"}`,
-      "", m.description || "(no description)",
-    ].join("\n");
+    const body = issueBody(id, m);
     const res = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/issues`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${env.GITHUB_TOKEN}`, accept: "application/vnd.github+json",
         "user-agent": "openstrap-reports", "content-type": "application/json",
       },
-      body: JSON.stringify({ title: `[${id}] ${m.category}: ${m.title}`, body, labels: [m.category, "report"] }),
+      body: JSON.stringify({ title: `[${id}] ${m.category}: ${inertTitle(m.title)}`, body, labels: [m.category, "report"] }),
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) return null;
