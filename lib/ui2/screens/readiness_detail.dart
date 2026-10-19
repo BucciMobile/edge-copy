@@ -58,7 +58,12 @@ class ReadinessData {
 
   bool get provisional => head['recovery_state'] == 'provisional';
 
+  /// The past day this was read for, or null for today. Set only by
+  /// [loadForDay].
+  final String? day;
+
   const ReadinessData({
+    this.day,
     this.head = const {},
     this.readiness = Metric.empty,
     this.breakdown = const [],
@@ -67,6 +72,25 @@ class ReadinessData {
     this.series = const [],
     this.absentDiag,
   });
+
+  /// A past day, as Home's day switcher shows it: the stored score for
+  /// [date] and that day's own absence diagnostic. No breakdown — the
+  /// percentile view only exists in today's insights, and borrowing today's
+  /// would put this morning's ranking under last Tuesday's number.
+  static Future<ReadinessData> loadForDay(
+      LocalRepository repo, String date) async {
+    final overview = await repo.getDayOverview(date);
+    final chart = await repo.getChart('recovery');
+    final readiness = metricOf(overview['readiness']);
+    return ReadinessData(
+      day: date,
+      readiness: readiness,
+      series: denseDays(pointsOf(chart), 90),
+      absentDiag: readiness.value != null
+          ? null
+          : await LocalDb.readinessAbsentDiag(date),
+    );
+  }
 
   static Future<ReadinessData> load(LocalRepository repo) async {
     final today = await repo.getToday();
@@ -120,7 +144,10 @@ class ReadinessData {
 
 class ReadinessDetail extends StatefulWidget {
   final ReadinessData? data;
-  const ReadinessDetail({super.key, this.data});
+
+  /// The day to read, as a local label. Null means today.
+  final String? day;
+  const ReadinessDetail({super.key, this.data, this.day});
 
   @override
   State<ReadinessDetail> createState() => _ReadinessDetailState();
@@ -151,7 +178,10 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
       return;
     }
     try {
-      final d = await ReadinessData.load(repo);
+      final day = widget.day;
+      final d = day == null || day == todayLabel()
+          ? await ReadinessData.load(repo)
+          : await ReadinessData.loadForDay(repo, day);
       if (mounted) setState(() => (_d = d, _loading = false));
     } catch (_) {
       if (mounted) setState(() => _loading = false);
@@ -169,7 +199,10 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
     // No date in the nav bar. It named the held-over night, and the headline
     // can no longer BE that night — a date up here now would be labelling
     // today's number with somebody else's day.
-    return detailScaffold(c, l?.readinessDetailTitle ?? 'Recovery', [
+    // A day the person stepped back to IS named: the number below is that
+    // day's, not a held-over stand-in for today.
+    return detailScaffold(c, l?.readinessDetailTitle ?? 'Recovery',
+        sub: d.day == null ? '' : prettyDay(d.day, l), [
       if (_loading && _d == null) ...[
         const SizedBox(height: S.x8),
         const Center(child: CircularProgressIndicator()),
@@ -297,7 +330,7 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
               ),
             ]),
           ),
-        ] else if (v != null)
+        ] else if (v != null && d.day == null)
           Section(
             l?.readinessDetailWhatWentIntoIt ?? 'What went into it',
             StatusCard(

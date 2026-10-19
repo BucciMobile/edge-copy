@@ -1959,8 +1959,12 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
             onOpen: (k) => go(
                 c,
                 switch (k) {
-                  HomeRingKind.recovery => const ReadinessDetail(),
-                  HomeRingKind.strain => const DayStrainDetail(),
+                  // A past day's rings open that day's screens: the number
+                  // tapped and the number shown must be the same day's.
+                  HomeRingKind.recovery =>
+                    ReadinessDetail(day: isToday ? null : _day),
+                  HomeRingKind.strain =>
+                    DayStrainDetail(day: isToday ? null : _day),
                   // The night the ring was drawn from, not last night. Today
                   // stays null even after the switcher steps back onto it:
                   // today's ring is the held-over night, and only the default
@@ -1996,7 +2000,8 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
                       (l?.homeReadinessNoReason ?? 'Nothing recorded says why.'),
               fix: l?.homeSeeWhatWasMissing ?? 'See what was missing',
               icon: LucideIcons.batteryCharging,
-              onFix: () => go(c, const ReadinessDetail()),
+              onFix: () =>
+                  go(c, ReadinessDetail(day: isToday ? null : _day)),
             );
           }),
 
