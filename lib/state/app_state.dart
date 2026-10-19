@@ -2928,8 +2928,15 @@ class AppState extends ChangeNotifier {
     if (_taskerBuzzCheckInFlight) return;
     _taskerBuzzCheckInFlight = true;
     try {
-      final pattern = await TaskerBridge.peekPendingBuzz();
-      if (pattern == null) return;
+      final pending = await TaskerBridge.peekPendingBuzz();
+      if (pending == null) return;
+      final pattern = pending.pattern;
+      if (!pending.isFresh(DateTime.now())) {
+        _log('[tasker] dropping stale pending buzz (pattern=$pattern, '
+            'requestedAtMs=${pending.requestedAtMs})');
+        await TaskerBridge.clearPendingBuzz();
+        return;
+      }
       // A Tasker BUZZ_STRAP can arrive while the app is fully dead; the
       // reconnect this _init() already kicked off may not have landed by the
       // time we get here. Wait (bounded) for a live link rather than firing
@@ -2938,8 +2945,8 @@ class AppState extends ChangeNotifier {
       // on a live connection. If this 20s wait still times out, the request
       // is NOT lost: _onEngineState calls back in here on every subsequent
       // "became connected" transition for the rest of this process's life,
-      // so a slower reconnect still eventually delivers it instead of
-      // requiring a full app restart.
+      // so a slower reconnect still delivers it — but only while it is
+      // younger than PendingTaskerBuzz.maxAge; older requests are dropped.
       final connected = await _waitUntil(
         () => engine.isConnected,
         const Duration(seconds: 20),
@@ -2947,6 +2954,12 @@ class AppState extends ChangeNotifier {
       if (!connected) {
         _log('[tasker] pending buzz (pattern=$pattern) still queued — '
             'no connection within 20s, will retry on the next reconnect');
+        return;
+      }
+      if (!pending.isFresh(DateTime.now())) {
+        _log('[tasker] pending buzz (pattern=$pattern) went stale waiting '
+            'for a connection — dropping it');
+        await TaskerBridge.clearPendingBuzz();
         return;
       }
       _log('[tasker] consuming pending buzz (pattern=$pattern) from headless intent');
