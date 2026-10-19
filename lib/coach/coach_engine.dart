@@ -18,6 +18,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../ai/journal_ai.dart' show mergeJournalEntry;
 import '../data/day_label.dart';
 import '../data/db.dart';
 import '../data/local_repository.dart';
@@ -881,8 +882,24 @@ class CoachEngine {
             summary: 'Add journal for $journalDate: tags ${args['tags'] ?? []}, note "${args['note'] ?? ''}".',
             args: args,
           ), () async {
-            await api.postJournal(journalDate,
-                ((args['tags'] as List?) ?? const []).map((e) => '$e').toList(), '${args['note'] ?? ''}');
+            // postJournal replaces the day's whole row, so the stored day is
+            // read and merged first — otherwise "log that I had coffee" wipes
+            // every tag and note already logged for that day.
+            Map<String, dynamic>? row;
+            for (final e in await api.getJournal(range: 'all')) {
+              if (e['date'] == journalDate) row = e;
+            }
+            final merged = mergeJournalEntry(
+              existingTags: ((row?['tags'] as List?) ?? const [])
+                  .map((e) => '$e')
+                  .toList(),
+              existingNote: (row?['note'] as String?) ?? '',
+              newTags: ((args['tags'] as List?) ?? const [])
+                  .map((e) => '$e')
+                  .toList(),
+              newNote: '${args['note'] ?? ''}',
+            );
+            await api.postJournal(journalDate, merged.tags, merged.note);
             return 'Journal saved.';
           });
         case 'log_period':
