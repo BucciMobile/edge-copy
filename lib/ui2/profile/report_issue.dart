@@ -157,6 +157,9 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     } catch (e) {
       if (mounted) setState(() => _error = e is ReportSendError ? e.status : -2);
     } finally {
+      // The zip is not deleted here: the share target can still be reading
+      // it after the sheet returns. pruneSharedReports keeps the newest two,
+      // and collectReport sweeps any older than ten minutes on the next run.
       if (mounted) {
         setState(() {
           _busy = false;
