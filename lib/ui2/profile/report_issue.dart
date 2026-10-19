@@ -174,6 +174,14 @@ class _ReportIssueScreenState extends State<ReportIssueScreen> {
     final l = _l(context);
     final messenger = ScaffoldMessenger.of(context);
     if (_busy) return;
+    // The row is the whole tap target and its title is the ID people come
+    // here to copy, while the delete drops the ticket on the server and the
+    // only copy of its delete token, so one stray tap had no way back.
+    final ok = await confirmRemove(context,
+        title: l.reportDeleteConfirmTitle(r.id),
+        body: l.reportDeleteConfirmBody,
+        remove: l.reportDelete);
+    if (!ok || !mounted || _busy) return;
     setState(() => _busy = true);
     try {
       await deleteReport(r);

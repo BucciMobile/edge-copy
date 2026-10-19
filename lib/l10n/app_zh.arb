@@ -2663,5 +2663,7 @@
   "dataReanalyzeFailed": "重新分析失败：{error}",
   "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
   "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
+  "reportDeleteConfirmTitle": "删除报告 {id}？",
+  "reportDeleteConfirmBody": "它会立即从服务器上删除，之后无法再通过 ID 打开。此操作无法撤销。",
   "profileImplausibleFields": "请检查{fields}。数值超出范围，因此未保存任何内容。"
 }

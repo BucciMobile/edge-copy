@@ -15737,6 +15737,19 @@
   "@reportDeleteFailed": {
     "description": "Issue report: delete failed."
   },
+  "reportDeleteConfirmTitle": "Delete report {id}?",
+  "@reportDeleteConfirmTitle": {
+    "description": "Issue report: confirm before deleting a sent report.",
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "reportDeleteConfirmBody": "It's removed from the server now, so it can't be opened from its ID any more. There's no undo.",
+  "@reportDeleteConfirmBody": {
+    "description": "Issue report: what deleting a sent report does."
+  },
   "reportSaveFailedTitle": "Couldn't share the report",
   "@reportSaveFailedTitle": {
     "description": "Report screen: title of the card shown when building or sharing the local zip failed. Nothing was sent."

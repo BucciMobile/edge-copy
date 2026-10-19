@@ -7494,6 +7494,8 @@
   },
   "reportDelete": "Удалить",
   "reportDeleteFailed": "Не удалось удалить. Попробуйте позже.",
+  "reportDeleteConfirmTitle": "Удалить сообщение {id}?",
+  "reportDeleteConfirmBody": "Оно сразу удаляется с сервера, и открыть его по ID больше не получится. Отменить нельзя.",
   "reportSaveFailedTitle": "Не удалось поделиться сообщением",
   "reportSaveFailedBody": "Не удалось собрать или передать файл. Тикет не создан.",
   "reportSaveRetry": "Повторить",

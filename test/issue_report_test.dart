@@ -218,6 +218,30 @@ void main() {
     expect(find.text(noUpload), findsNothing);
   });
 
+  testWidgets('tapping a sent report asks before deleting it', (tester) async {
+    final exp = DateTime.now().add(const Duration(days: 7)).toUtc();
+    SharedPreferences.setMockInitialValues({
+      'issue_reports_sent': jsonEncode([
+        {'id': 'r-abc123', 'deleteToken': 't', 'expiresAt': exp.toIso8601String()}
+      ]),
+    });
+    tester.view.physicalSize = const Size(390 * 3, 3000 * 3);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        theme: buildTheme(Brightness.light),
+        home: const ReportIssueScreen()));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('r-abc123'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete report r-abc123?'), findsOneWidget);
+    await tester.tap(find.text('Keep it'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete report r-abc123?'), findsNothing);
+    expect(find.text('r-abc123'), findsOneWidget);
+    expect((await loadSentReports()).map((r) => r.id), ['r-abc123']);
+  });
+
   test('local path has no size cap: a gzip past the upload limit builds a zip',
       () async {
     final dir = await Directory.systemTemp.createTemp('gz');
