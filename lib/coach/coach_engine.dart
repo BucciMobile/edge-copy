@@ -257,6 +257,11 @@ class CoachEngine {
   /// Max characters of running history resent on each turn.
   static const int kMaxHistoryChars = 120000;
 
+  /// What an over-budget tool result in the current turn is replaced with.
+  static const String _kDroppedToolResult =
+      '(earlier result dropped to fit the conversation size limit — '
+      're-run the query if it is still needed)';
+
   /// Hard ceiling on one serialized provider request body.
   static const int kMaxRequestBytes = 400 * 1024;
 
@@ -294,6 +299,39 @@ class CoachEngine {
           );
         }
         _history.removeRange(0, nextTurn);
+      }
+      return;
+    }
+    // The current turn starts at the LAST user message and is never dropped:
+    // a tool-heavy turn (a handful of 16k run_sql results, each re-escaped by
+    // jsonEncode) can outgrow the budget by itself, and walking the history
+    // down past the question sent the provider a bare system prompt — the
+    // model then answered "how can I help?" or the provider 400'd on a request
+    // with no user message, and the question was gone from the saved session.
+    if (_history.any((m) => m['role'] == 'user')) {
+      // Whole older turns go first, oldest first. The search from index 1
+      // stops at or before the current question, so it is never removed.
+      while (_historyChars() > kMaxHistoryChars &&
+          _history.lastIndexWhere((m) => m['role'] == 'user') > 0) {
+        _history.removeRange(
+            0, _history.indexWhere((m) => m['role'] == 'user', 1));
+      }
+      // Still over with only the current turn left: replace this turn's
+      // oldest tool results with a stub. The message itself stays so its
+      // tool_call_id still pairs with the assistant turn that requested it.
+      for (var i = 0;
+          i < _history.length && _historyChars() > kMaxHistoryChars;
+          i++) {
+        final m = _history[i];
+        if (m['role'] == 'tool' && m['content'] != _kDroppedToolResult) {
+          _history[i] = {...m, 'content': _kDroppedToolResult};
+        }
+      }
+      if (_historyChars() > kMaxHistoryChars) {
+        throw CoachException(
+          'This turn exceeded the conversation size limit. '
+          'Start a new chat or ask a narrower question.',
+        );
       }
       return;
     }
