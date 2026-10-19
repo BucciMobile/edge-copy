@@ -138,8 +138,6 @@
   "dataDatabaseShared": "Base de datos compartida. Es la copia completa.",
   "dataEncryptedBackupShared": "Copia de seguridad cifrada compartida. Sin esa frase de contraseña nadie puede abrirla, ni siquiera esta app, ni nosotros.",
   "dataDaysReanalyzed": "{n, plural, one{1 día reanalizado.} other{{n} días reanalizados.}}",
-  "dataReanalyzeFailed": "El reanálisis falló: {error}",
-  "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "dataBackupFailed": "Copia de seguridad fallida: {error}",
   "dataBackupSkipped": "Copia de seguridad omitida.",
   "dataBackedUpTo": "Copia de seguridad en {path}",
@@ -395,7 +393,6 @@
   "napsWokeUpHelp": "CUÁNDO TE DESPERTASTE",
   "napsInvalidWindow": "Una siesta dura entre 5 minutos y 6 horas. Cualquier cosa más larga es un sueño nocturno y pertenece a la noche, donde se pueden leer las fases.",
   "napsOverlap": "Eso se superpone con una siesta ya registrada este día. Elimina esa primero, en lugar de contar la misma hora dos veces.",
-  "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
   "napsNotReanalysed": "El día no se ha vuelto a analizar: ya había otro análisis en curso. Tu edición está guardada y se aplicará la próxima vez.",
   "napsTitle": "Siestas",
   "napsNoReadingTitle": "Sin datos de siestas para este día",
@@ -2689,5 +2686,9 @@
   },
   "deviceUseSheetOff": "Puedes desactivarlo cuando quieras. Lo que haya aportado se quitará.",
   "deviceUseSheetConfirm": "Usarlo",
-  "deviceUseSheetCancel": "Ahora no"
+  "deviceUseSheetCancel": "Ahora no",
+  "dataReanalyzeFailed": "El reanálisis falló: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
+  "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
+  "profileImplausibleFields": "Revisa {fields}. El valor está fuera de rango, así que no se guardó nada."
 }

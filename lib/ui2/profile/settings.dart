@@ -19,6 +19,8 @@ import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../compute/profile.dart'
+    show plausibleAgeYears, plausibleHeightCm, plausibleWeightKg;
 import '../../data/off_lookup.dart';
 import '../../health/health_export.dart' show HealthLinkState;
 import '../../health/health_import_state.dart';
@@ -1618,13 +1620,29 @@ class _EditProfileViewState extends State<EditProfileView> {
       sayUnreadable(context, bad);
       return;
     }
+    final heightCm =
+        height.value == null ? null : _u.heightToCm(_height.text);
+    final weightKg =
+        weight.value == null ? null : _u.weightToKg(_weight.text);
+    final off = [
+      if (age.value case final a? when !plausibleAgeYears(a))
+        (l?.settingsAgeFieldLabel ?? 'Age'),
+      if (heightCm != null && !plausibleHeightCm(heightCm))
+        uiText(context, _u.heightLabel),
+      if (weightKg != null && !plausibleWeightKg(weightKg))
+        uiText(context, _u.weightLabel),
+    ];
+    if (off.isNotEmpty) {
+      sayImplausible(context, off);
+      return;
+    }
     widget.onSave({
       'name': _name.text.trim().isEmpty ? null : _name.text.trim(),
       'sex': _sex,
       'age': age.value?.round(),
       // Typed in the units on the label, stored in metric.
-      'height_cm': height.value == null ? null : _u.heightToCm(_height.text),
-      'weight_kg': weight.value == null ? null : _u.weightToKg(_weight.text),
+      'height_cm': heightCm,
+      'weight_kg': weightKg,
     });
   }
 

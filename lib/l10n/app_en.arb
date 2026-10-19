@@ -615,24 +615,6 @@
       }
     }
   },
-  "dataReanalyzeFailed": "Re-analysis failed: {error}",
-  "@dataReanalyzeFailed": {
-    "description": "Re-analyze result: the pass itself failed.",
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
-  "dataReanalyzeDaysFailed": "{n, plural, one{1 day could not be analyzed. If this keeps happening, please report it.} other{{n} days could not be analyzed. If this keeps happening, please report it.}}",
-  "@dataReanalyzeDaysFailed": {
-    "description": "Re-analyze result: N days could not be derived.",
-    "placeholders": {
-      "n": {
-        "type": "int"
-      }
-    }
-  },
   "dataBackupFailed": "Backup failed: {error}",
   "@dataBackupFailed": {
     "description": "Backup result: failed.",
@@ -1968,10 +1950,6 @@
   "napsOverlap": "That overlaps a nap already on this day. Remove that one first, rather than counting the same hour twice.",
   "@napsOverlap": {
     "description": "Validation error when a manually logged nap overlaps an existing one."
-  },
-  "napsInFuture": "That nap hasn't finished yet. Log it once you're awake.",
-  "@napsInFuture": {
-    "description": "Validation error when a manually logged nap ends after the current time."
   },
   "napsNotReanalysed": "The day was not re-analysed — another analysis was already running. Your edit is saved and will apply next time.",
   "@napsNotReanalysed": {
@@ -15673,7 +15651,7 @@
   "@reportDatabaseCovered": {
     "description": "Issue report: line under the 2-week switch while the full database switch is on."
   },
-  "reportStageSlice": "Preparing last 2 weeks\u2026",
+  "reportStageSlice": "Preparing last 2 weeks…",
   "@reportStageSlice": {
     "description": "Report screen: progress text inside the busy button while the 2-week database is built."
   },
@@ -15818,6 +15796,37 @@
     "description": "Snackbar after copying the ticket ID on the report screen.",
     "placeholders": {
       "id": {
+        "type": "String"
+      }
+    }
+  },
+  "dataReanalyzeFailed": "Re-analysis failed: {error}",
+  "@dataReanalyzeFailed": {
+    "description": "Re-analyze result: the pass itself failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 day could not be analyzed. If this keeps happening, please report it.} other{{n} days could not be analyzed. If this keeps happening, please report it.}}",
+  "@dataReanalyzeDaysFailed": {
+    "description": "Re-analyze result: N days could not be derived.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "napsInFuture": "That nap hasn't finished yet. Log it once you're awake.",
+  "@napsInFuture": {
+    "description": "Validation error when a manually logged nap ends after the current time."
+  },
+  "profileImplausibleFields": "Check {fields}. That value is out of range, so nothing was saved.",
+  "@profileImplausibleFields": {
+    "description": "Shown when a typed age, height or weight is outside the believable range.",
+    "placeholders": {
+      "fields": {
         "type": "String"
       }
     }

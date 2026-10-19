@@ -138,8 +138,6 @@
   "dataDatabaseShared": "数据库已分享。这是完整的副本。",
   "dataEncryptedBackupShared": "加密备份已分享。没有该密码短语任何人都无法打开它——包括本应用，也包括我们。",
   "dataDaysReanalyzed": "{n, plural, other{已重新分析 {n} 天。}}",
-  "dataReanalyzeFailed": "重新分析失败：{error}",
-  "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
   "dataBackupFailed": "备份失败：{error}",
   "dataBackupSkipped": "已跳过备份。",
   "dataBackedUpTo": "已备份到 {path}",
@@ -395,7 +393,6 @@
   "napsWokeUpHelp": "醒来时间",
   "napsInvalidWindow": "小睡的时长应在 5 分钟到 6 小时之间。超过这个时长应算作夜间睡眠，属于可以读取睡眠阶段的夜晚记录。",
   "napsOverlap": "该时间段与当天已有的一次小睡重叠。请先删除那一次记录，而不是把同一小时计算两次。",
-  "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
   "napsNotReanalysed": "当天未被重新分析——已有另一项分析正在运行。你的修改已保存，将在下次生效。",
   "napsTitle": "小睡",
   "napsNoReadingTitle": "当天没有小睡数据",
@@ -2660,5 +2657,9 @@
   },
   "deviceUseSheetOff": "你可以随时关闭它。届时它添加的内容会被移除。",
   "deviceUseSheetConfirm": "使用",
-  "deviceUseSheetCancel": "暂不"
+  "deviceUseSheetCancel": "暂不",
+  "dataReanalyzeFailed": "重新分析失败：{error}",
+  "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
+  "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
+  "profileImplausibleFields": "请检查{fields}。数值超出范围，因此未保存任何内容。"
 }

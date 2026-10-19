@@ -138,8 +138,6 @@
   "dataDatabaseShared": "Base de données partagée. C’est la copie complète.",
   "dataEncryptedBackupShared": "Sauvegarde chiffrée partagée. Sans cette phrase secrète, personne ne peut l’ouvrir — y compris cette application, et y compris nous.",
   "dataDaysReanalyzed": "{n, plural, one{{n} jour réanalysé.} other{{n} jours réanalysés.}}",
-  "dataReanalyzeFailed": "La réanalyse a échoué : {error}",
-  "dataReanalyzeDaysFailed": "{n, plural, one{{n} jour n’a pas pu être analysé. Si cela se reproduit, merci de le signaler.} other{{n} jours n’ont pas pu être analysés. Si cela se reproduit, merci de le signaler.}}",
   "dataBackupFailed": "Échec de la sauvegarde : {error}",
   "dataBackupSkipped": "Sauvegarde ignorée.",
   "dataBackedUpTo": "Sauvegardé dans {path}",
@@ -395,7 +393,6 @@
   "napsWokeUpHelp": "QUAND VOUS VOUS ÊTES RÉVEILLÉ",
   "napsInvalidWindow": "Une sieste dure entre 5 minutes et 6 heures. Au-delà, il s'agit d'un sommeil, et cela appartient à la nuit, où les phases peuvent être lues.",
   "napsOverlap": "Cela chevauche une sieste déjà enregistrée ce jour-là. Supprimez d'abord celle-ci plutôt que de compter la même heure deux fois.",
-  "napsInFuture": "Cette sieste n'est pas encore terminée. Enregistrez-la une fois réveillé.",
   "napsNotReanalysed": "La journée n'a pas été réanalysée — une autre analyse était déjà en cours. Votre modification est enregistrée et s'appliquera la prochaine fois.",
   "napsTitle": "Siestes",
   "napsNoReadingTitle": "Aucune donnée de sieste pour cette journée",
@@ -2660,5 +2657,9 @@
   },
   "deviceUseSheetOff": "Vous pouvez le désactiver à tout moment. Ce qu'il a apporté sera alors retiré.",
   "deviceUseSheetConfirm": "L'utiliser",
-  "deviceUseSheetCancel": "Pas maintenant"
+  "deviceUseSheetCancel": "Pas maintenant",
+  "dataReanalyzeFailed": "La réanalyse a échoué : {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{{n} jour n’a pas pu être analysé. Si cela se reproduit, merci de le signaler.} other{{n} jours n’ont pas pu être analysés. Si cela se reproduit, merci de le signaler.}}",
+  "napsInFuture": "Cette sieste n'est pas encore terminée. Enregistrez-la une fois réveillé.",
+  "profileImplausibleFields": "Vérifiez {fields}. La valeur est hors limites, rien n'a donc été enregistré."
 }

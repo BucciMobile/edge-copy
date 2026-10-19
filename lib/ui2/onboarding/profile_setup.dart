@@ -15,6 +15,8 @@ import '../../l10n/display_text.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../compute/profile.dart'
+    show plausibleAgeYears, plausibleHeightCm, plausibleWeightKg;
 import '../../l10n/app_localizations.dart';
 import '../../l10n/date_text.dart';
 import '../../state/app_state.dart';
@@ -138,6 +140,21 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
     ];
     if (bad.isNotEmpty) {
       sayUnreadable(context, bad);
+      return;
+    }
+    final age = Typed.of(_age.text).value;
+    final height = _u.heightToCm(_height.text);
+    final weight = _u.weightToKg(_weight.text);
+    final off = [
+      if (age != null && !plausibleAgeYears(age))
+        AppLocalizations.of(context)?.settingsAgeFieldLabel ?? 'Age',
+      if (height != null && !plausibleHeightCm(height))
+        uiText(context, _u.heightLabel),
+      if (weight != null && !plausibleWeightKg(weight))
+        uiText(context, _u.weightLabel),
+    ];
+    if (off.isNotEmpty) {
+      sayImplausible(context, off);
       return;
     }
     await widget.onCycleTracking?.call(_cycleOn);

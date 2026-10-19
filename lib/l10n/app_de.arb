@@ -141,8 +141,6 @@
   "dataDatabaseShared": "Datenbank geteilt. Sie enthält alle Daten.",
   "dataEncryptedBackupShared": "Verschlüsseltes Backup geteilt. Ohne die Passphrase kann es niemand öffnen – weder diese App noch wir.",
   "dataDaysReanalyzed": "{n, plural, one{1 Tag neu analysiert.} other{{n} Tage neu analysiert.}}",
-  "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
-  "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
   "dataBackupFailed": "Backup fehlgeschlagen: {error}",
   "dataBackupSkipped": "Backup übersprungen.",
   "dataBackedUpTo": "Gesichert nach {path}",
@@ -423,7 +421,6 @@
   "napsWokeUpHelp": "AUFGEWACHT UM",
   "napsInvalidWindow": "Ein Nickerchen dauert zwischen 5 Minuten und 6 Stunden. Alles Längere ist Schlaf und gehört zur Nacht, wo die Schlafphasen ausgewertet werden.",
   "napsOverlap": "Das überschneidet sich mit einem Nickerchen, das an diesem Tag schon eingetragen ist. Entferne zuerst das andere, damit dieselbe Zeit nicht doppelt zählt.",
-  "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
   "napsNotReanalysed": "Der Tag wurde nicht neu ausgewertet, weil gerade schon eine andere Auswertung lief. Deine Änderung ist gespeichert und wird beim nächsten Mal berücksichtigt.",
   "napsTitle": "Nickerchen",
   "napsNoReadingTitle": "Keine Daten zu Nickerchen an diesem Tag",
@@ -2785,5 +2782,9 @@
   },
   "deviceUseSheetOff": "Du kannst es jederzeit ausschalten. Was es beigetragen hat, wird dann wieder entfernt.",
   "deviceUseSheetConfirm": "Nutzen",
-  "deviceUseSheetCancel": "Nicht jetzt"
+  "deviceUseSheetCancel": "Nicht jetzt",
+  "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
+  "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
+  "profileImplausibleFields": "Bitte {fields} prüfen. Der Wert liegt außerhalb des gültigen Bereichs, daher wurde nichts gespeichert."
 }
