@@ -90,6 +90,7 @@ import 'prefs.dart';
 import '../ble/adapters/signals.dart' show InputSignal;
 import '../ui2/profile/devices.dart' show liveSources, rankSources;
 import '../data/db.dart';
+import '../data/export_retention.dart' show purgeSharedHealthCopies;
 import '../ecg/ble_ecg_transport.dart';
 import '../ecg/ecg_controller.dart';
 import '../ecg/ecg_guard_store.dart';
@@ -1334,6 +1335,9 @@ class AppState extends ChangeNotifier {
       // 2 · every row in every table (see LocalDb.wipeAll for why it is not a
       // hand-written table list, and for the sync_cursor decision).
       await LocalDb.wipeAll();
+      // The copies already handed to share sheets (exports, CSVs, issue
+      // reports) are the same records in plaintext, sitting in the cache.
+      await purgeSharedHealthCopies();
 
       // Surfaces outside the database that were still showing it.
       await NotificationService.instance.cancelAll();

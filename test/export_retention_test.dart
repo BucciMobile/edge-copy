@@ -135,4 +135,52 @@ void main() {
       );
     });
   });
+
+  group('pruneSharedReports', () {
+    late Directory dir;
+    setUp(() async => dir = await Directory.systemTemp.createTemp('osr_'));
+    tearDown(() async => dir.delete(recursive: true));
+
+    test('keeps the two newest locally shared report archives', () async {
+      for (final us in [100, 300, 200, 400]) {
+        await _touch(dir, 'openstrap_report_$us.zip');
+      }
+      await _touch(dir, 'openstrap_report_50.db.gz');
+      await _touch(dir, 'notes.txt');
+      await pruneSharedReports(dir);
+      expect(_names(dir), [
+        'notes.txt',
+        'openstrap_report_300.zip',
+        'openstrap_report_400.zip',
+        'openstrap_report_50.db.gz',
+      ]);
+    });
+  });
+
+  group('purgeSharedHealthCopies', () {
+    late Directory dir;
+    setUp(() async => dir = await Directory.systemTemp.createTemp('osp_'));
+    tearDown(() async => dir.delete(recursive: true));
+
+    test('removes every shared or staged copy, nothing else', () async {
+      final share = Directory(p.join(dir.path, 'db_share'))..createSync();
+      await _touch(share, 'openstrap_export_2.db');
+      final csv = Directory(p.join(dir.path, 'openstrap_csv', '9'))
+        ..createSync(recursive: true);
+      await _touch(csv, 'heart_rate.csv');
+      Directory(p.join(dir.path, 'osm_tiles')).createSync();
+      for (final n in [
+        'openstrap_export_1.db',
+        'openstrap_export_1.db.osbk',
+        'openstrap_report_7.zip',
+        'openstrap_report_8.db.gz',
+        'openstrap_slice_9.db',
+        'unrelated.db',
+      ]) {
+        await _touch(dir, n);
+      }
+      await purgeSharedHealthCopies(dir);
+      expect(_names(dir), ['osm_tiles', 'unrelated.db']);
+    });
+  });
 }

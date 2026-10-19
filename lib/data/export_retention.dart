@@ -79,3 +79,65 @@ Future<void> pruneLegacyRootExports(
     // Housekeeping only.
   }
 }
+
+final _reportName = RegExp(r'^openstrap_report_(\d+)\.zip$');
+
+/// Delete all but the [keep] newest issue-report archives in [tmpRoot].
+///
+/// "Share locally" hands the zip to the share sheet and, like a manual
+/// export, never hears back, so the zip was never deleted — and one built
+/// with the full database is a complete plaintext copy of the health record.
+/// The previous one is kept in case its share sheet is still reading it.
+Future<void> pruneSharedReports(
+  Directory tmpRoot, {
+  int keep = kSharedExportsKept,
+}) async {
+  try {
+    final byStamp = <int, File>{};
+    for (final f in tmpRoot.listSync().whereType<File>()) {
+      final m = _reportName.firstMatch(p.basename(f.path));
+      if (m != null) byStamp[int.parse(m.group(1)!)] = f;
+    }
+    final stamps = byStamp.keys.toList()..sort((a, b) => b.compareTo(a));
+    for (final s in stamps.skip(keep)) {
+      try {
+        await byStamp[s]!.delete();
+      } catch (_) {}
+    }
+  } catch (_) {
+    // Housekeeping only — a failure here must never fail the share.
+  }
+}
+
+final _healthCopyName = RegExp(
+    r'^openstrap_(export_\d+\.db(\.osbk)?|report_\d+(\.zip|\.db\.gz)|slice_\d+\.db)$');
+
+/// Delete every copy of the health record the app has handed to a share
+/// sheet or staged in [tmpRoot]: manual exports, CSV runs, issue-report
+/// archives and their intermediates.
+///
+/// For "Delete everything". The retention sweeps above keep the newest
+/// couple on purpose, and the OS purges the cache only when it likes, so a
+/// reset that wiped the database still left whole plaintext copies of it
+/// behind. Best effort: one undeletable file must not fail the reset.
+Future<void> purgeSharedHealthCopies([Directory? tmpRoot]) async {
+  try {
+    tmpRoot ??= await getTemporaryDirectory();
+  } catch (_) {
+    return;
+  }
+  for (final name in const ['db_share', 'openstrap_csv']) {
+    try {
+      final d = Directory(p.join(tmpRoot.path, name));
+      if (d.existsSync()) await d.delete(recursive: true);
+    } catch (_) {}
+  }
+  try {
+    for (final f in tmpRoot.listSync().whereType<File>()) {
+      if (!_healthCopyName.hasMatch(p.basename(f.path))) continue;
+      try {
+        await f.delete();
+      } catch (_) {}
+    }
+  } catch (_) {}
+}
