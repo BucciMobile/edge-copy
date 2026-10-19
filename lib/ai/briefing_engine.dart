@@ -187,19 +187,24 @@ Future<Map<String, dynamic>> collectBriefingInputs(
 /// speaks (it maps those onto series keys itself). Deliberately short: every
 /// one of these is a number the user already has a screen for, so a finding
 /// about it can be checked.
-const Map<String, ({String key, String label, String unit, int dp})>
+///
+/// `cumulative` marks a value that grows through the day, so the current day's
+/// stored point is only the total so far.
+const Map<String,
+        ({String key, String label, String unit, int dp, bool cumulative})>
     kSweepMetrics = {
-  'recovery': (key: 'readiness', label: 'recovery', unit: '', dp: 0),
-  'resting_hr': (key: 'rhr', label: 'resting heart rate', unit: 'bpm', dp: 0),
-  'hrv': (key: 'rmssd', label: 'HRV', unit: 'ms', dp: 0),
-  'strain': (key: 'strain', label: 'strain', unit: '', dp: 1),
-  'steps': (key: 'steps', label: 'steps', unit: '', dp: 0),
-  'sleep': (key: 'tst_min', label: 'time asleep', unit: 'min', dp: 0),
+  'recovery': (key: 'readiness', label: 'recovery', unit: '', dp: 0, cumulative: false),
+  'resting_hr': (key: 'rhr', label: 'resting heart rate', unit: 'bpm', dp: 0, cumulative: false),
+  'hrv': (key: 'rmssd', label: 'HRV', unit: 'ms', dp: 0, cumulative: false),
+  'strain': (key: 'strain', label: 'strain', unit: '', dp: 1, cumulative: true),
+  'steps': (key: 'steps', label: 'steps', unit: '', dp: 0, cumulative: true),
+  'sleep': (key: 'tst_min', label: 'time asleep', unit: 'min', dp: 0, cumulative: false),
   'efficiency': (
     key: 'efficiency',
     label: 'sleep efficiency',
     unit: '%',
-    dp: 0
+    dp: 0,
+    cumulative: false
   ),
 };
 
@@ -210,11 +215,17 @@ const Map<String, ({String key, String label, String unit, int dp})>
 /// The window stops at the most recent algo-version break. Values either side
 /// of one are not comparable, and a version bump reported as "the lowest in 60
 /// days" would be a finding about us, not about the user.
+///
+/// [wallNow] is the real clock (defaults to now). When the day being read has
+/// not ended by it, cumulative metrics are marked partial.
 Future<List<SweepSeries>> collectSweepSeries(
   LocalRepository repo,
-  DateTime now,
-) async {
+  DateTime now, {
+  DateTime? wallNow,
+}) async {
   final today = todayLabel(now);
+  final inProgress =
+      today.compareTo(todayLabel(wallNow ?? DateTime.now())) >= 0;
   final out = <SweepSeries>[];
   for (final e in kSweepMetrics.entries) {
     try {
@@ -257,6 +268,7 @@ Future<List<SweepSeries>> collectSweepSeries(
         decimals: m.dp,
         today: todayValue,
         history: history,
+        partial: m.cumulative && inProgress,
       ));
     } catch (_) {/* a series we cannot read is a series with no finding */}
   }
