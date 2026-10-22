@@ -685,9 +685,10 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
 
     // The stepper names the night, so the nav bar does not say it twice. With
     // one night on disk there is no stepper, and then the subtitle is the only
-    // thing that dates the screen.
+    // thing that dates the screen, so it names the day the way the stepper
+    // would rather than printing the raw yyyy-MM-dd key.
     return _frame(c, title,
-        sub: d.days.length < 2 ? (d.day ?? '').toUpperCase() : '', [
+        sub: d.days.length < 2 ? dayNavLabel(d.day, l).toUpperCase() : '', [
       ...dayNavRow(_day ?? d.day, d.days, _goDay),
 
       // ── 1 · THE ANSWER ──

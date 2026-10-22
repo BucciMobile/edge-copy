@@ -417,6 +417,15 @@ void main() {
             const Metric(value: 1360, confidence: .7, tier: MetricTier.estimate),
       );
 
+  // With one night on disk there is no stepper, so the subtitle dates the
+  // screen. It printed the raw day key ('2026-05-20') in every locale.
+  testWidgets('a lone night is dated by name, never by its raw key',
+      (t) async {
+    await _pump(t, SleepData(day: '2026-05-20', night: _night()));
+    expect(find.text('2026-05-20'), findsNothing);
+    expect(find.text(prettyDay('2026-05-20').toUpperCase()), findsOneWidget);
+  });
+
   testWidgets('tonight is one takeaway, not six numbers', (t) async {
     await _pump(t, planned(todayLabel()));
     expect(find.text('lights out'), findsOneWidget);
