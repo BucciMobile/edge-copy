@@ -1330,6 +1330,41 @@ String? ouraReusableDeviceId(Map<String, Object?>? priorRow) {
   return (id == null || id == LocalDb.kPrimaryDeviceId) ? null : id;
 }
 
+/// What a failed pairing does with the key stored under its device id.
+enum OuraFailedPairKey {
+  /// A freshly minted id's key: an orphan, nothing points at it.
+  drop,
+
+  /// The key the reused row held before this attempt overwrote it.
+  restore,
+
+  /// The ring the row names already acknowledged the new key and answers to
+  /// nothing else, so the new key stays.
+  keep,
+}
+
+/// The decision behind [_pairOuraRing]'s failure path. [reused] is true when
+/// the id came from [ouraReusableDeviceId]; [sameRing] when the ring being
+/// paired has the remote id that row names.
+///
+/// A ring that took the new key keeps it only when it is the ring the row
+/// names. A DIFFERENT ring that took the key and then failed the challenge has
+/// left the paired ring untouched, still answering to its old key, so that key
+/// goes back: keeping the new one would leave the row pointing at a ring that
+/// refuses every later sync, recoverable only by a factory reset that wipes
+/// whatever it had not synced yet.
+@visibleForTesting
+OuraFailedPairKey ouraFailedPairKey({
+  required bool reused,
+  required bool sameRing,
+  required bool keyInstalled,
+  required bool hadPriorKey,
+}) {
+  if (!reused) return OuraFailedPairKey.drop;
+  if (keyInstalled && sameRing) return OuraFailedPairKey.keep;
+  return hadPriorKey ? OuraFailedPairKey.restore : OuraFailedPairKey.drop;
+}
+
 /// What to tell a user whose OWN key the ring refused, by result code. Not
 /// [_kResetFirst]: that sentence tells them to reset the ring, which is exactly
 /// what pairing with an existing key exists to avoid.
@@ -1690,7 +1725,8 @@ Future<String?> _pairOuraRing(
       'oura-${_hex(List<int>.generate(4, (_) => rnd.nextInt(256)))}';
   // A different remote id may be a different ring. The id is still reused (one
   // ring slot), but its ring-clock bookmark and anchor are not carried over —
-  // see `_cursorItem`'s doc.
+  // see `_cursorItem`'s doc. Nor, on a failed attempt, is the new key: the
+  // paired ring still answers to its own (see [ouraFailedPairKey]).
   final sameRing = priorRow?['remote_id'] == device.remoteId.str;
   // What the keychain held for [deviceId] before this attempt touched it. Only
   // meaningful when an id is being reused: the key is stored BEFORE the ring
@@ -1894,23 +1930,31 @@ Future<String?> _pairOuraRing(
     // points at it and nothing ever will, so it goes. A REUSED id's key is the
     // one the working pairing still depends on, and this attempt overwrote it
     // before the ring proved anything, so it is put back (or dropped, when
-    // there was none to put back). Once the ring acknowledged the new key, a
-    // reused id keeps it: the ring answers to nothing else now, and the row
-    // already points here.
-    if (!paired && !(reusedId != null && keyInstalled)) {
-      if (priorKey == null) {
-        await OuraLink._dropKey(deviceId);
-      } else {
-        try {
-          await _secure.write(
-            key: _keyItem(deviceId),
-            value: _hex(priorKey),
-            iOptions: _kApple,
-            mOptions: _kMacos,
-          );
-        } catch (e) {
-          debugPrint('[oura pair] could not restore the prior key: $e');
-        }
+    // there was none to put back). Once the ring the row names acknowledged
+    // the new key, it keeps it — see [ouraFailedPairKey] for why a different
+    // ring does not.
+    if (!paired) {
+      switch (ouraFailedPairKey(
+        reused: reusedId != null,
+        sameRing: sameRing,
+        keyInstalled: keyInstalled,
+        hadPriorKey: priorKey != null,
+      )) {
+        case OuraFailedPairKey.drop:
+          await OuraLink._dropKey(deviceId);
+        case OuraFailedPairKey.keep:
+          break;
+        case OuraFailedPairKey.restore:
+          try {
+            await _secure.write(
+              key: _keyItem(deviceId),
+              value: _hex(priorKey!),
+              iOptions: _kApple,
+              mOptions: _kMacos,
+            );
+          } catch (e) {
+            debugPrint('[oura pair] could not restore the prior key: $e');
+          }
       }
     }
   }
