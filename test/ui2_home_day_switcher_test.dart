@@ -318,6 +318,39 @@ void main() {
     expect(find.text('Set an alarm'), findsOneWidget);
   });
 
+  // A day switch kept the old day on screen while it loaded, and for good if
+  // the read threw: the stepper named yesterday while the rings, tiles and
+  // greeting date were still today's, and nothing said the read had failed.
+  testWidgets('a past day that fails to load does not keep today on screen',
+      (t) async {
+    final app = AppState.forTesting();
+    addTearDown(app.dispose);
+    app.repo = _PastDayThrowsRepo();
+
+    await t.pumpWidget(MaterialApp(
+      theme: buildTheme(Brightness.light),
+      home: ChangeNotifierProvider<AppState>.value(
+        value: app,
+        child: const Scaffold(body: HomeScreen(hour: 9)),
+      ),
+    ));
+    await _settle(t);
+    expect(find.text('70'), findsOneWidget);
+
+    await t.tap(find.bySemanticsLabel('Previous day'));
+    await _settle(t);
+
+    expect(find.text('70'), findsNothing);
+    expect(find.textContaining('could not be read'), findsOneWidget);
+    expect(find.text('Today could not be read'), findsNothing);
+
+    await t.ensureVisible(find.text('Back to today'));
+    await t.tap(find.text('Back to today'));
+    await _settle(t);
+    expect(find.text('70'), findsOneWidget);
+    expect(find.textContaining('could not be read'), findsNothing);
+  });
+
   // Home is never disposed (the shell's IndexedStack), so "Back to today"
   // storing today's literal date left the tab pinned to that date once the
   // clock crossed midnight.
@@ -378,4 +411,11 @@ class _NeedRepo extends _Repo {
   @override
   Future<Map<String, dynamic>> getDaySleepV2(String date) async =>
       {'has_sleep': true, 'duration_min': 250, 'need_min': 465};
+}
+
+/// Today reads fine; any past day throws on its first per-day read.
+class _PastDayThrowsRepo extends _Repo {
+  @override
+  Future<Map<String, dynamic>> getDayOverview(String date) async =>
+      throw StateError('read failed');
 }

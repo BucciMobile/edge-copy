@@ -1443,6 +1443,7 @@
   "homeOfSpan": "{duration} में से",
   "homeLoadFailedTitle": "आज का डेटा पढ़ा नहीं जा सका",
   "homeLoadFailedBody": "सहेजा गया दिन लोड नहीं हो सका। कुछ भी हटाया नहीं गया — यह एक रीड एरर है, डेटा खोना नहीं।",
+  "homeDayLoadFailedTitle": "{day} का डेटा पढ़ा नहीं जा सका",
   "wellnessLoadFailedTitle": "इसे पढ़ा नहीं जा सका",
   "wellnessLoadFailedBody": "आपका सहेजा गया डेटा पढ़ने में विफलता हुई। कुछ भी हटाया नहीं गया — यह पढ़ने में हुई गड़बड़ी है, डेटा गायब नहीं है।",
   "homeTryAgain": "फिर से कोशिश करें",

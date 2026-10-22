@@ -1631,7 +1631,13 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
   void _goDay(String day) {
     setState(() {
       _day = homeSwitcherDay(day);
+      // The day on screen goes with the switch. Kept, it stayed under the new
+      // day's stepper for the whole load with no spinner, and for good if the
+      // load threw: the rings, tiles and greeting date were still the old
+      // day's, and the failure card only renders when there is no day.
+      _d = null;
       _loading = true;
+      _failed = false;
     });
     _load();
   }
@@ -1773,7 +1779,10 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           const Center(child: CircularProgressIndicator())
         else if (_failed)
           StatusCard(
-            l?.homeLoadFailedTitle ?? 'Today could not be read',
+            _day == null
+                ? (l?.homeLoadFailedTitle ?? 'Today could not be read')
+                : (l?.homeDayLoadFailedTitle(prettyDay(_day, l)) ??
+                    '${prettyDay(_day, l)} could not be read'),
             l?.homeLoadFailedBody ??
                 'The stored day failed to load. Nothing was deleted — this is a '
                 'read that went wrong, not missing data.',
@@ -1797,6 +1806,16 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
               onFix: sync == null ? null : () => _tapSync(sync),
             );
           }),
+        // A failed read of a day stepped back onto has no stepper on this
+        // path, so this is the way home.
+        if (_day != null && _day != todayLabel())
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () => _goDay(todayLabel()),
+              child: Text(l?.homeBackToToday ?? 'Back to today'),
+            ),
+          ),
         if (!_loading && !_failed && widget.data == null) ...[
           const SizedBox(height: S.x3),
           firstWeekCard(c, days: _days.length, strainScored: false),

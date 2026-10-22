@@ -1443,6 +1443,7 @@
   "homeOfSpan": "共 {duration}",
   "homeLoadFailedTitle": "今日数据读取失败",
   "homeLoadFailedBody": "已保存的当日数据加载失败。没有任何内容被删除——这是读取出错，不是数据丢失。",
+  "homeDayLoadFailedTitle": "{day}的数据读取失败",
   "wellnessLoadFailedTitle": "无法读取",
   "wellnessLoadFailedBody": "读取已存储的数据失败。没有删除任何内容——这是一次读取出错，而不是数据缺失。",
   "homeTryAgain": "重试",

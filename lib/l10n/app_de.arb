@@ -1478,6 +1478,7 @@
   "homeOfSpan": "von {duration}",
   "homeLoadFailedTitle": "Der heutige Tag konnte nicht geladen werden",
   "homeLoadFailedBody": "Der gespeicherte Tag konnte nicht geladen werden. Es wurde nichts gelöscht – das ist ein Ladefehler, es fehlen keine Daten.",
+  "homeDayLoadFailedTitle": "{day} konnte nicht geladen werden",
   "wellnessLoadFailedTitle": "Konnte nicht gelesen werden",
   "wellnessLoadFailedBody": "Die gespeicherten Daten konnten nicht gelesen werden. Es wurde nichts gelöscht – das ist ein Ladefehler, es fehlen keine Daten.",
   "homeTryAgain": "Erneut versuchen",

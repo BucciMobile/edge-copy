@@ -7329,6 +7329,16 @@
   "@homeLoadFailedBody": {
     "description": "Body of the card shown when today's data failed to load from the database."
   },
+  "homeDayLoadFailedTitle": "{day} could not be read",
+  "@homeDayLoadFailedTitle": {
+    "description": "Title of the card shown on Home when a past day picked with the day switcher failed to load from the database.",
+    "placeholders": {
+      "day": {
+        "type": "String",
+        "example": "Wednesday, 15 October"
+      }
+    }
+  },
   "wellnessLoadFailedTitle": "This could not be read",
   "@wellnessLoadFailedTitle": {
     "description": "Title of the card shown when the Wellness screen or the sleep plan failed to load from the database."
