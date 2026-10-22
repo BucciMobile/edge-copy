@@ -1171,10 +1171,18 @@ class AppState extends ChangeNotifier {
   Future<Map<String, dynamic>> updateProfile(
     Map<String, dynamic> fields,
   ) async {
+    final goalBefore = user?['step_goal'];
     user = {...?user, ...fields};
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_kProfile, jsonEncode(user));
     notifyListeners();
+    // Home bakes the step goal into its loaded data and re-reads only on the
+    // insights revision; `notifyListeners` alone left its "% of goal", "steps
+    // left" and goal ring on the old goal until the next derive, while the
+    // steps detail screen one tap away already showed the new one.
+    if (fields.containsKey('step_goal') && fields['step_goal'] != goalBefore) {
+      bumpInsights();
+    }
     return user!;
   }
 
