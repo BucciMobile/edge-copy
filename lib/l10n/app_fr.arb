@@ -44,7 +44,7 @@
   "pairingFailedAdviceTitle": "Le bracelet a été trouvé mais la session ne s’est pas terminée",
   "pairingFailedAdviceBody": "Relancer la recherche à un mètre de distance fonctionne généralement.",
   "profileSetupTitle": "À propos de vous",
-  "profileSetupBody": "Quatre chiffres modifient la façon dont vos données sont notées. Laissez-en un vide et seules les métriques qui en ont besoin resteront indisponibles.",
+  "profileSetupBody": "Le sexe est le seul choix obligatoire pour continuer. L'âge, la taille et le poids modifient la façon dont vos données sont notées ; laissez-en un vide et seules les métriques qui en ont besoin resteront indisponibles.",
   "profileSetupSexHeader": "SEXE",
   "profileSetupSexMale": "Homme",
   "profileSetupSexFemale": "Femme",

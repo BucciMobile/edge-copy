@@ -44,7 +44,7 @@
   "pairingFailedAdviceTitle": "找到了腕带，但会话未完成",
   "pairingFailedAdviceBody": "从一米距离再次扫描通常有效。",
   "profileSetupTitle": "关于你",
-  "profileSetupBody": "四个数字会影响你的数据评分方式。留空其中任何一个，只有需要它的指标会不可用。",
+  "profileSetupBody": "继续前只需选择性别。年龄、身高和体重会影响你的数据评分方式；留空其中任何一个，只有需要它的指标会不可用。",
   "profileSetupSexHeader": "性别",
   "profileSetupSexMale": "男性",
   "profileSetupSexFemale": "女性",

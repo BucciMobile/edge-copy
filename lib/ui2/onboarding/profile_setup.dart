@@ -178,8 +178,10 @@ class _ProfileSetupViewState extends State<ProfileSetupView> {
             const SizedBox(height: S.x3),
             Text(
               l?.profileSetupBody ??
-                  'Four numbers change how your data is scored. Leave any of them '
-                      'blank and only the metrics that need it stay unavailable.',
+                  'Sex is the one choice you need to make to continue. Age, '
+                      'height and weight change how your data is scored; leave '
+                      'any of them blank and only the metrics that need it stay '
+                      'unavailable.',
               style: F.body.copyWith(color: p.ink2),
             ),
             const SizedBox(height: S.x6),

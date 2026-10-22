@@ -44,7 +44,7 @@
   "pairingFailedAdviceTitle": "Band gefunden, aber Verbindung nicht abgeschlossen",
   "pairingFailedAdviceBody": "Meist klappt es, wenn du aus etwa einem Meter Entfernung erneut suchst.",
   "profileSetupTitle": "Über dich",
-  "profileSetupBody": "Vier Angaben beeinflussen, wie deine Daten ausgewertet werden. Lässt du eine leer, bleiben nur die Werte aus, die sie benötigen.",
+  "profileSetupBody": "Das Geschlecht ist die einzige Angabe, die zum Fortfahren nötig ist. Alter, Größe und Gewicht beeinflussen, wie deine Daten ausgewertet werden; lässt du eine davon leer, bleiben nur die Werte aus, die sie benötigen.",
   "profileSetupSexHeader": "GESCHLECHT",
   "profileSetupSexMale": "Männlich",
   "profileSetupSexFemale": "Weiblich",

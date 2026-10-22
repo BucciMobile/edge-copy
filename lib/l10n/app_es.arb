@@ -44,7 +44,7 @@
   "pairingFailedAdviceTitle": "Se encontró la banda pero la sesión no terminó",
   "pairingFailedAdviceBody": "Volver a buscar desde un metro de distancia suele funcionar.",
   "profileSetupTitle": "Sobre ti",
-  "profileSetupBody": "Cuatro datos cambian cómo se puntúan tus datos. Deja alguno en blanco y solo las métricas que lo necesiten quedarán sin disponibilidad.",
+  "profileSetupBody": "El sexo es la única opción obligatoria para continuar. La edad, la altura y el peso cambian cómo se puntúan tus datos; deja alguno en blanco y solo las métricas que lo necesiten quedarán sin disponibilidad.",
   "profileSetupSexHeader": "SEXO",
   "profileSetupSexMale": "Hombre",
   "profileSetupSexFemale": "Mujer",
