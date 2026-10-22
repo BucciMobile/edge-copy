@@ -3035,6 +3035,27 @@ class DerivationEngine {
       _running = false;
     }
   }
+
+  /// Run [body] once no pass is in flight, holding the latch so none starts
+  /// until it returns. For user deletes: a pass that built its substrate
+  /// before the delete keeps writing `day_result`, `metric_series` and the
+  /// baselines after it commits, and the deleted days come back with no
+  /// substrate left to ever re-derive or remove them. Waits rather than
+  /// skips, like [_withRunLock]'s import caller. [body] must not call a
+  /// locked entry point (it would be skipped as busy).
+  static Future<T> whileIdle<T>(Future<T> Function() body) async {
+    while (_running) {
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+    }
+    // No await between the loop's last check and taking the latch.
+    _running = true;
+    try {
+      return await body();
+    } finally {
+      _running = false;
+    }
+  }
+
   final Map<String, dynamic> _diag = {
     'running': false,
     'stage': 'idle',

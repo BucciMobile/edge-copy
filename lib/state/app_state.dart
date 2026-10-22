@@ -1333,8 +1333,11 @@ class AppState extends ChangeNotifier {
       final secondaryIds = await _secondaryDeviceIdsForReset();
 
       // 2 · every row in every table (see LocalDb.wipeAll for why it is not a
-      // hand-written table list, and for the sync_cursor decision).
-      await LocalDb.wipeAll();
+      // hand-written table list, and for the sync_cursor decision). Behind the
+      // derive latch: ResetGate stops ingest, not a pass already deriving from
+      // the substrate it read before the wipe, which would write those days'
+      // results and baselines straight back into the emptied store.
+      await DerivationEngine.whileIdle(LocalDb.wipeAll);
       // The copies already handed to share sheets (exports, CSVs, issue
       // reports) are the same records in plaintext, sitting in the cache.
       await purgeSharedHealthCopies();
@@ -2688,7 +2691,10 @@ class AppState extends ChangeNotifier {
       LocalDb.exportDaysDb(dayIds);
 
   Future<int> deleteDays(Set<String> dayIds) async {
-    final deleted = await LocalDb.deleteDays(dayIds);
+    // Same race as resetAllData: a pass in flight would write the deleted
+    // days back after the delete, with no substrate left to ever remove them.
+    final deleted =
+        await DerivationEngine.whileIdle(() => LocalDb.deleteDays(dayIds));
     await LocalDb.refreshComputeFreshness();
     lastSynced = await LocalDb.latestSample();
     // Deleting days is a durable write like any other, so the screens holding a
