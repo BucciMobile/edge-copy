@@ -99,8 +99,9 @@ List<HealthDataType> healthDeleteTypes({required bool isApplePlatform}) {
 ///
 /// Health Connect stores a workout's energy as a separate
 /// TotalCaloriesBurnedRecord inserted in the same atomic batch, so without that
-/// write permission the whole workout write fails. On Android the session's
-/// kcal stays in the day's hourly active energy instead.
+/// write permission the whole workout write fails. On both platforms the
+/// session's kcal also stays in the day's hourly active energy, which is what
+/// the store's daily active-energy total is built from.
 @visibleForTesting
 int? healthWorkoutEnergyKcal(
   Map<String, Object?> r, {
@@ -1323,29 +1324,13 @@ class HealthExporter {
     );
     final bucketCount = bucketBounds.length - 1;
 
-    // Active energy: chunked into hourly buckets over the day.
-    // We subtract workout calories to prevent double-counting, because workouts
-    // are exported separately (their totalEnergyBurned already covers it, on
-    // Apple only — see healthWorkoutEnergyKcal).
-    // Upper bound is exclusive (dayEnd - 1s): sessionsInRange is inclusive on
-    // both ends, so a workout starting exactly at midnight would otherwise be
-    // double-subtracted from both this day and the next.
-    var cal = sc('calories')?.toDouble() ?? 0.0;
-    try {
-      final rows = await LocalDb.sessionsInRange(
-        dayStart.millisecondsSinceEpoch ~/ 1000,
-        (dayEnd.millisecondsSinceEpoch ~/ 1000) - 1,
-      );
-      final workoutCal =
-          healthWorkoutCaloriesToSubtract(rows, isApplePlatform: isApple);
-      cal = (cal > workoutCal) ? cal - workoutCal : 0.0;
-    } catch (e) {
-      // Unknown whether cal is workout-adjusted — still write our best guess
-      // below (idempotent re-export corrects it once this query succeeds),
-      // but flag the day so it isn't marked done on this pass.
-      debugPrint('[health] workout-calorie query: $e');
-      success = false;
-    }
+    // Active energy: chunked into hourly buckets over the day, workouts
+    // included. The WORKOUT sample's totalEnergyBurned is not counted by
+    // HealthKit's Active Energy total or the Move ring (those sum
+    // activeEnergyBurned samples only, and the plugin saves a bare HKWorkout
+    // with none attached), so taking workout kcal out of these buckets made
+    // them vanish from the day instead of preventing a double count.
+    final cal = sc('calories')?.toDouble() ?? 0.0;
 
     if (cal > 0 && bucketCount > 0) {
       final calPerHour = cal / bucketCount;
@@ -1650,25 +1635,6 @@ String? healthWorkoutTitleForType(String? type) {
       .split(' ')
       .map((w) => w[0].toUpperCase() + w.substring(1))
       .join(' ');
-}
-
-/// Calories of the day's sessions that get their own WORKOUT sample, and so
-/// come off the day's active energy. A session [HealthExporter] skips (live,
-/// fabricated end, private) keeps its calories in the active-energy total —
-/// subtracting them too would make them vanish from the day entirely. Only
-/// the energy the WORKOUT sample itself carries comes off
-/// ([healthWorkoutEnergyKcal]: none on Android).
-@visibleForTesting
-double healthWorkoutCaloriesToSubtract(List<Map<String, Object?>> rows,
-    {bool isApplePlatform = true}) {
-  var total = 0.0;
-  for (final r in rows) {
-    if ((r['status']?.toString() ?? '') == 'live') continue;
-    if ((r['end_ts_fabricated'] as num?)?.toInt() == 1) continue;
-    if ((r['private'] as num?)?.toInt() == 1) continue;
-    total += healthWorkoutEnergyKcal(r, isApplePlatform: isApplePlatform) ?? 0;
-  }
-  return total;
 }
 
 /// Parameterised by [ios] rather than reading `Platform` directly so a unit
