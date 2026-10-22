@@ -374,9 +374,9 @@ void main() {
       expect(Typed.of('  ').blank, isTrue);
       expect(Typed.of('  ').bad, isFalse);
       expect(Typed.of('78.4').value, 78.4);
-      // A comma decimal is 1.5 to half of Europe and 15 to the other half, and
-      // a unit suffix is not a number at all. Neither is guessed at.
-      for (final s in ['78 kg', '1,5', '1,200', 'twelve']) {
+      // "1,200" is 1.2 to half of Europe and 1200 to the other half, and a
+      // unit suffix is not a number at all. Neither is guessed at.
+      for (final s in ['78 kg', '1,200', 'twelve']) {
         expect(Typed.of(s).bad, isTrue, reason: s);
         expect(Typed.of(s).value, isNull, reason: s);
       }

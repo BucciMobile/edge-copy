@@ -6,6 +6,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../l10n/decimal_text.dart' show parseTypedNumber;
+
 enum UnitSystem { metric, imperial }
 
 extension UnitSystemLabel on UnitSystem {
@@ -175,14 +177,14 @@ class UnitsController extends ChangeNotifier {
 
   /// Parse a weight field (display units) → kg for storage.
   double? weightToKg(String text) {
-    final v = double.tryParse(text.trim());
+    final v = parseTypedNumber(text);
     if (v == null) return null;
     return isImperial ? v * _kgPerLb : v;
   }
 
   /// Parse a height field (display units = total inches when imperial) → cm.
   double? heightToCm(String text) {
-    final v = double.tryParse(text.trim());
+    final v = parseTypedNumber(text);
     if (v == null) return null;
     return isImperial ? v * _cmPerIn : v;
   }
