@@ -281,4 +281,17 @@ void main() {
         isTrue);
     expect(DerivationEngine.sleepWindowTruncatedByPrune(day, null), isFalse);
   });
+
+  test('a user window that staged to nothing (onset 0) is judged on the '
+      "day's lookback, not as cut by every prune", () {
+    const day = '2026-08-12';
+    final cut = DateTime(2026, 8, 10).millisecondsSinceEpoch ~/ 1000;
+    for (final source in ['manual', 'confirmed']) {
+      expect(
+          DerivationEngine.sleepWindowTruncatedByPrune(day, cut,
+              sleepSource: source, sleepOnsetSec: 0),
+          isFalse,
+          reason: source);
+    }
+  });
 }

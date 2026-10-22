@@ -4978,7 +4978,13 @@ class DerivationEngine {
       windowTruncatedByPrune(
         dayId,
         prunedBeforeSec,
-        forcedOnsetSec: sleepSource == 'manual' || sleepSource == 'confirmed'
+        // A user window the segmenter abstained on carries onset 0 (no
+        // staged window), and 0 is older than any prune cursor: fall back to
+        // the day's own lookback rather than calling every such day cut.
+        forcedOnsetSec: (sleepSource == 'manual' ||
+                    sleepSource == 'confirmed') &&
+                sleepOnsetSec != null &&
+                sleepOnsetSec > 0
             ? sleepOnsetSec
             : null,
       );
@@ -5468,9 +5474,16 @@ class DerivationEngine {
     // cut keeps the oldest kept day's own rows but drops the evening half of
     // its night, so sleepSub is non-empty and the scalars come back from a
     // partial night. Every path (algo bump, force, override, rescan) lands here.
+    // A user-set window is staged from the override, not from a replayed
+    // candidate, so an empty night substrate there means the window itself
+    // had too little recording (or no sleep), not that raw aged out — the
+    // prune leg below answers that against the override's own onset.
+    final userSetWindow =
+        day.sleepSource == 'manual' || day.sleepSource == 'confirmed';
     if (!producedNothing &&
         (nightSubstrateRegressed(
               sleepRejected: day.sleepSource == 'rejected',
+              userSetWindow: userSetWindow,
               sleepSubEmpty: sleepSub.isEmpty,
               nightScalarsNull: scMap == null ||
                   (scMap['rhr'] == null &&
@@ -5484,7 +5497,11 @@ class DerivationEngine {
                   day.date,
                   await LocalDb.getCursorInt(_prunedBeforeCursor),
                   sleepSource: day.sleepSource,
-                  sleepOnsetSec: day.sleepOnsetSec,
+                  sleepOnsetSec: day.sleepOnsetSec > 0 || !userSetWindow
+                      ? day.sleepOnsetSec
+                      : ((await LocalDb.getSleepOverride(day.date))?[
+                              'onset_ts'] as num?)
+                          ?.toInt(),
                 )))) {
       final existingNight = await LocalDb.dayResult(day.date);
       final existingHadNight = existingNight != null &&
@@ -6218,11 +6235,20 @@ class DerivationEngine {
   /// [sleepRejected] (the user said "not sleep") is never a regression: the
   /// null night is what they asked for, and the existing row is the very
   /// night they rejected.
+  ///
+  /// [userSetWindow] (a 'manual' or 'confirmed' override) is not one either:
+  /// that window is staged from the override itself, so an empty night
+  /// substrate means too little of it was recorded, and the existing row is
+  /// usually the auto night being corrected — declining kept that night on
+  /// screen and re-declined every later pass. Whether the prune cut the
+  /// user's window is the prune check's job, on the override's own onset.
   static bool nightSubstrateRegressed({
     bool sleepRejected = false,
+    bool userSetWindow = false,
     required bool sleepSubEmpty,
     required bool nightScalarsNull,
-  }) => !sleepRejected && sleepSubEmpty && nightScalarsNull;
+  }) =>
+      !sleepRejected && !userSetWindow && sleepSubEmpty && nightScalarsNull;
 
   /// Whether [row] is a REAL derived day result worth protecting — i.e. not a
   /// skip marker and not an all-absent shell.
