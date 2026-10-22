@@ -1,11 +1,13 @@
 package wtf.openstrap.openstrap_edge
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -89,6 +91,19 @@ class EdgeTrackingService : Service() {
          */
         @JvmStatic
         fun start(context: Context, location: Boolean? = null) {
+            // startForegroundService arms a deadline that only startForeground
+            // satisfies. If startForeground is going to throw, the system kills
+            // the process ~10 s later (ForegroundServiceDidNotStartInTimeException),
+            // and the watchdog / CDM / boot paths would repeat that every time.
+            // So refuse here, before the deadline exists.
+            val allowed = connectedDeviceTypeAllowed(Build.VERSION.SDK_INT) { perm ->
+                ContextCompat.checkSelfPermission(context, perm) ==
+                    PackageManager.PERMISSION_GRANTED
+            }
+            if (!allowed) {
+                Log.w(TAG, "not starting: no Bluetooth permission for the connectedDevice FGS type")
+                return
+            }
             val intent = Intent(context, EdgeTrackingService::class.java)
             if (location != null) intent.putExtra(EXTRA_LOCATION, location)
             ContextCompat.startForegroundService(context, intent)
@@ -108,6 +123,20 @@ class EdgeTrackingService : Service() {
                 Log.w(caller, "EdgeTrackingService start refused: $e")
             }
 
+        /**
+         * Android 14+ throws SecurityException from startForeground with
+         * FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE unless one of that type's
+         * prerequisite permissions is granted. Of those, this app only declares
+         * BLUETOOTH_CONNECT and BLUETOOTH_SCAN, both runtime permissions the user
+         * can revoke ("Nearby devices") after pairing.
+         */
+        internal fun connectedDeviceTypeAllowed(
+            sdkInt: Int,
+            isGranted: (String) -> Boolean,
+        ): Boolean = sdkInt < Build.VERSION_CODES.UPSIDE_DOWN_CAKE ||
+            isGranted(Manifest.permission.BLUETOOTH_CONNECT) ||
+            isGranted(Manifest.permission.BLUETOOTH_SCAN)
+
         internal fun startGuarded(
             start: () -> Unit,
             onRefused: (Exception) -> Unit,
@@ -119,6 +148,9 @@ class EdgeTrackingService : Service() {
             false
         }
     }
+
+    /** Whether startForeground has succeeded at least once in this service lifetime. */
+    private var inForeground = false
 
     override fun onCreate() {
         super.onCreate()
@@ -159,6 +191,7 @@ class EdgeTrackingService : Service() {
                 }
                 try {
                     startForeground(NOTIF_ID, notif, type)
+                    inForeground = true
                 } catch (e: Exception) {
                     if (withLocation) {
                         // Location type can be refused (permission revoked mid-run,
@@ -166,18 +199,29 @@ class EdgeTrackingService : Service() {
                         // connectedDevice keep-alive rather than losing the BLE link.
                         Log.w(TAG, "startForeground with location failed, retrying without: $e")
                         startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE)
+                        inForeground = true
                     } else {
                         throw e
                     }
                 }
             } else {
                 startForeground(NOTIF_ID, notif)
+                inForeground = true
             }
         } catch (e: Exception) {
-            // Defensive: a background start without an FGS exemption can throw on
-            // API 31+. The watchdog/CDM/boot paths all carry exemptions, but never
-            // crash the process over a keep-alive notification.
+            // A background start without an FGS exemption can throw on API 31+, and
+            // on 14+ so does a revoked Bluetooth permission. Swallowing it is only
+            // safe if an earlier start already put the service in the foreground.
+            // Otherwise the system kills the whole process at the
+            // startForegroundService deadline, and START_STICKY brings it back
+            // into the same crash. Stop instead, non-sticky; the watchdog stays
+            // scheduled and restarts the service once the start can succeed.
             Log.w(TAG, "startForeground failed: $e")
+            if (!inForeground) {
+                stopSelf()
+                KeepAliveWorker.schedule(applicationContext)
+                return START_NOT_STICKY
+            }
         }
         // AFTER startForeground, so the 5 s foreground-service deadline is met
         // before any heavier work runs on the main thread:
