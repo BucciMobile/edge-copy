@@ -10191,6 +10191,9 @@ class LocalDb {
     'lab_result': (['marker', 'taken_on'], 'updated_at'),
     'cycle_symptom': (['date'], 'updated_at'),
     'sleep_override': (['day_id'], 'created_at'),
+    // A dose slot is re-marked in place (taken, skipped, cleared), so an older
+    // backup would flip a dose logged since back to what it said then.
+    'med_dose': (['med_key', 'date', 'slot_min'], 'updated_at'),
     'cycle_log': (['date'], null),
     'sessions': (['id'], null),
     'strength_set': (['session_id'], null),

@@ -32,6 +32,7 @@ Future<void> _clear() async {
     'cycle_log',
     'sessions',
     'strength_set',
+    'med_dose',
   ]) {
     await db.delete(t);
   }
@@ -70,6 +71,7 @@ void main() {
       'openstrap_restore_keeps_newer_edits_test.db',
       'monday.db',
       'newer.db',
+      'dose.db',
     ]) {
       try {
         File(p.join(dir, f)).deleteSync();
@@ -157,5 +159,32 @@ void main() {
     final fields = await db.query('journal_metric');
     expect([for (final r in fields) r['field']], ['alcohol']);
     expect((await db.query('sleep_override')).single['onset_ts'], 500);
+  });
+
+  test('an older backup does not undo a dose marked after it', () async {
+    await _clear();
+    final db = await LocalDb.instance;
+    Map<String, Object?> dose(int slot, {int? takenTs, int skipped = 0,
+            required int updatedAt}) =>
+        {
+          'med_key': 'iron', 'date': _day, 'slot_min': slot,
+          'taken_ts': takenTs, 'skipped': skipped, 'note': '',
+          'updated_at': updatedAt,
+        };
+    await db.insert('med_dose', dose(480, skipped: 1, updatedAt: 1000));
+    await db.insert('med_dose', dose(1200, updatedAt: 1000));
+    final backup = await _snapshot('dose.db');
+
+    // Since the backup: the skipped morning dose was taken after all.
+    await db.update(
+        'med_dose', {'taken_ts': 50, 'skipped': 0, 'updated_at': 2000},
+        where: 'slot_min = 480');
+
+    await LocalDb.importFromDbFile(backup);
+
+    final rows = await db.query('med_dose', orderBy: 'slot_min');
+    expect(rows, hasLength(2));
+    expect(rows.first['taken_ts'], 50);
+    expect(rows.first['skipped'], 0);
   });
 }
