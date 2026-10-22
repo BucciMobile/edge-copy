@@ -5795,8 +5795,7 @@ class DerivationEngine {
         }
       }
       // A session floor raised the scalar above the HR-only envelope: the
-      // envelope carries the same number and says why. `series.strain_curve`
-      // stays the HR build-up through the day.
+      // envelope carries the same number and says why.
       final strainEnv = (bundle['clinical'] as Map?)?['strain'];
       final scStrain = scMap?['strain'];
       if (strainEnv is Map &&
@@ -5808,6 +5807,23 @@ class DerivationEngine {
         strainEnv['note'] = 'the day\'s headline strain, which a workout '
             'logged this day can raise (heart-rate strain '
             '${hrStrain.toStringAsFixed(1)})';
+      }
+      // `series.strain_curve` is drawn right under that headline on the same
+      // 0-21 axis. Left as the HR-only build-up it ended below a floored
+      // headline — a flat line at 0 under "0.6" — so it gets the same floor
+      // from each session's end onward. Copied into a fresh dynamic-valued map
+      // for the same reason as `coverage` above: the pipeline's series map
+      // literal has a narrower inferred value type.
+      final seriesNow = bundle['series'];
+      final curveNow = seriesNow is Map ? seriesNow['strain_curve'] : null;
+      if (scStrain is num && curveNow is List && curveNow.isNotEmpty) {
+        final seriesMap = Map<String, dynamic>.from(seriesNow as Map);
+        seriesMap['strain_curve'] = strainCurveFlooredAtSessions(
+          curveNow,
+          savedSessions,
+          capSec: localNextMidnightSecForDayLabel(day.date) - 1,
+        );
+        bundle['series'] = seriesMap;
       }
       // Method, family and class on each envelope of a wearable's day
       // (inputs/canonical.dart). A band's day is untouched.
@@ -7597,6 +7613,63 @@ class DerivationEngine {
       if (v != null && v.isFinite && v > best) best = v;
     }
     return best;
+  }
+
+  /// [curve] (`series.strain_curve`, `{t, v}` points) with each point raised
+  /// to the strain of every finished, non-private session that had ENDED by
+  /// then — the same sessions [strainFlooredAtSessions] lifts the headline to.
+  /// Without this the headline could read 0.6 above a line pinned at 0 all
+  /// day. A session ending after the last point adds one point at its end
+  /// (capped at [capSec]) so the line still finishes on the headline. An
+  /// empty curve stays empty: there is no HR build-up to draw.
+  @visibleForTesting
+  static List<Map<String, dynamic>> strainCurveFlooredAtSessions(
+    List curve,
+    List<Map<String, dynamic>> sessions, {
+    int? capSec,
+  }) {
+    final points = <Map<String, dynamic>>[
+      for (final p in curve.whereType<Map>())
+        if (p['t'] is num && p['v'] is num)
+          <String, dynamic>{'t': p['t'], 'v': p['v']},
+    ];
+    if (points.isEmpty) return points;
+    final floors = <(int, double)>[];
+    for (final s in sessions) {
+      if (s['status'] != 'done') continue;
+      if ((s['private'] as num?)?.toInt() == 1) continue;
+      final v = (s['strain'] as num?)?.toDouble();
+      final end = (s['end_ts'] as num?)?.toInt();
+      if (v == null || !v.isFinite || end == null) continue;
+      floors.add((end, v));
+    }
+    if (floors.isEmpty) return points;
+    floors.sort((a, b) => a.$1.compareTo(b.$1));
+    var fi = 0;
+    var floor = double.negativeInfinity;
+    for (final p in points) {
+      final t = (p['t'] as num).toInt();
+      while (fi < floors.length && floors[fi].$1 <= t) {
+        if (floors[fi].$2 > floor) floor = floors[fi].$2;
+        fi++;
+      }
+      if (floor > (p['v'] as num)) p['v'] = floor;
+    }
+    var lastT = (points.last['t'] as num).toInt();
+    var lastV = (points.last['v'] as num).toDouble();
+    for (; fi < floors.length; fi++) {
+      final (end, v) = floors[fi];
+      if (v <= lastV) continue;
+      final t = capSec != null && end > capSec ? capSec : end;
+      if (t <= lastT) {
+        points.last['v'] = v;
+      } else {
+        points.add(<String, dynamic>{'t': t, 'v': v});
+        lastT = t;
+      }
+      lastV = v;
+    }
+    return points;
   }
 
   static void _applyWakeDayFeatures(
