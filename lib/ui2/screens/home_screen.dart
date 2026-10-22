@@ -1416,6 +1416,10 @@ class HomeData {
       calories: metricOf(strain['calories']),
       caloriesTotal: metricOf(strain['calories_total']),
       sleepMin: metricOf(sleep['duration_min']),
+      // The learned need `getDaySleepV2` already carries (absent until one is
+      // learned). Left unset, the ring told a user who has a need that there
+      // was "No target yet" on every day but today.
+      sleepNeedMin: metricOf(sleep['need_min']),
       stepGoal: (profile['step_goal'] as num?)?.toInt() ?? kDefaultStepGoal,
     );
   }

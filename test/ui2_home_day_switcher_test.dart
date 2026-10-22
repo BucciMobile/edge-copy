@@ -216,6 +216,18 @@ void main() {
     expect(t.widget<SleepDetail>(find.byType(SleepDetail)).day, isNull);
   });
 
+  test('a past day carries the learned sleep need, so its ring has a target',
+      () async {
+    final d = await HomeData.loadForDay(_NeedRepo(), _yesterday);
+    expect(d.sleepMin.value, 250);
+    expect(d.sleepNeedMin.value, 465);
+  });
+
+  test('a past day with no learned need stays without a target', () async {
+    final d = await HomeData.loadForDay(_Repo(), _yesterday);
+    expect(d.sleepNeedMin.value, isNull);
+  });
+
   testWidgets('a past day with nothing recorded says so, not "sync the band"',
       (t) async {
     final app = AppState.forTesting();
@@ -358,4 +370,12 @@ class _PartialPastRepo extends _EmptyPastRepo {
   @override
   Future<Map<String, dynamic>> getDayStrain(String date) async =>
       {'strain': 9.9};
+}
+
+/// `getDaySleepV2` as the live repo writes it once a need has been learned:
+/// `need_min` is a plain minute count beside the night's duration.
+class _NeedRepo extends _Repo {
+  @override
+  Future<Map<String, dynamic>> getDaySleepV2(String date) async =>
+      {'has_sleep': true, 'duration_min': 250, 'need_min': 465};
 }
