@@ -432,7 +432,7 @@ class PairSensorView extends StatelessWidget {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(S.x4, 0, S.x4, S.x10),
               children: [
-                if (paired != null) ..._pairedSection(c, paired!),
+                if (paired != null) ..._pairedSection(c, paired!, busy),
                 Section(
                   paired == null
                       ? (l?.pairSensorWhatThisAdds ?? 'What this adds')
@@ -597,7 +597,7 @@ class PairSensorView extends StatelessWidget {
     );
   }
 
-  List<Widget> _pairedSection(BuildContext c, PairedSensor s) {
+  List<Widget> _pairedSection(BuildContext c, PairedSensor s, bool busy) {
     final l = AppLocalizations.of(c);
     return [
       Section(
@@ -634,12 +634,43 @@ class PairSensorView extends StatelessWidget {
                   'Removes the source. The readings it already took stay.',
               danger: true,
               chevron: false,
-              onTap: onForget == null ? null : () => onForget!(s.id),
+              // Locked while a pair is in flight, and asked first: for a ring
+              // or a Mi Band this deletes the pairing key the app minted and
+              // never showed anyone, and the device keeps it — one stray tap
+              // would leave a ring that refuses every new key until it is
+              // factory reset. The device page asks the same question.
+              onTap: onForget == null || busy
+                  ? null
+                  : () => _confirmForget(c, s),
             ),
           ]),
         ),
       ),
     ];
+  }
+
+  Future<void> _confirmForget(BuildContext c, PairedSensor s) async {
+    final l = AppLocalizations.of(c);
+    final name = s.label ?? entryLabel;
+    final ok = await showDialog<bool>(
+      context: c,
+      builder: (d) => AlertDialog(
+        title: Text(l?.devicesForgetSensor(name) ?? 'Forget $name?'),
+        content: Text(
+          withIosUninstallWarning(c, l?.devicesForgetSensorBody ??
+              'It stops being used in workouts and has to be paired again. Everything already saved on this phone stays.'),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(d).pop(false),
+              child: Text(l?.devicesKeepItPaired ?? 'Keep it paired')),
+          TextButton(
+              onPressed: () => Navigator.of(d).pop(true),
+              child: Text(l?.devicesForgetIt ?? 'Forget it')),
+        ],
+      ),
+    );
+    if (ok == true) onForget?.call(s.id);
   }
 
   Widget _candidateRow(BuildContext c, BandCandidate cand, bool busy) {
