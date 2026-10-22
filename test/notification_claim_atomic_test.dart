@@ -224,6 +224,27 @@ void main() {
       expect(await LocalDb.notifFiredExists(fresh), isTrue);
     });
 
+    test('the prefs mirror is pruned too when the DB is healthy', () async {
+      // The mirror is written on every won claim, so without its own prune it
+      // grows by one key per notification for the life of the install.
+      final stale = '${_dayOffset(-(FiredKeyStore.retentionDays + 5))}:low_read';
+      final fresh = '${_dayOffset(-1)}:low_read';
+      SharedPreferences.setMockInitialValues({
+        'notif_fired:$stale': true,
+        'notif_fired:$fresh': true,
+        'notif_fired:alarm_fired:12345': true,
+      });
+
+      expect(await const FiredKeyStore().claim('${_dayOffset(0)}:trigger'),
+          isTrue);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      expect(prefs.containsKey('notif_fired:$stale'), isFalse);
+      expect(prefs.getBool('notif_fired:$fresh'), isTrue);
+      expect(prefs.getBool('notif_fired:alarm_fired:12345'), isTrue);
+    });
+
     test('undated claims (alarm_fired:<epoch>) are never pruned', () async {
       const store = FiredKeyStore();
       await LocalDb.seedNotifFired(['alarm_fired:12345']);
