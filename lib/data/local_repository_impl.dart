@@ -35,6 +35,7 @@ import 'db.dart';
 import 'activity_store.dart';
 import '../models/activity_suggestion.dart';
 import '../health/health_export.dart';
+import '../import/whoop_import.dart' show WhoopImporter;
 import 'journal_fields.dart';
 import '../ble/adapters/_registry.dart' show kBandRegistry;
 import 'local_repository.dart';
@@ -2833,7 +2834,14 @@ class LocalRepositoryImpl extends LocalRepository {
   int? _profileAge() => (getProfileMap()?['age'] as num?)?.round();
 
   @override
-  Future<void> deleteWorkout(String id) async => LocalDb.deleteSession(id);
+  Future<void> deleteWorkout(String id) async {
+    // Tombstone first: a failed delete then only leaves a row the importer
+    // already skips, while the other order's failure brings it back.
+    if (id.startsWith(WhoopImporter.workoutIdPrefix)) {
+      await WhoopImporter.rememberDeletedWorkout(id);
+    }
+    await LocalDb.deleteSession(id);
+  }
 
   @override
   Future<void> setWorkoutPrivate(String id, bool private) async {

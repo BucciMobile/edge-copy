@@ -16,6 +16,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../compute/derivation_engine.dart' show kAlgoVersion, DerivationEngine;
 import '../compute/profile.dart';
@@ -58,7 +59,32 @@ class _Row {
   }
 }
 
+const String _kDeletedWorkoutsPref = 'whoop_import_deleted_workouts';
+
 class WhoopImporter {
+  /// Every imported workout's session id starts with this, followed by its
+  /// start epoch — the same CSV row always lands on the same id.
+  static const String workoutIdPrefix = 'whoop_';
+
+  /// Imported workout ids the user has DELETED here. The export still has
+  /// them, so without this list the next import would bring each one back.
+  static Future<Set<String>> deletedWorkoutIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {...(prefs.getStringList(_kDeletedWorkoutsPref) ?? const [])};
+  }
+
+  // Serialized: each write replaces the whole list, so two overlapping calls
+  // would each drop the other's id.
+  static Future<void> _deletedWrites = Future.value();
+
+  static Future<void> rememberDeletedWorkout(String id) => _deletedWrites =
+      _deletedWrites.catchError((_) {}).then((_) async {
+        final prefs = await SharedPreferences.getInstance();
+        final set = await deletedWorkoutIds();
+        if (set.contains(id)) return;
+        await prefs.setStringList(_kDeletedWorkoutsPref, [...set, id]);
+      });
+
   /// Column aliases for the energy field. The unit is read from whichever of
   /// these actually matched — never inferred from the value (see [_kcal]).
   static const List<String> _energyCols = [
@@ -134,6 +160,12 @@ class WhoopImporter {
     // file's data. Merge is "new non-null value wins, else keep prior" so the
     // outcome doesn't depend on file order.
     final pendingDays = <String, Map<String, dynamic>>{};
+    Set<String> deletedWorkouts;
+    try {
+      deletedWorkouts = await deletedWorkoutIds();
+    } catch (_) {
+      deletedWorkouts = const {};
+    }
     for (final path in csvPaths) {
       final rows = await _readCsv(path);
       if (rows.isEmpty) continue;
@@ -160,7 +192,7 @@ class WhoopImporter {
         final row = _Row(col, f);
 
         if (kind == _Kind.workout) {
-          if (await _writeWorkout(row)) workouts++;
+          if (await _writeWorkout(row, deletedWorkouts)) workouts++;
         } else if (kind == _Kind.day) {
           final extracted = _extractDayFields(row);
           if (extracted == null) continue;
@@ -401,7 +433,7 @@ class WhoopImporter {
     return _DayWrite.written;
   }
 
-  static Future<bool> _writeWorkout(_Row row) async {
+  static Future<bool> _writeWorkout(_Row row, Set<String> deleted) async {
     String get(List<String> names) => row.get(names);
     final zone = get(_zoneCols);
     final start =
@@ -409,7 +441,17 @@ class WhoopImporter {
     final end = parseExportTs(get(['workout end time', 'end time']), zone: zone);
     if (start == null) return false;
     num? n(List<String> names) => double.tryParse(get(names));
-    final id = 'whoop_$start';
+    final id = '$workoutIdPrefix$start';
+    // A re-import (a newer export picking up recent days) carries every old
+    // workout again. putSession is INSERT-OR-REPLACE over the whole row, so
+    // rewriting one already here would revert the user's type correction,
+    // wipe their RPE and clear its private flag — and the export below would
+    // then write a workout they had made private into the health store. What
+    // the export says about a past workout does not change; keep the row.
+    // A deleted one stays deleted.
+    if (deleted.contains(id) || await LocalDb.session(id) != null) {
+      return false;
+    }
     await LocalDb.putSession({
       'id': id,
       'start_ts': start,
