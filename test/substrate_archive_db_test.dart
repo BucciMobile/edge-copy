@@ -1253,6 +1253,35 @@ void main() {
     }
   });
 
+  test('the pre-3.27 export leaves the archive out instead of stripping it',
+      () async {
+    await _seed();
+    await LocalDb.pruneDecodedBeforeRecTs(cutoff, archive: policy);
+    LocalDb.debugForceAttachExport = true;
+    // The strip-and-VACUUM step must not run on this path at all.
+    LocalDb.debugFailExportStrip = true;
+    try {
+      final path = await LocalDb.exportCopy(includeSubstrateArchive: false);
+      final db = await databaseFactory.openDatabase(path,
+          options: OpenDatabaseOptions(singleInstance: false));
+      try {
+        final n = (await db.rawQuery(
+                'SELECT COUNT(*) AS n FROM ${SubstrateArchive.table}'))
+            .first['n'] as int;
+        expect(n, 0);
+        final rows = (await db.rawQuery(
+                'SELECT COUNT(*) AS n FROM decoded_onehz'))
+            .first['n'] as int;
+        expect(rows, greaterThan(0));
+      } finally {
+        await db.close();
+      }
+    } finally {
+      LocalDb.debugFailExportStrip = false;
+      LocalDb.debugForceAttachExport = false;
+    }
+  });
+
   test('page queries seek on the primary key', () async {
     final db = await _db();
     for (final sql in [

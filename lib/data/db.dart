@@ -9314,12 +9314,23 @@ class LocalDb {
     if (await f.exists()) await f.delete(); // VACUUM INTO requires a fresh path
     Database? copy;
     try {
+      var archiveCopied = true;
       if (!debugForceAttachExport && await _vacuumIntoSupported(db)) {
         await db.execute('VACUUM INTO ?', [dest]);
       } else {
-        await attachCopy(db.path, dest, (_, _) async => '');
+        // Leave the archive out at copy time: copying it only to delete it
+        // and VACUUM again needs roughly three times its size in free space,
+        // which fails every backup on a nearly full phone.
+        await attachCopy(
+            db.path,
+            dest,
+            (_, table) async =>
+                !includeSubstrateArchive && table == SubstrateArchive.table
+                    ? null
+                    : '');
+        archiveCopied = includeSubstrateArchive;
       }
-      if (!includeSubstrateArchive) {
+      if (!includeSubstrateArchive && archiveCopied) {
         copy = await openDatabase(dest, singleInstance: false);
         if (debugFailExportStrip) throw StateError('test: strip failed');
         await copy.delete(SubstrateArchive.table);
