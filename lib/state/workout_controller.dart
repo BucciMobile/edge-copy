@@ -867,7 +867,30 @@ class WorkoutController {
     }
   }
 
-  Future<void> stopWorkout() async {
+  /// The stop in progress, handed to every caller that arrives before it
+  /// settles. A stop can be started from the Live Activity on resume, the live
+  /// screen's Finish, the mini-bar and the band double-tap, and it spends
+  /// seconds in sensor and GPS flushes before it clears [activeWorkout]. A
+  /// second stop that got past the entry check while the first was parked in
+  /// those flushes wrote the session twice, cancelled the first stop's
+  /// recovery tail, and, when the first finished under it, hit a null
+  /// `activeWorkout` — so a workout that was saved was reported as unsaved.
+  Future<void>? _stopping;
+
+  Future<void> stopWorkout() {
+    final inFlight = _stopping;
+    if (inFlight != null) return inFlight;
+    if (activeWorkout == null) return Future<void>.value();
+    final stop = _stopWorkoutOnce();
+    _stopping = stop;
+    // Cleared on failure too: a failed write keeps the session live, and the
+    // retry has to run a fresh stop rather than replay the error.
+    return stop.whenComplete(() {
+      if (identical(_stopping, stop)) _stopping = null;
+    });
+  }
+
+  Future<void> _stopWorkoutOnce() async {
     if (activeWorkout == null) return;
     // Step coverage is judged at the moment of stop: the teardown awaited
     // below can take long enough to look like an accel gap that never happened.
