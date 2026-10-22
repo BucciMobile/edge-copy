@@ -82,8 +82,11 @@ class IosShortcutSync {
     final engine = foregroundEngine?.call();
     if (engine == null || !engine.isConnected) return 'notConnected';
     try {
-      await engine.buzz();
-      return 'buzzed';
+      // A failed write doesn't throw; it comes back false. Reporting that as
+      // "buzzed" would tell the user the band buzzed when it never got the
+      // command (a marginal or half-dead link before the liveness fuse trips).
+      final delivered = await engine.buzzDelivered();
+      return delivered ? 'buzzed' : 'failed';
     } catch (e) {
       debugPrint('[shortcut-sync] buzz: $e');
       return 'failed';

@@ -8695,12 +8695,20 @@ class BleEngine {
   }
   Future<void> buzz() => buzzPattern(hapticShortPulse);
 
+  /// [buzz] that reports whether the command reached the strap. `_send` does
+  /// not throw on a failed or timed-out GATT write — it logs and returns
+  /// false — so a caller that tells someone "the band buzzed" (the iOS
+  /// Shortcut) needs this instead of treating "no exception" as delivered.
+  Future<bool> buzzDelivered() => _sendBuzz(hapticShortPulse);
+
   /// Play a haptic buzz. gen5 ("Maverick") has a DIFFERENT buzz opcode and
   /// payload shape than gen4 (`Cmd.runHapticPatternMaverick`, 12-byte body —
   /// see `cmdBuzzGen5Maverick` in protocol/commands.dart) — [pattern] is
   /// honoured only on gen4; a gen5 link always plays the strap's fixed
   /// `[47, 152]` waveform pair (the only Maverick buzz byte-verified so far).
-  Future<void> buzzPattern(int pattern) {
+  Future<void> buzzPattern(int pattern) => _sendBuzz(pattern);
+
+  Future<bool> _sendBuzz(int pattern) {
     if (_session?.band.isGen5 ?? false) {
       return _send(
         Cmd.runHapticPatternMaverick,

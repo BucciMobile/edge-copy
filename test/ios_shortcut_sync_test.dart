@@ -41,17 +41,21 @@ base class _AdapterTurningOn extends FlutterBluePlusPlatform {
 }
 
 class _BuzzEngine extends BleEngine {
-  _BuzzEngine({required this.connected})
+  _BuzzEngine({required this.connected, this.writeSucceeds = true})
     : super(onRecord: (_, _) async {}, onState: (_) {});
 
   final bool connected;
+  final bool writeSucceeds;
   int buzzes = 0;
 
   @override
   bool get isConnected => connected;
 
   @override
-  Future<void> buzz() async => buzzes++;
+  Future<bool> buzzDelivered() async {
+    buzzes++;
+    return writeSucceeds;
+  }
 }
 
 class _LiveEngine extends BleEngine {
@@ -336,6 +340,14 @@ void main() {
     IosShortcutSync.foregroundEngine = () => engine;
     addTearDown(() => IosShortcutSync.foregroundEngine = null);
     expect(await IosShortcutSync.buzz(), 'buzzed');
+    expect(engine.buzzes, 1);
+  });
+
+  test('a Shortcut buzz whose write fails is not reported as buzzed', () async {
+    final engine = _BuzzEngine(connected: true, writeSucceeds: false);
+    IosShortcutSync.foregroundEngine = () => engine;
+    addTearDown(() => IosShortcutSync.foregroundEngine = null);
+    expect(await IosShortcutSync.buzz(), 'failed');
     expect(engine.buzzes, 1);
   });
 
