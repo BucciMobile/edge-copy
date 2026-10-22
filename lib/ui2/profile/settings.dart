@@ -69,7 +69,8 @@ class MoreSettings extends StatefulWidget {
   State<MoreSettings> createState() => _MoreSettingsState();
 }
 
-class _MoreSettingsState extends State<MoreSettings> {
+class _MoreSettingsState extends State<MoreSettings>
+    with WidgetsBindingObserver {
   bool _dev = Prefs.getBool(Prefs.devMode, false);
 
   /// Whether a food barcode may be looked up online. Not on AppState: it is a
@@ -83,14 +84,49 @@ class _MoreSettingsState extends State<MoreSettings> {
   /// not drawn at all where the OS cannot change it.
   AppIconChoice? _icon;
 
+  /// Android's battery-optimization exemption, asked of the OS. Null until it
+  /// answers and always null elsewhere, which keeps the row off iOS.
+  bool? _bgExempt;
+  bool _oemAutostart = false;
+
   @override
   void initState() {
     super.initState();
     _readVersion();
     _readIcon();
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      WidgetsBinding.instance.addObserver(this);
+      _readBackground();
+    }
     // The developer wearable toggles list the paired devices; best-effort.
     if (_dev) {
       WearableDisplay.instance.loadDevices().catchError((Object _) {});
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// The exemption dialog and the OEM screen both answer out of band, by the
+  /// user coming back to the app, so the rows re-read the OS on resume rather
+  /// than guessing from the tap.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _readBackground();
+  }
+
+  Future<void> _readBackground() async {
+    final app = context.read<AppState>();
+    final exempt = await app.isIgnoringBatteryOptimizations();
+    final oem = await app.needsOemAutostartSettings();
+    if (mounted) {
+      setState(() {
+        _bgExempt = exempt;
+        _oemAutostart = oem;
+      });
     }
   }
 
@@ -171,6 +207,10 @@ class _MoreSettingsState extends State<MoreSettings> {
       zoneAlertZone: app.zoneAlertTargetZone,
       appIcon: _icon,
       onPickIcon: _pickIcon,
+      backgroundExempt: _bgExempt,
+      showOemAutostart: _oemAutostart,
+      onRequestBackgroundExempt: app.requestIgnoreBatteryOptimizations,
+      onOpenOemAutostart: app.openOemAutostartSettings,
       phoneSteps: app.phoneStepsEnabled,
       telemetry: app.telemetryConsent,
       barcodeLookup: _barcode,
@@ -526,6 +566,18 @@ class MoreSettingsView extends StatelessWidget {
   final AppIconChoice? appIcon;
   final ValueChanged<AppIconChoice>? onPickIcon;
 
+  /// Android only: whether the app is exempt from battery optimization. Null
+  /// draws no row — iOS has no such switch, and an unanswered check is not a
+  /// reason to show "Allow". Without the exemption Doze, or an OEM task
+  /// killer, stops the tracking service and the night never syncs.
+  final bool? backgroundExempt;
+
+  /// Android only, on phone makers that keep a separate autostart allowlist
+  /// the stock exemption does not cover. The OS cannot say whether it is
+  /// granted, so the row is an action, not a state.
+  final bool showOemAutostart;
+  final VoidCallback? onRequestBackgroundExempt, onOpenOemAutostart;
+
   /// The health-contribution row appears only where it means something: a
   /// build that has the feature, or an install that already said yes to it.
   final bool showHealthShare, healthShare;
@@ -581,6 +633,10 @@ class MoreSettingsView extends StatelessWidget {
     this.clockFormat = ClockFormat.system,
     this.appIcon,
     this.onPickIcon,
+    this.backgroundExempt,
+    this.showOemAutostart = false,
+    this.onRequestBackgroundExempt,
+    this.onOpenOemAutostart,
     this.phoneSteps = false,
     this.healthSync = false,
     this.healthState = HealthLinkState.unknown,
@@ -680,6 +736,28 @@ class MoreSettingsView extends StatelessWidget {
                                   ?.settingsDoubleTapRowSub ??
                               'What a double-tap on the band does',
                           onTap: () => goto(c, const BandGestures()))),
+                  if (backgroundExempt != null)
+                    SetRow(LucideIcons.batteryCharging, C.green,
+                        l?.settingsKeepAliveRowTitle ??
+                            'Keep syncing in the background',
+                        sub: l?.settingsKeepAliveRowSub ??
+                            'So battery saving doesn’t stop the overnight sync',
+                        value: backgroundExempt!
+                            ? on
+                            : (l?.settingsKeepAliveAllow ?? 'Allow'),
+                        // Once granted it can only be revoked in the OS
+                        // battery settings, so the row stops being a button.
+                        chevron: !backgroundExempt!,
+                        onTap: backgroundExempt!
+                            ? null
+                            : onRequestBackgroundExempt),
+                  if (showOemAutostart)
+                    SetRow(LucideIcons.power, C.green,
+                        l?.settingsAutostartRowTitle ?? 'Allow auto-start',
+                        sub: l?.settingsAutostartRowSub ??
+                            'This phone’s maker needs one more setting before '
+                                'the app can keep syncing overnight',
+                        onTap: onOpenOemAutostart),
                 ]),
                 // Band, App, Data, Privacy, Advanced: named for what is in
                 // them, so nothing needs a sub-line listing its contents.

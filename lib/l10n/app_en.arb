@@ -11385,6 +11385,26 @@
   "@settingsDoubleTapRowSub": {
     "description": "Settings row subtitle for the double-tap gesture entry"
   },
+  "settingsKeepAliveRowTitle": "Keep syncing in the background",
+  "@settingsKeepAliveRowTitle": {
+    "description": "Android settings row title for the battery-optimization exemption"
+  },
+  "settingsKeepAliveRowSub": "So battery saving doesn’t stop the overnight sync",
+  "@settingsKeepAliveRowSub": {
+    "description": "Android settings row subtitle for the battery-optimization exemption"
+  },
+  "settingsKeepAliveAllow": "Allow",
+  "@settingsKeepAliveAllow": {
+    "description": "Value shown on the background-sync row while the exemption has not been granted; tapping asks for it"
+  },
+  "settingsAutostartRowTitle": "Allow auto-start",
+  "@settingsAutostartRowTitle": {
+    "description": "Android settings row title, shown only on phone makers with a separate autostart allowlist"
+  },
+  "settingsAutostartRowSub": "This phone’s maker needs one more setting before the app can keep syncing overnight",
+  "@settingsAutostartRowSub": {
+    "description": "Subtitle for the autostart row; tapping opens the phone maker's own settings screen"
+  },
   "settingsTaskerShortcutsRowTitle": "Tasker and Shortcuts",
   "@settingsTaskerShortcutsRowTitle": {
     "description": "Settings row title opening the automation screen"
