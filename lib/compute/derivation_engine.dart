@@ -2393,6 +2393,60 @@ Future<String> debugBaselineSignature() async =>
     (await _BaselineHistoryCache.load()).toArtifactJson()['signature']
         as String;
 
+/// How long the device has to sit in a new timezone (>=3h from the guard's
+/// baseline) before a heavy pass releases the travel hold on its own. Long
+/// enough that a layover or a same-day hop does not trigger it.
+const int kTzTravelSettleMs = 24 * 60 * 60 * 1000;
+const int _tzJumpThresholdMin = 180;
+
+/// One step of the timezone-travel guard, pure so it can be tested without a
+/// database or a real clock. [stored] is the decoded `tz_travel_guard`
+/// payload; `write` is what to persist (null = leave it as it is).
+///
+/// `offset_min` is the baseline zone and only moves when no jump stands.
+/// While one does, `away_offset_min`/`away_since_ms` record which zone the
+/// device is in and since when, so the hold can end once that zone has
+/// stood for [kTzTravelSettleMs] instead of waiting for a manual restage.
+@visibleForTesting
+({bool held, bool settled, Map<String, Object?>? write}) evaluateTzTravelGuard({
+  required Map<dynamic, dynamic>? stored,
+  required int nowOffsetMin,
+  required int nowMs,
+}) {
+  final lastOffsetMin = (stored?['offset_min'] as num?)?.toInt();
+  final jumped = lastOffsetMin != null &&
+      (nowOffsetMin - lastOffsetMin).abs() >= _tzJumpThresholdMin;
+  if (!jumped) {
+    return (
+      held: false,
+      settled: false,
+      write: {'offset_min': nowOffsetMin},
+    );
+  }
+  final awayOffsetMin = (stored?['away_offset_min'] as num?)?.toInt();
+  final awaySinceMs = (stored?['away_since_ms'] as num?)?.toInt();
+  // A different away zone (a second hop) or a clock that went backwards
+  // restarts the wait rather than counting time spent somewhere else.
+  if (awayOffsetMin != nowOffsetMin ||
+      awaySinceMs == null ||
+      awaySinceMs > nowMs) {
+    return (
+      held: true,
+      settled: false,
+      write: {
+        'offset_min': lastOffsetMin,
+        'away_offset_min': nowOffsetMin,
+        'away_since_ms': nowMs,
+      },
+    );
+  }
+  return (
+    held: true,
+    settled: nowMs - awaySinceMs >= kTzTravelSettleMs,
+    write: null,
+  );
+}
+
 @visibleForTesting
 ({List<String> days, String reason}) selectLightDeriveDays({
   required Set<String> rawDays,
@@ -4497,7 +4551,26 @@ class DerivationEngine {
     // silently landing on an already-finalized day_id and looking lost. Once
     // that's detected, hold off auto-deriving anything adjacent to finalized
     // data until "Re-analyze data" (full restage) resolves it properly.
-    if (await _timezoneTravelSuspected()) {
+    final tz = await _tzTravelGuard();
+    if (tz.held) {
+      // Holding forever is worse than the relabel risk: every day that lands
+      // next to a newly finalized one is held too, for the whole trip, and
+      // nothing on screen tells the user that only "Re-analyze data" lets
+      // them go. Once the new zone has stood for a day, a heavy pass does what
+      // that restage would — derive every pending raw day under the current
+      // zone — and the end of run() clears the hold if none of them failed.
+      if (heavy && tz.settled) {
+        _log(
+          'derive: new timezone stable — deriving the held days and '
+          'releasing the timezone hold',
+        );
+        return _scopeForDays(
+          rawDays,
+          reason: 'tz-travel-settled',
+          fullHistory: true,
+          rawDays: rawDays,
+        );
+      }
       final adjacent = <String>{
         for (final day in finalized) ..._adjacentDayIds(day),
       };
@@ -4555,40 +4628,37 @@ class DerivationEngine {
   /// True right after the device timezone jumps by more than a real DST shift
   /// ever would (>=3h) — a strong signal of actual cross-timezone travel
   /// rather than a seasonal clock change. Stays true across repeated calls
-  /// (derive runs many times a day) by only ever updating the persisted
-  /// baseline offset when NO jump is detected — updating it unconditionally
+  /// (derive runs many times a day) by only ever moving the persisted
+  /// baseline offset when NO jump is detected — moving it unconditionally
   /// would make the very next call see lastOffset == nowOffset and silently
-  /// drop the guard after a single pass. `force` (full restage) is what
-  /// resets it, per _deriveScope.
-  static const int _tzJumpThresholdMin = 180;
-  Future<bool> _timezoneTravelSuspected() async {
-    final nowOffsetMin = DateTime.now().timeZoneOffset.inMinutes;
+  /// drop the guard after a single pass. A full restage resets it, and so
+  /// does a heavy pass once the new zone has stood for
+  /// [kTzTravelSettleMs] (see _deriveScope).
+  Future<bool> _timezoneTravelSuspected() async =>
+      (await _tzTravelGuard()).held;
+
+  Future<({bool held, bool settled})> _tzTravelGuard() async {
     final row = await LocalDb.baseline('tz_travel_guard');
     final raw = row?['payload_json'];
-    int? lastOffsetMin;
+    Map<dynamic, dynamic>? stored;
     if (raw is String && raw.isNotEmpty) {
       try {
         final d = jsonDecode(raw);
-        if (d is Map) lastOffsetMin = (d['offset_min'] as num?)?.toInt();
+        if (d is Map) stored = d;
       } catch (_) {
         // fall through — treat as unknown
       }
     }
-    if (lastOffsetMin == null) {
-      await LocalDb.putBaseline(
-        'tz_travel_guard',
-        jsonEncode({'offset_min': nowOffsetMin}),
-      );
-      return false;
+    final step = evaluateTzTravelGuard(
+      stored: stored,
+      nowOffsetMin: DateTime.now().timeZoneOffset.inMinutes,
+      nowMs: DateTime.now().millisecondsSinceEpoch,
+    );
+    final write = step.write;
+    if (write != null) {
+      await LocalDb.putBaseline('tz_travel_guard', jsonEncode(write));
     }
-    final jumped = (nowOffsetMin - lastOffsetMin).abs() >= _tzJumpThresholdMin;
-    if (!jumped) {
-      await LocalDb.putBaseline(
-        'tz_travel_guard',
-        jsonEncode({'offset_min': nowOffsetMin}),
-      );
-    }
-    return jumped;
+    return (held: step.held, settled: step.settled);
   }
 
   _DeriveScope _scopeForDays(
