@@ -3016,6 +3016,7 @@ class DerivationEngine {
     Profile profile, {
     bool heavy = false,
     bool force = false,
+    Set<String> editedDays = const {},
     void Function(String day, int index, int total)? onDayDone,
     void Function(int failedDays, String? error)? onOutcome,
   }) async {
@@ -3146,6 +3147,10 @@ class DerivationEngine {
         ...await LocalDb.sleepOverrideDays(),
         // A nap edit on a finalized day has to take effect too — same reason.
         ...await LocalDb.napEditDays(),
+        // A day whose override was just CLEARED is no longer listed above, but
+        // its finalized row still holds the user's window (or the rejected
+        // night) and has to be re-derived back to automatic.
+        ...editedDays,
       };
       final todoDays = [
         for (final day in scope.targetDays)

@@ -604,6 +604,13 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
             child: Text(
                 l?.sleepDetailUndoRejection ?? 'Undo — go back to automatic'),
           ),
+          if (!_saving && _overrideFailed != null)
+            StatusCard(
+              l?.sleepDetailCorrectionFailedTitle ??
+                  'That correction has not been applied',
+              _overrideFailed!,
+              icon: LucideIcons.triangleAlert,
+            ),
         ] else if (rejectedDay != null) ...[
           // A night the detector missed is the other half of "it got it
           // wrong": the same manual window a mis-staged night gets, stored as
