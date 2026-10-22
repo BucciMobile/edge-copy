@@ -989,15 +989,23 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   final lnDates = d.lnRmssdDates.length == d.lnRmssdHistory.length
       ? [...d.lnRmssdDates, if (lnToday != null) d.date]
       : null;
-  final lnReadiness = lnHist.length >= 4
-      ? readinessLnRmssd(lnHist, dates: lnDates)
-      : Metric<ReadinessLnRmssd>.absent(
+  final lnReadiness = lnHist.length < 4
+      ? Metric<ReadinessLnRmssd>.absent(
           tier: Tier.high,
           inputs_used: const ['ln_rmssd_history'],
           // A BASELINE shortfall, so it gets the baseline grammar the UI
           // already turns into "Need N more nights".
           note: needBaselineNote(have: lnHist.length, need: 4),
-        );
+        )
+      // Without tonight's value the last element is the previous night, and
+      // scoring it would store yesterday's band under today.
+      : lnToday == null
+      ? const Metric<ReadinessLnRmssd>.absent(
+          tier: Tier.high,
+          inputs_used: ['ln_rmssd_history', 'sleep_session_rmssd'],
+          note: 'no sleep-session RMSSD tonight, so there is no night to score',
+        )
+      : readinessLnRmssd(lnHist, dates: lnDates);
 
   // ── STRAIN: Banister TRIMP over the WAKE span (per-minute day HR) ──────────
   final prof = d.profile;

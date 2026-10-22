@@ -19,6 +19,7 @@ String _label(DateTime d) =>
 Map<String, dynamic> _lnReadiness({
   required List<String> historyDates,
   bool withDates = true,
+  bool tonightRr = true,
 }) {
   final rr = <double>[], ts = <double>[];
   var t = _t0 * 1000.0;
@@ -37,8 +38,8 @@ Map<String, dynamic> _lnReadiness({
       dayHr: hr,
       sleepTsSec: sleepTs,
       sleepHr: hr,
-      sleepRrMs: rr,
-      sleepRrTsMs: ts,
+      sleepRrMs: tonightRr ? rr : const <double>[],
+      sleepRrTsMs: tonightRr ? ts : const <double>[],
       sleepSkinTemp: List<int>.filled(_nightSec, 0),
       sleepJson: const <String, dynamic>{'tst_sec': _nightSec},
       hypnoStages: const [],
@@ -82,5 +83,14 @@ void main() {
         _lnReadiness(historyDates: _nightsEnding(DateTime(2026, 8, 13), 21));
     expect(env['value'], isA<Map>());
     expect((env['value'] as Map)['band'], isNotNull);
+  });
+
+  test('a night with no RMSSD does not score the previous night as tonight',
+      () {
+    final env = _lnReadiness(
+        historyDates: _nightsEnding(DateTime(2026, 8, 13), 21),
+        tonightRr: false);
+    expect(env['value'], isNot(isA<Map>()));
+    expect(env['note'] as String, contains('no sleep-session RMSSD'));
   });
 }
