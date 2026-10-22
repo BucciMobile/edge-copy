@@ -107,6 +107,67 @@ void main() {
       );
     });
 
+    group('suspectElapsedStep', () {
+      const hour = 3600.0;
+
+      test('counts time the phone spent suspended', () {
+        // Locked overnight: the stopwatch saw 5 minutes of CPU-awake time,
+        // but the strap RTC and the wall clock both moved 8 hours. The old
+        // stopwatch-only grace counted 5 minutes here, so 12 h of grace took
+        // days on a mostly-asleep phone with history deferred throughout.
+        final step = ClockPolicy.suspectElapsedStep(
+          strapDelta: 8 * hour,
+          wallDelta: 8 * hour,
+          monoDelta: 300,
+        );
+        expect(step, 8 * hour);
+        expect(ClockPolicy.suspectGraceExpired(0.0, step + step), isTrue,
+            reason: 'two suspended nights are past the 12 h window');
+      });
+
+      test('a forward wall step alone does not age the window', () {
+        // The phone steps forward three days over NTP a minute in. Only the
+        // minute is real; the strap RTC proves it.
+        final step = ClockPolicy.suspectElapsedStep(
+          strapDelta: 60,
+          wallDelta: 3 * 24 * hour + 60,
+          monoDelta: 60,
+        );
+        expect(step, 60);
+        expect(ClockPolicy.suspectGraceExpired(0.0, step), isFalse);
+      });
+
+      test('a forward strap step alone does not age the window', () {
+        final step = ClockPolicy.suspectElapsedStep(
+          strapDelta: 2 * 24 * hour,
+          wallDelta: 120,
+          monoDelta: 120,
+        );
+        expect(step, 120);
+      });
+
+      test('a backward step on either clock falls back to the stopwatch', () {
+        expect(
+          ClockPolicy.suspectElapsedStep(
+              strapDelta: -hour, wallDelta: hour, monoDelta: 90),
+          90,
+        );
+        expect(
+          ClockPolicy.suspectElapsedStep(
+              strapDelta: hour, wallDelta: -hour, monoDelta: 90),
+          90,
+        );
+      });
+
+      test('never negative', () {
+        expect(
+          ClockPolicy.suspectElapsedStep(
+              strapDelta: -10, wallDelta: -10, monoDelta: -1),
+          0,
+        );
+      });
+    });
+
     test('flags a slow PHONE clock: a plausible strap RTC > 1d in the future', () {
       // Clocks agree → not suspect.
       expect(ClockPolicy.phoneClockSuspect(wall, wall), isFalse);

@@ -462,14 +462,40 @@ class ClockPolicy {
 
   /// True once a suspect-clock state has persisted past [suspectGraceSeconds].
   ///
-  /// Both arguments are MONOTONIC seconds (a `Stopwatch`), never wall clock.
-  /// The state being timed is "we do not trust `DateTime.now()`", so timing it
-  /// with `DateTime.now()` is self-defeating: a phone that steps forward a day
-  /// over NTP — while possibly still more than a day behind the strap — would
-  /// instantly age the suspicion past the grace window and re-authorize the
-  /// drain-and-trim this gate exists to hold back.
+  /// Both arguments are on the elapsed-time scale built by
+  /// [suspectElapsedStep], never raw wall clock. The state being timed is "we
+  /// do not trust `DateTime.now()`", so timing it with `DateTime.now()` alone
+  /// is self-defeating: a phone that steps forward a day over NTP — while
+  /// possibly still more than a day behind the strap — would instantly age the
+  /// suspicion past the grace window and re-authorize the drain-and-trim this
+  /// gate exists to hold back.
   static bool suspectGraceExpired(double? sinceSecs, double nowSecs) =>
       sinceSecs != null && nowSecs - sinceSecs >= suspectGraceSeconds;
+
+  /// Real time that passed between two strap clock reads, for aging the
+  /// suspect-clock grace window.
+  ///
+  /// No single phone-side clock can do this. A `Stopwatch` does not advance
+  /// while the phone is suspended (Android CLOCK_MONOTONIC), so on a phone
+  /// that sits locked overnight 12 h of grace took several real days, with
+  /// history deferred the whole time. The wall clock does advance through
+  /// suspend, but it is the clock under suspicion and can step forward.
+  ///
+  /// The strap RTC keeps ticking through phone suspend and does not move when
+  /// the phone's clock does. Taking the smaller of the strap and wall deltas
+  /// counts suspended time (both advance through it) while a forward step on
+  /// either clock alone is ignored (the other one bounds it). The monotonic
+  /// delta is a floor: it never exceeds real elapsed time, so a backward step
+  /// on either clock can only slow the window down, never stall it.
+  static double suspectElapsedStep({
+    required double strapDelta,
+    required double wallDelta,
+    required double monoDelta,
+  }) {
+    final clocks = strapDelta < wallDelta ? strapDelta : wallDelta;
+    final step = clocks > monoDelta ? clocks : monoDelta;
+    return step < 0 ? 0.0 : step;
+  }
 
   static bool phoneClockSuspect(int deviceClock, int wallNow) =>
       deviceClock >= kMinPlausibleUnix &&

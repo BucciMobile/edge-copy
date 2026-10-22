@@ -1951,15 +1951,14 @@ class BleEngine {
 
   /// Age the clock-suspicion start past [ClockPolicy.suspectGraceSeconds].
   ///
-  /// The grace window is 12 real hours off a monotonic stopwatch, so the only
-  /// alternative to a seam here is not covering post-grace behaviour at all —
-  /// and post-grace is precisely where history un-defers onto a strap RTC we
-  /// have just concluded is the fast one.
+  /// The grace window is 12 real hours, aged off the strap/wall/monotonic
+  /// clocks together, so the only alternative to a seam here is not covering
+  /// post-grace behaviour at all — and post-grace is precisely where history
+  /// un-defers onto a strap RTC we have just concluded is the fast one.
   @visibleForTesting
   void debugExpireClockSuspicion() {
-    if (_phoneClockSuspectSince == null) return;
-    _phoneClockSuspectSince =
-        _monotonicSecs() - ClockPolicy.suspectGraceSeconds - 1;
+    if (_phoneClockSuspectElapsed == null) return;
+    _phoneClockSuspectElapsed = ClockPolicy.suspectGraceSeconds + 1.0;
   }
 
   /// Told by AppState on every foreground/background transition. Drives the
@@ -2332,21 +2331,38 @@ class BleEngine {
   // history offload is DEFERRED (not drained-and-trimmed) until the clocks agree.
   // See ClockPolicy.phoneClockSuspect and _startHistoricalRefresh.
   bool _phoneClockSuspect = false;
-  /// MONOTONIC seconds ([_monotonicSecs]) at which the suspicion started — not a
-  /// wall `DateTime`. The whole point of this state is that the wall clock is
-  /// not trusted: timing the grace window off `DateTime.now()` lets the very
-  /// jump we are waiting for (the phone stepping forward over NTP, possibly
-  /// still >1 day behind the strap) expire the window instantly and hand back
-  /// permission to drain-and-trim under a clock we still don't trust.
-  double? _phoneClockSuspectSince;
+  /// Real seconds the suspicion had lasted as of the last strap clock read
+  /// (null = not suspect). Aged per read by [ClockPolicy.suspectElapsedStep]
+  /// from the strap/wall/monotonic deltas since [_suspectAnchorStrap] etc.
+  ///
+  /// Not the stopwatch alone: it stops while the phone is suspended, so a
+  /// phone locked on a nightstand stretched the 12 h grace to days with
+  /// history deferred throughout. Not the wall clock alone: it is the clock
+  /// under suspicion, and the very jump we are waiting for (the phone stepping
+  /// forward over NTP, possibly still >1 day behind the strap) would expire the
+  /// window instantly and hand back permission to drain-and-trim.
+  double? _phoneClockSuspectElapsed;
+  int _suspectAnchorStrap = 0;
+  int _suspectAnchorWall = 0;
+  double _suspectAnchorMono = 0;
   bool get historyPausedForClock => _deferForClock;
+
+  /// [_phoneClockSuspectElapsed] plus the monotonic time since that read. The
+  /// stopwatch undercounts across suspend, but only until the next strap read
+  /// re-anchors with the suspend-inclusive step.
+  double _suspectElapsedNow() {
+    final base = _phoneClockSuspectElapsed;
+    if (base == null) return 0.0;
+    final sinceRead = _monotonicSecs() - _suspectAnchorMono;
+    return base + (sinceRead > 0 ? sinceRead : 0.0);
+  }
+
   /// Defer history only while the disagreement is still young. A slow phone
   /// re-syncs over NTP in minutes; one that persists past the grace window is a
   /// strap RTC running fast, and deferring forever would stall sync for good.
   bool get _deferForClock =>
       _phoneClockSuspect &&
-      !ClockPolicy.suspectGraceExpired(
-          _phoneClockSuspectSince, _monotonicSecs());
+      !ClockPolicy.suspectGraceExpired(0.0, _suspectElapsedNow());
   int _clockPausedOffloads = 0; // diagnostics: offloads deferred for this reason
   /// Request/response correlation for every command this engine awaits
   ///. Replaces the two ad-hoc one-shot completers this file used to
@@ -3867,7 +3883,7 @@ class BleEngine {
       // on the next reading if the phone genuinely is wrong.
       if (_phoneClockSuspect) {
         _phoneClockSuspect = false;
-        _phoneClockSuspectSince = null;
+        _phoneClockSuspectElapsed = null;
         _log('[CLOCK] SET_CLOCK accepted — clearing the phone-clock-suspect '
             'verdict from the pre-correction reading; history may drain.');
       }
@@ -8113,10 +8129,23 @@ class BleEngine {
       // moment a read agrees (the phone almost always self-corrects via NTP).
       final wasSuspect = _phoneClockSuspect;
       _phoneClockSuspect = ClockPolicy.phoneClockSuspect(dev, wall);
+      final mono = _monotonicSecs();
       if (_phoneClockSuspect && !wasSuspect) {
-        _phoneClockSuspectSince = _monotonicSecs();
-      } else if (!_phoneClockSuspect) {
-        _phoneClockSuspectSince = null;
+        _phoneClockSuspectElapsed = 0.0;
+      } else if (_phoneClockSuspect) {
+        _phoneClockSuspectElapsed = (_phoneClockSuspectElapsed ?? 0.0) +
+            ClockPolicy.suspectElapsedStep(
+              strapDelta: (dev - _suspectAnchorStrap).toDouble(),
+              wallDelta: (wall - _suspectAnchorWall).toDouble(),
+              monoDelta: mono - _suspectAnchorMono,
+            );
+      } else {
+        _phoneClockSuspectElapsed = null;
+      }
+      if (_phoneClockSuspect) {
+        _suspectAnchorStrap = dev;
+        _suspectAnchorWall = wall;
+        _suspectAnchorMono = mono;
       }
       // The read gate is released above, on the reply itself, not here.
       //
