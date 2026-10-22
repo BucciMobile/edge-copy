@@ -461,6 +461,21 @@ void main() {
     });
   });
 
+  group('sleepStepperDay', () {
+    test('stepping onto the newest night follows it rather than pinning it',
+        () {
+      expect(sleepStepperDay('2026-10-17', '2026-10-17'), isNull);
+    });
+
+    test('an older night stays pinned', () {
+      expect(sleepStepperDay('2026-10-16', '2026-10-17'), '2026-10-16');
+    });
+
+    test('without a known newest night the chosen date is kept', () {
+      expect(sleepStepperDay('2026-10-17', null), '2026-10-17');
+    });
+  });
+
   group('the Sleep tab', () {
     Future<void> tab(WidgetTester t, String day, {String? latest}) async {
       t.view.physicalSize = const Size(390 * 3, 5200 * 3);

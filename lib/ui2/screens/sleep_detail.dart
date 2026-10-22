@@ -380,6 +380,16 @@ class SleepData {
   }
 }
 
+/// What the Sleep stepper stores for [day]: null when it is the newest night
+/// on offer, so the screen keeps following the newest night. The tab lives in
+/// the shell's IndexedStack and is never disposed — stepping back a night and
+/// forward again stored that night's literal date, and the next morning's
+/// sync reloaded onto it, so the tab sat on yesterday's night until the
+/// arrows were touched again.
+@visibleForTesting
+String? sleepStepperDay(String day, String? latestDay) =>
+    day == latestDay ? null : day;
+
 class SleepDetail extends StatefulWidget {
   final SleepData? data;
 
@@ -571,7 +581,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   /// it goes with it.
   void _goDay(String day) {
     setState(() {
-      _day = day;
+      _day = sleepStepperDay(day, _d?.latestDay);
       _scrub = null;
       _overrideFailed = null;
       _loading = true;

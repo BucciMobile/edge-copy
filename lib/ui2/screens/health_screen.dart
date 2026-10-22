@@ -594,7 +594,9 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
   }
 
   void _goVitalsDay(String day) {
-    setState(() => _vDay = day);
+    // Stored as null on today, as Home does: Health is kept alive by the shell
+    // and a literal date would pin Vitals to it once the calendar moves on.
+    setState(() => _vDay = homeSwitcherDay(day));
     _loadVitals(force: true);
   }
 
