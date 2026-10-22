@@ -63,6 +63,27 @@ void main() {
       expect(sensorCapReached(rows, adapterId: 'ble_hrs'), isTrue);
     });
 
+    test('a Mi Band pair replaces the Mi Band row, so it is not an addition',
+        () {
+      // The pick callback cannot name the row before the band is chosen, so
+      // the exact check runs with no repairingId. The pair either reuses the
+      // same band's row or forgets the other Mi Band rows once it succeeds.
+      final rows = [
+        ..._rows(kMaxConcurrentSecondaryLinks - 1),
+        {
+          'id': 'miband234-0a0b0c0d',
+          'adapter_id': kMiBand234.id,
+          'remote_id': 'R-mi'
+        },
+      ];
+      expect(sensorCapReached(rows, adapterId: kMiBand234.id), isFalse);
+      // With no Mi Band row yet, a first Mi Band is a new row and counts.
+      expect(
+          sensorCapReached(_rows(kMaxConcurrentSecondaryLinks),
+              adapterId: kMiBand234.id),
+          isTrue);
+    });
+
     test('the soft check lets a paired kind through to its own screen', () {
       final rows = _rows(kMaxConcurrentSecondaryLinks);
       expect(sensorCapReached(rows, adapterId: 'ble_hrs', anyOfAdapter: true),

@@ -1281,16 +1281,18 @@ final List<({BandEntry entry, String blurb, Future<String?> Function(BluetoothDe
 ///
 /// * [repairingId] — the row id the pair will write, when it is known before
 ///   the pair runs (`HrsLink.mintDeviceId`, keyed by the peripheral).
-/// * [adapterId] of a single-slot sensor (the ring: `pairOuraRing` reuses the
-///   one ring row it finds) — any existing row of that adapter is the row the
-///   pair rewrites.
+/// * [adapterId] of a single-slot sensor — any existing row of that adapter
+///   is the row the pair rewrites. The ring: `pairOuraRing` reuses the one
+///   ring row it finds. The Mi Band: `pairMiBand234` reuses the row of the
+///   same band, and a different band's successful pair forgets every other
+///   Mi Band row (one Mi Band syncs at a time), so it never nets a row.
 /// * [anyOfAdapter] — a SOFT check before a sensor's own screen opens or a
 ///   scan starts, when the peripheral is not known yet. An existing row of
 ///   [adapterId] lets the user through to that screen's forget / re-pair
 ///   section; the pair itself is checked again, exactly, before it runs.
 ///
-/// Anything else (a Mi Band pair mints a fresh random id every time) adds a
-/// row and is counted.
+/// Anything else (a heart-rate strap pair whose peripheral has no row yet)
+/// adds a row and is counted.
 bool sensorCapReached(Iterable<Map<String, Object?>> deviceRows,
     {String? repairingId, String? adapterId, bool anyOfAdapter = false}) {
   // A row with no `remote_id` holds no link — a backup restore brings a
@@ -1301,8 +1303,8 @@ bool sensorCapReached(Iterable<Map<String, Object?>> deviceRows,
           r['id'] != LocalDb.kPrimaryDeviceId &&
           ((r['remote_id'] as String?) ?? '').isNotEmpty)
       .toList();
-  final sameAdapterRewrites =
-      adapterId != null && (anyOfAdapter || adapterId == kOura.id);
+  final sameAdapterRewrites = adapterId != null &&
+      (anyOfAdapter || adapterId == kOura.id || adapterId == kMiBand234.id);
   for (final r in secondary) {
     if (repairingId != null && r['id'] == repairingId) return false;
     if (sameAdapterRewrites && r['adapter_id'] == adapterId) return false;
