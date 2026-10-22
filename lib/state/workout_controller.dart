@@ -235,6 +235,13 @@ class WorkoutController {
 
   Timer? _workoutTimer;
 
+  // One App-Group read of the Live Activity's Finish flag at a time; the tick
+  // runs at 1 Hz and a read can outlast a second.
+  bool _finishFlagPollInFlight = false;
+
+  // The relaunch reconcile, while it runs. See [maybeFinishFromLiveActivity].
+  Future<void>? _reconciling;
+
   // GPS route tracking for the active run/ride/walk (on-device only). Null when
   // no session is live or the type isn't route-eligible / permission denied.
   RouteTracker? _routeTracker;
@@ -650,8 +657,14 @@ class WorkoutController {
   }
 
   /// If the Live Activity's Finish button was tapped (App Intent set the flag),
-  /// stop the workout here too. Call on app resume.
+  /// stop the workout here too. Called on app resume and polled from the 1 Hz
+  /// workout tick.
   Future<void> maybeFinishFromLiveActivity() async {
+    // On a cold relaunch the first resume lands while the reconcile is still
+    // reading the live row back. Consuming then saw no workout, spent the tap,
+    // and the rehydrated session ran on with nothing left to end it.
+    final reconciling = _reconciling;
+    if (reconciling != null) await reconciling;
     // Consume FIRST. `&&` short-circuited the consume away whenever no session
     // was live, so a Finish tapped on a Live Activity that outlived the app
     // stayed latched on disk — and then ended the NEXT workout, days later, on
@@ -681,7 +694,15 @@ class WorkoutController {
   ///   live" banner. duration_min/calories are left unset rather than guessed
   ///   (we don't know the real end time or effort).
   static const int _kMaxLiveWorkoutAgeMs = 6 * 60 * 60 * 1000; // 6h
-  Future<void> reconcileOrphanedLiveWorkout() async {
+  Future<void> reconcileOrphanedLiveWorkout() {
+    final f = _reconcileOrphanedLiveWorkout();
+    _reconciling = f;
+    return f.whenComplete(() {
+      if (identical(_reconciling, f)) _reconciling = null;
+    });
+  }
+
+  Future<void> _reconcileOrphanedLiveWorkout() async {
     try {
       // Called unawaited from _init(); a concurrent startWorkout() could in
       // principle already be running by the time this DB round-trip resolves
@@ -1130,6 +1151,23 @@ class WorkoutController {
   void _tickWorkout() {
     final w = activeWorkout;
     if (w == null) return;
+
+    // The lock-screen Finish button runs in the widget extension and does not
+    // bring the app forward. Checked only on resume, the session kept its
+    // timer, streams and GPS running until the app was next opened, and
+    // stopWorkout then stamped that later moment as the end: a run finished at
+    // 18:30 and opened at 22:00 banked three and a half hours. Checked before
+    // the pause return, since a paused session can be finished there too.
+    if (!_finishFlagPollInFlight) {
+      _finishFlagPollInFlight = true;
+      unawaited(
+        maybeFinishFromLiveActivity()
+            .catchError(
+              (Object e) => _log('[workout] lock-screen finish failed: $e'),
+            )
+            .whenComplete(() => _finishFlagPollInFlight = false),
+      );
+    }
 
     // Pause is held by the live screen's draft. While paused the clock and
     // every tally (zones, strain, calories, the idle watch) hold too, so the
