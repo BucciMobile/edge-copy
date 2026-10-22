@@ -9073,6 +9073,53 @@ class LocalDb {
     return [for (final r in rows) _withDate(r)];
   }
 
+  /// The N most recent days at their served version, newest day_id first,
+  /// each carrying `day_id`/`date` plus the numeric `scalars.<key>` value for
+  /// every name in [keys] — extracted IN SQLite, so no payload crosses the
+  /// platform channel and nothing is decoded on the calling isolate.
+  ///
+  /// For a caller that wants a handful of scalars across months of days.
+  /// Doing it with [recentDayResults] moves ~88 KB of payload per day and then
+  /// expands every compact curve back into per-sample maps on the UI isolate
+  /// to read three numbers — the same work that, run over 90 bundles, was
+  /// measured as a multi-second main-isolate hang.
+  ///
+  /// Every served day comes back. A day whose payload is malformed, lacks the
+  /// key, or holds a non-number there gets null for that key — what decoding
+  /// the bundle and reading `scalars[key] is num` gave.
+  static Future<List<Map<String, dynamic>>> recentDayScalars(
+    int limit,
+    List<String> keys,
+  ) async {
+    // The names are spliced into the SQL as JSON paths and column aliases.
+    final plain = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+    for (final k in keys) {
+      if (!plain.hasMatch(k)) {
+        throw ArgumentError.value(k, 'keys', 'not a plain scalar name');
+      }
+    }
+    final db = await instance;
+    // Nested CASE rather than AND: json_type/json_extract RAISE on a malformed
+    // document, and SQLite only promises lazy evaluation for CASE branches —
+    // one corrupt bundle must null its own day, not fail the whole read.
+    final cols = [
+      for (final k in keys)
+        'CASE WHEN json_valid(r.payload_json) THEN '
+            "CASE WHEN json_type(r.payload_json, '\$.scalars.$k') "
+            "IN ('integer', 'real') "
+            "THEN json_extract(r.payload_json, '\$.scalars.$k') END "
+            'END AS "$k"',
+    ];
+    final rows = await db.rawQuery(
+      'SELECT r.day_id${cols.isEmpty ? '' : ', ${cols.join(', ')}'} '
+      'FROM day_result r '
+      '$_servedDayJoin '
+      'ORDER BY r.day_id DESC LIMIT ?',
+      [limit],
+    );
+    return [for (final r in rows) _withDate(r)];
+  }
+
   /// `{day_id -> served algo_version}` for every day, payload-free.
   ///
   /// One query instead of a `dayResult()` per day: a caller walking history to

@@ -4297,17 +4297,22 @@ class LocalRepositoryImpl extends LocalRepository {
         if (DateTime.tryParse(s) case final d?) DateTime(d.year, d.month, d.day),
     ]..sort();
     final overlay = <Map<String, dynamic>>[];
-    final derived = await LocalDb.recentDayResults(120);
+    // Three scalars per day, read in SQL. Decoding 120 full bundles here ran on
+    // the UI isolate and repeated after every derive pass while this tab sat
+    // in the shell's IndexedStack.
+    final derived = await LocalDb.recentDayScalars(
+      120,
+      const ['rhr', 'rmssd', 'skin_temp_z'],
+    );
     if (derived.isNotEmpty) {
       // recentDerivedDays is newest-first; coverline wants oldest-first.
       final ordered = derived.reversed.toList();
       final dates = <String>[];
       final temps = <double?>[];
       for (final r in ordered) {
-        final b = _decode(r['payload_json']);
         final dt = r['date'] as String;
         dates.add(dt);
-        final z = _scalar(b, 'skin_temp_z')?.toDouble();
+        final z = (r['skin_temp_z'] as num?)?.toDouble();
         temps.add(z);
         // (cycle index, cycle day) for this row — see WH-02 above.
         int? cd, ci;
@@ -4324,8 +4329,8 @@ class LocalRepositoryImpl extends LocalRepository {
           'date': dt,
           'cycle_day': ?cd,
           'cycle_index': ?ci,
-          'resting_hr': _scalar(b, 'rhr')?.toDouble(),
-          'hrv_rmssd': _scalar(b, 'rmssd')?.toDouble(),
+          'resting_hr': (r['rhr'] as num?)?.toDouble(),
+          'hrv_rmssd': (r['rmssd'] as num?)?.toDouble(),
           'skin_temp_idx': z,
         });
       }
