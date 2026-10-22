@@ -1049,9 +1049,20 @@ class NoDurableProgressEscalation {
     return remedyAfter << doublings;
   }
 
+  int? _lastRefusedBurst;
+
   /// Feed one refused HISTORY_END. Returns true when the caller should run the
   /// remedy (and resets the refusal streak so the next run needs a fresh one).
-  bool trimRefused() {
+  ///
+  /// [burst] identifies the burst the HISTORY_END closes. A band that hears no
+  /// result re-offers the same HISTORY_END about every 2.5 s, and counting each
+  /// re-offer turned "3 bursts in a row" into 7.5 s of one burst: the remedy
+  /// bounced the link before the reconnect's gate window could clear, give-up
+  /// arrived within a minute, and the post-give-up backoff was measured in
+  /// re-offers. A repeat of the burst already counted is not a new refusal.
+  bool trimRefused({int? burst}) {
+    if (burst != null && burst == _lastRefusedBurst) return false;
+    _lastRefusedBurst = burst;
     _refusals++;
     if (_refusals < nextRemedyThreshold) return false;
     _refusals = 0;
@@ -1071,6 +1082,7 @@ class NoDurableProgressEscalation {
   /// proof the condition is over — clears the streak, the remedy count AND the
   /// give-up latch, so a later run can escalate again.
   void trimAcked() {
+    _lastRefusedBurst = null;
     _refusals = 0;
     _remedies = 0;
     _gaveUp = false;

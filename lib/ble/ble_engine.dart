@@ -518,6 +518,12 @@ enum _HpsTerminalKind {
   /// task ends through the one abort boundary and the band keeps its
   /// checkpoint for the ordinary sync that follows the reading.
   preempted,
+
+  /// A burst banked nothing durable and its HISTORY_END was refused
+  /// ([TrimAckVerdict.blockedNoDurableProgress]). No result is sent for that
+  /// burst, so without ending the task the band re-offers the marker every
+  /// ~2.5 s indefinitely and the idle watchdog never gets to fire.
+  noDurableProgress,
 }
 
 class _HpsTerminal {
@@ -2442,6 +2448,11 @@ class BleEngine {
   // See NoDurableProgressEscalation for the full derivation.
   final NoDurableProgressEscalation _noDurableProgress =
       NoDurableProgressEscalation();
+  // Bumped on every HISTORY_START that declares one of our bursts, so the
+  // escalation above counts a refused burst once rather than once per
+  // re-offer of its HISTORY_END. Engine-wide, never reset: the count it keys
+  // spans reconnects.
+  int _burstSerial = 0;
   // Band-truth reconciliation: `expectedPacketCount` mismatches are advisory
   // (see the comment at the validation site — treating a single mismatch as
   // fatal was actively harmful and was reverted), but a mismatch that keeps
@@ -6979,7 +6990,7 @@ class BleEngine {
         // we never stored — the HR-gap / frozen-cursor failure mode after a
         // reconnect with a bad plausibility window. Keep the chunk on the
         // band; after a short streak, re-correlate the clock and bounce.
-        final runRemedy = _noDurableProgress.trimRefused();
+        final runRemedy = _noDurableProgress.trimRefused(burst: _burstSerial);
         _log(
           '[SYNC] HISTORY_END token=$tokenHex has no durable rows but the '
           'plausibility gate dropped samples this burst — NOT ACKing '
@@ -7035,7 +7046,20 @@ class BleEngine {
               }),
             );
           }
+          return;
         }
+        // End the task. Nothing answers this HISTORY_END, so the band would
+        // otherwise re-offer it every ~2.5 s for as long as the link holds:
+        // each re-offer re-armed the idle watchdog (so it never fired), wrote
+        // another ledger row, and kept `_offloadActive` up, pausing battery
+        // polls and the keep-alive hook. The abort trims nothing — the band
+        // keeps the chunk and re-delivers it on the next task, which is the
+        // next burst the escalation counts.
+        await _endHistoryTaskWithAbort(
+          session: session,
+          kind: _HpsTerminalKind.noDurableProgress,
+          reason: 'no_durable_progress',
+        );
         return;
     }
   }
@@ -7133,6 +7157,7 @@ class BleEngine {
       _historyAwaitingFirstStart = false;
       _burstDroppedAtStart = _recordGate.dropped;
       _burstDroppedBelowFloorAtStart = _recordGate.droppedBelowFloor;
+      _burstSerial++;
       d?.rearm();
       // The one place a new burst is really declared — the only safe point to
       // clear the discarded-burst poison (see DrainController.beginBurst).
