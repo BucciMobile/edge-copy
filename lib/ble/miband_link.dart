@@ -241,6 +241,11 @@ class MiBand234Link {
     _deviceId = deviceId;
     try {
       return await withSecondaryLinkSlot(() async {
+        // A forget that landed while this sync was parked on the slot has
+        // already stopped it (nulling `_deviceId`) and deleted the row. The
+        // ids captured above would otherwise still connect to the forgotten
+        // device and bank its history under a row that no longer exists.
+        if (_deviceId != deviceId) return false;
         try {
           final device = BluetoothDevice.fromId(remoteId);
           _device = device;

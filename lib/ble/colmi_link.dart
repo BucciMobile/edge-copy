@@ -69,6 +69,16 @@ class ColmiLink {
   String? _deviceId;
   bool _busy = false;
 
+  /// How many syncs got past the slot wait to a connect attempt. Under a test
+  /// `connect()` has no plugin and fails, so the return value alone cannot
+  /// tell a cancelled sync from one that tried the radio.
+  @visibleForTesting
+  int get connectAttemptsForTest => _connectAttempts;
+  int _connectAttempts = 0;
+
+  @visibleForTesting
+  String? get deviceIdForTest => _deviceId;
+
   /// The session's clock, read once (Unix seconds): the moment the ring's
   /// "N days ago" is counted from. Stamped on every big-data reply as
   /// `rec_ts`, so a sync that runs past midnight still resolves each reply
@@ -102,6 +112,12 @@ class ColmiLink {
     _deviceId = deviceId;
     try {
       return await withSecondaryLinkSlot(() async {
+        // A forget that landed while this sync was parked on the slot has
+        // already stopped it (nulling `_deviceId`) and deleted the row. The
+        // ids captured above would otherwise still connect to the forgotten
+        // device and bank its history under a row that no longer exists.
+        if (_deviceId != deviceId) return false;
+        _connectAttempts++;
         try {
           final device = BluetoothDevice.fromId(remoteId);
           _device = device;
