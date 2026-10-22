@@ -749,7 +749,8 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // ── BREATHING-RATE VARIABILITY (per-window RSA over the sleep NN) ──────────
   // Window the cleaned sleep NN into ~30-min bins, take each bin's RSA resp rate,
   // then BRV = dispersion + Theil-Sen trend of those per-window rates.
-  final respWindows = _respPerWindow(nn, nnTimes);
+  final respWindows =
+      respPerWindow(nn, nnTimes, artifactFraction: artifactFraction);
   final brv = respWindows.length >= 3
       ? breathingRateVariability(respWindows)
       : Metric<BrvResult>.absent(
@@ -1922,9 +1923,16 @@ double? sleepClockOffsetSec(int epochSec) {
 /// Per-window RSA respiratory rates (br/min) for the BRV estimator. Buckets the
 /// cleaned NN into [windowMs] (~30-min) bins by beat time and runs [rsaRespRate]
 /// on each bin with ≥[minBeats] beats; keeps only resolved windows.
-List<double> _respPerWindow(
+///
+/// [artifactFraction] is the night's share of corrected beats. The night-level
+/// [rsaRespRate] call refuses the breathing rate when that share is above its
+/// gate, because interpolated beats move the RSA peak; the bins are cut from
+/// the same corrected NN, so they carry the same gate. With 0 here, BRV was
+/// published on nights whose breathing rate was withheld as unmeasurable.
+List<double> respPerWindow(
   List<double> nn,
   List<double> nnTimes, {
+  required double artifactFraction,
   double windowMs = 1800000.0,
   int minBeats = 60,
 }) {
@@ -1942,8 +1950,8 @@ List<double> _respPerWindow(
   for (final idx in idxs) {
     final segNn = binsNn[idx]!;
     if (segNn.length < minBeats) continue;
-    // NN is already artifact-corrected upstream → artifactFraction 0.
-    final r = rsaRespRate(segNn, binsTs[idx]!, artifactFraction: 0.0);
+    final r =
+        rsaRespRate(segNn, binsTs[idx]!, artifactFraction: artifactFraction);
     final b = r.present ? r.value!.brpm : null;
     if (b != null) out.add(b);
   }
