@@ -314,6 +314,34 @@ void main() {
       await LocalDb.deleteDevice('garmin-gone');
       expect(await activeWearableId(), _watch);
     });
+
+    test('pairing a replacement of the active wearable makes it active',
+        () async {
+      await LocalDb.setCursor(kActiveWearableCursor, _watch);
+      // A workout strap or a different kind of wearable leaves it alone.
+      expect(await adoptReplacementWearable(_strap), isFalse);
+      await LocalDb.upsertDevice(
+          id: 'colmi-other', adapterId: 'colmi', label: 'ring');
+      expect(await adoptReplacementWearable('colmi-other'), isFalse);
+      expect(await activeWearableId(), _watch);
+      // A second watch (a new remote id, so a new row): syncs go to it, so
+      // derivation follows.
+      await LocalDb.upsertDevice(
+          id: 'garmin-new',
+          adapterId: 'garmin',
+          remoteId: 'AA:BB:CC:00:00:09',
+          label: 'garmin');
+      expect(await adoptReplacementWearable('garmin-new'), isTrue);
+      expect(await activeWearableId(), 'garmin-new');
+      // Choosing no wearable is not overridden by a pairing.
+      await LocalDb.setCursor(kActiveWearableCursor, kNoActiveWearable);
+      expect(await adoptReplacementWearable(_watch), isFalse);
+      expect(await activeWearableId(), isNull);
+
+      await LocalDb.deleteDevice('garmin-new');
+      await LocalDb.deleteDevice('colmi-other');
+      await LocalDb.setCursor(kActiveWearableCursor, _watch);
+    });
   });
 
   group('a WHOOP band and a Garmin watch on the same days', () {

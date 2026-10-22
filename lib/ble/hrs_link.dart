@@ -57,7 +57,8 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:openstrap_protocol/openstrap_protocol.dart'
     show polarPmdSupportsPpi;
 
-import '../compute/inputs/canonical.dart' show wearableEnabled;
+import '../compute/inputs/canonical.dart'
+    show adoptReplacementWearable, wearableEnabled;
 import '../data/db.dart';
 import '../sync/paired_device.dart' show cleanDeviceLabel;
 import 'accessory_setup.dart';
@@ -840,13 +841,22 @@ class HrsLink {
             'saved.';
       }
       link.close();
+      final deviceId = mintDeviceId(entry, device.remoteId.str);
       await LocalDb.upsertDevice(
-        id: mintDeviceId(entry, device.remoteId.str),
+        id: deviceId,
         adapterId: entry.id,
         remoteId: device.remoteId.str,
         label: label,
         tier: deriveTier(tier, entry.id),
       );
+      // A replacement for the active wearable: syncs now land on this row,
+      // so derivation has to read it too. Best effort, the sensor is paired
+      // either way.
+      try {
+        await adoptReplacementWearable(deviceId);
+      } catch (e) {
+        debugPrint('[hrs] could not move the active wearable: $e');
+      }
       return null;
     } catch (e) {
       debugPrint('[hrs] pair setup failed: $e');
