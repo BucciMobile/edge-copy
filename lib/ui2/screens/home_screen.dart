@@ -65,7 +65,7 @@ import '../../theme/theme_switcher.dart' show themedRoute;
 import '../activity/day_strain.dart' show DayStrainDetail;
 import '../profile/alarm.dart'
     show AlarmArmState, alarmArmOf, alarmDoor, alarmGlanceCard;
-import '../profile/devices.dart' show formatDayTime;
+import '../profile/devices.dart' show RePair, formatDayTime;
 import '../profile/profile.dart';
 import '../profile/wearable_numbers.dart'
     show WearableCells, kHomeWearableRows;
@@ -134,6 +134,27 @@ VoidCallback? syncOf(BuildContext c) {
   } catch (_) {
     return null;
   }
+}
+
+/// The card Home shows instead of "Sync the band" when no band is paired, or
+/// null when one is (or there is no AppState above us). Onboarding's "Skip for
+/// now" opens the app with nothing paired; a sync then returns at once, the
+/// tap grace held "Connecting to your band" up for 20 s over nothing, and
+/// nothing on Home pointed at pairing.
+Widget? noBandCard(BuildContext c, AppLocalizations? l) {
+  try {
+    if (c.read<AppState>().isPaired) return null;
+  } catch (_) {
+    return null;
+  }
+  return StatusCard(
+    l?.devicesNoBandPaired ?? 'No band is paired',
+    l?.pairingSkipNote ??
+        'The app opens without a band. Nothing is measured until one is paired.',
+    fix: l?.devicesPairABand ?? 'Pair a band',
+    icon: LucideIcons.watch,
+    onFix: () => goto(c, const RePair()),
+  );
 }
 
 /// Whether the database had to be rebuilt to start this launch, or null in a
@@ -1720,6 +1741,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     }
     final phase = _phaseStatusCard(c, l);
     if (phase != null) return phase;
+    if (noBandCard(c, l) case final noBand?) return noBand;
 
     final sync = syncOf(c);
     return StatusCard(
@@ -1797,6 +1819,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
           Builder(builder: (c) {
             final phase = _phaseStatusCard(c, l);
             if (phase != null) return phase;
+            if (noBandCard(c, l) case final noBand?) return noBand;
             final sync = syncOf(c);
             return StatusCard(
               l?.homeNothingDerivedTitle ?? 'No nights scored yet',
