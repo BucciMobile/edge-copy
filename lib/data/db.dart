@@ -3695,6 +3695,27 @@ class LocalDb {
     return (r.first['s'] as num?)?.toInt() ?? 0;
   }
 
+  /// [day]'s banked phone windows, so a re-sync can keep the ones for an hour
+  /// the sensor no longer covers (see `PhonePedometer.syncDay`).
+  static Future<List<({int startTs, int endTs, int steps})>>
+      phoneCoverageForDay(String day) async {
+    final db = await instance;
+    final rows = await db.query(
+      'live_coverage',
+      columns: ['start_ts', 'end_ts', 'steps'],
+      where: 'day = ? AND source = ?',
+      whereArgs: [day, kStepSourcePhone],
+    );
+    return [
+      for (final r in rows)
+        (
+          startTs: (r['start_ts'] as num).toInt(),
+          endTs: (r['end_ts'] as num).toInt(),
+          steps: (r['steps'] as num).toInt(),
+        ),
+    ];
+  }
+
   /// Drop every phone-sourced coverage row (the user turned phone steps off).
   /// Band rows are untouched, so days fall back to the band count.
   static Future<int> clearPhoneCoverage() async {
