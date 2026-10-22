@@ -86,7 +86,7 @@ void main() {
         latchAtMs = DateTime.now().millisecondsSinceEpoch;
         sleep(const Duration(milliseconds: 5));
         await Future<void>.delayed(const Duration(seconds: 5));
-        return (epoch: 1750000000, disabled: false);
+        return (epoch: 1750000000, disabled: false, failed: false);
       }, (sinceMs) async => latchAtMs != null && latchAtMs! >= sinceMs);
       fa.elapse(const Duration(seconds: 40));
     });

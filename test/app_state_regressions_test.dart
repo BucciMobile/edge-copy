@@ -480,6 +480,36 @@ void main() {
       expect(app.alarmConfirmed, isTrue);
     });
 
+    test('a schedule edit reports whether the band actually took it',
+        () async {
+      // The alarm screen used to say "Alarm sent to the band" whenever the
+      // row saved, including when the strap rejected SET_ALARM_TIME or the
+      // link was down, so the band kept the old wake time with no warning.
+      await silenceOsPresent();
+      final rejecting = _RejectingArmEngine();
+      final app = AppState.forTesting(engine: rejecting);
+      addTearDown(app.dispose);
+      expect(await app.setScheduleDay(weekday: 2, enabled: true), isFalse,
+          reason: 'offline: saved, not on the band');
+      app.device.connection = 'connected';
+      expect(await app.setScheduleDay(weekday: 2, hour: 6, minute: 15),
+          isFalse,
+          reason: 'the strap refused the arm');
+      expect(rejecting.attempts, 1);
+      expect(app.alarmSchedule.firstWhere((e) => e.weekday == 2).hour, 6,
+          reason: 'the row is still saved for the next re-arm');
+
+      final engine = _ArmRecordingEngine();
+      final ok = AppState.forTesting(engine: engine);
+      addTearDown(ok.dispose);
+      ok.device.connection = 'connected';
+      expect(await ok.setScheduleDay(weekday: 2, enabled: true), isTrue);
+      expect(engine.armed, hasLength(1));
+      expect(await ok.setScheduleDay(weekday: 2, enabled: true), isTrue,
+          reason: 'already armed for that slot is not a failure');
+      expect(engine.armed, hasLength(1));
+    });
+
     test('ALARM_SET (event 56) leaves the armed alarm alone', () async {
       SharedPreferences.setMockInitialValues({'alarm_epoch': 1785000000});
       final app = AppState.forTesting();
@@ -1154,6 +1184,18 @@ class _ArmRecordingEngine extends BleEngine {
       {int index = 0, List<int>? haptics}) async {
     armed.add(when);
     return when;
+  }
+}
+
+/// The strap rejects every SET_ALARM (engine.setAlarm's null result).
+class _RejectingArmEngine extends BleEngine {
+  _RejectingArmEngine() : super(onRecord: (_, _) async {}, onState: (_) {});
+  int attempts = 0;
+  @override
+  Future<DateTime?> setAlarm(DateTime when,
+      {int index = 0, List<int>? haptics}) async {
+    attempts++;
+    return null;
   }
 }
 

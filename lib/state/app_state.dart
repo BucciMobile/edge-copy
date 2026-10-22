@@ -4511,7 +4511,14 @@ class AppState extends ChangeNotifier {
   /// Change one weekday's slot and re-arm immediately when connected —
   /// waiting for the next connect/sync would leave the band holding the OLD
   /// schedule while the screen already claims the new one.
-  Future<void> setScheduleDay({
+  ///
+  /// The row is saved either way. Returns false when the band does not hold
+  /// the new schedule yet (offline, or the arm write failed or was rejected)
+  /// so the alarm screen can say so instead of reporting it as sent; the
+  /// next connect/sync re-arms it. It does not throw for that: the Siri
+  /// enable-tomorrow path re-latches its request on a throw, and a saved row
+  /// needs no retry.
+  Future<bool> setScheduleDay({
     required int weekday,
     int? hour,
     int? minute,
@@ -4545,7 +4552,8 @@ class AppState extends ChangeNotifier {
     // just switched off must not still be warned about, and one just switched
     // on must be.
     unawaited(_ensureRemindersScheduled());
-    if (isConnected) await _armNextAlarmOccurrence();
+    if (!isConnected) return false;
+    return _armNextAlarmOccurrence();
   }
 
   /// Compute + arm the next scheduled occurrence, skipping the write when it
@@ -4566,8 +4574,10 @@ class AppState extends ChangeNotifier {
     _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
   }
 
-  Future<void> _armNextAlarmOccurrence({int? firedEpoch}) async {
-    if (!isConnected) return;
+  /// True when the band now holds what the schedule says (armed, disabled,
+  /// or already matching); false when offline or a needed write failed.
+  Future<bool> _armNextAlarmOccurrence({int? firedEpoch}) async {
+    if (!isConnected) return false;
     try {
       // A headless re-arm (background_sync.dart) can have rewritten
       // `alarm_epoch`/`alarm_epoch_confirmed` under this same live process
@@ -4600,13 +4610,16 @@ class AppState extends ChangeNotifier {
         // give up its old alarm on its own (PR #329 review).
         _clearArmedAlarmState();
         notifyListeners();
-        return;
+        return true;
       }
+      if (result.failed) return false;
       final epoch = result.epoch;
-      if (epoch == null) return;
+      if (epoch == null) return true;
       await _onArmed(DateTime.fromMillisecondsSinceEpoch(epoch * 1000), epoch);
+      return true;
     } catch (e) {
       _log('[alarm] weekly-schedule arm failed: $e');
+      return false;
     }
   }
 
@@ -4875,7 +4888,9 @@ class AppState extends ChangeNotifier {
   /// confirm the band actually fires before trusting the scheduled wake.
   Future<void> testAlarmBuzz() async {
     if (!isConnected) throw Exception('Connect to your strap first');
-    await engine.runAlarm();
+    if (!await engine.runAlarm()) {
+      throw Exception('The band did not get the buzz command — try again');
+    }
   }
 
   Future<void> testBuzzPattern(int pattern) async {

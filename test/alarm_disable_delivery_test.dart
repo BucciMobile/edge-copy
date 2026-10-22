@@ -44,6 +44,36 @@ void main() {
     expect(r.disabled, isFalse,
         reason: 'the caller clears its armed epoch on disabled:true');
     expect(r.epoch, isNull);
+    expect(r.failed, isTrue);
+  });
+
+  test('a failed arm is told apart from an arm that already matches',
+      () async {
+    final schedule = fillDefaultAlarmSchedule([
+      for (var d = 0; d < 7; d++)
+        AlarmScheduleEntry(weekday: d, hour: 7, minute: 0, enabled: true),
+    ]);
+    final now = DateTime(2026, 10, 20, 22);
+    final writes = <Uint8List>[];
+    final failed = await armNextScheduledOccurrence(
+      engine: _engine(false, writes),
+      schedule: schedule,
+      currentArmedEpoch: null,
+      now: now,
+    );
+    expect(writes, isNotEmpty, reason: 'the arm was attempted');
+    expect(failed.epoch, isNull);
+    expect(failed.failed, isTrue);
+
+    final next = nextAlarmOccurrence(schedule, now)!;
+    final same = await armNextScheduledOccurrence(
+      engine: _engine(false, []),
+      schedule: schedule,
+      currentArmedEpoch: next.millisecondsSinceEpoch ~/ 1000,
+      now: now,
+    );
+    expect(same.epoch, isNull);
+    expect(same.failed, isFalse, reason: 'nothing to write is not a failure');
   });
 
   test('every day off + delivered disable reports disabled', () async {
@@ -53,5 +83,6 @@ void main() {
       currentArmedEpoch: 1800000000,
     );
     expect(r.disabled, isTrue);
+    expect(r.failed, isFalse);
   });
 }
