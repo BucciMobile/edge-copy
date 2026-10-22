@@ -8872,7 +8872,9 @@ class LocalDb {
 
   /// `compute_freshness` key marking the raw-free next-night nap cleanup
   /// (compute/nap_overlap_cleanup.dart) as applied. Cleared by an import.
-  static const String kNapNextNightCleanupKey = 'nap_next_night_cleanup_v1';
+  /// v2: the v1 pass skipped every day the readiness backfill had restamped
+  /// at v112+, so installs that already ran it run it once more.
+  static const String kNapNextNightCleanupKey = 'nap_next_night_cleanup_v2';
 
   /// `compute_freshness` key for [bumpUsageCounter]'s local counts.
   static const String kUsageCountersKey = 'usage_counters';

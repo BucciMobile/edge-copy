@@ -16,9 +16,6 @@ import 'nap_edits.dart' show napMinutes;
 /// `compute_freshness` key marking the cleanup as applied (an import clears it).
 const String kNapNextNightCleanupKey = LocalDb.kNapNextNightCleanupKey;
 
-/// Last algo version that could book tonight's sleep as a nap.
-const int kNapNextNightFixedIn = 106;
-
 /// [naps] without the detected ones overlapping the next day's main sleep
 /// [nextOnsetSec, nextOffsetSec). A nap the user logged (it carries a
 /// `source`) is kept. Null when nothing is dropped.
@@ -39,15 +36,20 @@ List<Map<String, dynamic>>? napsWithoutNextNight(
   return kept.length == naps.length ? null : kept;
 }
 
-/// Runs the cleanup once over every stored day below [kNapNextNightFixedIn].
-/// Returns the days rewritten. Marked done only after it finishes.
+/// Runs the cleanup once over every stored day. Returns the days rewritten.
+/// Marked done only after it finishes.
+///
+/// Not gated on the stored algo version: the raw-free readiness and strain
+/// backfills restamp an old bundle at the current version while copying its
+/// naps through untouched, so a pre-v106 double count can sit under a v112+
+/// stamp. A day derived at v106+ has no detected nap inside the next night,
+/// so the check is a no-op there.
 Future<int> cleanNextNightNapsOnce() async {
   if (await LocalDb.computeFreshness(kNapNextNightCleanupKey) != null) return 0;
   final versions = await LocalDb.dayResultVersions();
   final days = versions.keys.toList()..sort();
   var cleaned = 0;
   for (final day in days) {
-    if (versions[day]! >= kNapNextNightFixedIn) continue;
     // Calendar arithmetic on the label (noon avoids any DST edge).
     final d = DateTime.parse(day);
     final nextDay = dayLabelOf(DateTime(d.year, d.month, d.day + 1, 12));
