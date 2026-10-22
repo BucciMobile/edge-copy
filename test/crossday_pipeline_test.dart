@@ -817,4 +817,66 @@ void _wiredFamilies() {
       expect((b['temp_illness'] as Map)['date'], days.last['date']);
     });
   });
+
+  group('the breakdown ranks tonight against its own method family', () {
+    const methods = {'gen4': 'hr_1hz', 'gen5': 'hr_1hz', 'oura': 'hr_5min'};
+
+    // 30 band nights, then 20 ring nights whose vendor HRV runs ~20 ms lower
+    // and whose resting HR runs ~8 bpm higher. Both series are steady within
+    // their own device; only the switch is a step.
+    List<Map<String, dynamic>> switched(String later) {
+      final days = _synthDays(50);
+      for (var i = 0; i < days.length; i++) {
+        final wobble = (i % 5) - 2;
+        final ring = i >= 30;
+        days[i]['skin_temp_family'] = ring ? later : 'gen4';
+        if (ring && later == 'oura') {
+          days[i]['rmssd'] = 25.0 + wobble * 1.5;
+          days[i]['rhr'] = 63.0 + wobble;
+        }
+      }
+      // Tonight is the ring's median night, not its worst.
+      days.last['rmssd'] = 25.0;
+      days.last['rhr'] = 63.0;
+      return days;
+    }
+
+    Map<String, dynamic> pct(Map<String, dynamic> b, String k) =>
+        ((b['percentiles'] as Map)[k] as Map)['value'] as Map<String, dynamic>;
+
+    test('a new ring is not ranked against the band it replaced', () {
+      final b = buildCrossDayBundle(switched('oura'), const {},
+          methodFamilies: methods);
+      // Only the 19 prior ring nights are history.
+      expect(pct(b, 'rmssd')['n'], 19);
+      expect(pct(b, 'rhr')['n'], 19);
+      // Tonight is the ring's median, so it ranks mid-history. Mixed with the
+      // 30 band nights it ranked near the bottom (~20th percentile for HRV,
+      // ~80th for resting HR).
+      expect(pct(b, 'rmssd')['percentile_of_you'], greaterThan(40));
+      expect(pct(b, 'rhr')['percentile_of_you'], lessThan(60));
+      final items = (((b['readiness_glassbox'] as Map)['value']
+              as Map)['breakdown'] as List)
+          .cast<Map>();
+      final hrv = items.firstWhere((m) => m['label'] == 'hrv');
+      expect(hrv['percentile_of_you'], greaterThan(40));
+    });
+
+    test('WHOOP 4 to WHOOP 5 keeps one history (same method family)', () {
+      final b = buildCrossDayBundle(switched('gen5'), const {},
+          methodFamilies: methods);
+      expect(pct(b, 'rmssd')['n'], 49);
+      expect(pct(b, 'rhr')['n'], 49);
+    });
+
+    test('an unstamped night counts as a band night', () {
+      final days = switched('gen5');
+      for (var i = 0; i < 20; i++) {
+        days[i].remove('skin_temp_family');
+      }
+      final b =
+          buildCrossDayBundle(days, const {}, methodFamilies: methods);
+      expect(pct(b, 'rmssd')['n'], 49);
+    });
+  });
 }

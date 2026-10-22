@@ -50,11 +50,17 @@ import 'onehz_pipeline.dart' show needInputNote;
 /// that day (TS-11). A day with more than one is dropped by the analytics, not
 /// split — it belongs to no single type. Empty ⇒ `session_cost` is absent,
 /// which is also its state for the first ten sessions of any type.
+///
+/// [methodFamilies] maps a device family to its method family (the
+/// engine's `kMethodFamily`). The breakdown's HRV, resting HR and breathing
+/// rate compare tonight only with prior nights of tonight's method family.
+/// Empty ⇒ nights compare by their raw device family.
 Map<String, dynamic> buildCrossDayBundle(
   List<Map<String, dynamic>> daysOldestFirst,
   Map<String, dynamic> profile, {
   List<String> cycleStartDates = const [],
   Map<String, List<String>> sessionTypesByDate = const {},
+  Map<String, String> methodFamilies = const {},
 }) {
   final days = daysOldestFirst;
   final n = days.length;
@@ -205,13 +211,35 @@ Map<String, dynamic> buildCrossDayBundle(
       : allDurH.sublist(allDurH.length - 7);
   final sleepDebt = ana.sleepDebt(recentDurH, freeDurH);
 
+  // A ring's vendor RMSSD or a 1-min watch's resting HR is not the same
+  // quantity as a band's 1 Hz one, and the headline readiness keeps a separate
+  // baseline per method family for exactly that reason. The breakdown below
+  // ranks tonight against its history, so that history has to be split the
+  // same way, or the first weeks on a new wearable read as "held you back"
+  // against the old one's numbers while the headline calls them normal.
+  // `skin_temp_family` is the day's device family (it is not temperature-
+  // specific); an unstamped day is a band's, as in the baseline cache.
+  String? methodOf(int i) {
+    final device = (days[i]['skin_temp_family'] as String?) ?? 'gen4';
+    return methodFamilies[device] ?? device;
+  }
+
+  final tonightMethod = n == 0 ? null : methodOf(n - 1);
+  List<double?> sameMethod(List<double?> series) => [
+        for (var i = 0; i < n; i++)
+          i == n - 1 || methodOf(i) == tonightMethod ? series[i] : null,
+      ];
+  final rmssdOwn = sameMethod(rmssdList);
+  final rhrOwn = sameMethod(rhrList);
+  final respOwn = sameMethod(respList);
+
   // ── percentile-of-you for today vs history (history = all-but-last) ────────
   // rhr is LOWER-is-better — the same orientation `_glassInput` ten lines below
   // has always passed for this exact list. Unoriented, a night with the user's
   // lowest resting HR in a month came back labelled "among your worst".
   final percentiles = <String, dynamic>{
-    'rmssd': _pctOfYou(rmssdList, ana.Better.higher),
-    'rhr': _pctOfYou(rhrList, ana.Better.lower),
+    'rmssd': _pctOfYou(rmssdOwn, ana.Better.higher),
+    'rhr': _pctOfYou(rhrOwn, ana.Better.lower),
     'readiness': _pctOfYou(readyList, ana.Better.higher),
   };
 
@@ -219,12 +247,12 @@ Map<String, dynamic> buildCrossDayBundle(
   // rmssd higher-better; rhr/resp lower-better; skin_temp_z lower-ABS better
   // (so we orient temp by its absolute deviation, lower=better).
   final gbInputs = <ana.GlassBoxInput>[];
-  final gbRmssd = _glassInput('hrv', rmssdList, ana.wHrv, lowerIsBetter: false);
+  final gbRmssd = _glassInput('hrv', rmssdOwn, ana.wHrv, lowerIsBetter: false);
   if (gbRmssd != null) gbInputs.add(gbRmssd);
   final gbRhr =
-      _glassInput('rhr', rhrList, ana.wRhr, lowerIsBetter: true, quantum: 1);
+      _glassInput('rhr', rhrOwn, ana.wRhr, lowerIsBetter: true, quantum: 1);
   if (gbRhr != null) gbInputs.add(gbRhr);
-  final gbResp = _glassInput('resp', respList, ana.wResp, lowerIsBetter: true);
+  final gbResp = _glassInput('resp', respOwn, ana.wResp, lowerIsBetter: true);
   if (gbResp != null) gbInputs.add(gbResp);
   // temp: use absolute z so "further from your baseline" is worse. `tempList`
   // here is `skin_temp_z` — already a z-score against the raw-ADC baseline

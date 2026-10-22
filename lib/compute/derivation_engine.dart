@@ -59,6 +59,7 @@ import 'inputs/garmin_inputs.dart'
     show
         isWearableFamily,
         kHrCadenceSec,
+        kMethodFamily,
         kOneHzRunGapSec,
         kWearableFamilies,
         methodFamily;
@@ -6677,6 +6678,7 @@ class DerivationEngine {
                   profileMap,
                   cycleStartDates: cycleStarts,
                   sessionTypesByDate: sessionTypes,
+                  methodFamilies: kMethodFamily,
                 )
                 ..['algo_version'] = kAlgoVersion
                 ..['built_for_day'] = builtForDay
