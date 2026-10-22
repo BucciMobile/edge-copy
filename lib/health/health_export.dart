@@ -1485,6 +1485,9 @@ class HealthExporter {
     if ((r['private'] as num?)?.toInt() == 1) {
       return null; // skip, not a failure
     }
+    if (r['source'] == kScoredImportSessionSource) {
+      return null; // skip, not a failure
+    }
     final st = (r['start_ts'] as num?)?.toInt();
     final en = (r['end_ts'] as num?)?.toInt();
     if (st == null || en == null || en <= st) {
@@ -1534,6 +1537,7 @@ class HealthExporter {
     // exported workout, and deleting it here — only to have _writeOneWorkout
     // refuse to write the replacement — would erase it for nothing.
     if ((session['end_ts_fabricated'] as num?)?.toInt() == 1) return false;
+    if (session['source'] == kScoredImportSessionSource) return false;
     final st = (session['start_ts'] as num?)?.toInt();
     final en = (session['end_ts'] as num?)?.toInt();
     if (st == null || en == null || en <= st) return false;
@@ -1636,6 +1640,11 @@ String? healthWorkoutTitleForType(String? type) {
       .map((w) => w[0].toUpperCase() + w.substring(1))
       .join(' ');
 }
+
+/// `sessions.source` of a session scored from an imported workout's window.
+/// The import came from the health store and the original is still there, so
+/// writing this one as well would list the same workout twice.
+const String kScoredImportSessionSource = 'scored_import';
 
 /// Parameterised by [ios] rather than reading `Platform` directly so a unit
 /// test can exercise BOTH platform branches on a host VM (where `Platform.isIOS`

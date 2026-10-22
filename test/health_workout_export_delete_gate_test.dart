@@ -164,6 +164,35 @@ void main() {
     });
   });
 
+  group('sessions scored from an imported workout', () {
+    // The import's original is already in the health store; the day export
+    // writing the scored copy as well listed the workout twice.
+    late _FakeHealthStore store;
+
+    tearDown(() => store.remove());
+
+    test('are never written to the health store', () async {
+      store = _FakeHealthStore(deleteResult: true)..install();
+
+      final ok = await HealthExporter().exportWorkout(
+          {..._session(), 'source': kScoredImportSessionSource});
+
+      expect(ok, isFalse);
+      expect(store.calls, isNot(contains('writeWorkoutData')));
+      expect(store.calls, isNot(contains('delete')));
+    });
+
+    test('an ordinary manual session still is', () async {
+      store = _FakeHealthStore(deleteResult: true)..install();
+
+      final ok = await HealthExporter()
+          .exportWorkout({..._session(), 'source': 'manual'});
+
+      expect(ok, isTrue);
+      expect(store.calls, contains('writeWorkoutData'));
+    });
+  });
+
   group('deleteWorkoutWindow (retime cleanup)', () {
     // setWorkoutWindow only has the OLD [start,end] before it overwrites the
     // row — this is what it calls to clear that range so a narrowed/moved

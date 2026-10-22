@@ -2916,6 +2916,7 @@ class LocalRepositoryImpl extends LocalRepository {
     required int startTs,
     required int endTs,
     required String type,
+    String source = 'manual',
   }) async {
     // A manual row's id is derived from its start second, so re-logging the
     // IDENTICAL window is an update of that row, not a collision with it. A
@@ -2951,6 +2952,7 @@ class LocalRepositoryImpl extends LocalRepository {
       existing: same ? prior : null,
       sessionId:
           moved ? '$id:${DateTime.now().millisecondsSinceEpoch}' : null,
+      source: source,
       validateAgainstId: same
           ? prior['id'] as String
           : (prior == null && !moved ? id : null),
