@@ -58,13 +58,19 @@ class DevicePickerScreen extends StatefulWidget {
   /// back to, so it needs no separate way out.
   final VoidCallback? onSkip;
 
+  /// Where the back chevron goes when there is no route underneath to pop.
+  /// Set only at first-run onboarding, where the picker is the gate's root
+  /// page; null keeps the default `Navigator.maybePop`.
+  final VoidCallback? onBack;
+
   /// Whether "Watches & bands" is offered at all. False from "add a
   /// sensor": this phone already has its one primary band, and re-pairing
   /// it is a distinct, destructive-feeling action reached from `RePair`,
   /// not something to offer beside a chest strap in the same list.
   final bool includeBand;
 
-  const DevicePickerScreen({super.key, this.onSkip, this.includeBand = true});
+  const DevicePickerScreen(
+      {super.key, this.onSkip, this.onBack, this.includeBand = true});
 
   @override
   State<DevicePickerScreen> createState() => _DevicePickerScreenState();
@@ -305,6 +311,7 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
       onPickNearby: _pickNearby,
       onOpenEntry: _openEntry,
       onSkip: widget.onSkip,
+      onBack: widget.onBack,
     );
   }
 
@@ -330,6 +337,7 @@ class DevicePickerView extends StatelessWidget {
   final void Function(BandCandidate)? onPickNearby;
   final void Function(BandEntry)? onOpenEntry;
   final VoidCallback? onSkip;
+  final VoidCallback? onBack;
 
   const DevicePickerView({
     super.key,
@@ -346,6 +354,7 @@ class DevicePickerView extends StatelessWidget {
     this.onPickNearby,
     this.onOpenEntry,
     this.onSkip,
+    this.onBack,
   });
 
   @override
@@ -359,7 +368,7 @@ class DevicePickerView extends StatelessWidget {
         child: Column(children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: S.x4),
-            child: NavBar(title),
+            child: NavBar(title, onBack: onBack),
           ),
           Expanded(
             child: ListView(

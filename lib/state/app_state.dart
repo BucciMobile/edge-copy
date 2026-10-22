@@ -600,6 +600,20 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Undo the welcome choice while still unpaired, so the onboarding picker's
+  /// back chevron returns to the welcome screen. The picker is the gate's root
+  /// route at first run — there is nothing under it to pop — and once a choice
+  /// is persisted the welcome screen (and its "bring my history first" import)
+  /// would otherwise never come back short of Settings › sign out. No-op once
+  /// a band is paired: the route has moved past pairing by then.
+  Future<void> backToWelcome() async {
+    if (_onboardChoice == null || isPaired) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_kOnboard);
+    _onboardChoice = null;
+    notifyListeners();
+  }
+
   /// Existing-user path: after a successful cloud import, persist the cloud
   /// profile + mark onboarding done so the gate advances to pairing → shell.
   /// [cloudProfile] is the mapped local-profile field set from CloudImporter.
