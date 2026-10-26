@@ -51,6 +51,11 @@ class StepCalibrationScreen extends StatefulWidget {
 
 class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
   final Map<StepCategory, LiveStepGainProfile?> _profiles = {};
+
+  /// ONE instance for the screen's lifetime. The ticker runs once a second for
+  /// three minutes, and a fresh `PhonePedometer` per tick would mean 180 objects
+  /// and 180 platform-channel queries for a value read at most twice a routine.
+  final PhonePedometer _pedometer = PhonePedometer();
   CalibrationSession? _session;
   Timer? _ticker;
   DateTime? _routineStart;
@@ -85,6 +90,14 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     final app = context.read<AppState>();
     _ticker?.cancel();
     _routineStart = DateTime.now();
+    if (category.referenceIsPhone) {
+      // Ask BEFORE the routine, not after. A three-minute household routine that
+      // is then refused because the phone was never granted step access has
+      // wasted the wearer's time, and its refusal message would blame their
+      // pocket for a permission they were never asked for — a wrong reason,
+      // which is worse than none.
+      unawaited(_ensurePhonePermission());
+    }
     setState(() {
       _outcome = null;
       _session = CalibrationSession(category: category)
@@ -114,11 +127,21 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     setState(() {});
   }
 
+  Future<void> _ensurePhonePermission() async {
+    try {
+      if (!await _pedometer.hasPermission()) {
+        await _pedometer.requestPermission();
+      }
+    } catch (_) {
+      // No permission means no reference, which `finish()` reports as such.
+    }
+  }
+
   Future<void> _readPhone(CalibrationSession s) async {
     final start = _routineStart;
     if (start == null) return;
     try {
-      final steps = await PhonePedometer().stepsBetween(start, DateTime.now());
+      final steps = await _pedometer.stepsBetween(start, DateTime.now());
       // A null or -1 answer is the phone saying "I did not cover that interval",
       // which is not a zero. Leaving the reference absent makes `finish()` refuse
       // the run rather than fit a 0.0 gain from a phone on a table.
@@ -141,6 +164,13 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     final s = _session;
     if (s == null) return;
     _ticker?.cancel();
+    // One final read, so the reference covers the WHOLE routine instead of
+    // whatever the last tick happened to see — and so it is taken while the
+    // wearer is still standing there, which is the difference between a measured
+    // reference and a refused routine.
+    if (s.category.referenceIsPhone) await _readPhone(s);
+    // §4.5: `context` may not be used after an await without this.
+    if (!mounted) return;
     final out = s.finish();
     final l = AppLocalizations.of(context);
 
@@ -221,22 +251,22 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     LiveStepGainProfile profile,
     AppLocalizations? l,
   ) {
+    // Signed, so a reduction reads as one: -12% is a different claim from 12%.
     final pct = ((profile.gain - 1) * 100).round();
-    final sign = pct >= 0 ? '+' : '';
     if (run.category.isGait) {
-      return (l?.stepCalDoneGait ??
-              'Saved. You counted {count} steps and the band saw {band}. From '
-                  'now on this kind of walking is corrected by {pct}%.')
-          .replaceAll('{count}', '${run.expectedSteps}')
-          .replaceAll('{band}', '${run.rawSteps}')
-          .replaceAll('{pct}', '$sign$pct');
+      return l?.stepCalDoneGait(run.expectedSteps, run.rawSteps, pct) ??
+          'Saved. You counted ${run.expectedSteps} steps and the band saw '
+              '${run.rawSteps}. From now on this kind of walking is corrected '
+              'by $pct%.';
     }
-    return (l?.stepCalDoneHousehold ??
-            'Saved. Your phone counted {count} steps of the {band} the band '
-                'saw. Household movement is now scaled to {gain}.')
-        .replaceAll('{count}', '${run.expectedSteps}')
-        .replaceAll('{band}', '${run.rawSteps}')
-        .replaceAll('{gain}', profile.gain.toStringAsFixed(2));
+    return l?.stepCalDoneHousehold(
+          run.expectedSteps,
+          run.rawSteps,
+          profile.gain.toStringAsFixed(2),
+        ) ??
+        'Saved. Your phone counted ${run.expectedSteps} steps of the '
+            '${run.rawSteps} the band saw. Household movement is now scaled to '
+            '${profile.gain.toStringAsFixed(2)}.';
   }
 
   @override
@@ -298,9 +328,9 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       const SizedBox(height: S.x2),
       Center(
         child: Text(
-          (l?.stepCalBandSeen ?? 'steps the band has seen')
-              .replaceAll('{target}',
-                  isHousehold ? '' : '${s.targetSteps}'),
+          // No placeholder: this label names the counter, it does not read the
+          // target. It used to substitute a `{target}` the string never had.
+          l?.stepCalBandSeen ?? 'steps the band has seen',
           style: F.cap.copyWith(color: p.ink2),
         ),
       ),
@@ -318,9 +348,8 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       Text(
         isHousehold
             ? (l?.stepCalElapsed ?? 'Keep going — this one is timed.')
-            : (l?.stepCalCountYourself ??
-                'Count your own steps. Stop when you reach {target}.')
-                .replaceAll('{target}', '${s.targetSteps}'),
+            : (l?.stepCalCountYourself(s.targetSteps) ??
+                'Count your own steps. Stop when you reach ${s.targetSteps}.'),
         style: F.cap.copyWith(color: p.ink2),
       ),
       const SizedBox(height: S.x6),
@@ -385,8 +414,8 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
   String _subtitleFor(StepCategory category, AppLocalizations? l) {
     final profile = _profiles[category];
     final state = profile?.isCalibrated ?? false
-        ? (l?.stepCalCalibrated ?? 'Calibrated — counted {n} times')
-            .replaceAll('{n}', '${profile!.nRuns}')
+        ? (l?.stepCalCalibrated(profile!.nRuns) ??
+            'Calibrated — counted ${profile!.nRuns} times')
         : (l?.stepCalNotCalibrated ?? 'Not calibrated yet');
     return '$state · ${_guideShort(category, l)}';
   }

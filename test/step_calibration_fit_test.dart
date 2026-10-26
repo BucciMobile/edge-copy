@@ -118,10 +118,21 @@ void main() {
       expect(fit.gain, greaterThan(0));
     });
 
-    test('the household gain is floored, never zero', () {
-      final fit = fittedGain(StepCategory.everyday, [_everyday(15, 400)]);
-      expect(fit!.gain, kEverydayGainMin);
-      expect(fit.gain, greaterThan(0));
+    test('a ratio under the floor is REFUSED, not clamped to it', () {
+      // Clamping a single run would turn "this routine did not measure what it
+      // claims" into a value at the edge of the legal band — a fabricated
+      // metric with a plausible shape. The floor is enforced by refusing.
+      expect(stepRunRejection(_everyday(15, 400)),
+          StepRunRejection.ratioOutsideGainRange);
+      expect(fittedGain(StepCategory.everyday, [_everyday(15, 400)]), isNull);
+    });
+
+    test('a third-done walk is refused rather than clamped to 2.0', () {
+      // 100 claimed against 30 seen implies 3.3, above kGaitGainMax. Clamped, it
+      // would DOUBLE every later step the wearer takes.
+      final half = _gait(StepCategory.brisk, 100, 30, 110);
+      expect(stepRunRejection(half), StepRunRejection.ratioOutsideGainRange);
+      expect(fittedGain(StepCategory.brisk, [half]), isNull);
     });
 
     test('the household gain can never inflate the count', () {
@@ -198,6 +209,22 @@ void main() {
       // backstop BEHIND live_coverage_policy's 40 spm still-hour rule.
       final c = creditLiveSteps(rawSteps: 25, cadenceSpm: 12, runs: calibrated);
       expect(c.creditedSteps, lessThanOrEqualTo(4));
+    });
+
+    test('a WALKING cadence with no calibrated family is left alone', () {
+      // The bug this replaces: a wearer who calibrated only the household
+      // routine had every real walk scaled to 5-14% of what the band counted,
+      // because a gait cadence matching no calibrated band fell through to the
+      // household gain. "A household gain can only damp" is not reassurance —
+      // damping a walk by 90% is a far worse error than the over-count the
+      // calibration exists to fix.
+      final c = creditLiveSteps(
+        rawSteps: 140,
+        cadenceSpm: 140, // squarely inside the 60-200 gait band
+        runs: [_everyday(55, 400)],
+      );
+      expect(c.creditedSteps, 140);
+      expect(c.calibrated, isFalse);
     });
 
     test('an uncalibrated family is credited exactly as today', () {
@@ -369,6 +396,25 @@ void main() {
         ..start(bandBaseline: 0, nowMs: t0)
         ..observe(bandTotal: 50, nowMs: t0 + 30000);
       expect(gait.progress, closeTo(0.5, 1e-9));
+    });
+
+    test('a timed routine that stopped early is refused', () {
+      final s = CalibrationSession(category: StepCategory.everyday)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..observe(bandTotal: 200, nowMs: t0 + 60000); // 60 s of 180
+      expect(s.canFinish, isFalse);
+      final out = s.finish();
+      expect(out.refusal, StepRunRejection.routineTooShort);
+      // Raised by the session, not by stepRunRejection: a run does not know how
+      // long its routine was asked to last, so that function could not judge it.
+    });
+
+    test('a gait routine has no duration gate', () {
+      final s = CalibrationSession(category: StepCategory.brisk)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..observe(bandTotal: 112, nowMs: t0 + 60000);
+      expect(s.canFinish, isTrue);
+      expect(s.finish().refusal, isNull);
     });
 
     test('a silent band is its own outcome, not a refusal', () {

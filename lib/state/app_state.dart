@@ -3230,11 +3230,28 @@ class AppState extends ChangeNotifier {
   /// saved, or a walk that started before the save would bank with the old gain.
   List<StepCalibrationRun>? _liveStepCalibration;
 
-  Future<List<StepCalibrationRun>> _liveStepCalibrationRuns() async =>
-      _liveStepCalibration ??= await LocalDb.liveStepCalibrationRuns();
+  /// Bumped by every invalidation. A load that started before an invalidation
+  /// must not put its result back: the calibration screen saves while a banked
+  /// walk may already have triggered a read, and a stale list restored after the
+  /// save would have every later walk fit the previous gain.
+  int _liveStepCalibrationGeneration = 0;
+
+  Future<List<StepCalibrationRun>> _liveStepCalibrationRuns() async {
+    final cached = _liveStepCalibration;
+    if (cached != null) return cached;
+    final generation = _liveStepCalibrationGeneration;
+    final rows = await LocalDb.liveStepCalibrationRuns();
+    if (generation != _liveStepCalibrationGeneration) return rows;
+    return _liveStepCalibration = rows;
+  }
 
   /// Drop the cached fit so the next banked run uses a newly saved calibration.
-  void invalidateLiveStepCalibration() => _liveStepCalibration = null;
+  /// Also called after a database import, which merges calibration rows in
+  /// without this process knowing.
+  void invalidateLiveStepCalibration() {
+    _liveStepCalibration = null;
+    _liveStepCalibrationGeneration++;
+  }
 
   /// Map a phone-clock instant onto the BAND's record-time base, the base
   /// `live_coverage` rows live in.
@@ -3582,6 +3599,17 @@ class AppState extends ChangeNotifier {
         day,
         source: kStepSourceStrap,
       );
+      // AGENTS.md §4.7 — the other two callers of `addLiveCoverage` are
+      // enumerated here so this capability cannot be wired into one path and
+      // forgotten in the rest:
+      //   * `_recoverOrphanedLiveSessionOnce` (below) banks a checkpoint's
+      //     numbers VERBATIM, and that checkpoint is written through this same
+      //     `creditedStepsForRun`, so it carries the calibration too.
+      //   * `lib/import/noop_ingest.dart` banks another app's exported step
+      //     runs. Those are the vendor's own counts, already measured by a
+      //     device that is not this strap's pedometer, so this calibration must
+      //     NOT be applied to them — the gain describes our counter's residual,
+      //     not theirs.
     }
   }
 

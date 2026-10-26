@@ -2309,11 +2309,40 @@ class LocalDb {
     StepCalibrationRun run, {
     required int runTs,
     DateTime? now,
+  }) {
+    // SERIALISED, because two routines for the same category banking at once can
+    // each read a different history snapshot and write their profiles in the
+    // opposite order — leaving the older result in place while the newer run is
+    // already durable. One lock rather than one per category: a save is three
+    // writes and the contention case is a user tapping two routines, so the
+    // simpler invariant is worth more than the parallelism.
+    final chained = _liveStepGainLock.then((_) async {
+      await putLiveStepCalibrationRun(run, runTs: runTs);
+      return refitLiveStepGain(run.category, now: now);
+    });
+    // The chain must survive this save's own failure, or one bad routine would
+    // block every later one.
+    _liveStepGainLock = chained.then((_) {}, onError: (_) {});
+    return chained;
+  }
+
+  /// Serialises calibration saves — see [bankLiveStepCalibrationRun].
+  static Future<void> _liveStepGainLock = Future<void>.value();
+
+  /// Recompute and store one family's gain from every admitted run on record.
+  ///
+  /// Separate from the banking call so a torn state is REPAIRABLE: if a save
+  /// ever leaves a run durable without the profile it implies — a process kill
+  /// between the two writes, a failed refit — running this again derives the
+  /// right answer from the rows, because both sides are idempotent by key and
+  /// the fit is a pure function of the stored evidence.
+  static Future<LiveStepGainProfile> refitLiveStepGain(
+    StepCategory category, {
+    DateTime? now,
   }) async {
-    await putLiveStepCalibrationRun(run, runTs: runTs);
     final rows = await liveStepCalibrationRuns();
     final profile = estimateLiveStepGain(
-      run.category,
+      category,
       rows,
       now: now ?? DateTime.now(),
     );

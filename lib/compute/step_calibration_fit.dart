@@ -229,6 +229,23 @@ enum StepRunRejection {
   /// was on a table), and fitting a 0.0 gain from it would delete every real
   /// step in every later household window.
   noReferenceSteps,
+
+  /// The ratio this run implies falls outside the category's gain range.
+  ///
+  /// A run is REFUSED here rather than clamped into range. Clamping a single
+  /// run silently converts "this routine did not measure what it claims" into a
+  /// value at the edge of the legal band — the exact shape of a fabricated
+  /// metric. A wearer who taps Done after a third of their walk produces
+  /// expected 100 against raw 30, i.e. a gain of 3.3; clamped to 2.0 that would
+  /// DOUBLE every later step they take. The clamp stays in [fittedGain] as
+  /// defence for stored or imported rows, but no run may reach it from here.
+  ratioOutsideGainRange,
+
+  /// A TIMED routine that did not run for its full duration. The household
+  /// family has no step target to fall short of, so this is its equivalent —
+  /// and `stepRunRejection` cannot carry it, because a run does not know how
+  /// long its routine was asked to be. [CalibrationSession.finish] raises it.
+  routineTooShort,
 }
 
 /// Null when the run may be used to fit; otherwise why it may not.
@@ -259,7 +276,7 @@ StepRunRejection? stepRunRejection(StepCalibrationRun r) {
     if (r.rawSteps > (r.expectedSteps * kGaitGainMax).ceil()) {
       return StepRunRejection.rawExceedsExpectedByTooMuch;
     }
-    return null;
+    return _ratioAdmissible(r);
   }
 
   // EVERYDAY. The band is EXPECTED to see far more than the phone — that is the
@@ -269,6 +286,23 @@ StepRunRejection? stepRunRejection(StepCalibrationRun r) {
   if (r.expectedSteps <= 0) return StepRunRejection.noReferenceSteps;
   if (r.expectedSteps > r.rawSteps) {
     return StepRunRejection.rawExceedsExpectedByTooMuch;
+  }
+  return _ratioAdmissible(r);
+}
+
+/// The gain this run implies must lie inside the category's own range.
+///
+/// Split out so both families cannot drift apart: the check is identical, only
+/// the range differs, and the range already lives in [gainFloor]/[gainCeiling].
+/// This is what turns "the fit would have clamped it" into "the run is refused",
+/// and it is the only guard against a routine that stopped early — the app can
+/// never know how many steps the wearer really took, but it CAN know that the
+/// count it saw is not consistent with the walk that was asked for.
+StepRunRejection? _ratioAdmissible(StepCalibrationRun r) {
+  if (r.rawSteps <= 0) return StepRunRejection.rawTooSmall;
+  final ratio = r.expectedSteps / r.rawSteps;
+  if (ratio < gainFloor(r.category) || ratio > gainCeiling(r.category)) {
+    return StepRunRejection.ratioOutsideGainRange;
   }
   return null;
 }
@@ -557,8 +591,34 @@ StepCredit creditLiveSteps({
   }
 
   final gait = gaitCategoryForCadence(cadenceSpm, runs);
-  // A gait window with an uncalibrated band falls through to everyday, whose
-  // gain is capped at 1.0 — so it can never inflate, only damp.
+
+  // A cadence INSIDE the gait band that no calibrated family owns is a walk the
+  // wearer has not calibrated — so it is credited EXACTLY as it is today.
+  //
+  // It must not fall through to the household gain. An earlier version did, on
+  // the reasoning that a household gain is capped at 1.0 and so "can only damp".
+  // Damping is not harmless: a wearer who calibrates only the household routine
+  // would then have every real walk scaled to 5-14% of what the band counted,
+  // which is a far worse error than the over-count the calibration exists to
+  // fix. "Uncalibrated changes nothing" has to hold for the walk too.
+  final inGaitBand =
+      cadenceSpm >= kGaitCadenceMinSpm && cadenceSpm <= kGaitCadenceMaxSpm;
+  if (gait == null && inGaitBand) {
+    return StepCredit(
+      creditedSteps: rawSteps,
+      rawSteps: rawSteps,
+      category: null,
+      gainApplied: 1.0,
+      calibrated: false,
+    );
+  }
+
+  // Below the gait band there is no ambulation to protect — that is the space
+  // the household family owns, and live_cadence.dart defines it as "a few steps
+  // to the kettle inside an otherwise still minute" rather than walking. The
+  // cost is written down rather than hidden: a genuine walk slower than
+  // kGaitCadenceMinSpm is damped with the household movement, and the answer is
+  // to calibrate the `slow` family, whose band would then own those minutes.
   final family = gait ?? StepCategory.everyday;
 
   final fit = fittedGain(family, runs);
@@ -797,7 +857,14 @@ class CalibrationSession {
   /// A gate on EVIDENCE, not on the target: ending a gait run at zero strap
   /// steps produces a run the admissibility rules refuse anyway, and telling the
   /// wearer that before they press the button is kinder than a refusal after.
-  bool get canFinish => _started && bandSeconds > 0 && bandRawSteps > 0;
+  bool get canFinish =>
+      _started &&
+      bandSeconds > 0 &&
+      bandRawSteps > 0 &&
+      // The household family has no step target, so its equivalent is the
+      // routine's own duration: stopping it a third of the way through measures
+      // a third of the movement and would be fitted as if it were all of it.
+      (!category.referenceIsPhone || bandSeconds >= targetSeconds);
 
   /// Finish the routine and produce the run, or the reason there is none.
   ///
@@ -812,6 +879,15 @@ class CalibrationSession {
       // No usable band signal at all. Not a [StepRunRejection] — that enum
       // judges a run that exists, and this one never happened.
       return (run: null, refusal: null, bandSilent: true);
+    }
+    if (category.referenceIsPhone && bandSeconds < targetSeconds) {
+      // Raised HERE, not in [stepRunRejection]: a run does not know how long its
+      // routine was asked to last, so that function could not judge this.
+      return (
+        run: null,
+        refusal: StepRunRejection.routineTooShort,
+        bandSilent: false,
+      );
     }
     final run = StepCalibrationRun(
       category: category,

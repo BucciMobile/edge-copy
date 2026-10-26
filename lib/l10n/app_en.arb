@@ -15790,5 +15790,29 @@
   "stepCalBadData": "That routine produced unreadable sensor data.",
   "stepCalSaveFailed": "Could not save that calibration.",
   "stepCalDoneGait": "Saved. You counted {count} steps and the band saw {band}. From now on this kind of walking is corrected by {pct}%.",
-  "stepCalDoneHousehold": "Saved. Your phone counted {count} steps of the {band} the band saw. Household movement is now scaled to {gain}."
+  "stepCalDoneHousehold": "Saved. Your phone counted {count} steps of the {band} the band saw. Household movement is now scaled to {gain}.",
+  "@stepCalCalibrated": {
+    "description": "Badge on a category row: how many supervised routines are behind its gain.",
+    "placeholders": {"n": {"type": "int"}}
+  },
+  "@stepCalCountYourself": {
+    "description": "Instruction during a gait routine. The wearer counts their own steps; the band's live count is shown only as feedback, because a run that ended on the band's own count would always fit exactly 1.0.",
+    "placeholders": {"target": {"type": "int"}}
+  },
+  "@stepCalDoneGait": {
+    "description": "Result of a gait calibration: what the wearer counted, what the band counted, and the percentage correction now applied. Signed, so a reduction reads as -12%.",
+    "placeholders": {
+      "count": {"type": "int"},
+      "band": {"type": "int"},
+      "pct": {"type": "int"}
+    }
+  },
+  "@stepCalDoneHousehold": {
+    "description": "Result of a household calibration: the phone's count (the reference), the band's count, and the resulting scale as a fixed-2 string.",
+    "placeholders": {
+      "count": {"type": "int"},
+      "band": {"type": "int"},
+      "gain": {"type": "String"}
+    }
+  }
 }
