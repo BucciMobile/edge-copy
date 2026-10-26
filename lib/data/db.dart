@@ -2293,6 +2293,34 @@ class LocalDb {
     );
   }
 
+  /// Bank one accepted calibration run and refit the family it belongs to.
+  ///
+  /// ONE call from the calibration screen, because the two writes must not be
+  /// performed by hand in two places: a run stored without the profile it
+  /// implies — or the reverse — leaves the app correcting with a gain that does
+  /// not match the evidence that produced it, and nothing downstream could tell.
+  ///
+  /// The caller must clear [AppState.invalidateLiveStepCalibration] afterwards,
+  /// or a walk already in progress would bank with the previous gain.
+  ///
+  /// Returns the refitted profile, so the screen can show the wearer the number
+  /// their routine just produced instead of a generic acknowledgement.
+  static Future<LiveStepGainProfile> bankLiveStepCalibrationRun(
+    StepCalibrationRun run, {
+    required int runTs,
+    DateTime? now,
+  }) async {
+    await putLiveStepCalibrationRun(run, runTs: runTs);
+    final rows = await liveStepCalibrationRuns();
+    final profile = estimateLiveStepGain(
+      run.category,
+      rows,
+      now: now ?? DateTime.now(),
+    );
+    await putLiveStepGainProfile(profile);
+    return profile;
+  }
+
   /// The stored gain for one family, or null when none was fitted or the stored
   /// version is not this code's. Null means "behave exactly as before" — never
   /// a fabricated 1.0 that hides a mismatch.

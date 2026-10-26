@@ -688,21 +688,36 @@ class CalibrationSession {
   /// How long to keep a household routine going. Everyday only.
   final int targetSeconds;
 
-  int _bandRaw = 0;
-  int _bandSeconds = 0;
+  int _bandBaseline = 0;
+  int _bandTotal = 0;
+  int _startMs = 0;
+  int _nowMs = 0;
+  bool _started = false;
   int? _phoneSteps;
   double? _peakToPeakG;
   double? _confidence;
-  int _elapsedMs = 0;
   bool _finished = false;
 
-  /// The strap's RAW count so far — pre-gain, exactly as `pedometer()` returns
-  /// it, and the value that becomes the run's `rawSteps`.
-  int get bandRawSteps => _bandRaw;
+  /// The strap's RAW count for this ROUTINE — `pedometer()`'s count at the
+  /// current observation minus the count when the routine began, pre-gain
+  /// throughout, and the value that becomes the run's `rawSteps`.
+  ///
+  /// A DELTA, because a screen can only read the live session's cumulative
+  /// counter: what a routine measured is the difference between where that
+  /// counter stood at the start and where it stands now.
+  int get bandRawSteps => _bandTotal - _bandBaseline;
 
-  /// Sampled seconds the strap's chunks covered. Sampled, never wall time: a
-  /// chunk covers the signal it holds however long it took to arrive.
-  int get bandSeconds => _bandSeconds;
+  /// Seconds the routine's clock covered.
+  ///
+  /// The routine's OWN wall span, not a sampled span — the screen has no other
+  /// clock, and a supervised routine is short and hand-started. A stalled link
+  /// does not inflate this into a wrong cadence silently: the live path refuses
+  /// to commit a window measuring under `kMinLiveSampleRateHz`, so a stall shows
+  /// up as the band count standing still. A cadence that still lands outside
+  /// 60-200 spm simply produces no gait band (see [categoryBand]), which costs
+  /// the wearer nothing but that band.
+  int get bandSeconds =>
+      _started && _nowMs > _startMs ? (_nowMs - _startMs) ~/ 1000 : 0;
 
   /// The phone's count for the routine's window, or null when it has not been
   /// read (everyday refuses without it rather than fitting against nothing).
@@ -714,7 +729,7 @@ class CalibrationSession {
   /// the one [categoryBand] will later compare against. 0 until it can be
   /// measured, which is not a cadence.
   double get bandCadenceSpm =>
-      _bandSeconds <= 0 ? 0.0 : _bandRaw * 60.0 / _bandSeconds;
+      bandSeconds <= 0 ? 0.0 : bandRawSteps * 60.0 / bandSeconds;
 
   /// 0..1 for the progress affordance.
   ///
@@ -724,20 +739,35 @@ class CalibrationSession {
   double get progress {
     if (category.isGait) {
       if (targetSteps <= 0) return 0;
-      final p = _bandRaw / targetSteps;
+      final p = bandRawSteps / targetSteps;
       return p < 0 ? 0 : (p > 1 ? 1 : p);
     }
     if (targetSeconds <= 0) return 0;
-    final p = (_elapsedMs / 1000) / targetSeconds;
+    final p = bandSeconds / targetSeconds;
     return p < 0 ? 0 : (p > 1 ? 1 : p);
   }
 
-  /// Fold one completed pedometer chunk: [rawSteps] counted over [seconds] of
-  /// signal. A chunk with no steps or no span cannot move the routine.
-  void addBandChunk({required int rawSteps, required int seconds}) {
-    if (_finished || rawSteps <= 0 || seconds <= 0) return;
-    _bandRaw += rawSteps;
-    _bandSeconds += seconds;
+  /// Begin the routine. [bandBaseline] is the live session's cumulative raw
+  /// counter right now — everything the routine is credited with is measured
+  /// from here, so a walk that happened before the wearer pressed start cannot
+  /// land in their calibration.
+  void start({required int bandBaseline, required int nowMs}) {
+    if (_finished || _started) return;
+    _started = true;
+    _bandBaseline = bandBaseline < 0 ? 0 : bandBaseline;
+    _bandTotal = _bandBaseline;
+    _startMs = nowMs;
+    _nowMs = nowMs;
+  }
+
+  /// The live session's cumulative raw counter, as the screen reads it. Never
+  /// allowed to go backwards: the counter is reset when a session ends, and a
+  /// routine that spans a reconnect must not be credited with a negative
+  /// correction.
+  void observe({required int bandTotal, required int nowMs}) {
+    if (_finished || !_started) return;
+    _bandTotal = bandTotal < _bandBaseline ? _bandBaseline : bandTotal;
+    if (nowMs > _nowMs) _nowMs = nowMs;
   }
 
   /// The phone's count for this routine's window. Replaceable, because the
@@ -760,17 +790,14 @@ class CalibrationSession {
     _confidence = confidence;
   }
 
-  void advance({required int elapsedMs}) {
-    if (_finished || elapsedMs < 0) return;
-    _elapsedMs = elapsedMs;
-  }
+
 
   /// May the wearer end the routine yet?
   ///
   /// A gate on EVIDENCE, not on the target: ending a gait run at zero strap
   /// steps produces a run the admissibility rules refuse anyway, and telling the
   /// wearer that before they press the button is kinder than a refusal after.
-  bool get canFinish => _bandSeconds > 0 && _bandRaw > 0;
+  bool get canFinish => _started && bandSeconds > 0 && bandRawSteps > 0;
 
   /// Finish the routine and produce the run, or the reason there is none.
   ///
@@ -781,7 +808,7 @@ class CalibrationSession {
   ({StepCalibrationRun? run, StepRunRejection? refusal, bool bandSilent})
       finish() {
     _finished = true;
-    if (_bandSeconds <= 0 || _bandRaw <= 0) {
+    if (!_started || bandSeconds <= 0 || bandRawSteps <= 0) {
       // No usable band signal at all. Not a [StepRunRejection] — that enum
       // judges a run that exists, and this one never happened.
       return (run: null, refusal: null, bandSilent: true);
@@ -796,7 +823,7 @@ class CalibrationSession {
       // [stepRunRejection] turns into `noReferenceSteps` rather than a fitted
       // 0.0 gain.
       expectedSteps: category.referenceIsPhone ? (_phoneSteps ?? 0) : targetSteps,
-      rawSteps: _bandRaw,
+      rawSteps: bandRawSteps,
       cadenceSpm: bandCadenceSpm,
       // Passed THROUGH, never defaulted: null here means the caller did not
       // measure them, which is a different claim from a measured zero.

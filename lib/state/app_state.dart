@@ -3281,6 +3281,21 @@ class AppState extends ChangeNotifier {
   /// first measurement lands. It is never banked (the commit path measures its
   /// own chunk, below). Measure the partial too only if a rate that low is ever
   /// seen on real hardware.
+  /// The strap's live RAW step count for this connected session — what the
+  /// calibration screen shows while the wearer walks.
+  ///
+  /// PUBLIC AND RAW ON PURPOSE. The screen's whole job is to show the gap
+  /// between what the wearer counted and what the band saw, and that gap IS the
+  /// correction. Applying the gain here would hide the answer behind the number
+  /// being calibrated, and at the moment of calibration the gain is the thing
+  /// the wearer is trying to change.
+  ///
+  /// [_liveRaw]'s own docstring calls its value "gain-applied". It is not, and
+  /// cannot be: `_committedRaw` holds "raw (pre-gain) steps from completed
+  /// minutes" and `ana.pedometer` returns "Raw count — no calibration gain".
+  /// The value is exposed under a name that matches what it actually is.
+  int get liveStrapRawSteps => _liveRaw;
+
   int get _liveRaw {
     if (_magMin.isEmpty) return _committedRaw;
     final hz = _liveHz;
