@@ -15757,7 +15757,7 @@
     }
   },
   "settingsStepCalibration": "Step calibration",
-  "settingsStepCalibrationSub": "Teaches the strap your own walking, so its step count fits you. Nothing leaves the device",
+  "settingsStepCalibrationSub": "Learns how your strap over- or under-counts your own walking, and corrects it on the phone. Nothing is written to the strap and nothing leaves the device",
   "stepCalTitle": "Step calibration",
   "stepCalIntro": "Your strap counts steps off its own motion sensor, and how far off it is depends on you. These routines measure that. Nothing leaves your phone.",
   "stepCalSlowTitle": "Slow walk",

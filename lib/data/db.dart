@@ -2256,8 +2256,14 @@ class LocalDb {
         expectedSteps: (r['expected_steps'] as num?)?.toInt() ?? 0,
         rawSteps: (r['raw_steps'] as num?)?.toInt() ?? 0,
         cadenceSpm: (r['cadence_spm'] as num?)?.toDouble() ?? 0,
-        peakToPeakG: (r['p2p_g'] as num?)?.toDouble() ?? 0,
-        confidence: (r['confidence'] as num?)?.toDouble() ?? 0,
+        // NULL PASSES THROUGH AS NULL. These two columns are nullable precisely
+        // so a routine whose caller never measured them stores an ABSENCE — and
+        // a `?? 0` here would turn that absence back into a real still reading at
+        // the bottom of the scale, which is the fabrication the nullable column
+        // exists to prevent. `cadence_spm` above keeps its `?? 0` because it is
+        // NOT NULL and 0 there means "no cadence measurable", not a measurement.
+        peakToPeakG: (r['p2p_g'] as num?)?.toDouble(),
+        confidence: (r['confidence'] as num?)?.toDouble(),
       ));
     }
     return out;

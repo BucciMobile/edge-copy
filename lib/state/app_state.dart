@@ -3294,8 +3294,14 @@ class AppState extends ChangeNotifier {
     );
   }
 
-  /// Steps counted on the live 100 Hz stream this connected session (real,
-  /// gain-applied). Used for cadence calibration. 0 when not streaming.
+  /// Steps counted on the live 100 Hz stream this connected session. Used for
+  /// cadence calibration. 0 when not streaming.
+  ///
+  /// This used to read "(real, gain-applied)". It is NOT, and cannot be:
+  /// `_committedRaw` holds "raw (pre-gain) steps from completed minutes" and
+  /// `ana.pedometer` returns "Raw count — no calibration gain". Corrected rather
+  /// than left standing, because the calibration reads this value and depends on
+  /// it being raw.
   ///
   /// The still-filling partial minute is dropped once the stream has been
   /// MEASURED below [kMinLiveSampleRateHz] — a count off a stream that slow is
@@ -3306,6 +3312,13 @@ class AppState extends ChangeNotifier {
   /// first measurement lands. It is never banked (the commit path measures its
   /// own chunk, below). Measure the partial too only if a rate that low is ever
   /// seen on real hardware.
+  int get _liveRaw {
+    if (_magMin.isEmpty) return _committedRaw;
+    final hz = _liveHz;
+    if (hz != null && hz < kMinLiveSampleRateHz) return _committedRaw;
+    return _committedRaw + ana.pedometer(_magMin);
+  }
+
   /// The strap's live RAW step count for this connected session — what the
   /// calibration screen shows while the wearer walks.
   ///
@@ -3320,13 +3333,6 @@ class AppState extends ChangeNotifier {
   /// minutes" and `ana.pedometer` returns "Raw count — no calibration gain".
   /// The value is exposed under a name that matches what it actually is.
   int get liveStrapRawSteps => _liveRaw;
-
-  int get _liveRaw {
-    if (_magMin.isEmpty) return _committedRaw;
-    final hz = _liveHz;
-    if (hz != null && hz < kMinLiveSampleRateHz) return _committedRaw;
-    return _committedRaw + ana.pedometer(_magMin);
-  }
 
   // ── the two safety gates on this tier — see live_step_runs.dart ────────────
   /// Phone-clock instant the current chunk's first sample arrived AFTER, i.e.
