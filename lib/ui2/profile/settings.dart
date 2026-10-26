@@ -1,4 +1,5 @@
 import '../../l10n/display_text.dart';
+import 'step_calibration.dart';
 // Settings, and editing the profile.
 //
 // Two deliberate departures from the reference design:
@@ -746,6 +747,16 @@ class MoreSettingsView extends StatelessWidget {
                               'band doesn’t cover. Nothing leaves the device',
                       value: phoneSteps ? on : off,
                       onTap: onTogglePhoneSteps),
+
+              // Step calibration. A per-wearer correction for the strap's own
+              // 100 Hz pedometer — see step_calibration.dart for why it must be
+              // measured rather than assumed, and for what makes it different
+              // from the guided calibration app_state.dart records as removed.
+              _SettingsTile(
+                icon: LucideIcons.footprints,
+                label: l?.settingsStepCalibration ?? 'Step calibration',
+                value: '',
+                onTap: () => goto(c, const StepCalibrationScreen())),
                 ]),
                 settingsGroup(c, l?.settingsGroupPrivacy ?? 'Privacy', [
                   SetRow(LucideIcons.bug, C.orange,

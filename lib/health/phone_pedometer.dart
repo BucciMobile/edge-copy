@@ -92,6 +92,25 @@ class PhonePedometer {
   /// ACTIVITY_RECOGNITION request and it also arms the sensor listener. If this
   /// method stops being reached, the feature looks broken with nothing for the
   /// user to fix; `arming reaches the platform` in the tests pins that.
+  /// The motion coprocessor's own step count between two instants, or null when
+  /// the interval is not covered.
+  ///
+  /// The calibration routine needs a WINDOW, not a day: a household routine is
+  /// three minutes long and the reference has to be the steps inside exactly
+  /// those minutes. Null and [intervalNotCovered] both mean "no reference", and
+  /// the calibration refuses the run on either — a phone that was on a table
+  /// measured nothing, which must not be fitted as a measured zero.
+  Future<int?> stepsBetween(DateTime from, DateTime to) async {
+    if (!to.isAfter(from)) return null;
+    try {
+      final steps = await _readSteps(from, to);
+      if (steps == null || steps == intervalNotCovered || steps < 0) return null;
+      return steps;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> requestPermission() async {
     try {
       return await phoneStepsChannel.invokeMethod<bool>('requestPermission') ??
