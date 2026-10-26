@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import '../lib/compute/sensor_step_engine.dart';
-import '../lib/compute/step_calibration_profile.dart';
+import '../lib/compute/sensor_calibration_profile.dart';
 
 void main() {
   test('Engine estimates steps correctly for high-confidence signal', () {
-    final profile = StepCalibrationProfile(
+    final profile = SensorCalibrationProfile(
       version: 100,
       meanMagnitude: 1.0,
       variance: 0.1,

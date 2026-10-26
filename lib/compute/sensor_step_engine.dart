@@ -1,13 +1,12 @@
 import 'dart:math';
-import 'step_calibration_profile.dart';
+import 'sensor_calibration_profile.dart';
 
-/// Provides a confidence-based step estimation layer using WHOOP raw sensor vectors.
-/// Integrates alongside the existing derivation pipeline as a correction layer.
+/// Provides a confidence-based step estimation layer using WHOOP Gen5 raw sensor vectors.
+/// Only active if deviceFamily is 'gen5' and profile is calibrated.
 class SensorStepEngine {
   static const double kConfidenceThreshold = 0.85;
 
-  /// Returns calibrated step count if sensor data matches profile confidence.
-  static int? estimateSteps(List<double> magnitudes, StepCalibrationProfile profile) {
+  static int? estimateSteps(List<double> magnitudes, SensorCalibrationProfile profile) {
     if (magnitudes.isEmpty) return null;
 
     final rms = sqrt(magnitudes.map((m) => m * m).reduce((a, b) => a + b) / magnitudes.length);
