@@ -48,6 +48,7 @@ import '../compute/derive_scheduler.dart';
 import '../compute/inputs/canonical.dart'
     show flagOnOrPrimary, onWearableDaysChanged, refreshSessionSensorSources;
 import '../compute/manual_session.dart' show supersededSuggestionIds;
+import '../compute/step_calibration_fit.dart';
 import '../compute/hr_max.dart';
 import '../compute/inputs/measurement_inputs.dart'
     show
@@ -3218,6 +3219,23 @@ class AppState extends ChangeNotifier {
   /// something a source ladder can rank.
   final GaitRuns _gaitRuns = GaitRuns();
 
+  /// Admitted calibration runs for the live 100 Hz pedometer, cached per
+  /// session.
+  ///
+  /// Lazily loaded rather than fetched per banked run: the fit reads the WHOLE
+  /// run history, and a session banks a handful of runs, so a query per run
+  /// would be a query per walk for an answer that cannot change mid-session.
+  ///
+  /// The calibration screen MUST call [invalidateLiveStepCalibration] once it has
+  /// saved, or a walk that started before the save would bank with the old gain.
+  List<StepCalibrationRun>? _liveStepCalibration;
+
+  Future<List<StepCalibrationRun>> _liveStepCalibrationRuns() async =>
+      _liveStepCalibration ??= await LocalDb.liveStepCalibrationRuns();
+
+  /// Drop the cached fit so the next banked run uses a newly saved calibration.
+  void invalidateLiveStepCalibration() => _liveStepCalibration = null;
+
   /// Map a phone-clock instant onto the BAND's record-time base, the base
   /// `live_coverage` rows live in.
   ///
@@ -3516,13 +3534,26 @@ class AppState extends ChangeNotifier {
 
   /// Persist [runs] as `live_coverage` rows under the STRAP source.
   ///
-  /// `ana.StepParams.gain` is applied HERE and nowhere else on the persistence
-  /// path — the runs carry the raw count exactly as `pedometer()` returns it,
-  /// and this is the daily-sum layer `calcSteps` documents as the gain's home.
-  /// Applying it at both ends shipped a silent x1.23.
+  /// The step trim is applied HERE, and on the checkpoint path ONLY through the
+  /// same [creditedStepsForRun] call — the runs carry the raw count exactly as
+  /// `pedometer()` returns it, and this is the daily-sum layer `calcSteps`
+  /// documents as the gain's home. Two formulas, or one formula applied at both
+  /// ends, is the silent x1.23 this method's history records; one shared
+  /// function with one factor per run is the invariant that prevents it.
   Future<void> _bankGaitRuns(List<LiveStepRun> runs) async {
+    if (runs.isEmpty) return;
+    final calibration = await _liveStepCalibrationRuns();
     for (final run in runs) {
-      final steps = (run.rawSteps * ana.StepParams.gain).round();
+      // ONE factor per run. When the wearer has calibrated a family this file
+      // uses THAT gain; otherwise it is exactly the shipped `StepParams.gain`
+      // this line used before, to the digit. The two are never multiplied —
+      // multiplying them is the silent x1.23 this method's docstring records.
+      final steps = creditedStepsForRun(
+        rawSteps: run.rawSteps,
+        seconds: run.seconds,
+        runs: calibration,
+        fallbackGain: ana.StepParams.gain,
+      );
       if (steps <= 0) continue;
       // Per RUN, so a walk either side of midnight lands on the right days
       // instead of both going to whichever day the session started on.
@@ -3552,6 +3583,7 @@ class AppState extends ChangeNotifier {
     if (_gaitRuns.isEmpty) return;
     try {
       final prefs = await SharedPreferences.getInstance();
+      final calibration = await _liveStepCalibrationRuns();
       await prefs.setString(
         _kLiveSessionCheckpoint,
         // Runs are stored gain-applied, i.e. exactly the numbers
@@ -3561,7 +3593,19 @@ class AppState extends ChangeNotifier {
         jsonEncode({
           'runs': [
             for (final r in _gaitRuns.runs)
-              [r.startTs, r.endTs, (r.rawSteps * ana.StepParams.gain).round()],
+              [
+                r.startTs,
+                r.endTs,
+                // The SAME single application as [_bankGaitRuns], because
+                // recovery banks these numbers verbatim. A second formula here
+                // would be a second application of the gain.
+                creditedStepsForRun(
+                  rawSteps: r.rawSteps,
+                  seconds: r.seconds,
+                  runs: calibration,
+                  fallbackGain: ana.StepParams.gain,
+                ),
+              ],
           ],
         }),
       );

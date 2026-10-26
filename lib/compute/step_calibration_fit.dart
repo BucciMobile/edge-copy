@@ -568,3 +568,57 @@ StepCredit creditLiveSteps({
     calibrated: true,
   );
 }
+
+/// Credit one BANKED live run: the cadence is the run's own raw count over its
+/// own sampled span, which is how `lib/ble/live_cadence.dart` already defines a
+/// cadence ("a completed chunk is one minute, so its step count IS a
+/// steps-per-minute reading").
+///
+/// The RAW count is what picks the category and the gain is applied once at the
+/// end — the same "gate first, gain last" rule `live_cadence.dart` documents,
+/// and for the same reason: a gain applied before the cadence test would stretch
+/// the band by whatever the gain is.
+StepCredit creditLiveRun({
+  required int rawSteps,
+  required int seconds,
+  required List<StepCalibrationRun> runs,
+}) {
+  if (seconds <= 0) {
+    // No measurable span, so no cadence, so no basis for a category. Leave the
+    // count alone rather than letting it fall through to the everyday family,
+    // which would damp a run we merely failed to measure.
+    return StepCredit(
+      creditedSteps: rawSteps < 0 ? 0 : rawSteps,
+      rawSteps: rawSteps < 0 ? 0 : rawSteps,
+      category: null,
+      gainApplied: 1.0,
+      calibrated: false,
+    );
+  }
+  return creditLiveSteps(
+    rawSteps: rawSteps,
+    cadenceSpm: rawSteps * 60.0 / seconds,
+    runs: runs,
+  );
+}
+
+/// THE single entry point for the persistence path: what a banked run is worth.
+///
+/// [fallbackGain] is `ana.StepParams.gain`, the shipped trim, and it is used
+/// ONLY when the wearer has calibrated nothing — so an uncalibrated app banks
+/// exactly the numbers it banks today, to the digit.
+///
+/// When a family IS calibrated the calibrated gain REPLACES the shipped one
+/// rather than multiplying into it. That distinction is not cosmetic:
+/// `app_state.dart` records that applying the gain at both ends of this path
+/// once "shipped a silent x1.23". There is exactly one factor per run.
+int creditedStepsForRun({
+  required int rawSteps,
+  required int seconds,
+  required List<StepCalibrationRun> runs,
+  required double fallbackGain,
+}) {
+  final credit = creditLiveRun(rawSteps: rawSteps, seconds: seconds, runs: runs);
+  if (!credit.calibrated) return (rawSteps * fallbackGain).round();
+  return credit.creditedSteps;
+}
