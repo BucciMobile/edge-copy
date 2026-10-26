@@ -52,6 +52,7 @@ import '../compute/nap_edits.dart' show NapEditKind;
 import '../compute/vendor_sleep.dart' show VendorEpoch, VendorNight;
 import 'journal_fields.dart';
 import 'live_coverage_policy.dart';
+import '../compute/step_calibration_fit.dart';
 import 'step_calibration.dart';
 import 'med_store.dart';
 import 'models.dart';
@@ -312,6 +313,8 @@ class LocalDb {
     'baselines',
     'step_calibration',
     'step_calibration_day',
+    'live_step_calibration',
+    'live_step_calibration_run',
     'raw_archive',
     'device_coverage',
     // Step windows. Every day's steps are read from here, and the band's live
@@ -2053,6 +2056,44 @@ class LocalDb {
         PRIMARY KEY (day, device_family, wearing)
       )
     ''');
+    // Live 100 Hz pedometer calibration — a DIFFERENT model from
+    // `step_calibration*` above and deliberately in its own tables.
+    //
+    // That pair calibrates the gen5 ON-CHIP counter: a multiplicative factor on
+    // raw ticks, per (device family, wearing). These calibrate the LIVE 100 Hz
+    // pedometer `pedometer()` feeds: a scale per ACTIVITY family (slow / brisk
+    // / jog against the wearer's own count, everyday against the phone), with
+    // its own version namespace. Sharing a table would let one model overwrite
+    // the other's stored value — the same reasoning that keeps
+    // `kLiveStepGainVersion` away from `kStepCalibrationVersion`.
+    //
+    // `live_step_calibration_run` keeps the individual runs, not just the fit,
+    // because re-calibrating is meant to REFINE: the estimator is a ratio of
+    // sums, so a stored history is what lets a second walk outweigh the first
+    // by the steps it carried. Same shape as `step_calibration_day`.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS live_step_calibration (
+        category   TEXT NOT NULL,
+        gain       REAL NOT NULL,
+        n_runs     INTEGER NOT NULL,
+        version    INTEGER NOT NULL,
+        updated_ts INTEGER NOT NULL,
+        PRIMARY KEY (category)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS live_step_calibration_run (
+        category       TEXT NOT NULL,
+        run_ts         INTEGER NOT NULL,
+        reference      TEXT NOT NULL,
+        expected_steps INTEGER NOT NULL,
+        raw_steps      INTEGER NOT NULL,
+        cadence_spm    REAL NOT NULL,
+        p2p_g          REAL NOT NULL,
+        confidence     REAL NOT NULL,
+        PRIMARY KEY (category, run_ts)
+      )
+    ''');
   }
 
   /// Idempotent by key. NULL reference_steps = the phone did not cover the day.
@@ -2176,6 +2217,119 @@ class LocalDb {
         'wearing': p.wearing,
         'factor': p.factor,
         'n_days': p.nDays,
+        'version': p.version,
+        'updated_ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  // ── live 100 Hz pedometer calibration (per activity family) ───────────────
+
+  /// Admitted calibration runs, newest first. Read back into the pure fit; the
+  /// stored rows are the evidence the gain is a ratio of sums over.
+  static Future<List<StepCalibrationRun>> liveStepCalibrationRuns() async {
+    final db = await instance;
+    final rows = await db.query(
+      'live_step_calibration_run',
+      orderBy: 'run_ts DESC',
+    );
+    final out = <StepCalibrationRun>[];
+    for (final r in rows) {
+      final category = StepCategory.parse(r['category']);
+      // A row whose category or reference this build does not know is SKIPPED,
+      // not guessed: attaching a run to the wrong family would corrupt that
+      // family's fit with another one's evidence.
+      if (category == null) continue;
+      final reference = switch (r['reference']) {
+        'wearerCount' => StepReference.wearerCount,
+        'phonePedometer' => StepReference.phonePedometer,
+        _ => null,
+      };
+      if (reference == null) continue;
+      out.add(StepCalibrationRun(
+        category: category,
+        reference: reference,
+        expectedSteps: (r['expected_steps'] as num?)?.toInt() ?? 0,
+        rawSteps: (r['raw_steps'] as num?)?.toInt() ?? 0,
+        cadenceSpm: (r['cadence_spm'] as num?)?.toDouble() ?? 0,
+        peakToPeakG: (r['p2p_g'] as num?)?.toDouble() ?? 0,
+        confidence: (r['confidence'] as num?)?.toDouble() ?? 0,
+      ));
+    }
+    return out;
+  }
+
+  /// Bank one run. The caller must have admitted it first — a refused run is a
+  /// claim about the routine, not evidence, and storing it would let it weigh on
+  /// every later refit.
+  ///
+  /// Idempotent by (category, run_ts): re-banking the same routine replaces its
+  /// row rather than counting it twice.
+  static Future<void> putLiveStepCalibrationRun(
+    StepCalibrationRun r, {
+    required int runTs,
+  }) async {
+    final db = await instance;
+    await db.insert(
+      'live_step_calibration_run',
+      {
+        'category': r.category.key,
+        'run_ts': runTs,
+        'reference': switch (r.reference) {
+          StepReference.wearerCount => 'wearerCount',
+          StepReference.phonePedometer => 'phonePedometer',
+        },
+        'expected_steps': r.expectedSteps,
+        'raw_steps': r.rawSteps,
+        'cadence_spm': r.cadenceSpm,
+        'p2p_g': r.peakToPeakG,
+        'confidence': r.confidence,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// The stored gain for one family, or null when none was fitted or the stored
+  /// version is not this code's. Null means "behave exactly as before" — never
+  /// a fabricated 1.0 that hides a mismatch.
+  static Future<LiveStepGainProfile?> liveStepGainProfile(
+    StepCategory category,
+  ) async {
+    final db = await instance;
+    final rows = await db.query(
+      'live_step_calibration',
+      where: 'category = ?',
+      whereArgs: [category.key],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final row = rows.first;
+    if ((row['version'] as num?)?.toInt() != kLiveStepGainVersion) return null;
+    final gain = (row['gain'] as num?)?.toDouble();
+    // The row's own clamp is re-checked here: a hand-edited or restored row must
+    // not be able to present a gain the fit would never have produced.
+    if (gain == null || !gain.isFinite) return null;
+    if (gain < gainFloor(category) || gain > gainCeiling(category)) return null;
+    return LiveStepGainProfile(
+      version: kLiveStepGainVersion,
+      category: category,
+      gain: gain,
+      nRuns: (row['n_runs'] as num?)?.toInt() ?? 0,
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(
+        ((row['updated_ts'] as num?)?.toInt() ?? 0) * 1000,
+      ),
+    );
+  }
+
+  static Future<void> putLiveStepGainProfile(LiveStepGainProfile p) async {
+    final db = await instance;
+    await db.insert(
+      'live_step_calibration',
+      {
+        'category': p.category.key,
+        'gain': p.gain,
+        'n_runs': p.nRuns,
         'version': p.version,
         'updated_ts': DateTime.now().millisecondsSinceEpoch ~/ 1000,
       },
@@ -10024,6 +10178,8 @@ class LocalDb {
       // Calibration observations cannot be rebuilt once raw is pruned.
       'step_calibration',
       'step_calibration_day',
+      'live_step_calibration',
+      'live_step_calibration_run',
       // The devices this phone knows about — so a SECONDARY device's identity
       // survives a backup/restore round trip rather than leaving its rows in
       // `decoded_onehz` pointing at a `device_id` nothing can name. The PRIMARY

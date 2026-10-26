@@ -183,10 +183,28 @@ const double kCategoryBandSpread = 0.20;
 /// variation would reject their real walking.
 const double kCategoryBandMinWidthSpm = 20.0;
 
-/// Physiological bounds from AN-2554, in spm: 0.5-5 steps/s. Bands are clamped
-/// here so a mis-entered run cannot produce a band outside human gait.
-const double kGaitCadenceMinSpm = 30.0;
-const double kGaitCadenceMaxSpm = 300.0;
+/// The cadence band that identifies gait in this codebase, in spm.
+///
+/// THESE MUST EQUAL `kMinCadenceSpm` / `kMaxCadenceSpm` in
+/// `lib/ble/live_cadence.dart` — the same band `livePedometer` treats as
+/// confident gait. Two definitions of "this minute was walking" would let the
+/// calibration build a band the session logic disagrees with, which is the
+/// drift class `step_cadence.dart` was created to prevent on the windows→minutes
+/// side.
+///
+/// They are redeclared rather than imported because this file is deliberately
+/// dependency-free (pure, no analytics, no I/O), and pinned by a test that
+/// asserts equality in both directions — the same DERIVED-OR-PINNED convention
+/// `live_step_runs.dart` uses for `kRouteTypeKeys`. A silent drift is then
+/// impossible; a deliberate change fails a test.
+///
+/// NOT AN-2554's 0.5-5 steps/s (30-300 spm). That is the interval bound the
+/// COUNTER accepts — the widest range a human gait interval may have — and it is
+/// not the narrower band that identifies a minute as ambulation. A 40 spm
+/// "minute" is a few steps to the kettle, which `live_cadence.dart` states
+/// outright: "A minute below this is not sustained walking."
+const double kGaitCadenceMinSpm = 60.0;
+const double kGaitCadenceMaxSpm = 200.0;
 
 /// Why a run was refused. Every rejection is a claim about the RUN, and the
 /// caller must show it rather than silently discarding a routine the wearer just
@@ -408,7 +426,14 @@ StepCategoryBand? categoryBand(
   if (!category.isGait) return null;
   final cadences = [
     for (final r in runs)
-      if (r.category == category && stepRunRejection(r) == null) r.cadenceSpm,
+      if (r.category == category &&
+          stepRunRejection(r) == null &&
+          // A run whose own cadence sits outside the gait band did not walk what
+          // this band is meant to describe. Letting it define the band would
+          // widen or shift the window onto cadences no gait minute occupies.
+          r.cadenceSpm >= kGaitCadenceMinSpm &&
+          r.cadenceSpm <= kGaitCadenceMaxSpm)
+        r.cadenceSpm,
   ]..sort();
   if (cadences.isEmpty) return null;
 
