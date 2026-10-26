@@ -752,11 +752,14 @@ class MoreSettingsView extends StatelessWidget {
               // 100 Hz pedometer — see step_calibration.dart for why it must be
               // measured rather than assumed, and for what makes it different
               // from the guided calibration app_state.dart records as removed.
-              _SettingsTile(
-                icon: LucideIcons.footprints,
-                label: l?.settingsStepCalibration ?? 'Step calibration',
-                value: '',
-                onTap: () => goto(c, const StepCalibrationScreen())),
+                  SetRow(
+                      LucideIcons.footprints,
+                      C.teal,
+                      l?.settingsStepCalibration ?? 'Step calibration',
+                      sub: l?.settingsStepCalibrationSub ??
+                          'Teaches the strap your own walking, so its step count '
+                              'fits you. Nothing leaves the device',
+                      onTap: () => goto(c, const StepCalibrationScreen())),
                 ]),
                 settingsGroup(c, l?.settingsGroupPrivacy ?? 'Privacy', [
                   SetRow(LucideIcons.bug, C.orange,

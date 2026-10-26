@@ -39,6 +39,7 @@ import '../../data/db.dart';
 import '../../health/phone_pedometer.dart';
 import '../../l10n/app_localizations.dart';
 import '../../state/app_state.dart';
+import '../screens/metric_detail.dart' show detailLinkRow, detailScaffold;
 import '../ui2.dart';
 
 class StepCalibrationScreen extends StatefulWidget {
