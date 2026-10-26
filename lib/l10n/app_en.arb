@@ -15782,6 +15782,7 @@
   "stepCalKeepWalking": "Nothing recorded yet \u2014 start walking with the strap snug.",
   "stepCalKeepMoving": "Nothing recorded yet \u2014 keep the phone on you and keep moving.",
   "stepCalNoSignal": "The band recorded nothing during that routine.",
+  "stepCalNoPhoneAccess": "This routine needs your phone\u2019s step counter, and access was not granted. That counter is the reference for household movement.",
   "stepCalNoPhone": "Your phone counted no steps while you did that. Keep it in your pocket next time \u2014 it is the reference for household movement.",
   "stepCalBandQuiet": "The band saw almost no movement. It is worth checking the strap is worn snugly and streaming.",
   "stepCalTooShort": "That routine was too short to measure against. Walk the full count.",
@@ -15789,8 +15790,8 @@
   "stepCalWrongSource": "That routine used the wrong reference.",
   "stepCalBadData": "That routine produced unreadable sensor data.",
   "stepCalSaveFailed": "Could not save that calibration.",
-  "stepCalDoneGait": "Saved. You counted {count} steps and the band saw {band}. From now on this kind of walking is corrected by {pct}%.",
-  "stepCalDoneHousehold": "Saved. Your phone counted {count} steps of the {band} the band saw. Household movement is now scaled to {gain}.",
+  "stepCalDoneGait": "Saved. You counted {count} steps and the band saw {band} steps. From now on this kind of walking is corrected by {pct}%.",
+  "stepCalDoneHousehold": "Saved. Your phone counted {count} steps of the {band} steps the band saw. Household movement is now scaled to {gain}.",
   "@stepCalCalibrated": {
     "description": "Badge on a category row: how many supervised routines are behind its gain.",
     "placeholders": {"n": {"type": "int"}}

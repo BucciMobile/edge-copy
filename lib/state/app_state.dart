@@ -1304,6 +1304,10 @@ class AppState extends ChangeNotifier {
       // 2 · every row in every table (see LocalDb.wipeAll for why it is not a
       // hand-written table list, and for the sync_cursor decision).
       await LocalDb.wipeAll();
+      // The rows are gone; the cached fit is not. Without this a walk banked
+      // after a data reset would still be corrected by the pre-reset gain — the
+      // same omission as the import path, and the same one line.
+      invalidateLiveStepCalibration();
 
       // Surfaces outside the database that were still showing it.
       await NotificationService.instance.cancelAll();

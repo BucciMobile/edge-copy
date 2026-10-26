@@ -128,13 +128,27 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
   }
 
   Future<void> _ensurePhonePermission() async {
+    var granted = false;
     try {
-      if (!await _pedometer.hasPermission()) {
-        await _pedometer.requestPermission();
-      }
+      granted = await _pedometer.hasPermission() ||
+          await _pedometer.requestPermission();
     } catch (_) {
-      // No permission means no reference, which `finish()` reports as such.
+      granted = false;
     }
+    if (!mounted || granted) return;
+    // STOP the routine rather than let it run to its refusal. Without access the
+    // phone reference can never arrive, so three minutes of tidying could only
+    // end in a refusal — and the wearer finds out now, standing there, instead of
+    // afterwards.
+    _ticker?.cancel();
+    final l = AppLocalizations.of(context);
+    setState(() {
+      _session = null;
+      _routineStart = null;
+      _outcome = l?.stepCalNoPhoneAccess ??
+          'This routine needs your phone\u2019s step counter, and access was '
+              'not granted. It is the reference for household movement.';
+    });
   }
 
   /// Sequence of phone reads started. Only the MOST RECENTLY STARTED read may
@@ -170,8 +184,12 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
 
   Future<void> _finish() async {
     final s = _session;
-    if (s == null) return;
+    // `_busy` guards re-entry: the awaited final read leaves the buttons live,
+    // and a second tap would finish a session that is already finished.
+    if (s == null || _busy) return;
     _ticker?.cancel();
+    // Locked BEFORE the read, not after it.
+    setState(() => _busy = true);
     // One final read, so the reference covers the WHOLE routine instead of
     // whatever the last tick happened to see — and so it is taken while the
     // wearer is still standing there, which is the difference between a measured
@@ -184,6 +202,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
 
     if (out.bandSilent) {
       setState(() {
+        _busy = false;
         _session = null;
         _outcome = l?.stepCalNoSignal ?? 'The band recorded nothing during that routine.';
       });
@@ -191,6 +210,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     }
     if (out.refusal != null) {
       setState(() {
+        _busy = false;
         _session = null;
         _outcome = _describeRefusal(out.refusal!, l);
       });
@@ -198,7 +218,6 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     }
 
     final app = context.read<AppState>();
-    setState(() => _busy = true);
     try {
       final profile = await LocalDb.bankLiveStepCalibrationRun(
         out.run!,
