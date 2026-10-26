@@ -1,39 +1,42 @@
 import 'package:flutter/foundation.dart';
-import 'calibration_model.dart';
+import 'step_calibration_profile.dart';
+
+enum CalibrationType { slow, brisk, jog, everyday }
 
 class CalibrationController extends ChangeNotifier {
-  bool isRecording = false;
-  CalibrationType? currentType;
-  List<double> magnitudes = [];
+  bool _isRecording = false;
+  bool get isRecording => _isRecording;
+  
+  List<double> _magnitudes = [];
 
-  void startCalibration(CalibrationType type) {
-    isRecording = true;
-    currentType = type;
-    magnitudes.clear();
+  void startRecording() {
+    _magnitudes = [];
+    _isRecording = true;
     notifyListeners();
   }
 
   void processSample(double mag) {
-    if (!isRecording) return;
-    magnitudes.add(mag);
-    if (magnitudes.length >= 100) { // Beispiel: 100 Samples als Kalibrierungs-Set
-      finishCalibration();
-    }
+    if (!_isRecording) return;
+    _magnitudes.add(mag);
   }
 
-  void finishCalibration() {
-    isRecording = false;
-    // Logik: Mean, Variance berechnen und CalibrationProfile erstellen
-    final mean = magnitudes.reduce((a, b) => a + b) / magnitudes.length;
-    final variance = magnitudes.map((m) => (m - mean) * (m - mean)).reduce((a, b) => a + b) / magnitudes.length;
-    
-    final profile = CalibrationProfile(
+  Future<StepCalibrationProfile?> finishRecording() async {
+    _isRecording = false;
+    if (_magnitudes.length < 100) return null;
+
+    final mean = _magnitudes.reduce((a, b) => a + b) / _magnitudes.length;
+    final variance = _magnitudes.map((m) => (m - mean) * (m - mean)).reduce((a, b) => a + b) / _magnitudes.length;
+
+    final profile = StepCalibrationProfile(
+      version: StepCalibrationProfile.kVersion,
       meanMagnitude: mean,
       variance: variance,
-      meanGravity: [0.0, 0.0, 0.0], // Vereinfacht für dieses Skelett
+      meanGravity: [0.0, 0.0, 0.0], // To be populated with raw vector average
+      sampleCount: _magnitudes.length,
+      createdAt: DateTime.now(),
     );
     
-    // In echten Controller schreiben...
-    notifyListeners();
+    // Here: Integration with DB/Prefs (e.g. LocalRepository)
+    return profile;
   }
 }
