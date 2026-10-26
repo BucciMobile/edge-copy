@@ -293,4 +293,92 @@ void main() {
       );
     });
   });
+
+  group('the calibration session', () {
+    test('the LIVE BAND COUNT DOES NOT TERMINATE A GAIT RUN', () {
+      // The trap: ending the run when the counter reaches the target would make
+      // rawSteps == 100 by construction, so every wearer would fit a gain of
+      // exactly 1.0 forever. The wearer counts; the band's live count is only
+      // feedback.
+      final s = CalibrationSession(category: StepCategory.brisk, targetSteps: 100);
+      s.addBandChunk(rawSteps: 56, seconds: 30);
+      s.addBandChunk(rawSteps: 56, seconds: 30);
+      expect(s.bandRawSteps, 112);
+      final out = s.finish();
+      expect(out.run!.expectedSteps, 100); // the wearer's count, NOT 112
+      expect(out.run!.reference, StepReference.wearerCount);
+      final fit = fittedGain(StepCategory.brisk, [out.run!]);
+      expect(fit!.gain, closeTo(100 / 112, 1e-9));
+      expect(fit.gain, isNot(closeTo(1.0, 0.001)));
+    });
+
+    test('the band reports its own cadence for the run', () {
+      final s = CalibrationSession(category: StepCategory.brisk);
+      s.addBandChunk(rawSteps: 112, seconds: 60);
+      final out = s.finish();
+      expect(out.run!.cadenceSpm, closeTo(112, 1e-9));
+    });
+
+    test('everyday refuses without a phone count instead of fitting a 0.0 gain', () {
+      final s = CalibrationSession(category: StepCategory.everyday);
+      s.addBandChunk(rawSteps: 400, seconds: 180);
+      final out = s.finish();
+      expect(out.refusal, StepRunRejection.noReferenceSteps);
+      expect(out.run, isNotNull); // the run exists; it is the REFERENCE that does not
+    });
+
+    test('everyday with a phone count fits low and positive', () {
+      final s = CalibrationSession(category: StepCategory.everyday);
+      s.addBandChunk(rawSteps: 400, seconds: 180);
+      s.setPhoneSteps(55);
+      final out = s.finish();
+      expect(out.refusal, isNull);
+      expect(fittedGain(StepCategory.everyday, [out.run!])!.gain, closeTo(55 / 400, 1e-9));
+    });
+
+    test('everyday progress measures time, gait progress measures the band', () {
+      final ed = CalibrationSession(category: StepCategory.everyday, targetSeconds: 180);
+      ed.advance(elapsedMs: 90000);
+      expect(ed.progress, closeTo(0.5, 1e-9));
+      final gait = CalibrationSession(category: StepCategory.brisk, targetSteps: 100);
+      gait.addBandChunk(rawSteps: 50, seconds: 30);
+      expect(gait.progress, closeTo(0.5, 1e-9));
+    });
+
+    test('a silent band is its own outcome, not a refusal', () {
+      final s = CalibrationSession(category: StepCategory.jog);
+      final out = s.finish();
+      expect(out.run, isNull);
+      expect(out.refusal, isNull);
+      expect(out.bandSilent, isTrue);
+    });
+
+    test('nothing is accepted after the run is finished', () {
+      final s = CalibrationSession(category: StepCategory.brisk)..finish();
+      s.addBandChunk(rawSteps: 50, seconds: 60);
+      expect(s.bandRawSteps, 0);
+    });
+
+    test('unmeasured features stay absent, never a substituted zero', () {
+      final s = CalibrationSession(category: StepCategory.brisk);
+      s.addBandChunk(rawSteps: 110, seconds: 60);
+      final bare = s.finish().run!;
+      expect(bare.peakToPeakG, isNull);
+      expect(bare.confidence, isNull);
+
+      final withFeatures = CalibrationSession(category: StepCategory.brisk);
+      withFeatures.addBandChunk(rawSteps: 110, seconds: 60);
+      withFeatures.setBandFeatures(peakToPeakG: 1.2, confidence: 0.86);
+      final full = withFeatures.finish().run!;
+      expect(full.peakToPeakG, 1.2);
+      expect(full.confidence, 0.86);
+    });
+
+    test('a NaN feature is refused rather than stored', () {
+      final s = CalibrationSession(category: StepCategory.brisk);
+      s.addBandChunk(rawSteps: 110, seconds: 60);
+      s.setBandFeatures(confidence: double.nan);
+      expect(s.finish().refusal, StepRunRejection.nonFiniteFeature);
+    });
+  });
 }

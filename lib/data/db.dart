@@ -2089,8 +2089,11 @@ class LocalDb {
         expected_steps INTEGER NOT NULL,
         raw_steps      INTEGER NOT NULL,
         cadence_spm    REAL NOT NULL,
-        p2p_g          REAL NOT NULL,
-        confidence     REAL NOT NULL,
+        -- Nullable on purpose: a routine whose caller never measured these
+        -- stores NULL rather than a fabricated 0.0, which would be
+        -- indistinguishable from a real still reading.
+        p2p_g          REAL,
+        confidence     REAL,
         PRIMARY KEY (category, run_ts)
       )
     ''');

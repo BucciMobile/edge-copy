@@ -137,10 +137,18 @@ class StepCalibrationRun {
 
   /// `PedometerResult.peakToPeakG` — median stride amplitude, the motion
   /// strength. Carrying and lifting push this above a walk's.
-  final double peakToPeakG;
+  ///
+  /// NULLABLE BECAUSE IT IS OPTIONAL, NOT BECAUSE 0 IS MEANINGFUL. Nothing in
+  /// the fit reads it today; it is stored so the wearer can be shown WHY a
+  /// routine looked the way it did. A routine whose caller never measured it
+  /// stores NULL, and 0.0 would be a fabricated reading — a real still reading
+  /// is 0, so a made-up zero would be indistinguishable from a measurement at
+  /// exactly the end of the scale where the discriminator matters.
+  final double? peakToPeakG;
 
   /// `PedometerResult.confidence` — amplitude AND rhythm regularity, 0..1.
-  final double confidence;
+  /// Nullable for the same reason as [peakToPeakG].
+  final double? confidence;
 }
 
 /// A run smaller than this cannot carry a ratio: the noise in a 40-step walk's
@@ -225,9 +233,16 @@ enum StepRunRejection {
 
 /// Null when the run may be used to fit; otherwise why it may not.
 StepRunRejection? stepRunRejection(StepCalibrationRun r) {
-  if (!r.cadenceSpm.isFinite ||
-      !r.peakToPeakG.isFinite ||
-      !r.confidence.isFinite) {
+  if (!r.cadenceSpm.isFinite) return StepRunRejection.nonFiniteFeature;
+  // Absent is fine; PRESENT-BUT-NOT-A-NUMBER is not. A NaN that reaches the fit
+  // would poison every later run's ratio, so it is refused here rather than
+  // filtered silently downstream.
+  final p2p = r.peakToPeakG;
+  if (p2p != null && !p2p.isFinite) {
+    return StepRunRejection.nonFiniteFeature;
+  }
+  final conf = r.confidence;
+  if (conf != null && !conf.isFinite) {
     return StepRunRejection.nonFiniteFeature;
   }
   if (r.category.referenceIsPhone != (r.reference == StepReference.phonePedometer)) {
@@ -621,4 +636,173 @@ int creditedStepsForRun({
   final credit = creditLiveRun(rawSteps: rawSteps, seconds: seconds, runs: runs);
   if (!credit.calibrated) return (rawSteps * fallbackGain).round();
   return credit.creditedSteps;
+}
+
+/// How many steps a gait calibration asks the WEARER to count.
+///
+/// 100 is the smallest round number where the counting error stays well under
+/// the bias being measured, and short enough that the routine still gets done.
+const int kCalibrationTargetSteps = 100;
+
+/// How long a household routine runs. Long enough that the phone's own pedometer
+/// accumulates a meaningful count from the walking inside it, and that the
+/// band's arm-work peaks accumulate enough to measure.
+const int kCalibrationTargetSeconds = 180;
+
+/// One calibration routine in progress: what the wearer does, what the strap
+/// counts, and what independent reference backs it.
+///
+/// WHY THE LIVE BAND COUNT MAY NOT TERMINATE A GAIT RUN.
+///
+/// The obvious design is "count the steps as the wearer walks and stop at 100".
+/// It calibrates nothing: the run would end when the COUNTER reached 100, so
+/// [StepCalibrationRun.rawSteps] would be 100 by construction and every fitted
+/// gain would be exactly 1.0 for every wearer, forever — a number that looks
+/// like a calibration and is a tautology. A reference must be independent of the
+/// instrument it calibrates. So:
+///
+///   * GAIT families — the WEARER counts. The band's live count is feedback on
+///     the screen ("the band has seen 112 so far"), never the terminator, and
+///     the wearer ends the run after counting [targetSteps].
+///   * EVERYDAY — the PHONE is the reference, over the routine's own span, so
+///     the run is timed ([targetSeconds]) and the phone must be carried.
+///
+/// The live count is still shown for gait, and the gap between it and the
+/// target IS the measurement — 100 walked, 112 seen, gain 0.893. That is the
+/// number the wearer came for; hiding it would hide the answer.
+///
+/// This class holds no clock: the caller supplies elapsed time, so the logic
+/// stays testable and nothing here can disagree with a screen's own timer.
+class CalibrationSession {
+  CalibrationSession({
+    required this.category,
+    this.targetSteps = kCalibrationTargetSteps,
+    this.targetSeconds = kCalibrationTargetSeconds,
+  });
+
+  final StepCategory category;
+
+  /// Steps the wearer is asked to count. Gait families only.
+  final int targetSteps;
+
+  /// How long to keep a household routine going. Everyday only.
+  final int targetSeconds;
+
+  int _bandRaw = 0;
+  int _bandSeconds = 0;
+  int? _phoneSteps;
+  double? _peakToPeakG;
+  double? _confidence;
+  int _elapsedMs = 0;
+  bool _finished = false;
+
+  /// The strap's RAW count so far — pre-gain, exactly as `pedometer()` returns
+  /// it, and the value that becomes the run's `rawSteps`.
+  int get bandRawSteps => _bandRaw;
+
+  /// Sampled seconds the strap's chunks covered. Sampled, never wall time: a
+  /// chunk covers the signal it holds however long it took to arrive.
+  int get bandSeconds => _bandSeconds;
+
+  /// The phone's count for the routine's window, or null when it has not been
+  /// read (everyday refuses without it rather than fitting against nothing).
+  int? get phoneSteps => _phoneSteps;
+
+  bool get isFinished => _finished;
+
+  /// Cadence the STRAP reports for the routine, in spm — its own reading, and
+  /// the one [categoryBand] will later compare against. 0 until it can be
+  /// measured, which is not a cadence.
+  double get bandCadenceSpm =>
+      _bandSeconds <= 0 ? 0.0 : _bandRaw * 60.0 / _bandSeconds;
+
+  /// 0..1 for the progress affordance.
+  ///
+  /// GAIT measures the BAND's progress, because that is the only progress
+  /// anyone can compute live — and it is labelled as the band's count, not as
+  /// the wearer's. EVERYDAY measures elapsed time, since it has no step target.
+  double get progress {
+    if (category.isGait) {
+      if (targetSteps <= 0) return 0;
+      final p = _bandRaw / targetSteps;
+      return p < 0 ? 0 : (p > 1 ? 1 : p);
+    }
+    if (targetSeconds <= 0) return 0;
+    final p = (_elapsedMs / 1000) / targetSeconds;
+    return p < 0 ? 0 : (p > 1 ? 1 : p);
+  }
+
+  /// Fold one completed pedometer chunk: [rawSteps] counted over [seconds] of
+  /// signal. A chunk with no steps or no span cannot move the routine.
+  void addBandChunk({required int rawSteps, required int seconds}) {
+    if (_finished || rawSteps <= 0 || seconds <= 0) return;
+    _bandRaw += rawSteps;
+    _bandSeconds += seconds;
+  }
+
+  /// The phone's count for this routine's window. Replaceable, because the
+  /// screen re-reads it as the routine runs.
+  void setPhoneSteps(int steps) {
+    if (_finished) return;
+    _phoneSteps = steps < 0 ? 0 : steps;
+  }
+
+  /// The live pedometer's own summary for the routine, when the caller has it.
+  ///
+  /// Stored, not judged: the fit does not read these. They are what lets the
+  /// screen tell the wearer "your household movement was measurably less
+  /// rhythmic than your walk" from a measurement instead of a guess. Omitted
+  /// entirely when the caller never measured them — an absent feature is honest,
+  /// a substituted 0.0 is not.
+  void setBandFeatures({double? peakToPeakG, double? confidence}) {
+    if (_finished) return;
+    _peakToPeakG = peakToPeakG;
+    _confidence = confidence;
+  }
+
+  void advance({required int elapsedMs}) {
+    if (_finished || elapsedMs < 0) return;
+    _elapsedMs = elapsedMs;
+  }
+
+  /// May the wearer end the routine yet?
+  ///
+  /// A gate on EVIDENCE, not on the target: ending a gait run at zero strap
+  /// steps produces a run the admissibility rules refuse anyway, and telling the
+  /// wearer that before they press the button is kinder than a refusal after.
+  bool get canFinish => _bandSeconds > 0 && _bandRaw > 0;
+
+  /// Finish the routine and produce the run, or the reason there is none.
+  ///
+  /// Refusals here are about the ROUTINE and are surfaced to the wearer:
+  /// "nothing was recorded" is a different message from "the phone was not
+  /// carried", and neither is a silent no-op that leaves them believing their
+  /// walk taught the app something.
+  ({StepCalibrationRun? run, StepRunRejection? refusal, bool bandSilent})
+      finish() {
+    _finished = true;
+    if (_bandSeconds <= 0 || _bandRaw <= 0) {
+      // No usable band signal at all. Not a [StepRunRejection] — that enum
+      // judges a run that exists, and this one never happened.
+      return (run: null, refusal: null, bandSilent: true);
+    }
+    final run = StepCalibrationRun(
+      category: category,
+      reference: category.referenceIsPhone
+          ? StepReference.phonePedometer
+          : StepReference.wearerCount,
+      // GAIT: the wearer's own count, which is the whole point of the routine.
+      // EVERYDAY: the phone's count, and 0 when it was never read — which
+      // [stepRunRejection] turns into `noReferenceSteps` rather than a fitted
+      // 0.0 gain.
+      expectedSteps: category.referenceIsPhone ? (_phoneSteps ?? 0) : targetSteps,
+      rawSteps: _bandRaw,
+      cadenceSpm: bandCadenceSpm,
+      // Passed THROUGH, never defaulted: null here means the caller did not
+      // measure them, which is a different claim from a measured zero.
+      peakToPeakG: _peakToPeakG,
+      confidence: _confidence,
+    );
+    return (run: run, refusal: stepRunRejection(run), bandSilent: false);
+  }
 }
