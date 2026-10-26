@@ -424,7 +424,15 @@ double gainCeiling(StepCategory category) =>
   // feature does not work.
   final ratio = expected / raw;
   return (
-    gain: ratio.clamp(gainFloor(category), gainCeiling(category)),
+    // `.toDouble()` is a NO-OP if Dart's static special case for `clamp` applies
+    // here (receiver and both bounds `double` ⇒ `double`), and it is REQUIRED if
+    // it does not. The shipped `lib/data/step_calibration.dart:122` returns
+    // `corrected.clamp(0, int)` straight out of an `int` function with no cast,
+    // which only compiles if the special case exists — so I believe this is a
+    // false positive. But the conversion costs nothing, the risk it removes is a
+    // build failure in a toolchain no check here can run, and neither reading
+    // argues against being explicit.
+    gain: ratio.clamp(gainFloor(category), gainCeiling(category)).toDouble(),
     nRuns: admitted.length,
   );
 }
@@ -490,7 +498,8 @@ StepCategoryBand? categoryBand(
   final median =
       n.isOdd ? cadences[n ~/ 2] : (cadences[n ~/ 2 - 1] + cadences[n ~/ 2]) / 2;
   final half = (median * kCategoryBandSpread)
-      .clamp(kCategoryBandMinWidthSpm / 2, kGaitCadenceMaxSpm);
+      .clamp(kCategoryBandMinWidthSpm / 2, kGaitCadenceMaxSpm)
+      .toDouble();
   var lo = median - half;
   var hi = median + half;
   // Clamp to human gait without letting the clamp collapse the band.
@@ -636,7 +645,8 @@ StepCredit creditLiveSteps({
   // A gain below 1.0 must not be able to manufacture steps, and none may be
   // negative: the clamp mirrors `applyStepCalibration`'s.
   return StepCredit(
-    creditedSteps: credited.clamp(0, (rawSteps * kGaitGainMax).ceil()),
+    creditedSteps:
+        credited.clamp(0, (rawSteps * kGaitGainMax).ceil()).toInt(),
     rawSteps: rawSteps,
     category: family,
     gainApplied: fit.gain,
