@@ -137,11 +137,19 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     }
   }
 
+  /// Sequence of phone reads started. Only the MOST RECENTLY STARTED read may
+  /// write a value: on Android a query can outlive the next tick, and without
+  /// this the older interval lands last and replaces the newer count.
+  int _phoneReadSeq = 0;
+
   Future<void> _readPhone(CalibrationSession s) async {
     final start = _routineStart;
     if (start == null) return;
+    final seq = ++_phoneReadSeq;
     try {
       final steps = await _pedometer.stepsBetween(start, DateTime.now());
+      // A read that a later read has already superseded must not land.
+      if (seq != _phoneReadSeq) return;
       // A null or -1 answer is the phone saying "I did not cover that interval",
       // which is not a zero. Leaving the reference absent makes `finish()` refuse
       // the run rather than fit a 0.0 gain from a phone on a table.
