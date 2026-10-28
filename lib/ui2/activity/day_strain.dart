@@ -94,6 +94,31 @@ class DayStrainData {
 
   bool get hasCurve => curve.any((v) => v != null);
 
+  /// Lays the curve's epoch-second points onto the fixed 00:00–24:00 axis,
+  /// one slot per WALL-CLOCK minute of the first point's local day.
+  ///
+  /// The slot is the local `hour * 60 + minute`, not minutes elapsed since
+  /// midnight: a fall-back day is 1500 minutes long and a spring-forward day
+  /// 1380, so elapsed minutes pushed everything after the transition an hour
+  /// off the axis labels, and on fall-back cut 23:00–24:00 — the end of a
+  /// cumulative curve, which left the trace short of the day strain printed
+  /// under it. On the repeated hour the later sample wins (points arrive in
+  /// time order), which is the right one for a running total.
+  static (DateTime?, List<double?>) gridCurve(List<(int, double)> pts) {
+    if (pts.isEmpty) return (null, const <double?>[]);
+    final first = DateTime.fromMillisecondsSinceEpoch(pts.first.$1 * 1000);
+    final day = DateTime(first.year, first.month, first.day);
+    final out = List<double?>.filled(1440, null);
+    for (final p in pts) {
+      final t = DateTime.fromMillisecondsSinceEpoch(p.$1 * 1000);
+      if (t.year != day.year || t.month != day.month || t.day != day.day) {
+        continue;
+      }
+      out[t.hour * 60 + t.minute] = p.$2;
+    }
+    return (day, out);
+  }
+
   /// [forDay] is the label the caller is looking at; null means today. Home's
   /// day switcher passes it, so a past day's strain ring opens that day's
   /// curve rather than today's.
@@ -109,20 +134,7 @@ class DayStrainData {
           ((e['t'] as num).toInt(), (e['v'] as num).toDouble()),
     ];
 
-    DateTime? day;
-    var grid = const <double?>[];
-    if (pts.isNotEmpty) {
-      final first =
-          DateTime.fromMillisecondsSinceEpoch(pts.first.$1 * 1000);
-      day = DateTime(first.year, first.month, first.day);
-      final dayStart = day.millisecondsSinceEpoch ~/ 1000;
-      final out = List<double?>.filled(1440, null);
-      for (final p in pts) {
-        final i = (p.$1 - dayStart) ~/ 60;
-        if (i >= 0 && i < 1440) out[i] = p.$2;
-      }
-      grid = out;
-    }
+    final (day, grid) = gridCurve(pts);
 
     // Wear for THE DAY THE CURVE CAME FROM, not the day we asked for — both
     // reads fall back the same way, so asking for the resolved label is what
