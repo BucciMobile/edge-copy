@@ -1554,7 +1554,6 @@ class HomeScreen extends StatefulWidget {
 /// never disposed — a literal today's date stored by "Back to today" turned
 /// into yesterday at midnight, and the tab silently became a past-day view
 /// (no plan, no alarm, pull-to-refresh no longer synced).
-@visibleForTesting
 String? homeSwitcherDay(String day, {DateTime? now}) =>
     day == todayLabel(now) ? null : day;
 

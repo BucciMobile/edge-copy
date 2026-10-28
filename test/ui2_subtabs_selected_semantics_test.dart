@@ -22,12 +22,12 @@ void main() {
 
     expect(
       t.getSemantics(find.text('30 days')),
-      containsSemantics(isSelected: true, isButton: true),
+      isSemantics(isSelected: true, isButton: true),
     );
     for (final other in const ['7 days', '90 days']) {
       expect(
         t.getSemantics(find.text(other)),
-        containsSemantics(isSelected: false, isButton: true),
+        isSemantics(isSelected: false, isButton: true),
       );
     }
     handle.dispose();
@@ -38,14 +38,14 @@ void main() {
     await t.pumpWidget(_harness(SubTabs(items, 0, (_) {})));
     await t.pumpAndSettle();
     expect(t.getSemantics(find.text('7 days')),
-        containsSemantics(isSelected: true));
+        isSemantics(isSelected: true));
 
     await t.pumpWidget(_harness(SubTabs(items, 2, (_) {})));
     await t.pumpAndSettle();
     expect(t.getSemantics(find.text('7 days')),
-        containsSemantics(isSelected: false));
+        isSemantics(isSelected: false));
     expect(t.getSemantics(find.text('90 days')),
-        containsSemantics(isSelected: true));
+        isSemantics(isSelected: true));
     handle.dispose();
   });
 
@@ -56,7 +56,7 @@ void main() {
     await t.pumpAndSettle();
     expect(
       t.getSemantics(find.text('30 days')),
-      containsSemantics(isSelected: false),
+      isSemantics(isSelected: false),
     );
     handle.dispose();
   });
