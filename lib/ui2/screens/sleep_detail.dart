@@ -140,7 +140,12 @@ int? _noonOf(String? day) => day == null
 }
 
 String _pct(double v) => '${v.round()}%';
-String _pts(double v) => '${v.round()} points';
+
+/// The efficiency gap in percentage points, in the reader's language. It is
+/// glued in front of the localized lower/higher phrase, so an English unit
+/// here left every other locale reading a half-English verdict.
+String sleepEfficiencyDelta(AppLocalizations? l, double v) =>
+    l?.sleepDetailPointsDelta('${v.round()}') ?? '${v.round()} points';
 
 /// SLP-13 — the three staged figures of a night, as the intervals they are.
 ///
@@ -1841,7 +1846,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         low: l?.sleepDetailLowerThanUsual ?? 'lower than usual',
         high: l?.sleepDetailHigherThanUsual ?? 'higher than usual',
         fmt: _pct,
-        dfmt: _pts,
+        dfmt: (v) => sleepEfficiencyDelta(l, v),
       ));
     }
 

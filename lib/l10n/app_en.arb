@@ -8732,6 +8732,15 @@
   "@sleepDetailHigherThanUsual": {
     "description": "Verdict phrase: sleep efficiency was higher than usual."
   },
+  "sleepDetailPointsDelta": "{n} points",
+  "@sleepDetailPointsDelta": {
+    "description": "Verdict prefix: how far sleep efficiency was from the usual median, in percentage points; followed by the lower/higher-than-usual phrase.",
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  },
   "sleepDetailFellAsleep": "Fell asleep",
   "@sleepDetailFellAsleep": {
     "description": "Row label in the 'against your usual' comparison: sleep onset time."

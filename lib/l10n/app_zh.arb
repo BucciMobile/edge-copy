@@ -1699,6 +1699,7 @@
   "sleepDetailAsleepWhileInBed": "卧床期间的入睡比例",
   "sleepDetailLowerThanUsual": "比平时低",
   "sleepDetailHigherThanUsual": "比平时高",
+  "sleepDetailPointsDelta": "{n} 个百分点",
   "sleepDetailFellAsleep": "入睡时间",
   "sleepDetailEarlierThanUsual": "比平时早",
   "sleepDetailLaterThanUsual": "比平时晚",

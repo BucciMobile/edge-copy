@@ -1749,6 +1749,7 @@
   "sleepDetailAsleepWhileInBed": "Schlafanteil im Bett",
   "sleepDetailLowerThanUsual": "niedriger als üblich",
   "sleepDetailHigherThanUsual": "höher als üblich",
+  "sleepDetailPointsDelta": "{n} Prozentpunkte",
   "sleepDetailFellAsleep": "Eingeschlafen",
   "sleepDetailEarlierThanUsual": "früher als üblich",
   "sleepDetailLaterThanUsual": "später als üblich",

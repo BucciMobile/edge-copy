@@ -1699,6 +1699,7 @@
   "sleepDetailAsleepWhileInBed": "बिस्तर पर रहते हुए सोया हुआ",
   "sleepDetailLowerThanUsual": "सामान्य से कम",
   "sleepDetailHigherThanUsual": "सामान्य से ज़्यादा",
+  "sleepDetailPointsDelta": "{n} अंक",
   "sleepDetailFellAsleep": "नींद आई",
   "sleepDetailEarlierThanUsual": "सामान्य से जल्दी",
   "sleepDetailLaterThanUsual": "सामान्य से देर से",

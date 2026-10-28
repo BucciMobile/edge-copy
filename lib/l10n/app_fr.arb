@@ -1699,6 +1699,7 @@
   "sleepDetailAsleepWhileInBed": "Endormi pendant le temps au lit",
   "sleepDetailLowerThanUsual": "plus bas que d'habitude",
   "sleepDetailHigherThanUsual": "plus haut que d'habitude",
+  "sleepDetailPointsDelta": "{n} points",
   "sleepDetailFellAsleep": "Endormissement",
   "sleepDetailEarlierThanUsual": "plus tôt que d'habitude",
   "sleepDetailLaterThanUsual": "plus tard que d'habitude",

@@ -4013,6 +4013,7 @@
   "sleepDetailAsleepWhileInBed": "Сон во время нахождения в постели",
   "sleepDetailLowerThanUsual": "ниже обычного",
   "sleepDetailHigherThanUsual": "выше обычного",
+  "sleepDetailPointsDelta": "на {n} п.п.",
   "sleepDetailFellAsleep": "Засыпание",
   "sleepDetailEarlierThanUsual": "раньше обычного",
   "sleepDetailLaterThanUsual": "позже обычного",
