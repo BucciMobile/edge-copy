@@ -395,6 +395,15 @@ Map<String, Widget> _coachFigureCases() => {
       'skin_temp_z': -0.4,
     },
   ),
+  // A reply carrying a markdown image: it has to draw the inert placeholder,
+  // never a fetched picture.
+  'coach_answer_text': const CoachAnswerText(
+    'Your **resting HR** sat 3 bpm under your usual this week.\n\n'
+    '![chart](https://example.invalid/hr.png)\n\n'
+    '- sleep held at 7 h 12 min\n- strain eased off midweek',
+  ),
+  // The band rename sheet's body, outside the dialog route that hosts it.
+  'rename_band_dialog': const RenameBandDialog(current: 'WHOOP 4A1B2C'),
 };
 
 /// Charts, framed. Every one of these is captured with the thing that was
