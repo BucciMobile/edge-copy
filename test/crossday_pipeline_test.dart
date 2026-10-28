@@ -828,6 +828,26 @@ void _wiredFamilies() {
       final b = buildCrossDayBundle(days, const {});
       expect((b['temp_illness'] as Map)['date'], days.last['date']);
     });
+
+    test('an unstamped history stays in the baseline once nights are stamped',
+        () {
+      // Rows from before the family stamp existed, then five stamped nights
+      // that include the rise. Too few stamped nights to baseline on their own.
+      final f = flags(feverDays(
+        feverSd: 3,
+        family: (i) => i < 38 ? null : 'gen4',
+      ));
+      expect(f.sublist(f.length - 3), [false, true, true]);
+    });
+
+    test('an unstamped newest night keeps the stamped history', () {
+      // A strap-swap day carries no single family; it is still a band night.
+      final f = flags(feverDays(
+        feverSd: 3,
+        family: (i) => i == 42 ? null : 'gen4',
+      ));
+      expect(f.sublist(f.length - 3), [false, true, true]);
+    });
   });
 
   // The multivariate anomaly standardises every column itself, so its temp

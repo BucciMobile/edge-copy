@@ -82,8 +82,16 @@ Map<String, dynamic> buildCrossDayBundle(
   //
   // Raw values are in their device family's unit (gen4 ADC counts, gen5
   // centi-°C, a wearable's own scale), which the z-score had been hiding. Only
-  // nights in the newest scored night's family are kept; the rest are null
-  // rather than mixed into one baseline.
+  // nights in the newest stamped scored night's family are kept; the rest are
+  // null rather than mixed into one baseline.
+  //
+  // An unstamped night (written before the stamp existed, or a day spanning
+  // two straps) is a band's, as `methodOf` below and the per-day baseline
+  // cache already treat it. Comparing the raw stamp instead made the first
+  // stamped night after an upgrade drop the whole unstamped history, and a
+  // mixed-strap newest night drop every stamped one, leaving the watch on
+  // `need_baseline` for a week either way. A wearable's nights still never
+  // take an unstamped one.
   final rawTemp = <double?>[
     for (final d in days) _numOrNull(d['skin_temp_adc']),
   ];
@@ -92,14 +100,20 @@ Map<String, dynamic> buildCrossDayBundle(
   ];
   String? latestTempFamily;
   for (var i = n - 1; i >= 0; i--) {
-    if (rawTemp[i] != null) {
+    if (rawTemp[i] != null && tempFamily[i] != null) {
       latestTempFamily = tempFamily[i];
       break;
     }
   }
+  final unstampedFits = latestTempFamily == null ||
+      latestTempFamily == 'gen4' ||
+      latestTempFamily == 'gen5';
   final tempRawList = <double?>[
     for (var i = 0; i < n; i++)
-      tempFamily[i] == latestTempFamily ? rawTemp[i] : null,
+      tempFamily[i] == latestTempFamily ||
+              (tempFamily[i] == null && unstampedFits)
+          ? rawTemp[i]
+          : null,
   ];
 
   // A day flagged `unsettled` (today, until it was derived from a complete
