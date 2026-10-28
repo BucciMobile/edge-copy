@@ -801,6 +801,18 @@ void _wiredFamilies() {
       expect(f.sublist(f.length - 3), [false, true, true]);
     });
 
+    // A warm, ambient-correlated night is left out of the flag's input but
+    // still carries its raw value. Publishing its held-normal entry hid the
+    // open run from every alert surface.
+    test('an ambient-excluded last night does not hide an elevated run', () {
+      final days = feverDays(feverSd: 3);
+      days.last['skin_temp_illness_ok'] = false;
+      final b = buildCrossDayBundle(days, const {});
+      final tmp = b['temp_illness'] as Map;
+      expect(tmp['date'], days[days.length - 2]['date']);
+      expect(tmp['flag'], 'elevated');
+    });
+
     test('nights in another family\'s unit are not mixed into the baseline',
         () {
       // A gen4 history in ADC counts, then a swap to gen5 reading centi-°C

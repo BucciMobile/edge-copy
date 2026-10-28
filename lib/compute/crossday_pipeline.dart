@@ -560,8 +560,13 @@ Map<String, dynamic> buildCrossDayBundle(
             .length >=
         2),
   );
-  final latestTemp =
-      at(tempIllness, newestScored((i) => tempRawList[i] != null));
+  // Same predicate that built the flag's input: an ambient-excluded night
+  // still has a raw value, but the flag saw null and held it normal.
+  final latestTemp = at(
+    tempIllness,
+    newestScored((i) =>
+        days[i]['skin_temp_illness_ok'] != false && tempRawList[i] != null),
+  );
 
   // per-day flags (for notifications / trends): asleep/illness/anomaly/temp,
   // plus the nightly RESTING HR the "your resting HR trend shifted" CUSUM
