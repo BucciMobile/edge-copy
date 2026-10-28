@@ -421,11 +421,12 @@ String? sleepDayAfterOverride(
 /// sensor's raw count minus the day's median, already rounded to one decimal:
 /// there is no °C behind it. Printed bare as "-12.40" beside "52 bpm" it read
 /// as a twelve-degree drop, so it carries an explicit sign and no padding
-/// past the precision it actually has.
+/// past the precision it actually has, with the display locale's decimal mark
+/// like the readings beside it.
 @visibleForTesting
 String sleepScrubTempDelta(num v) {
-  final s = v.abs().toStringAsFixed(1);
-  if (s == '0.0') return '±0.0';
+  final s = displayFixed(v.abs(), 1);
+  if ((v.abs() * 10).round() == 0) return '±$s';
   return v < 0 ? '−$s' : '+$s';
 }
 
