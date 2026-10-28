@@ -251,7 +251,7 @@ HealthSleepStage? healthSleepStageOf(String? stage) {
 
 /// The span a day's SLEEP-type delete has to cover.
 ///
-/// Just [sleepSessionCleanupRange] — the noon-to-noon window around the
+/// [sleepSessionCleanupRange] — the noon-to-noon window around the
 /// night's wake, same as Android. This used to UNION that with the whole
 /// calendar day, and for a night waking after local noon the two windows
 /// concatenated into one contiguous span reaching back into the PREVIOUS
@@ -260,6 +260,12 @@ HealthSleepStage? healthSleepStageOf(String? stage) {
 /// never gets rewritten. Irrecoverable deletion is not a cleanup.
 ///
 /// With no night it is [noNightCleanupRange], null when that is empty.
+///
+/// Either way it starts after [previousWake] when the day before's night woke
+/// inside the window: a night ending after local noon overlaps this day's
+/// noon-to-noon span, and the overlap delete took its whole in-bed envelope
+/// and last stages with it. That day is behind the export cursor, so nothing
+/// wrote them back. The clamp never reaches past this night's own onset.
 ({DateTime start, DateTime end})? sleepCleanupWindow({
   required DateTime dayStart,
   HealthSleepSession? night,
@@ -268,7 +274,16 @@ HealthSleepStage? healthSleepStageOf(String? stage) {
   if (night == null) {
     return noNightCleanupRange(dayStart: dayStart, previousWake: previousWake);
   }
-  return sleepSessionCleanupRange(night);
+  final range = sleepSessionCleanupRange(night);
+  if (previousWake != null &&
+      !previousWake.isBefore(range.start) &&
+      previousWake.isBefore(night.start)) {
+    return (
+      start: previousWake.add(const Duration(seconds: 1)),
+      end: range.end,
+    );
+  }
+  return range;
 }
 
 /// What a day with no night clears: the noon-to-noon window its night would

@@ -325,6 +325,48 @@ void main() {
       );
     });
 
+    test("a night's HealthKit window stops short of yesterday's after-noon wake", () {
+      // Saturday's night ran 03:00-13:00. Sunday's runs Sat 23:30-Sun 07:30,
+      // so its noon-to-noon window starts Sat 12:00 and overlaps Saturday's
+      // in-bed envelope by an hour. HealthKit deletes on overlap, and
+      // Saturday is already behind the export cursor.
+      final dayStart = DateTime(2026, 8, 9);
+      final night = HealthSleepSession(
+        start: DateTime(2026, 8, 8, 23, 30),
+        end: DateTime(2026, 8, 9, 7, 30),
+        stages: const [],
+      );
+      final saturdayWake = DateTime(2026, 8, 8, 13);
+
+      final window = sleepCleanupWindow(
+        dayStart: dayStart,
+        night: night,
+        previousWake: saturdayWake,
+      )!;
+      expect(window.start, DateTime(2026, 8, 8, 13, 0, 1));
+      expect(window.end, DateTime(2026, 8, 9, 12));
+      expect(window.start.isAfter(saturdayWake), isTrue);
+      expect(window.start.isAfter(night.start), isFalse);
+
+      // A morning wake yesterday is outside the window: unchanged.
+      final normal = sleepCleanupWindow(
+        dayStart: dayStart,
+        night: night,
+        previousWake: DateTime(2026, 8, 8, 7),
+      )!;
+      expect(normal.start, DateTime(2026, 8, 8, 12));
+      expect(normal.end, DateTime(2026, 8, 9, 12));
+
+      // A "previous wake" at or after this night's onset is not a separate
+      // night ending before this one; never clamp past the onset.
+      final overlapping = sleepCleanupWindow(
+        dayStart: dayStart,
+        night: night,
+        previousWake: DateTime(2026, 8, 9, 1),
+      )!;
+      expect(overlapping.start, DateTime(2026, 8, 8, 12));
+    });
+
     test(
       'Apple replace on a no-night day leaves the next night alone',
       () async {

@@ -1134,10 +1134,11 @@ class HealthExporter {
 
     // Sleep is the smallest, highest-value write. Native replace owns cleanup
     // on both stores (Health Connect SleepSessionRecord; HealthKit inBed+Core).
-    // No night today means a clear, which must stop short of yesterday's
-    // night if that one woke after noon.
+    // Both the clear on a no-night day and HealthKit's replace on a day with
+    // a night must stop short of yesterday's night if that one woke after
+    // noon. Health Connect only uses it for the clear (its delete matches on
+    // start time; the native replace computes its own window).
     Future<DateTime?> previousWake() async {
-      if (normalizeHealthSleepSession(b) != null) return null;
       final prev = DateTime(dayStart.year, dayStart.month, dayStart.day - 1);
       final pb = _decode(
         (await LocalDb.dayResult(dayLabelOf(prev)))?['payload_json'],
