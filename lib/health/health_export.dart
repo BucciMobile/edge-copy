@@ -1674,7 +1674,10 @@ HealthWorkoutActivityType healthActivityForType(
   String? type, {
   required bool ios,
 }) {
-  switch ((type ?? '').toLowerCase()) {
+  // Spaces as underscores: rows imported from a WHOOP export before the
+  // importer normalised its activity names are stored as 'mountain biking',
+  // and the importer never rewrites a row it already holds.
+  switch ((type ?? '').trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_')) {
     case 'run':
     case 'running':
     case 'treadmill':
@@ -1686,6 +1689,7 @@ HealthWorkoutActivityType healthActivityForType(
     case 'biking':
     case 'indoor_bike':
     case 'mountain_biking':
+    case 'spin': // WHOOP's name, on rows imported before the alias existed
       return HealthWorkoutActivityType.BIKING;
     case 'walk':
     case 'walking':
@@ -1704,6 +1708,9 @@ HealthWorkoutActivityType healthActivityForType(
     case 'weight_training':
     case 'powerlifting':
     case 'kettlebell':
+    // WHOOP's names, on rows imported before the importer mapped them.
+    case 'weightlifting':
+    case 'strength_trainer':
       return ios
           ? HealthWorkoutActivityType.TRADITIONAL_STRENGTH_TRAINING
           : HealthWorkoutActivityType.STRENGTH_TRAINING;
@@ -1718,9 +1725,11 @@ HealthWorkoutActivityType healthActivityForType(
       return HealthWorkoutActivityType.ROWING;
     case 'hike':
     case 'hiking':
+    case 'hiking/rucking':
       return HealthWorkoutActivityType.HIKING;
     case 'climb':
     case 'climbing':
+    case 'rock_climbing':
       // Bare `CLIMBING` is iOS-only; `ROCK_CLIMBING` is the one spelling both
       // stores accept, which is the #184 lesson applied ahead of the bug.
       return HealthWorkoutActivityType.ROCK_CLIMBING;

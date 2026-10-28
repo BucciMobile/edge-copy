@@ -456,7 +456,7 @@ class WhoopImporter {
       'id': id,
       'start_ts': start,
       'end_ts': end,
-      'type': _slug(get(['activity name', 'activity'])),
+      'type': activityTypeKey(get(['activity name', 'activity'])),
       'status': 'done',
       'source': 'whoop',
       'calories': _kcal(get(_energyCols), row.header(_energyCols))?.toDouble(),
@@ -570,9 +570,26 @@ class WhoopImporter {
     return null;
   }
 
-  static String _slug(String s) {
-    final t = s.trim().toLowerCase();
-    return t.isEmpty ? 'other' : t;
+  /// WHOOP activity names spelt as this app's stored `sessions.type` keys
+  /// (`Activity.typeKey`: lower case, spaces as underscores). Storing WHOOP's
+  /// raw name kept the space in 'mountain biking' and WHOOP's own words for
+  /// things the catalogue names differently, so the health export fell
+  /// through to OTHER for every weightlifting session (#184 again, through
+  /// the importer) and the workout list found no catalogue entry for them.
+  static const Map<String, String> _whoopActivityAliases = {
+    'weightlifting': 'weight_training',
+    'strength_trainer': 'weight_training',
+    'functional_fitness': 'functional',
+    'spin': 'indoor_bike',
+    'hiking/rucking': 'hiking',
+    'rock_climbing': 'climbing',
+  };
+
+  @visibleForTesting
+  static String activityTypeKey(String s) {
+    final t = s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_');
+    if (t.isEmpty) return 'other';
+    return _whoopActivityAliases[t] ?? t;
   }
 
   /// Read a CSV via the repo's one RFC 4180 parser ([parseCsv],
