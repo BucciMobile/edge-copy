@@ -77640,12 +77640,7 @@
    "drivers": [],
    "note": "need_baseline:have=2,need=10"
   },
-  "temp_illness": {
-   "date": "2026-07-15",
-   "flag": "normal",
-   "luteal": false,
-   "confidence": 0.0
-  },
+  "temp_illness": null,
   "load": {
    "value": "—",
    "confidence": 0.0,
