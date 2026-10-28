@@ -39,6 +39,16 @@ class StepRun {
   int get hashCode => Object.hash(startSec, endSec, steps);
 }
 
+/// Plausible unix seconds. A timestamp outside this range is corrupt, RTC-unset
+/// (the band ships with its clock unset) or milli/microsecond-scaled. One such
+/// row reaching [NoopIngest.offer] either opens a date decades away — every
+/// later real date is then "older" than the high-water date and strands — or
+/// buffers a 1970 sample that stretches the next Substrate past the
+/// 400-day `calendarDays` guard, so the real day silently derives nothing.
+/// A microsecond value overflows `DateTime` outright.
+const int kNoopMinPlausibleTs = 1000000000; // 2001-09-09
+const int kNoopMaxPlausibleTs = 4102444800; // 2100-01-01
+
 /// What to do with an incoming row given the import's high-water date.
 /// [advance] closes out the previous date; [buffer] folds the row into the
 /// current rolling window; [late] means its day was already derived + pruned,
@@ -86,6 +96,10 @@ class NoopIngest {
   /// in, so they are counted rather than silently dropped.
   int lateRows = 0;
 
+  /// Samples whose timestamp fell outside [kNoopMinPlausibleTs]..
+  /// [kNoopMaxPlausibleTs] and were skipped.
+  int implausibleRows = 0;
+
   /// Dates that arrived AFTER a later date had already opened, so they were
   /// folded in as context but never derived in their own right. Non-empty means
   /// the source was not time-ordered and those days are missing from the
@@ -95,8 +109,13 @@ class NoopIngest {
       Set.unmodifiable(_strandedDates.difference(_derived));
 
   /// Offer a sample at [ts] (epoch seconds). Returns false when the sample is
-  /// too late to use — the caller must then skip it entirely.
+  /// too late to use, or its timestamp is implausible — the caller must then
+  /// skip it entirely.
   Future<bool> offer(int ts) async {
+    if (ts < kNoopMinPlausibleTs || ts > kNoopMaxPlausibleTs) {
+      implausibleRows++;
+      return false;
+    }
     final date = localDateLabel(ts);
     switch (decideRow(date, _curDate, _derived)) {
       case RowOrder.advance:

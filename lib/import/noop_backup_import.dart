@@ -59,11 +59,11 @@ const List<int> _kSqliteMagic = [
 @visibleForTesting
 int kNoopBackupPageRows = 20000;
 
-/// Plausible unix seconds. A timestamp outside this range is corrupt or
-/// millisecond-scaled, and letting one into the day walk would march it across
-/// decades one day at a time.
-const int _kMinPlausibleTs = 1000000000; // 2001-09-09
-const int _kMaxPlausibleTs = 4102444800; // 2100-01-01
+/// Plausible unix seconds (shared with the CSV path through [NoopIngest]). A
+/// timestamp outside this range is corrupt or millisecond-scaled, and letting
+/// one into the day walk would march it across decades one day at a time.
+const int _kMinPlausibleTs = kNoopMinPlausibleTs;
+const int _kMaxPlausibleTs = kNoopMaxPlausibleTs;
 
 /// Every table read, and the columns wanted from it. ONE definition: the probe
 /// and the reads both key off this, so a name can no longer be spelled one way
