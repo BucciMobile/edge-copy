@@ -825,6 +825,8 @@
   "nutritionExpenditureSub": "AUJOURD'HUI, D'APRÈS LA FRÉQUENCE CARDIAQUE ET VOTRE PROFIL",
   "nutritionRemoveTitle": "Supprimer {label} ?",
   "nutritionRemoveBody": "Cela retire ce repas du jour et de toute moyenne qui le comptait. Aucun retour en arrière possible.",
+  "nutritionSaveFailed": "Non enregistré — le repas est toujours là. Réessayez.",
+  "nutritionRemoveFailed": "Non retiré — le repas est toujours là. Réessayez.",
   "nutritionNothingToMeasure": "Rien à comparer pour {label} pour l'instant",
   "nutritionFloorAverageBody": "Chaque jour complet avait un repas enregistré sans valeur de {nutrient}, donc la moyenne ne serait qu'un minimum.",
   "nutritionCountedNoFigureBody": "{count} des {span} derniers jours ont compté, mais aucun ne portait de valeur de {nutrient}.",

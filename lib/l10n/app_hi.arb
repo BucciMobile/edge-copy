@@ -825,6 +825,8 @@
   "nutritionExpenditureSub": "आज, हृदय गति और आपकी प्रोफ़ाइल के आधार पर",
   "nutritionRemoveTitle": "{label} हटाएँ?",
   "nutritionRemoveBody": "इससे यह उस दिन और उसे गिनने वाले हर औसत से हट जाएगा। यह पूर्ववत नहीं किया जा सकता।",
+  "nutritionSaveFailed": "सेव नहीं हुआ — भोजन अभी भी यहीं है। फिर से कोशिश करें।",
+  "nutritionRemoveFailed": "हटाया नहीं गया — भोजन अभी भी वहीं है। फिर से कोशिश करें।",
   "nutritionNothingToMeasure": "अभी {label} की तुलना करने के लिए कुछ भी नहीं है",
   "nutritionFloorAverageBody": "हर पूरे दिन में कम से कम एक भोजन में {nutrient} का आँकड़ा दर्ज नहीं था, इसलिए औसत केवल एक निचली सीमा होगी।",
   "nutritionCountedNoFigureBody": "पिछले {span} दिनों में से {count} दिन गिने गए, पर किसी में भी {nutrient} का आँकड़ा नहीं था।",

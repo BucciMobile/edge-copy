@@ -1769,6 +1769,8 @@
     }
   },
   "nutritionRemoveBody": "Запись исчезнет из дня и всех средних, где учитывалась. Отменить удаление нельзя.",
+  "nutritionSaveFailed": "Не сохранено — приём пищи остался на экране. Повторите попытку.",
+  "nutritionRemoveFailed": "Не удалено — приём пищи остался на месте. Повторите попытку.",
   "nutritionNothingToMeasure": "Пока не с чем сравнить {label}",
   "@nutritionNothingToMeasure": {
     "placeholders": {

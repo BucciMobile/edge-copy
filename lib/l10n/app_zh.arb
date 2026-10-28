@@ -825,6 +825,8 @@
   "nutritionExpenditureSub": "今天，根据心率和你的个人资料估算",
   "nutritionRemoveTitle": "删除「{label}」？",
   "nutritionRemoveBody": "这会把它从这一天和每个统计过它的平均值中移除，且无法撤销。",
+  "nutritionSaveFailed": "未保存 —— 这餐仍在此处，请重试。",
+  "nutritionRemoveFailed": "未移除 —— 这餐仍然保留，请重试。",
   "nutritionNothingToMeasure": "目前还没有可用来衡量{label}的数据",
   "nutritionFloorAverageBody": "每个完整的一天里都有进食记录缺少{nutrient}数值，所以平均值只能是一个下限。",
   "nutritionCountedNoFigureBody": "最近 {span} 天中有 {count} 天被计入，但没有一天记录了{nutrient}数值。",

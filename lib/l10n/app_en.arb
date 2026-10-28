@@ -4095,6 +4095,14 @@
   "@nutritionRemoveBody": {
     "description": "Nutrition screen: confirmation sheet body warning the removal cannot be undone"
   },
+  "nutritionSaveFailed": "Not saved — the meal is still here. Try again.",
+  "@nutritionSaveFailed": {
+    "description": "Log food sheet: snackbar when saving a meal fails; the sheet stays open with the input intact"
+  },
+  "nutritionRemoveFailed": "Not removed — the meal is still there. Try again.",
+  "@nutritionRemoveFailed": {
+    "description": "Log food sheet: snackbar when removing a meal fails after the user confirmed"
+  },
   "nutritionNothingToMeasure": "Nothing to measure {label} against yet",
   "@nutritionNothingToMeasure": {
     "description": "Nutrition Goals tab: title shown when a target has no mean to compare against yet",

@@ -854,6 +854,8 @@
   "nutritionExpenditureSub": "HEUTE, AUS HERZFREQUENZ UND DEINEM PROFIL",
   "nutritionRemoveTitle": "{label} entfernen?",
   "nutritionRemoveBody": "Die Mahlzeit verschwindet aus dem Tag und aus allen Durchschnitten, in die sie eingeflossen ist. Das lässt sich nicht rückgängig machen.",
+  "nutritionSaveFailed": "Nicht gespeichert – die Mahlzeit ist noch da. Versuch es erneut.",
+  "nutritionRemoveFailed": "Nicht entfernt – die Mahlzeit ist noch da. Versuch es erneut.",
   "nutritionNothingToMeasure": "Noch keine Daten, mit denen sich {label} vergleichen lässt",
   "nutritionFloorAverageBody": "An jedem vollständigen Tag fehlte bei einer Mahlzeit die Angabe zu {nutrient}, daher wäre der Durchschnitt nur eine Untergrenze.",
   "nutritionCountedNoFigureBody": "{count} der letzten {span} Tage wurden gezählt, aber keiner davon hatte eine Angabe zu {nutrient}.",

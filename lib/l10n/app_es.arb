@@ -825,6 +825,8 @@
   "nutritionExpenditureSub": "HOY, SEGÚN LA FRECUENCIA CARDÍACA Y TU PERFIL",
   "nutritionRemoveTitle": "¿Eliminar {label}?",
   "nutritionRemoveBody": "Elimina el día y toda media que lo contara. No se puede deshacer.",
+  "nutritionSaveFailed": "No se guardó — la comida sigue aquí. Inténtalo de nuevo.",
+  "nutritionRemoveFailed": "No se eliminó — la comida sigue ahí. Inténtalo de nuevo.",
   "nutritionNothingToMeasure": "Nada que medir aún frente a {label}",
   "nutritionFloorAverageBody": "Todos los días completos tuvieron una comida registrada sin cifra de {nutrient}, así que la media solo sería un límite inferior.",
   "nutritionCountedNoFigureBody": "{count} de los últimos {span} días contaron, pero ninguno llevaba una cifra de {nutrient}.",
