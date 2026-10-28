@@ -735,13 +735,23 @@ class NotificationCenter {
   /// never after it. A 01:00 bedtime must not produce a midnight prompt.
   static int? checkInMinute(NotificationPrefs prefs, double? bedtimeMinOfDay) {
     if (!prefs.checkInEnabled) return null;
-    var t = bedtimeMinOfDay == null
-        ? checkInFallbackMin
-        : bedtimeMinOfDay.round() - checkInBeforeBedMin;
+    var t = checkInFallbackMin;
+    if (bedtimeMinOfDay != null) {
+      // The learned bedtime is a minute-of-day in [0, 1440), so a 00:30
+      // bedtime arrives as 30, not 1470. Unwrapped, that went negative,
+      // slipped under the quiet-hours ceiling and was raised to the 17:00
+      // floor: the latest sleepers got the earliest prompt. A slot that
+      // wraps into the small hours belongs to tonight, so it is carried past
+      // midnight and lets the ceilings below pull it back.
+      t = (bedtimeMinOfDay.round() - checkInBeforeBedMin) % (24 * 60);
+      if (t < 12 * 60) t += 24 * 60;
+    }
     if (prefs.quietEnabled && prefs.quietStartMin > prefs.quietEndMin) {
       final cap = prefs.quietStartMin - 30;
       if (t > cap) t = cap;
     }
+    // Never past midnight either: tomorrow's 00:30 is not "how was today?".
+    if (t >= 24 * 60) t = 24 * 60 - 1;
     if (t < checkInEarliestMin) t = checkInEarliestMin;
     // A degenerate quiet window (one that swallows the whole evening) leaves
     // nowhere honest to put this. Nothing is armed rather than something at
