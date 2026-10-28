@@ -15789,6 +15789,8 @@
   "stepCalMismatch": "The band counted far more than you did. Something other than walking was being picked up.",
   "stepCalWrongSource": "That routine used the wrong reference.",
   "stepCalBadData": "That routine produced unreadable sensor data.",
+  "stepCalRatioOutOfRange": "Your count and the band\u2019s are too far apart to use. Repeat the routine and walk the full count.",
+  "stepCalRoutineTooShort": "That routine ended before the timer finished. Keep going until it completes.",
   "stepCalSaveFailed": "Could not save that calibration.",
   "stepCalDoneGait": "Saved. You counted {count} steps and the band saw {band} steps. From now on this kind of walking is corrected by {pct}%.",
   "stepCalDoneHousehold": "Saved. Your phone counted {count} steps of the {band} steps the band saw. Household movement is now scaled to {gain}.",

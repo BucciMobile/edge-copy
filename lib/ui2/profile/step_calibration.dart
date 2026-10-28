@@ -109,7 +109,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
           nowMs: DateTime.now().millisecondsSinceEpoch,
         );
     });
-    _ticker = Timer.periodic(const Duration(seconds: 1), (_) => _tick());
+    _ticker = Timer.periodic(Motion.tick, (_) => _tick());
   }
 
   void _tick() {
@@ -240,8 +240,8 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
         _busy = false;
         _session = null;
         _routineStart = null;
-        _outcome = (l?.stepCalSaveFailed ?? 'Could not save that calibration.') +
-            ' ($e)';
+        _outcome =
+            '${l?.stepCalSaveFailed ?? 'Could not save that calibration.'} ($e)';
       });
     }
   }
@@ -271,6 +271,14 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
           l?.stepCalWrongSource ?? 'That routine used the wrong reference.',
         StepRunRejection.nonFiniteFeature =>
           l?.stepCalBadData ?? 'That routine produced unreadable sensor data.',
+        StepRunRejection.ratioOutsideGainRange =>
+          l?.stepCalRatioOutOfRange ??
+              'Your count and the band\u2019s are too far apart to use. Repeat '
+                  'the routine and walk the full count.',
+        StepRunRejection.routineTooShort =>
+          l?.stepCalRoutineTooShort ??
+              'That routine ended before the timer finished. Keep going until '
+                  'it completes.',
       };
 
   String _describeOutcome(
@@ -363,7 +371,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       ),
       const SizedBox(height: S.x4),
       ClipRRect(
-        borderRadius: BorderRadius.circular(4),
+        borderRadius: R.rSm,
         child: LinearProgressIndicator(
           value: s.progress,
           minHeight: 6,
@@ -417,7 +425,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       padding: const EdgeInsets.all(S.x4),
       decoration: BoxDecoration(
         color: p.ink3.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: R.rMd,
       ),
       child: Text(text, style: F.cap.copyWith(color: p.ink, height: 1.5)),
     );
