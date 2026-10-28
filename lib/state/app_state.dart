@@ -697,6 +697,7 @@ class AppState extends ChangeNotifier {
     // truncated backup fails loudly; `gzip.decoder` returns partial output
     // without raising and would restore short while reporting success.
     final counts = await LocalDb.importFromDbFile(path);
+    await LocalDb.refitAllLiveStepGains();
     // An import can MERGE calibration rows (`live_step_calibration`) in from the
     // backup without this process knowing, and the cached fit is the only thing
     // `creditedStepsForRun` consults when a walk is banked. Without this, every
@@ -3249,12 +3250,17 @@ class AppState extends ChangeNotifier {
   int _liveStepCalibrationGeneration = 0;
 
   Future<List<StepCalibrationRun>> _liveStepCalibrationRuns() async {
-    final cached = _liveStepCalibration;
-    if (cached != null) return cached;
-    final generation = _liveStepCalibrationGeneration;
-    final rows = await LocalDb.liveStepCalibrationRuns();
-    if (generation != _liveStepCalibrationGeneration) return rows;
-    return _liveStepCalibration = rows;
+    while (true) {
+      final cached = _liveStepCalibration;
+      if (cached != null) return cached;
+      final generation = _liveStepCalibrationGeneration;
+      final rows = await LocalDb.liveStepCalibrationRuns();
+      // Invalidated while the read was in flight: these rows may predate the
+      // save that invalidated them, so read again rather than hand the caller
+      // the previous calibration.
+      if (generation != _liveStepCalibrationGeneration) continue;
+      return _liveStepCalibration = rows;
+    }
   }
 
   /// Drop the cached fit so the next banked run uses a newly saved calibration.
@@ -3331,11 +3337,6 @@ class AppState extends ChangeNotifier {
   /// correction. Applying the gain here would hide the answer behind the number
   /// being calibrated, and at the moment of calibration the gain is the thing
   /// the wearer is trying to change.
-  ///
-  /// [_liveRaw]'s own docstring calls its value "gain-applied". It is not, and
-  /// cannot be: `_committedRaw` holds "raw (pre-gain) steps from completed
-  /// minutes" and `ana.pedometer` returns "Raw count — no calibration gain".
-  /// The value is exposed under a name that matches what it actually is.
   int get liveStrapRawSteps => _liveRaw;
 
   // ── the two safety gates on this tier — see live_step_runs.dart ────────────

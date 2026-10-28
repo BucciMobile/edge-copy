@@ -2231,8 +2231,10 @@ class LocalDb {
 
   /// Admitted calibration runs, newest first. Read back into the pure fit; the
   /// stored rows are the evidence the gain is a ratio of sums over.
-  static Future<List<StepCalibrationRun>> liveStepCalibrationRuns() async {
-    final db = await instance;
+  static Future<List<StepCalibrationRun>> liveStepCalibrationRuns({
+    DatabaseExecutor? exec,
+  }) async {
+    final db = exec ?? await instance;
     final rows = await db.query(
       'live_step_calibration_run',
       orderBy: 'run_ts DESC',
@@ -2278,8 +2280,9 @@ class LocalDb {
   static Future<void> putLiveStepCalibrationRun(
     StepCalibrationRun r, {
     required int runTs,
+    DatabaseExecutor? exec,
   }) async {
-    final db = await instance;
+    final db = exec ?? await instance;
     await db.insert(
       'live_step_calibration_run',
       {
@@ -2322,9 +2325,15 @@ class LocalDb {
     // already durable. One lock rather than one per category: a save is three
     // writes and the contention case is a user tapping two routines, so the
     // simpler invariant is worth more than the parallelism.
+    // ONE transaction: a run that is durable without the profile it implies
+    // (the refit read or the profile write failing after the insert) would be
+    // reported to the wearer as a failed save while later fits quietly used it.
     final chained = _liveStepGainLock.then((_) async {
-      await putLiveStepCalibrationRun(run, runTs: runTs);
-      return refitLiveStepGain(run.category, now: now);
+      final db = await instance;
+      return db.transaction((txn) async {
+        await putLiveStepCalibrationRun(run, runTs: runTs, exec: txn);
+        return refitLiveStepGain(run.category, now: now, exec: txn);
+      });
     });
     // The chain must survive this save's own failure, or one bad routine would
     // block every later one.
@@ -2345,15 +2354,37 @@ class LocalDb {
   static Future<LiveStepGainProfile> refitLiveStepGain(
     StepCategory category, {
     DateTime? now,
+    DatabaseExecutor? exec,
   }) async {
-    final rows = await liveStepCalibrationRuns();
+    final rows = await liveStepCalibrationRuns(exec: exec);
     final profile = estimateLiveStepGain(
       category,
       rows,
       now: now ?? DateTime.now(),
     );
-    await putLiveStepGainProfile(profile);
+    await putLiveStepGainProfile(profile, exec: exec);
     return profile;
+  }
+
+  /// Refit every family that has stored runs. A restore merges the backup's
+  /// runs into this phone's and its profile rows over this phone's, so neither
+  /// side's stored gain describes the combined evidence until this runs.
+  static Future<void> refitAllLiveStepGains({DateTime? now}) {
+    final chained = _liveStepGainLock.then((_) async {
+      final db = await instance;
+      await db.transaction((txn) async {
+        final runs = await liveStepCalibrationRuns(exec: txn);
+        final categories = {for (final r in runs) r.category};
+        for (final c in categories) {
+          await putLiveStepGainProfile(
+            estimateLiveStepGain(c, runs, now: now ?? DateTime.now()),
+            exec: txn,
+          );
+        }
+      });
+    });
+    _liveStepGainLock = chained.then((_) {}, onError: (_) {});
+    return chained;
   }
 
   /// The stored gain for one family, or null when none was fitted or the stored
@@ -2388,8 +2419,11 @@ class LocalDb {
     );
   }
 
-  static Future<void> putLiveStepGainProfile(LiveStepGainProfile p) async {
-    final db = await instance;
+  static Future<void> putLiveStepGainProfile(
+    LiveStepGainProfile p, {
+    DatabaseExecutor? exec,
+  }) async {
+    final db = exec ?? await instance;
     await db.insert(
       'live_step_calibration',
       {
