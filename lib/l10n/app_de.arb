@@ -1279,6 +1279,7 @@
   "healthTryAgain": "Erneut versuchen",
   "healthWhatVitals": "Vitalwerte",
   "healthWhatLabResults": "Laborergebnisse",
+  "cycleWhatCycleData": "Zyklusdaten",
   "healthMeasuresUnit": "Messwerte",
   "healthRowRestingHr": "Ruhepuls",
   "healthRowHrv": "HRV",

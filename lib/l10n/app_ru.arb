@@ -2867,6 +2867,7 @@
   "healthTryAgain": "Повторить",
   "healthWhatVitals": "показатели",
   "healthWhatLabResults": "результаты анализов",
+  "cycleWhatCycleData": "данные цикла",
   "healthMeasuresUnit": "измерения",
   "healthRowRestingHr": "Пульс в покое",
   "healthRowHrv": "ВСР",

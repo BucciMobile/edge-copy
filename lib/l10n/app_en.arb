@@ -6320,6 +6320,10 @@
   "@healthWhatLabResults": {
     "description": "Noun 'lab results' plugged into the read-failure title"
   },
+  "cycleWhatCycleData": "cycle data",
+  "@cycleWhatCycleData": {
+    "description": "Noun 'cycle data' plugged into the read-failure title on the Cycle tab"
+  },
   "healthMeasuresUnit": "measures",
   "@healthMeasuresUnit": {
     "description": "Noun 'measures' — used both as the read-failure title noun and as the Explore consistency-tile unit"

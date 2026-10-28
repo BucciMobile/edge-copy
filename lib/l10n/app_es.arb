@@ -1244,6 +1244,7 @@
   "healthTryAgain": "Intentar de nuevo",
   "healthWhatVitals": "vitales",
   "healthWhatLabResults": "resultados de laboratorio",
+  "cycleWhatCycleData": "datos del ciclo",
   "healthMeasuresUnit": "medidas",
   "healthRowRestingHr": "Frecuencia cardíaca en reposo",
   "healthRowHrv": "VFC",

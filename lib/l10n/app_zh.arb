@@ -1244,6 +1244,7 @@
   "healthTryAgain": "重试",
   "healthWhatVitals": "生命体征",
   "healthWhatLabResults": "化验结果",
+  "cycleWhatCycleData": "周期数据",
   "healthMeasuresUnit": "指标",
   "healthRowRestingHr": "静息心率",
   "healthRowHrv": "心率变异性",
