@@ -2637,7 +2637,7 @@ class AppState extends ChangeNotifier {
       await _derive.run(
         _profile,
         force: true,
-        editedDays: {if (editedDay != null) editedDay},
+        editedDays: {?editedDay},
       );
       if (editedDay != null) {
         // A finalized day behind the export cursor is never re-written, so
