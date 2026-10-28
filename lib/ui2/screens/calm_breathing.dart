@@ -253,6 +253,25 @@ class _CalmBreathingState extends State<CalmBreathing>
 
   bool _paceRead = false;
 
+  /// Set by the first X tap or back swipe. The teardown behind it (banking the
+  /// session, scoring both quiet windows, re-reading the effect) takes long
+  /// enough with nothing changing on screen that a second tap is natural, and
+  /// each exit ends in its own `pop()` — the second one removed the route
+  /// underneath (Wellness, or the home route behind a /breathing deep link).
+  bool _closing = false;
+
+  /// The one exit for both the X and the back gesture.
+  Future<void> _close() async {
+    if (_closing) return;
+    setState(() => _closing = true);
+    if (_running) {
+      await _stop(abort: true);
+    } else if (_quiet != null) {
+      await _abortQuiet();
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -519,15 +538,13 @@ class _CalmBreathingState extends State<CalmBreathing>
     final l = AppLocalizations.of(c);
     final busy = _running || _quiet != null;
     return PopScope(
-      canPop: !busy,
-      onPopInvokedWithResult: (didPop, _) async {
-        if (didPop || !busy) return;
-        if (_running) {
-          await _stop(abort: true);
-        } else {
-          await _abortQuiet();
-        }
-        if (mounted) Navigator.of(context).pop();
+      // Held closed for the whole teardown, not just while busy: `_stop` clears
+      // `_running` before its last `_loadEffect`, and a swipe in that gap would
+      // pop natively ahead of the pending `pop()` in `_close`.
+      canPop: !busy && !_closing,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _close();
       },
       child: Scaffold(
         backgroundColor: p.bg,
@@ -542,14 +559,7 @@ class _CalmBreathingState extends State<CalmBreathing>
                   child: Pressable(
                     semanticLabel:
                         l?.calmBreathingCloseBreathing ?? 'Close breathing',
-                    onTap: () async {
-                      if (_running) {
-                        await _stop(abort: true);
-                      } else if (_quiet != null) {
-                        await _abortQuiet();
-                      }
-                      if (c.mounted) Navigator.of(c).pop();
-                    },
+                    onTap: _close,
                     child: Icon(LucideIcons.x, size: 22, color: p.ink2),
                   ),
                 ),
