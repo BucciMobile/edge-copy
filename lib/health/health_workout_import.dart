@@ -368,6 +368,19 @@ class HealthWorkoutImporter {
         if (!tombstones.contains(r.uuid)) r,
     ];
     await LocalDb.putImportedWorkouts([for (final r in alive) r.toRow()]);
+    // A workout deleted in the health app simply stops coming back, so the
+    // upsert above never removes it. Anything stored in this window that the
+    // read no longer returns goes. Only reached on a read that returned
+    // workouts: a denied HealthKit read is an empty list, and must not wipe
+    // the history.
+    await LocalDb.deleteImportedWorkoutsMissing(
+      start.millisecondsSinceEpoch ~/ 1000,
+      end.millisecondsSinceEpoch ~/ 1000,
+      {
+        for (final p in points)
+          if (p.type == HealthDataType.WORKOUT) p.uuid,
+      },
+    );
     final withRoutes = await _importRoutes(start, end,
         skip: {...tombstones, ...ownUuids}, prompt: prompt);
     // Re-read: a workout scored or deleted while this pass was in flight, or

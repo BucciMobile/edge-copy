@@ -3114,6 +3114,41 @@ class LocalDb {
     });
   }
 
+  /// Drop every imported workout that starts inside [[startSec], [endSec]]
+  /// but whose uuid is not in [present], AND its route, like
+  /// [deleteImportedWorkout]. Returns how many went.
+  ///
+  /// The window is the one the store was just read over: a uuid it no longer
+  /// returns there was deleted in the health app, and the upsert alone would
+  /// keep listing it (and counting it toward the week) forever. Rows outside
+  /// the window are left alone, since the read says nothing about them.
+  static Future<int> deleteImportedWorkoutsMissing(
+    int startSec,
+    int endSec,
+    Set<String> present,
+  ) async {
+    final db = await instance;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'imported_workout',
+        columns: ['uuid'],
+        where: 'start_ts >= ? AND start_ts <= ?',
+        whereArgs: [startSec, endSec],
+      );
+      final gone = [
+        for (final r in rows)
+          if (!present.contains(r['uuid'])) r['uuid'] as String,
+      ];
+      for (final u in gone) {
+        await txn.delete('imported_workout',
+            where: 'uuid = ?', whereArgs: [u]);
+        await txn.delete('workout_route',
+            where: 'session_id = ?', whereArgs: [u]);
+      }
+      return gone.length;
+    });
+  }
+
   // ── EXTERNAL HEART-RATE SENSOR (0x180D) ─────────────────────────────────────
   /// What a standard Bluetooth heart-rate sensor delivered during ONE workout.
   ///
