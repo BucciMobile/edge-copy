@@ -12088,6 +12088,15 @@ class LocalDb {
   }) async {
     final db = await instance;
     await db.transaction((tx) async {
+      // A logged nap is credited whole on top of the main night's TST (nap_min,
+      // total asleep, sleep-need credit), so one typed over the end of the
+      // night — the doze after the alarm — counts those minutes twice.
+      if (source == 'manual' &&
+          await ActivityStore.overlapsMainSleep(tx, startTs, endTs)) {
+        throw const ActivityReviewException(
+          'That overlaps your main sleep, which already counts that time.',
+        );
+      }
       String? snapshot;
       if (source == 'rejected') {
         // A pre-upgrade nap may still live only in its retained day result.
@@ -12156,6 +12165,12 @@ class LocalDb {
       }
     });
   }
+
+  /// Whether [startTs, endTs) overlaps a main sleep already derived — the
+  /// check [putNapEdit] enforces for a logged nap, readable ahead of the write
+  /// so the entry screen can say why in the user's language.
+  static Future<bool> napOverlapsMainSleep(int startTs, int endTs) async =>
+      ActivityStore.overlapsMainSleep(await instance, startTs, endTs);
 
   static Future<List<Map<String, dynamic>>> napEdits(String dayId) async {
     final db = await instance;

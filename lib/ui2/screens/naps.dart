@@ -238,6 +238,14 @@ class _NapsScreenState extends State<NapsScreen> {
               'Remove that one first, rather than counting the same hour twice.');
       return;
     }
+    if (await LocalDb.napOverlapsMainSleep(s, e)) {
+      if (!mounted) return;
+      setState(() => _failed = l?.napsOverlapsSleep ??
+          'That overlaps your main sleep, which already counts that time. '
+              'Log only the part after you got up, or correct the night instead.');
+      return;
+    }
+    if (!mounted) return;
     await _edit(() => LocalDb.putNapEdit(
         dayId: day, startTs: s, endTs: e, source: 'manual'));
   }
