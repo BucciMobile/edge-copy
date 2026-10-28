@@ -10252,6 +10252,12 @@ class LocalDb {
     // A dose slot is re-marked in place (taken, skipped, cleared), so an older
     // backup would flip a dose logged since back to what it said then.
     'med_dose': (['med_key', 'date', 'slot_min'], 'updated_at'),
+    // A retimed schedule moves its past doses to the new minute, so the
+    // backup's old schedule would leave every dose logged since at a minute
+    // no slot reads, and bring the old reminder back. No edit stamp: local wins.
+    'med_def': (['key'], null),
+    // Edited in place from the food log; `update` restamps `updated_at`.
+    'food_entry': (['id'], 'updated_at'),
     'cycle_log': (['date'], null),
     'sessions': (['id'], null),
     'strength_set': (['session_id'], null),

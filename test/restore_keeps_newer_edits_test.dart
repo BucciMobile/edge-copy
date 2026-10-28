@@ -33,6 +33,8 @@ Future<void> _clear() async {
     'sessions',
     'strength_set',
     'med_dose',
+    'med_def',
+    'food_entry',
   ]) {
     await db.delete(t);
   }
@@ -72,6 +74,7 @@ void main() {
       'monday.db',
       'newer.db',
       'dose.db',
+      'schedule.db',
     ]) {
       try {
         File(p.join(dir, f)).deleteSync();
@@ -186,5 +189,29 @@ void main() {
     expect(rows, hasLength(2));
     expect(rows.first['taken_ts'], 50);
     expect(rows.first['skipped'], 0);
+  });
+
+  test('an older backup does not undo a retimed schedule or an edited meal',
+      () async {
+    await _clear();
+    final db = await LocalDb.instance;
+    await db.insert('med_def', {
+      'key': 'iron', 'label': 'Iron', 'schedule_json': '[480]',
+      'created_at': 1000,
+    });
+    await db.insert('food_entry', {
+      'id': 'f1', 'date': _day, 'meal': 'dinner', 'label': 'pasta',
+      'kcal': 800.0, 'created_at': 1000, 'updated_at': 1000,
+    });
+    final backup = await _snapshot('schedule.db');
+
+    // Since the backup: the dose moved to 09:00 and the meal was corrected.
+    await db.update('med_def', {'schedule_json': '[540]'});
+    await db.update('food_entry', {'kcal': 450.0, 'updated_at': 2000});
+
+    await LocalDb.importFromDbFile(backup);
+
+    expect((await db.query('med_def')).single['schedule_json'], '[540]');
+    expect((await db.query('food_entry')).single['kcal'], 450.0);
   });
 }
