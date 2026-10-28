@@ -587,6 +587,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
                   'You told us this stretch was not sleep, so nothing is '
                       'scored for it.')
               : (_userWindowEmpty(d.night, l) ??
+                  _autoNightUnrecorded(d.night, l) ??
                   l?.sleepDetailNoNightBody ??
                   'No stretch of band recordings long enough to score.'),
           fix: rejected ? '' : (l?.sleepDetailNoNightFix ??
@@ -1097,6 +1098,26 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         : (l?.sleepDetailWindowNoSleep ??
             'Your times are saved, but the band\u2019s recordings for those '
                 'hours show no sleep to score.');
+  }
+
+  /// Why an automatic night has nothing to show, when the derive knows: the
+  /// heart rate found a night but the band recorded too little movement
+  /// across it to stage one. Null otherwise, so an ordinary empty night keeps
+  /// the generic message.
+  static String? _autoNightUnrecorded(
+      Map<String, dynamic> n, AppLocalizations? l) {
+    final src = n['sleep_source'];
+    if (src == 'manual' ||
+        src == 'confirmed' ||
+        src == 'rejected' ||
+        n['has_sleep'] == true ||
+        n['absence_reason'] == null) {
+      return null;
+    }
+    return l?.sleepDetailNightUnrecorded ??
+        'Your heart rate shows a night\u2019s sleep, but the band recorded '
+            'too little movement data for most of it, so there\u2019s no '
+            'night to score.';
   }
 
   /// Where the drawn window came from: 'auto', 'auto_fallback', 'manual' or

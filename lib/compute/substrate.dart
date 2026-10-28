@@ -1322,6 +1322,10 @@ List<PhysioDay> calendarDays(
 
       ana.SleepSegmentation s;
       String src;
+      // The HR-led fallback's own absence, when it found a night-shaped HR dip
+      // ending in this day but the band recorded too little of that window to
+      // stage it. Kept so the day can say why instead of a bare "no sleep".
+      ana.SleepSegmentation? fallbackUnobserved;
       if (ov != null && ov.source == 'rejected') {
         // The user's word again, the other direction: this was NOT sleep at
         // all. Skip detection/staging entirely rather than force a window —
@@ -1368,8 +1372,11 @@ List<PhysioDay> calendarDays(
           );
         } else {
           // Not an error and not "no sleep" — just no accel evidence. Fall
-          // through to the HR-led path below, which is exactly the degraded
-          // mode for this and is already marked low-confidence.
+          // through to the HR-led path below. It can still stage a night whose
+          // missing accel sits outside the HR dip (a gappy evening), but not
+          // one whose dip itself lacks gravity: the forced-window stager only
+          // counts a second as observed when it has a valid vector, so that
+          // window comes back unobserved and its reason is kept below.
           s = ana.SleepSegmentation.absent;
         }
         src = 'auto';
@@ -1396,6 +1403,10 @@ List<PhysioDay> calendarDays(
             if (s2.present) {
               s = s2;
               src = 'auto_fallback';
+            } else if (s2.absenceReason != null &&
+                cand.offsetSec >= dayStart &&
+                cand.offsetSec < dayEnd) {
+              fallbackUnobserved = s2;
             }
           }
         }
@@ -1489,6 +1500,13 @@ List<PhysioDay> calendarDays(
                 '${(ana.kMinObservedFractionForSleep * 100).round()}% floor')
             : s;
         sleepSource = src;
+      } else if (fallbackUnobserved != null) {
+        // The HR dip says a night happened and the band could not record
+        // enough of it. The source stays 'none' (nothing was staged, and
+        // 'auto_fallback' promises a window), but the reason rides along so the
+        // screen can say the band missed the night rather than that no sleep
+        // was found.
+        seg = fallbackUnobserved;
       }
     }
 

@@ -8468,6 +8468,10 @@
   "sleepDetailReanalyseFailed": "The night wasn’t re-analysed; another run was busy or it failed. Your times are saved: open Your data and tap Re-analyze everything.",
   "sleepDetailWindowUnrecorded": "Your times are saved, but the band wasn’t recording for most of those hours (off your wrist or charging), so there’s no night to score.",
   "sleepDetailWindowNoSleep": "Your times are saved, but the band’s recordings for those hours show no sleep to score.",
+  "sleepDetailNightUnrecorded": "Your heart rate shows a night’s sleep, but the band recorded too little movement data for most of it, so there’s no night to score.",
+  "@sleepDetailNightUnrecorded": {
+    "description": "Shown on an automatically detected night with no sleep, when heart rate found a night but the band recorded too little movement data across it to stage one."
+  },
   "@sleepDetailWindowUnrecorded": {
     "description": "Shown after the user set their own sleep window (e.g. \"I was asleep\") and the band recorded too little of it to stage a night."
   },
