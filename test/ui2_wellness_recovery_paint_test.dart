@@ -316,6 +316,23 @@ void main() {
     expect(find.textContaining('enough nights'), findsNothing);
     _expectCardPainted(t);
   }, timeout: const Timeout(Duration(seconds: 60)));
+
+  // The plan is the Sleep tab's footer, so its debt link used to push a whole
+  // second SleepDetail over the one already on screen — same night, plus the
+  // Tonight section the tab leaves out on purpose. It scrolls back up instead.
+  testWidgets('the debt link stays on the Sleep tab instead of pushing it again',
+      (t) async {
+    await _openRecovery(t, dark: false, scale: 1.0, repo: _Repo());
+
+    final link = find.text('See what last night cost you');
+    expect(link, findsOneWidget);
+    await t.tap(link);
+    await _frames(t);
+
+    expect(find.byType(SleepDetail), findsNothing);
+    expect(find.text('See what last night cost you'), findsOneWidget);
+    expect(find.byType(BackButton), findsNothing);
+  }, timeout: const Timeout(Duration(seconds: 60)));
 }
 
 /// TWO framework-internal assertions this harness causes and the screen does

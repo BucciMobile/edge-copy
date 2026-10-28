@@ -45,7 +45,6 @@ import 'home_screen.dart'
 import 'journal_compose.dart';
 import 'start_card.dart';
 import 'metric_detail.dart' show detailScaffold;
-import 'sleep_detail.dart';
 
 class WellnessScreen extends StatefulWidget {
   /// Only the sleep plan (need, debt, bedtime, what charged and drained you),
@@ -528,9 +527,22 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
                       'tonight\'s is ${_hm(needSec / 60)}.',
               l?.wellnessSeeWhatLastNightCost ?? 'See what last night cost you',
               color: C.indigo,
-              onTap: () => Navigator.of(c).push(
-                MaterialPageRoute<void>(builder: (_) => const SleepDetail()),
-              ),
+              // This plan only ever renders as the Sleep tab's footer, under
+              // last night. Pushing SleepDetail opened a second copy of the
+              // screen already underneath, so go back up to the night instead.
+              onTap: () {
+                final pos = Scrollable.maybeOf(c)?.position;
+                if (pos == null) return;
+                // Reduced motion hands back a zero duration, and a scroll
+                // animation asserts on one — jump instead.
+                final d = motion(c, Motion.slow);
+                if (d == Duration.zero) {
+                  pos.jumpTo(pos.minScrollExtent);
+                } else {
+                  unawaited(pos.animateTo(pos.minScrollExtent,
+                      duration: d, curve: Curves.easeOut));
+                }
+              },
             ),
           ),
         Section(
