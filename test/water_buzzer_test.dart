@@ -45,4 +45,23 @@ void main() {
     expect(h.buzzes, 0);
     h.buzzer.dispose();
   });
+
+  // The first slot tomorrow must land at its wall-clock minute even when the
+  // night in between is 23 h or 25 h long. Walks every evening of a year so a
+  // DST transition is crossed whenever the process timezone has one (in UTC
+  // this only pins the ordinary-night behaviour).
+  test('first slot tomorrow lands at its wall-clock minute every night', () {
+    const first = 7 * 60;
+    final h = _Harness(DateTime(2026, 1, 1, 21, 30));
+    for (var d = 0; d < 366; d++) {
+      final evening = DateTime(2026, 1, 1 + d, 21, 30, 15);
+      h.wall = evening;
+      h.buzzer.configure(enabled: true, slotMinutes: [first, 20 * 60]);
+      final due = h.buzzer.debugDue!;
+      expect(due.hour * 60 + due.minute, first, reason: '$evening -> $due');
+      expect(due.day, DateTime(evening.year, evening.month, evening.day + 1).day,
+          reason: '$evening -> $due');
+    }
+    h.buzzer.dispose();
+  });
 }

@@ -14,6 +14,8 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+
 class WaterBuzzer {
   WaterBuzzer({
     required this.buzz,
@@ -40,6 +42,10 @@ class WaterBuzzer {
   bool _enabled = false;
   List<int> _slots = const []; // minutes-from-midnight, ascending
 
+  /// Wall-clock instant the pending timer is meant to fire, if armed.
+  @visibleForTesting
+  DateTime? get debugDue => _due;
+
   /// (Re)configure from the current prefs. Idempotent — cancels and re-arms.
   /// Pass `NotificationCenter.waterSlotMinutes(prefs)` as [slotMinutes].
   void configure({required bool enabled, required List<int> slotMinutes}) {
@@ -57,19 +63,19 @@ class WaterBuzzer {
     final now = _now();
     final nowMin = now.hour * 60 + now.minute;
 
-    // Next slot later today, else the first slot tomorrow.
-    int deltaMin;
+    // Next slot later today, else the first slot tomorrow. The target is built
+    // from calendar fields rather than by adding minutes to now: across a DST
+    // change midnight-to-slot is not 24 h of wall clock, and an elapsed-minutes
+    // delay would buzz an hour early (inside quiet hours) on fall-back night
+    // while the notification for the same slot still lands on time.
     final next = _slots.where((s) => s > nowMin);
-    if (next.isNotEmpty) {
-      deltaMin = next.first - nowMin;
-    } else {
-      deltaMin = (1440 - nowMin) + _slots.first;
-    }
-    // Subtract the seconds already elapsed this minute so we land on the minute.
-    var delay = Duration(minutes: deltaMin) - Duration(seconds: now.second);
+    final slot = next.isNotEmpty ? next.first : _slots.first;
+    final target = DateTime(now.year, now.month,
+        now.day + (next.isNotEmpty ? 0 : 1), slot ~/ 60, slot % 60);
+    var delay = target.difference(now);
     if (delay.isNegative) delay = Duration.zero;
 
-    _due = now.add(delay);
+    _due = target;
     _timer = Timer(delay, _fire);
   }
 
