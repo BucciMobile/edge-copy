@@ -24,6 +24,7 @@ import '../../compute/vendor_sleep.dart' show vendorStagesReported;
 import '../../data/day_label.dart';
 import '../../data/local_repository.dart';
 import '../../l10n/app_localizations.dart';
+import '../../l10n/decimal_text.dart';
 import '../../state/app_state.dart';
 import '../../state/locale_controller.dart';
 import '../../state/prefs.dart';
@@ -146,6 +147,15 @@ String _pct(double v) => '${v.round()}%';
 /// here left every other locale reading a half-English verdict.
 String sleepEfficiencyDelta(AppLocalizations? l, double v) =>
     l?.sleepDetailPointsDelta('${v.round()}') ?? '${v.round()} points';
+
+/// A reading with its unit, in the display locale: metric detail prints the
+/// same number through [displayFixed] and a translated unit, so a raw
+/// "14.2 br/min" here showed a Russian user two different spellings of one
+/// night.
+@visibleForTesting
+String sleepReadingText(AppLocalizations? l, num value, int places,
+        String unit) =>
+    '${displayFixed(value, places)} ${localizedText(l, unit)}';
 
 /// SLP-13 — the three staged figures of a night, as the intervals they are.
 ///
@@ -1503,12 +1513,14 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         : stages[(_scrub! * (stages.length - 1)).round()];
     final items = <(String, String, Color)>[
       if (at('hr') != null)
-        (l?.sleepDetailHeartRate ?? 'Heart rate', '${at('hr')!.round()} bpm', C.red),
+        (l?.sleepDetailHeartRate ?? 'Heart rate',
+            sleepReadingText(l, at('hr')!.round(), 0, 'bpm'), C.red),
       if (at('hrv') != null)
-        (l?.sleepDetailHrv ?? 'HRV', '${at('hrv')!.round()} ms', C.green),
+        (l?.sleepDetailHrv ?? 'HRV',
+            sleepReadingText(l, at('hrv')!.round(), 0, 'ms'), C.green),
       if (at('resp') != null)
         (l?.sleepDetailBreathing ?? 'Breathing',
-            '${at('resp')!.toStringAsFixed(1)} br/min', C.teal),
+            sleepReadingText(l, at('resp')!, 1, 'br/min'), C.teal),
       if (at('skin_temp') != null)
         (l?.sleepDetailTempRelative ?? 'Temp (rel.)',
             sleepScrubTempDelta(at('skin_temp')!), C.orange),
@@ -2018,8 +2030,8 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         vsBase != null) {
       items.add(InsightCard(
         l?.sleepDetailSleepingHrHighTitle ?? 'Sleeping heart rate ran high',
-        l?.sleepDetailSleepingHrHighBody(vsBase.toStringAsFixed(1)) ??
-            '${vsBase.toStringAsFixed(1)} bpm above your usual. Common after alcohol, a late meal, a hard session or an infection starting. A measurement, not a diagnosis.',
+        l?.sleepDetailSleepingHrHighBody(displayFixed(vsBase, 1)) ??
+            '${displayFixed(vsBase, 1)} bpm above your usual. Common after alcohol, a late meal, a hard session or an infection starting. A measurement, not a diagnosis.',
         icon: LucideIcons.heartPulse,
         color: C.red,
       ));
@@ -2088,13 +2100,15 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     final summary = <(String, String, Color)>[
       if (noc is Map && noc['sleeping_hr_avg'] != null)
         (loc?.sleepDetailSleepingHr ?? 'SLEEPING HR',
-            '${noc['sleeping_hr_avg']} bpm', C.red),
+            sleepReadingText(loc, noc['sleeping_hr_avg'] as num, 0, 'bpm'),
+            C.red),
       if (noc is Map && noc['sleeping_hr_min'] != null)
-        (loc?.sleepDetailLowest ?? 'LOWEST', '${noc['sleeping_hr_min']} bpm',
+        (loc?.sleepDetailLowest ?? 'LOWEST',
+            sleepReadingText(loc, noc['sleeping_hr_min'] as num, 0, 'bpm'),
             C.blue),
       if (respV != null)
         (loc?.sleepDetailBreathingCaps ?? 'BREATHING',
-            '${respV.toStringAsFixed(1)} br/min', C.teal),
+            sleepReadingText(loc, respV, 1, 'br/min'), C.teal),
     ];
 
     if (all.isEmpty) {
