@@ -1838,7 +1838,14 @@ class _StepGoalGaugeState extends State<_StepGoalGauge> {
 
   Future<void> _save() async {
     final t = Typed.of(_ctrl.text);
-    final typed = (t.bad || t.value == null) ? null : t.value!.round();
+    // "12k" or "12,000" is not a blank field: closing the editor here kept
+    // the old goal under a screen that looked as if it had saved the new one.
+    // Keep the editor open with what was typed and say it was not read.
+    if (t.bad) {
+      sayUnreadable(context, [uiText(context, 'Goal')]);
+      return;
+    }
+    final typed = t.value?.round();
     if (typed == null) {
       setState(() => _editing = false);
       return;
