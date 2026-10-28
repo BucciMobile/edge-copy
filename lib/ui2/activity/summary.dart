@@ -945,8 +945,16 @@ class _ActivitySummaryState extends State<ActivitySummary> {
     // Only true once a pick actually landed — pressing back out of the picker
     // must return to this screen, not fall through and pop it too.
     var picked = false;
+    // A second tap on a row while the first write is still queued behind a
+    // derive or drain transaction would run this closure again. The first
+    // pick pops the picker and then this screen; the second one's pop would
+    // land on the route underneath (the picker is still mounted through its
+    // exit transition), so only one pick may be in flight or land at all.
+    var busy = false;
     await Navigator.of(c).push(MaterialPageRoute(
       builder: (_) => ActivityPicker(onPick: (pc, newActivity) async {
+        if (busy || picked) return;
+        busy = true;
         // The stored key everywhere else uses — `startWorkout(type:
         // a.typeKey)` is the live path's own write. `a.name` here would still
         // resolve through `activityByName`'s normalized lookup, but it would
@@ -958,6 +966,7 @@ class _ActivitySummaryState extends State<ActivitySummary> {
           // picker open rather than close it over a write that never
           // happened — `onPick` is a `void Function`, so there is no caller
           // to hand this failure back to.
+          busy = false;
           return;
         }
         picked = true;
