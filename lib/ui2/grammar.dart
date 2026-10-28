@@ -1997,7 +1997,14 @@ class _SubTabsState extends State<SubTabs> {
                   builder: (_) {
                     final off = disabled.contains(i);
                     final on = i == index && !off;
-                    return Pressable(
+                    // The active pill differs from the rest only by fill and
+                    // weight, so without the flag a screen reader read every
+                    // pill as the same plain button and there was no way to
+                    // hear which range or section was showing.
+                    return Semantics(
+                      selected: on,
+                      inMutuallyExclusiveGroup: true,
+                      child: Pressable(
                       key: _keys.putIfAbsent(i, () => GlobalKey()),
                       onTap: off ? null : () => widget.onTap(i),
                       // `Pressable` drops `Semantics(button: true)` when `onTap` is
@@ -2037,6 +2044,7 @@ class _SubTabsState extends State<SubTabs> {
                     fontWeight: on ? FontWeight.w600 : FontWeight.w500,
                   ),
                 ),
+                      ),
                       ),
                     );
                   },
