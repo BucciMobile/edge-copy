@@ -7396,12 +7396,13 @@ class BleEngine {
       // returns before commit. A burst whose drops are ALL below the absolute
       // floor is not that path: those records can never become plausible, so
       // their archives are committed and the chunk trimmed (#601).
-      final hadDurableRows = d.bufferedRecords > 0 ||
-          d.bufferedProgressArchives > 0 ||
-          d.bufferedEcgRaw > 0;
+      //
+      // Both read the whole burst, not just the buffer: a timeout/idle flush
+      // can commit part of it before this END arrives.
+      final hadDurableRows = d.burstHasDurableProgress;
       // Snapshot: the commit below clears the buffer, and the post-commit
       // re-gate must judge the same burst.
-      final gateDropArchives = d.bufferedGateDropArchives;
+      final gateDropArchives = d.burstGateDropArchives;
       _log(
         '[SYNC] HistoryEnd batch=${m.batchId} records=${d.records} '
         'expected=${m.expectedPacketCount} '
@@ -9432,6 +9433,29 @@ class DrainController {
   /// The plausibility drops buffered for the next commit.
   int get bufferedGateDropArchives =>
       _archives.where((a) => a.reason == kGateDroppedReason).length;
+
+  // What tokenless commits (awaitComplete's timeout/idle flush, the short-count
+  // refusal) already made durable for the burst still open. Those flushes empty
+  // the buffer mid-burst, so a HISTORY_END judged on the buffer alone saw a
+  // burst that banked nothing: it refused the trim as no-progress (and with
+  // enough refusals bounced the link and raised the clock-lost card) and
+  // reported no trim advance to auto-continue, though the rows were stored.
+  // Counted only once the commit succeeds; cleared by [beginBurst] and by the
+  // token commit that consumes them, so they never carry into another burst.
+  int _burstFlushedDurable = 0;
+  int _burstFlushedGateDrops = 0;
+
+  /// Durable progress this burst: still buffered plus already flushed.
+  bool get burstHasDurableProgress =>
+      _raws.isNotEmpty ||
+      _ecgRaw.isNotEmpty ||
+      bufferedProgressArchives > 0 ||
+      _burstFlushedDurable > 0;
+
+  /// This burst's plausibility-drop archives: still buffered plus already
+  /// flushed (they are durable either way).
+  int get burstGateDropArchives =>
+      bufferedGateDropArchives + _burstFlushedGateDrops;
   int get lastProgressMs => _lastProgressAt.millisecondsSinceEpoch;
 
   /// Min/max real record time (rec_ts) currently buffered for this batch — lets
@@ -9663,6 +9687,8 @@ class DrainController {
     _lastProgressAt = DateTime.now();
     burstStats.reset();
     _burstTallyClosed = false;
+    _burstFlushedDurable = 0;
+    _burstFlushedGateDrops = 0;
   }
 
   /// The band declared a new burst (HISTORY_START) — clear the poison latch.
@@ -9686,6 +9712,8 @@ class DrainController {
   void beginBurst() {
     _trimGuard.beginBurst();
     _burstTallyClosed = false;
+    _burstFlushedDurable = 0;
+    _burstFlushedGateDrops = 0;
   }
 
   /// A genuinely NEW history task has been claimed — called by the engine
@@ -9840,8 +9868,13 @@ class DrainController {
     // cursor and leaves the flag alone: the tail commit used to reset it to
     // false right before _onOffloadFinished read it, so auto-continue never
     // fired. It is cleared per offload in [resetOffloadCounters].
+    // Rows a flush already banked for this burst count too: the END commit
+    // finds an empty buffer whenever a flush got there first.
     if (tokenHex != null) {
-      lastTrimAdvanced = tokenHex != _lastAckedToken && hadDurable;
+      lastTrimAdvanced = tokenHex != _lastAckedToken &&
+          (hadDurable ||
+              _burstFlushedDurable > 0 ||
+              _burstFlushedGateDrops > 0);
       _lastAckedToken = tokenHex;
     }
     _raws.clear();
@@ -9883,6 +9916,14 @@ class DrainController {
           tsMin: lo,
           tsMax: hi,
         );
+        _burstFlushedDurable = 0;
+        _burstFlushedGateDrops = 0;
+      } else {
+        final gateDrops =
+            archives.where((a) => a.reason == kGateDroppedReason).length;
+        _burstFlushedDurable += raws.length + ecgRaw.length +
+            archives.length - gateDrops;
+        _burstFlushedGateDrops += gateDrops;
       }
       return raws.length + archives.length + ecgRaw.length;
     } catch (e) {
