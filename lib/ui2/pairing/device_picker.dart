@@ -300,7 +300,12 @@ class _DevicePickerScreenState extends State<DevicePickerScreen> {
                 uiText(c, e.label),
                 uiText(c, deviceCategoryBlurb(l, e)),
               ) ||
-              _matches(e.label, deviceCategoryBlurb(null, e))))
+              _matches(e.label, deviceCategoryBlurb(null, e)) ||
+              // The one framed row stands for every WHOOP this app pairs, but
+              // its label is gen4's, so "whoop 5" or "mg" matched nothing and
+              // the only way to pair the band vanished from the list.
+              (e.isFramed &&
+                  _matches('${kWhoopGen5.label} WHOOP MG', 'WHOOP5 WHOOPMG'))))
             (
               entry: e,
               blurb: deviceCategoryBlurb(l, e),
