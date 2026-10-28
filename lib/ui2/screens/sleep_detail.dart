@@ -390,6 +390,18 @@ class SleepData {
 String? sleepStepperDay(String day, String? latestDay) =>
     day == latestDay ? null : day;
 
+/// What the Sleep screen stores for its night once a correction to [edited]
+/// has re-derived. The edit pins [edited] so the reload can't wander to
+/// another night, but on the tab that pin is never cleared by anything else:
+/// once a newer night arrived the tab stayed on the corrected one and lost
+/// the sleep plan, until the arrows were touched. So the pin is released when
+/// the edited night is still the newest one. A night the user stepped to
+/// meanwhile ([current] != [edited]) is left alone.
+@visibleForTesting
+String? sleepDayAfterOverride(
+        String? current, String edited, String? latestDay) =>
+    current == edited ? sleepStepperDay(edited, latestDay) : current;
+
 class SleepDetail extends StatefulWidget {
   final SleepData? data;
 
@@ -1103,6 +1115,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     if (_day == null && _d?.day == day) _day = day;
     if (mounted) await _load();
     if (!mounted) return;
+    _day = sleepDayAfterOverride(_day, day, _d?.latestDay);
     // EVERY failure below this screen is silent: the forced re-derive catches
     // and logs its own throw, and it returns at its first line when another
     // re-analysis is already running. Both leave the write in the database and

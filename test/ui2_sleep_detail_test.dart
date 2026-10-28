@@ -485,6 +485,24 @@ void main() {
     });
   });
 
+  group('sleepDayAfterOverride', () {
+    test('a correction to the newest night stops pinning it', () {
+      expect(sleepDayAfterOverride('2026-10-17', '2026-10-17', '2026-10-17'),
+          isNull);
+    });
+
+    test('an edited night that is no longer the newest stays pinned', () {
+      expect(sleepDayAfterOverride('2026-10-16', '2026-10-16', '2026-10-17'),
+          '2026-10-16');
+    });
+
+    test('a night the user stepped to meanwhile is left alone', () {
+      expect(sleepDayAfterOverride('2026-10-15', '2026-10-17', '2026-10-17'),
+          '2026-10-15');
+      expect(sleepDayAfterOverride(null, '2026-10-16', '2026-10-17'), isNull);
+    });
+  });
+
   group('the Sleep tab', () {
     Future<void> tab(WidgetTester t, String day, {String? latest}) async {
       t.view.physicalSize = const Size(390 * 3, 5200 * 3);
