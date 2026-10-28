@@ -150,6 +150,28 @@ void main() {
       expect(t, 21 * 60 + 30);
     });
 
+    test('a bedtime well past midnight still caps instead of disabling', () {
+      // Bedtime 01:00 → slot 00:15, which sorts below the 21:30 cap but is
+      // still inside quiet hours. It must cap like the 00:20 case above.
+      final t = NotificationCenter.windDownSlot(
+          const NotificationPrefs(windDownEnabled: true), 60.0);
+      expect(t, 21 * 60 + 30);
+      // The 00:44/00:45 boundary used to flip from armed to refused.
+      expect(
+          NotificationCenter.windDownSlot(
+              const NotificationPrefs(windDownEnabled: true), 45.0),
+          21 * 60 + 30);
+    });
+
+    test('a bedtime after quiet hours end is still refused, not capped', () {
+      // Bedtime 07:30 → slot 06:45, inside quiet hours; the bedtime itself is
+      // not, so a 21:30 nudge would be half a day early.
+      expect(
+          NotificationCenter.windDownSlot(
+              const NotificationPrefs(windDownEnabled: true), 7 * 60 + 30.0),
+          isNull);
+    });
+
     test('the copy names the learned bedtime, not the capped slot', () {
       // Bedtime 23:30 caps the slot to 21:30; the body must still say 23:30.
       expect(NotificationCenter.windDownBody(23 * 60 + 30.0),

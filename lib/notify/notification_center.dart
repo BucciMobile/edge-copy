@@ -550,11 +550,18 @@ class NotificationCenter {
     // Wrap across midnight, staying non-negative (Dart % can go negative for
     // negative operands only when the modulus is... it cannot here — but the
     // +1440 makes the intent explicit and survives sign changes).
-    var t = ((bedtimeMinOfDay.round() - windDownBeforeBedMin) % 1440 + 1440) %
-        1440;
+    final bed = bedtimeMinOfDay.round();
+    var t = ((bed - windDownBeforeBedMin) % 1440 + 1440) % 1440;
     if (prefs.quietEnabled && prefs.quietStartMin > prefs.quietEndMin) {
       final cap = prefs.quietStartMin - _windDownQuietMarginMin;
-      if (t > cap) t = cap;
+      // A slot that wrapped past midnight is just as late as one at 23:50,
+      // but it sorts BELOW the cap numerically. Without the second clause a
+      // 00:40 bedtime got a 21:30 wind-down while a 01:00 bedtime got none at
+      // all. Only when the bedtime itself sits inside the quiet window: a
+      // day sleeper whose bedtime falls after quiet ends is refused below
+      // rather than nudged half a day early.
+      final wrappedLate = t < prefs.quietEndMin && prefs.inQuietHours(bed);
+      if (t > cap || wrappedLate) t = cap;
     }
     if (prefs.inQuietHours(t)) return null;
     return t;
