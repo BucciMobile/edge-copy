@@ -1512,8 +1512,11 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     final l = AppLocalizations.of(context);
     final v = (r['value'] as num?)?.toDouble();
     final unit = (r['unit'] ?? m?.unit ?? '').toString();
-    final range = m?.rangeFor(sex);
-    final inRange = v == null || m == null ? null : m.inRange(v, sex: sex);
+    // A result in another unit than the catalogue's gets no verdict at all:
+    // the interval is in the catalogue's unit, not the one printed beside it.
+    final judge = m != null && m.judgesUnit(r['unit']) ? m : null;
+    final range = judge?.rangeFor(sex);
+    final inRange = v == null ? null : judge?.inRange(v, sex: sex);
 
     // The whole row is the control, with the bin as its affordance — the same
     // shape a logged meal takes, and it costs no width, which at 3x text is
