@@ -470,6 +470,12 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
   SleepData? _d;
   bool _loading = true;
   String? _day;
+
+  /// The last read threw. Kept apart from "no night": a read that failed
+  /// under a busy database must not tell someone with months of history that
+  /// the band recorded nothing, and on a day step it must not leave the
+  /// previous night drawn under the new date.
+  bool _failed = false;
   bool _saving = false; // an override write + its forced re-derive is in flight
   double? _scrub; // 0..1 across the night
 
@@ -582,10 +588,13 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
               _correctable = correctable,
               _wholeNightKept = wholeNightKept,
               _loading = false,
+              _failed = false,
             ));
       }
     } catch (_) {
-      if (mounted && gen == _loadGen) setState(() => _loading = false);
+      if (mounted && gen == _loadGen) {
+        setState(() => (_loading = false, _failed = true));
+      }
     }
   }
 
@@ -597,6 +606,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       _scrub = null;
       _overrideFailed = null;
       _loading = true;
+      _failed = false;
     });
     _load();
   }
@@ -611,6 +621,31 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
       return _frame(c, title, const [
         SizedBox(height: S.x8),
         Center(child: CircularProgressIndicator()),
+      ]);
+    }
+
+    if (_failed) {
+      // `_d` may still hold the night this screen stepped away from; only its
+      // day list is used, so the stepper stays and the day can be walked off.
+      final shown = _day ?? d.day;
+      return _frame(c, title, [
+        ...dayNavRow(shown, d.days, _goDay),
+        const SizedBox(height: S.x2),
+        StatusCard(
+          shown == null
+              ? (l?.wellnessLoadFailedTitle ?? 'This could not be read')
+              : (l?.homeDayLoadFailedTitle(prettyDay(shown, l)) ??
+                  '${prettyDay(shown, l)} could not be read'),
+          l?.homeLoadFailedBody ??
+              'The stored day failed to load. Nothing was deleted — this is a '
+                  'read that went wrong, not missing data.',
+          fix: l?.homeTryAgain ?? 'Try again',
+          icon: LucideIcons.databaseZap,
+          onFix: () {
+            setState(() => (_loading = true, _failed = false));
+            _load();
+          },
+        ),
       ]);
     }
 
@@ -651,7 +686,10 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         ] else if (rejected) ...[
           const SizedBox(height: S.x2),
           TextButton(
-            onPressed: _saving ? null : () => _clearWindow(rejectedDay),
+            // `_loading` too: mid-step this is still the previous day's undo.
+            onPressed: _saving || _loading
+                ? null
+                : () => _clearWindow(rejectedDay),
             child: Text(
                 l?.sleepDetailUndoRejection ?? 'Undo — go back to automatic'),
           ),
@@ -891,6 +929,10 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
     final vendor = source == 'vendor_staged';
 
     final busy = _saving;
+    // Every button below acts on `day`, the night drawn. While a day step is
+    // loading that is still the night the user stepped away from, not the
+    // date the stepper reads, the same reason the naps button waits.
+    final locked = busy || _loading;
     return [
       const SizedBox(height: S.x3),
       Surface(
@@ -946,18 +988,18 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
           Wrap(spacing: S.x2, children: [
             if (fallback && _wholeNightKept)
               TextButton(
-                onPressed: busy ? null : () => _confirmWindow(day),
+                onPressed: locked ? null : () => _confirmWindow(day),
                 child: Text(l?.sleepDetailConfirmTimes ?? 'These times are right'),
               ),
             TextButton(
-              onPressed: busy ? null : () => _editWindow(day, t0, t1),
+              onPressed: locked ? null : () => _editWindow(day, t0, t1),
               child: Text(mine
                   ? (l?.sleepDetailChangeTimes ?? 'Change the times')
                   : (l?.sleepDetailSetTimesMyself ?? 'Set the times myself')),
             ),
             if (mine && _wholeNightKept)
               TextButton(
-                onPressed: busy ? null : () => _clearWindow(day),
+                onPressed: locked ? null : () => _clearWindow(day),
                 child:
                     Text(l?.sleepDetailBackToAutomatic ?? 'Back to automatic'),
               ),
@@ -965,7 +1007,7 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
             // already have a reject action (sleep_nap source='rejected');
             // a whole-night main-sleep session didn't (edge#248).
             TextButton(
-              onPressed: busy ? null : () => _rejectWindow(day),
+              onPressed: locked ? null : () => _rejectWindow(day),
               child: Text(l?.sleepDetailNotSleep ?? 'Not sleep'),
             ),
           ]),
