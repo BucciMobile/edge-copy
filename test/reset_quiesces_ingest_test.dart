@@ -90,7 +90,7 @@ void main() {
   test('resetAllData raises the flag and always lowers it', () {
     final body = src.substring(src.indexOf('Future<String?> resetAllData() async'));
     final raise = body.indexOf('ResetGate.enter();');
-    final wipe = body.indexOf('LocalDb.wipeAll()');
+    final wipe = body.indexOf('DerivationEngine.whileIdle(LocalDb.wipeAll)');
     final lower = body.indexOf('ResetGate.leave();');
     final fin = body.indexOf('} finally {');
 
@@ -119,7 +119,7 @@ void main() {
     final body = src.substring(src.indexOf('Future<String?> resetAllData() async'));
     final stop = body.indexOf('await _stopSecondaryLinksForReset();');
     final ids = body.indexOf('await _secondaryDeviceIdsForReset();');
-    final wipe = body.indexOf('LocalDb.wipeAll()');
+    final wipe = body.indexOf('DerivationEngine.whileIdle(LocalDb.wipeAll)');
     expect(stop, greaterThanOrEqualTo(0));
     expect(stop, lessThan(wipe));
     expect(ids, greaterThanOrEqualTo(0));
