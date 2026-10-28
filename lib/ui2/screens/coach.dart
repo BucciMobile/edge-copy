@@ -296,12 +296,19 @@ class _CoachScreenState extends State<CoachScreen> {
     return ok ?? false;
   }
 
+  // Switching or clearing the session while a reply is in flight would hand
+  // the engine's live history and transcript to another chat: `send` keeps
+  // appending its tool calls and answer to them, and the `persist()` in
+  // `_send`'s finally writes them under whichever session is current then,
+  // so the reply lands in the wrong chat and the question is lost.
   void _newChat() {
+    if (_busy) return;
     _engine?.newSession();
     setState(_items.clear);
   }
 
   Future<void> _openSession(String id) async {
+    if (_busy) return;
     await _engine?.openSession(id);
     if (!mounted) return;
     setState(() {
@@ -329,6 +336,10 @@ class _CoachScreenState extends State<CoachScreen> {
     final engine = _engine;
     final p = P.of(context);
     final l = AppLocalizations.of(context);
+    // The sheet doesn't rebuild with this screen, so the rows read this
+    // snapshot and stay disabled until it is reopened, even if the reply
+    // finishes meanwhile. The handlers re-check `_busy` regardless.
+    final busy = _busy;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: p.card,
@@ -343,10 +354,12 @@ class _CoachScreenState extends State<CoachScreen> {
               _MenuRow(
                 LucideIcons.plus,
                 l?.coachNewChat ?? 'New chat',
-                onTap: () {
-                  Navigator.of(sheet).pop();
-                  _newChat();
-                },
+                onTap: busy
+                    ? null
+                    : () {
+                        Navigator.of(sheet).pop();
+                        _newChat();
+                      },
               ),
               // NO "AI settings" ROW. Choosing the model is a setting and
               // settings live in Profile — [CoachSetup] is pushed from there
@@ -394,16 +407,25 @@ class _CoachScreenState extends State<CoachScreen> {
                             LucideIcons.messageSquare,
                             s.title.isEmpty ? (l?.coachUntitledChat ?? 'Untitled chat') : s.title,
                             sub: s.preview,
-                            onTap: () {
-                              Navigator.of(sheet).pop();
-                              _openSession(s.id);
-                            },
-                            onRemove: () async {
-                              final wasOpen = s.id == engine.sessionId;
-                              await engine.deleteSession(s.id);
-                              setSheet(() {});
-                              if (wasOpen && mounted) setState(_items.clear);
-                            },
+                            onTap: busy
+                                ? null
+                                : () {
+                                    Navigator.of(sheet).pop();
+                                    _openSession(s.id);
+                                  },
+                            // Deleting the open chat starts a new session
+                            // inside the engine, the same hazard as above.
+                            onRemove: busy
+                                ? null
+                                : () async {
+                                    if (_busy) return;
+                                    final wasOpen = s.id == engine.sessionId;
+                                    await engine.deleteSession(s.id);
+                                    setSheet(() {});
+                                    if (wasOpen && mounted) {
+                                      setState(_items.clear);
+                                    }
+                                  },
                           ),
                       ],
                     );
