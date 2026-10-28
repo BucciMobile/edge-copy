@@ -1811,7 +1811,20 @@ import 'vendor_sleep.dart';
 // store `skin_temp_ambient_r` and the illness watch leaves out WHOOP 4 nights
 // whose skin temp tracks ambient (|r| >= 0.8, or unmeasured). One-shot,
 // raw-free: days derived before v106 drop naps overlapping the next night.
-const int kAlgoVersion = 113;
+// 113 → 116 (edge-only; 114 and 115 are claimed by the open sleep-continuation
+// change): the temperature illness flag scores the raw nightly skin temp, not
+// skin_temp_z, and the illness anomaly standardises it once; the skin temp
+// baseline leaves out unsettled nights and the nightly mean drops the cold
+// warm-up samples; a warm-bedroom night no longer hides an open skin temp run
+// and unstamped nights no longer blind the watch for a week; the Plews
+// rolling-7 lnRMSSD history is dated by calendar night and a night with no
+// sleep-session RMSSD stores no band; BRV honours the breathing-rate artifact
+// gate; the readiness breakdown ranks tonight against the same device's
+// history; the cycle-phase flag counts days across DST; the day strain curve
+// carries a workout-raised headline; a logged nap over the main sleep is
+// counted once; an implausible stored age is named as the reason strain,
+// calories and zones are absent.
+const int kAlgoVersion = 116;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
