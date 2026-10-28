@@ -1,6 +1,7 @@
 // Presentation-only vocabulary. Never pass user-entered text or storage keys.
 import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/widgets.dart';
+import 'package:intl/intl.dart' show NumberFormat;
 import 'app_localizations.dart';
 
 String uiText(BuildContext context, String text) =>
@@ -66,6 +67,43 @@ String localizedNotificationText(AppLocalizations? l, String text) {
       RegExp(r'^Your band is at (\d+)%\. Charge it soon\.$').firstMatch(text);
   if (battery != null) {
     return l.notifLowBatteryBody(int.parse(battery[1]!));
+  }
+  // BatteryForecaster.describe. The clock is already formatted for display
+  // (12/24-hour, the locale's AM/PM), so it passes through as text; the rate
+  // is re-formatted so de/fr/es/ru get their own decimal separator.
+  final rateFormat = NumberFormat('0.0', l.localeName);
+  String rate(String s) => rateFormat.format(double.parse(s));
+  final drainBefore = RegExp(
+    r"^At (\d+(?:\.\d+)?)%/h it runs out around (.+) — before you wake\. Charge it now to keep tonight's sleep\.$",
+  ).firstMatch(text);
+  if (drainBefore != null) {
+    return l.notifBatteryForecastBeforeWakeBody(
+        rate(drainBefore[1]!), drainBefore[2]!);
+  }
+  final drainReserve = RegExp(
+    r"^At (\d+(?:\.\d+)?)%/h it runs out around (.+), just after your usual wake time — about (\d+)% left when you get up\. Charge it now to keep tonight's sleep\.$",
+  ).firstMatch(text);
+  if (drainReserve != null) {
+    return l.notifBatteryForecastReserveBody(rate(drainReserve[1]!),
+        drainReserve[2]!, int.parse(drainReserve[3]!));
+  }
+  final drainAfter = RegExp(
+    r'^At (\d+(?:\.\d+)?)%/h it runs out around (.+), after your usual wake time\.$',
+  ).firstMatch(text);
+  if (drainAfter != null) {
+    return l.notifBatteryForecastAfterWakeBody(
+        rate(drainAfter[1]!), drainAfter[2]!);
+  }
+  final windDown = RegExp(r'^Your bedtime is around (.+)\. Start slowing down\.$')
+      .firstMatch(text);
+  if (windDown != null) {
+    return l.notifWindDownBody(windDown[1]!);
+  }
+  final idle = RegExp(
+    r'^Nothing above resting effort has been recorded for (\d+) minutes\. If the session is over, finish it from the Workout tab\.$',
+  ).firstMatch(text);
+  if (idle != null) {
+    return l.notifWorkoutIdleBody(int.parse(idle[1]!));
   }
   return localizedText(l, text);
 }

@@ -1125,6 +1125,12 @@ class WorkoutController {
   Future<bool> exportWorkoutToHealth(String? sessionId) =>
       HealthExporter.exportWorkoutId(sessionId);
 
+  /// The idle nudge's body. localizedNotificationText parses this exact
+  /// wording back to translate it, so the two change together.
+  static String idleNudgeBody(int minutes) =>
+      'Nothing above resting effort has been recorded for $minutes minutes. '
+      'If the session is over, finish it from the Workout tab.';
+
   /// Ask about a session that has gone quiet — the [WorkoutIdleWatch] ask.
   ///
   /// Once per session EVER, belt and braces: the watch stops on
@@ -1145,9 +1151,7 @@ class WorkoutController {
           // movement and detected-workout prompts.
           priority: NotifPriority.normal,
           title: 'Still working out?',
-          body: 'Nothing above resting effort has been recorded for '
-              '${w.idleWatch.nudgeAfter.inMinutes} minutes. If the session '
-              'is over, finish it from the Workout tab.',
+          body: idleNudgeBody(w.idleWatch.nudgeAfter.inMinutes),
           date: todayLabel(),
           route: kRouteWorkoutIdle,
         ),

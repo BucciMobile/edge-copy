@@ -15843,15 +15843,6 @@
   "@napsInFuture": {
     "description": "Validation error when a manually logged nap ends after the current time."
   },
-  "profileImplausibleFields": "Check {fields}. That value is out of range, so nothing was saved.",
-  "@profileImplausibleFields": {
-    "description": "Shown when a typed age, height or weight is outside the believable range.",
-    "placeholders": {
-      "fields": {
-        "type": "String"
-      }
-    }
-  },
   "notifRecoveryReadyBody": "Recovery {score}.",
   "@notifRecoveryReadyBody": {
     "description": "OS notification body when the day's recovery score is ready.",
@@ -15893,6 +15884,72 @@
     "description": "OS notification body when the band's battery is low.",
     "placeholders": {
       "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "profileImplausibleFields": "Check {fields}. That value is out of range, so nothing was saved.",
+  "@profileImplausibleFields": {
+    "description": "Shown when a typed age, height or weight is outside the believable range.",
+    "placeholders": {
+      "fields": {
+        "type": "String"
+      }
+    }
+  },
+  "notifBatteryForecastBeforeWakeBody": "At {rate}%/h it runs out around {time} — before you wake. Charge it now to keep tonight's sleep.",
+  "@notifBatteryForecastBeforeWakeBody": {
+    "description": "OS notification body when the band is forecast to run flat before the user wakes. rate is the drain in percent per hour, already formatted; time is a clock time, already formatted.",
+    "placeholders": {
+      "rate": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "notifBatteryForecastReserveBody": "At {rate}%/h it runs out around {time}, just after your usual wake time — about {left}% left when you get up. Charge it now to keep tonight's sleep.",
+  "@notifBatteryForecastReserveBody": {
+    "description": "OS notification body when the band is forecast to wake with almost no charge left. rate is the drain in percent per hour, already formatted; time is a clock time, already formatted.",
+    "placeholders": {
+      "rate": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      },
+      "left": {
+        "type": "int"
+      }
+    }
+  },
+  "notifBatteryForecastAfterWakeBody": "At {rate}%/h it runs out around {time}, after your usual wake time.",
+  "@notifBatteryForecastAfterWakeBody": {
+    "description": "OS notification body when the band's battery forecast lasts past the usual wake time. rate is the drain in percent per hour, already formatted; time is a clock time, already formatted.",
+    "placeholders": {
+      "rate": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "notifWindDownBody": "Your bedtime is around {time}. Start slowing down.",
+  "@notifWindDownBody": {
+    "description": "OS notification body for the wind-down reminder. time is a clock time, already formatted.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "notifWorkoutIdleBody": "Nothing above resting effort has been recorded for {minutes} minutes. If the session is over, finish it from the Workout tab.",
+  "@notifWorkoutIdleBody": {
+    "description": "OS notification body when a live workout has shown no effort for a while.",
+    "placeholders": {
+      "minutes": {
         "type": "int"
       }
     }

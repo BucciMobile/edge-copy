@@ -7548,14 +7548,6 @@
     }
   },
   "napsInFuture": "Этот дневной сон ещё не закончился. Запишите его, когда проснётесь.",
-  "profileImplausibleFields": "Проверьте: {fields}. Значение вне допустимого диапазона, поэтому ничего не сохранено.",
-  "@profileImplausibleFields": {
-    "placeholders": {
-      "fields": {
-        "type": "String"
-      }
-    }
-  },
   "notifRecoveryReadyBody": "Восстановление {score}.",
   "@notifRecoveryReadyBody": {
     "placeholders": {
@@ -7593,6 +7585,66 @@
   "@notifLowBatteryBody": {
     "placeholders": {
       "percent": {
+        "type": "int"
+      }
+    }
+  },
+  "profileImplausibleFields": "Проверьте: {fields}. Значение вне допустимого диапазона, поэтому ничего не сохранено.",
+  "@profileImplausibleFields": {
+    "placeholders": {
+      "fields": {
+        "type": "String"
+      }
+    }
+  },
+  "notifBatteryForecastBeforeWakeBody": "При расходе {rate}%/ч заряд кончится около {time} — до того, как вы проснётесь. Зарядите браслет сейчас, чтобы сохранить сегодняшний сон.",
+  "@notifBatteryForecastBeforeWakeBody": {
+    "placeholders": {
+      "rate": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "notifBatteryForecastReserveBody": "При расходе {rate}%/ч заряд кончится около {time}, вскоре после вашего обычного подъёма — к пробуждению останется около {left}%. Зарядите браслет сейчас, чтобы сохранить сегодняшний сон.",
+  "@notifBatteryForecastReserveBody": {
+    "placeholders": {
+      "rate": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      },
+      "left": {
+        "type": "int"
+      }
+    }
+  },
+  "notifBatteryForecastAfterWakeBody": "При расходе {rate}%/ч заряд кончится около {time}, после вашего обычного подъёма.",
+  "@notifBatteryForecastAfterWakeBody": {
+    "placeholders": {
+      "rate": {
+        "type": "String"
+      },
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "notifWindDownBody": "Вы обычно ложитесь около {time}. Пора сбавлять темп.",
+  "@notifWindDownBody": {
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
+  "notifWorkoutIdleBody": "Уже {minutes} мин. не было нагрузки выше уровня покоя. Если тренировка закончилась, завершите её на вкладке «Тренировка».",
+  "@notifWorkoutIdleBody": {
+    "placeholders": {
+      "minutes": {
         "type": "int"
       }
     }
