@@ -154,7 +154,12 @@ class NoopIngest {
     return true;
   }
 
-  void hr(int ts, int bpm) => (_secs[ts] ??= _Sec()).hr = bpm;
+  // Same physiological gate as the band decode. A NOOP row is otherwise taken
+  // at face value, so an off-wrist sentinel (255) or a 1 bpm glitch would land
+  // in max HR, strain and the resting-HR window for imported days only. 0 keeps
+  // the second (and its accel / SpO2 context) while saying "no usable HR".
+  void hr(int ts, int bpm) =>
+      (_secs[ts] ??= _Sec()).hr = plausibleHrOrNull(bpm) ?? 0;
 
   void rr(int ts, double ms) {
     // FINITE and positive. `ms <= 0` alone lets NaN through (it fails every
@@ -163,8 +168,13 @@ class NoopIngest {
     // costing a single interval. Both are reachable: a CSV column can spell
     // `NaN`, and a SQLite REAL can hold either outright.
     if (!ms.isFinite || ms <= 0) return;
+    // Then the band path's 250-2400 ms bound: outside it the interval is a
+    // missed or doubled detection, not a rhythm, and one of them is enough to
+    // move RMSSD / SDNN / pNNx for the whole imported night.
+    final rr = plausibleRrOrNull(ms);
+    if (rr == null) return;
     _rrTs.add(ts * 1000.0);
-    _rrMs.add(ms);
+    _rrMs.add(rr);
   }
 
   void gravity(int ts, double? x, double? y, double? z) {
