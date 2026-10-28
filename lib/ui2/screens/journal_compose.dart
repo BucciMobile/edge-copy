@@ -424,9 +424,8 @@ class _JournalComposeState extends State<JournalCompose> {
                                       size: 16, color: p.on(C.domMind)),
                                   const SizedBox(width: S.x1),
                                   Text(
-                                    // Not localized yet — a new entry point,
-                                    // not a copy pass over the whole screen.
-                                    'Talk it through with AI',
+                                    l?.journalComposeTalkItThroughWithAi ??
+                                        'Talk it through with AI',
                                     style: F.over
                                         .copyWith(color: p.on(C.domMind)),
                                   ),

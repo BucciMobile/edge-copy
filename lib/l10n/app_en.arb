@@ -3700,6 +3700,10 @@
   "@journalComposeAnythingElseLabel": {
     "description": "Label for the free-text journal note field."
   },
+  "journalComposeTalkItThroughWithAi": "Talk it through with AI",
+  "@journalComposeTalkItThroughWithAi": {
+    "description": "Link above the journal note field that opens an AI chat about the day. Shown only when an AI key is configured."
+  },
   "journalComposeAnythingElseHint": "A line about the day.",
   "@journalComposeAnythingElseHint": {
     "description": "Placeholder hint for the free-text journal note field."
