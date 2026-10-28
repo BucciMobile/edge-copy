@@ -7,6 +7,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:openstrap_edge/ui2/screens/screens.dart';
 import 'package:openstrap_edge/ui2/ui2.dart';
 
@@ -35,13 +36,16 @@ Future<void> _pumpSteps(WidgetTester t) async {
 }
 
 Future<void> _openEditorAndType(WidgetTester t, String text) async {
-  final edit = find.bySemanticsLabel('Edit daily step goal');
+  // The edit and save buttons' labels merge into the gauge card's one
+  // semantics node ("60% | Edit daily step goal | Goal | ..."), and tapping
+  // that node lands on the ring, so the taps go to the buttons themselves.
+  final edit = find.text('10,000 steps');
   await t.ensureVisible(edit);
   await t.tap(edit);
   await t.pumpAndSettle();
   await t.enterText(find.byType(TextField), text);
   await t.pump();
-  await t.tap(find.bySemanticsLabel('Save step goal'));
+  await t.tap(find.byIcon(LucideIcons.check));
   await t.pumpAndSettle();
 }
 
