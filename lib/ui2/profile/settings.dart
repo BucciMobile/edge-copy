@@ -1559,6 +1559,11 @@ class _EditProfileViewState extends State<EditProfileView> {
       TextEditingController(text: _u.weightField(widget.initial['weight_kg'] as num?));
   late String? _sex = (widget.initial['sex'] as String?)?.toLowerCase();
 
+  /// The metric values the height and weight fields were last filled from,
+  /// so [_save] can tell an untouched field from an edited one.
+  late num? _storedHeightCm = widget.initial['height_cm'] as num?;
+  late num? _storedWeightKg = widget.initial['weight_kg'] as num?;
+
   /// When the store last gave us something. Null is "never", which is also
   /// what an unreadable preference reads as — the first-run word on the button
   /// is the safe one either way.
@@ -1596,8 +1601,10 @@ class _EditProfileViewState extends State<EditProfileView> {
       if (!mounted) return;
       if (fields != null) {
         _age.text = _s(fields['age']);
-        _height.text = _u.heightField(fields['height_cm'] as num?);
-        _weight.text = _u.weightField(fields['weight_kg'] as num?);
+        _storedHeightCm = fields['height_cm'] as num?;
+        _storedWeightKg = fields['weight_kg'] as num?;
+        _height.text = _u.heightField(_storedHeightCm);
+        _weight.text = _u.weightField(_storedWeightKg);
         _sex = (fields['sex'] as String?)?.toLowerCase() ?? _sex;
       }
       setState(() {
@@ -1647,10 +1654,22 @@ class _EditProfileViewState extends State<EditProfileView> {
       sayUnreadable(context, bad);
       return;
     }
-    final heightCm =
-        height.value == null ? null : _u.heightToCm(_height.text);
-    final weightKg =
-        weight.value == null ? null : _u.weightToKg(_weight.text);
+    // An untouched field keeps the stored number. Imperial pre-fills are
+    // rounded to whole inches and pounds, so converting them back rewrote
+    // 72.5 kg as 72.57 and 178 cm as 177.8 on every save and a rename alone
+    // moved the stored body.
+    final h0 = _storedHeightCm;
+    final w0 = _storedWeightKg;
+    final heightCm = height.value == null
+        ? null
+        : (h0 != null && _height.text == _u.heightField(h0))
+            ? h0.toDouble()
+            : _u.heightToCm(_height.text);
+    final weightKg = weight.value == null
+        ? null
+        : (w0 != null && _weight.text == _u.weightField(w0))
+            ? w0.toDouble()
+            : _u.weightToKg(_weight.text);
     final off = [
       if (age.value case final a? when !plausibleAgeYears(a))
         (l?.settingsAgeFieldLabel ?? 'Age'),
