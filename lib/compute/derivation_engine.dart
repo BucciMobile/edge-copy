@@ -8319,8 +8319,8 @@ class DerivationEngine {
     // age/weight are read by `wakeDayEnergy` straight off the profile now, so
     // they are no longer unpacked here — TRIMP only needs the sex constant.
     final sex = profile.sex?.toLowerCase();
-    // ONE definition (hr_max.dart): null when age is unknown OR when we cannot
-    // say which strap measured this day.
+    // ONE definition (hr_max.dart): null when the age is unknown or not a
+    // plausible age.
     final hrMax = estimatedMaxHr(profile.ageYears, daySub.deviceFamily);
     final rhrForTrimp = restingHr ?? profile.restingHrManual?.toDouble();
     // THIS user's quiet-waking level, from PRIOR days only — the same list the
@@ -8350,7 +8350,10 @@ class DerivationEngine {
     // gates on exactly these inputs; the two must not disagree about WHY.
     final ceilingAbsent = hrMax != null
         ? null
-        : profile.ageYears == null
+        // An age stored before the profile forms checked it (a birth year, 0)
+        // has no ceiling either, and it is the age that needs fixing, not the
+        // strap.
+        : profile.ageYears == null || !plausibleAgeYears(profile.ageYears!)
         ? needInputNote('age')
         // We know the age; we do not know what measured the HR, so we
         // have no ceiling to band it against.

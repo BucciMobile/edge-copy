@@ -4423,7 +4423,9 @@ class LocalRepositoryImpl extends LocalRepository {
     final age = _profileAge();
     final zonesNote = set != null
         ? null
-        : age == null
+        // A pre-validation age (a birth year, 0) has no ceiling estimate
+        // either; the fix is the age, not the strap.
+        : age == null || !plausibleAgeYears(age)
         ? needInputNote('age')
         : ana.unknownFamilyNote(family);
     // TS-05 — the 28-day distribution is ABSENT, not captioned, until BOTH zone

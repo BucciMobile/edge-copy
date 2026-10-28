@@ -39,7 +39,7 @@ import 'hr_max.dart'
         smoothedMaxHr,
         smoothedMinHr,
         trainingZones;
-import 'profile.dart' show workoutSex;
+import 'profile.dart' show plausibleAgeYears, workoutSex;
 import 'step_cadence.dart' show cadenceSpmForMinutes;
 // Same argument: a pure `DateTime` lookup, no DB / IO / Flutter binding. It is
 // the ONE definition of "the UTC offset in effect at this instant" in the tree,
@@ -1071,7 +1071,9 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // `zone_timeline`, so they gate on the set and not on the age estimate.
   final ceilingAbsentNote = hrMax != null
       ? null
-      : age == null
+      // A pre-validation age (a birth year, 0) also yields no ceiling; name
+      // the age, not the strap.
+      : age == null || !plausibleAgeYears(age)
       ? needInputNote('age')
       // The age is known; what measured this HR is not, so there is no ceiling
       // to band it against (analytics' device.dart contract).
