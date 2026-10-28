@@ -4946,9 +4946,12 @@ class AppState extends ChangeNotifier {
   /// machine matches the raw ids so it stays dependency-free.
   void _handleAlarmEvent(int id, int ts) {
     // The strap stamps events on its own RTC; the alarm was armed at
-    // `when - driftSec` in that frame, so map back the same way.
+    // `when - driftSec` in that frame, so map back the same way. The fire time
+    // shown and persisted below must use this mapped value too, or a strap
+    // whose RTC never latched reports the alarm firing early/late by the drift.
+    final wallTs = ts + (engine.clockRef?.driftSec ?? 0);
     final effect = _alarm.onEvent(id, DateTime.now().millisecondsSinceEpoch,
-        tsSec: ts + (engine.clockRef?.driftSec ?? 0));
+        tsSec: wallTs);
     if (effect == null) return;
     switch (effect) {
       case AlarmEffect.confirmed:
@@ -4974,9 +4977,9 @@ class AppState extends ChangeNotifier {
         break;
       case AlarmEffect.fired:
         _log('[alarm] strap FIRED — EXECUTED (event $id) received.');
-        _alarmFiredAt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+        _alarmFiredAt = DateTime.fromMillisecondsSinceEpoch(wallTs * 1000);
         unawaited(SharedPreferences.getInstance()
-            .then((p) => p.setInt('alarm_fired_at', ts))
+            .then((p) => p.setInt('alarm_fired_at', wallTs))
             .catchError((Object e) {
           _log('[alarm] persisting the fire time failed: $e');
           return false;

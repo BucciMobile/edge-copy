@@ -30,6 +30,7 @@ import 'package:openstrap_edge/state/prefs.dart';
 import 'package:openstrap_edge/ui2/activity/catalogue.dart';
 import 'package:openstrap_edge/ui2/activity/live.dart';
 import 'package:openstrap_edge/sync/paired_device.dart';
+import 'package:openstrap_edge/sync/sync_policy.dart' show ClockRef;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -393,6 +394,27 @@ void main() {
       // and a relaunch later that day still shows it
       expect(prefs.getInt('alarm_fired_at'),
           app.alarmFiredAt!.millisecondsSinceEpoch ~/ 1000);
+    });
+
+    test('the fire time is shown in wall time, not the strap RTC frame',
+        () async {
+      // A strap whose SET_CLOCK never latched runs 40 min behind; the alarm
+      // was armed in its frame, so its event 57 stamp is 40 min "early".
+      SharedPreferences.setMockInitialValues({});
+      await silenceOsPresent();
+      final engine = _DriftedClockEngine(driftSec: 2400);
+      final app = AppState.forTesting(engine: engine);
+      addTearDown(app.dispose);
+      final wallNow = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+      app.debugHandleAlarmEvent(57, tsSec: wallNow - 2400);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(app.alarmFiredAt, isNotNull);
+      expect(app.alarmFiredAt!.millisecondsSinceEpoch ~/ 1000, wallNow);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      expect(prefs.getInt('alarm_fired_at'), wallNow);
     });
 
     test('the app-side EXECUTED id (58) is a RUN_ALARM buzz, the arm stays',
@@ -1185,6 +1207,16 @@ class _ArmRecordingEngine extends BleEngine {
     armed.add(when);
     return when;
   }
+}
+
+/// A strap whose RTC lags wall time by [driftSec] (GET_CLOCK correlated).
+class _DriftedClockEngine extends BleEngine {
+  _DriftedClockEngine({required int driftSec})
+      : _ref = ClockRef(device: 1785000000, wall: 1785000000 + driftSec),
+        super(onRecord: (_, _) async {}, onState: (_) {});
+  final ClockRef _ref;
+  @override
+  ClockRef? get clockRef => _ref;
 }
 
 /// The strap rejects every SET_ALARM (engine.setAlarm's null result).
