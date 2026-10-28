@@ -1696,6 +1696,52 @@ class LocalDb {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  /// Flip one symptom on [date] against what is STORED, inside one
+  /// transaction. The screen used to toggle against its last loaded snapshot
+  /// and hand the whole list to [putCycleSymptoms]; a second chip tapped before
+  /// the reload landed was computed from the same snapshot, and its REPLACE
+  /// wiped the first. It also passed no note, so every tap erased the day's
+  /// note. Returns the list now stored.
+  static Future<List<String>> toggleCycleSymptom(
+    String date,
+    String symptom,
+  ) async {
+    final db = await instance;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'cycle_symptom',
+        columns: ['symptoms_json', 'note'],
+        where: 'date = ?',
+        whereArgs: [date],
+        limit: 1,
+      );
+      final row = rows.isEmpty ? null : rows.first;
+      final now = <String>[];
+      final raw = row?['symptoms_json'];
+      if (raw is String) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is List) now.addAll(decoded.whereType<String>());
+        } catch (_) {
+          // A corrupt list is treated as empty rather than blocking the tap.
+        }
+      }
+      final note = row?['note'] as String?;
+      now.contains(symptom) ? now.remove(symptom) : now.add(symptom);
+      if (now.isEmpty && (note == null || note.isEmpty)) {
+        await txn.delete('cycle_symptom', where: 'date = ?', whereArgs: [date]);
+      } else {
+        await txn.insert('cycle_symptom', {
+          'date': date,
+          'symptoms_json': jsonEncode(now),
+          'note': note,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+      }
+      return now;
+    });
+  }
+
   /// All symptom rows (newest first): {date, symptoms_json, note}.
   static Future<List<Map<String, dynamic>>> cycleSymptoms() async {
     final db = await instance;

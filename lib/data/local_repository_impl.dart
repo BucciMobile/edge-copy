@@ -4380,6 +4380,10 @@ class LocalRepositoryImpl extends LocalRepository {
   }) async => LocalDb.putCycleSymptoms(date, symptoms, note: note);
 
   @override
+  Future<List<String>> toggleCycleSymptom(String date, String symptom) async =>
+      LocalDb.toggleCycleSymptom(date, symptom);
+
+  @override
   Future<Map<String, List<String>>> getCycleSymptoms() async {
     final rows = await LocalDb.cycleSymptoms();
     final out = <String, List<String>>{};

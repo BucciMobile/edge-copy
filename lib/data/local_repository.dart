@@ -360,6 +360,8 @@ abstract class LocalRepository {
     List<String> symptoms, {
     String? note,
   }) => throw UnimplementedError('re-layer: postCycleSymptoms');
+  Future<List<String>> toggleCycleSymptom(String date, String symptom) =>
+      throw UnimplementedError('re-layer: toggleCycleSymptom');
   Future<Map<String, List<String>>> getCycleSymptoms() =>
       throw UnimplementedError('re-layer: getCycleSymptoms');
 
