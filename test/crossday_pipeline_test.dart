@@ -830,6 +830,81 @@ void _wiredFamilies() {
     });
   });
 
+  // The multivariate anomaly standardises every column itself, so its temp
+  // feature is the raw nightly mean. It was handed `skin_temp_z`, which is
+  // scored against a baseline that already holds the earlier fever nights, and
+  // it skipped the ambient exclusion the temperature flag applies.
+  group('the anomaly reads the raw, ambient-gated nightly temp', () {
+    const noise = [-9.0, 4.0, 11.0, -3.0, -12.0, 7.0, 1.0, -6.0, 13.0, -5.0,
+      2.0, -10.0, 8.0, -1.0, 5.0, -7.0, 10.0, -4.0, 0.0, 6.0];
+
+    // 40 ordinary nights, then [tail] nights whose raw temp is [tailTemp].
+    // `skin_temp_z` is whatever [z] returns, so a test can make it disagree
+    // with the raw mean.
+    List<Map<String, dynamic>> nights({
+      int tail = 3,
+      double tailTemp = 3040,
+      double? Function(int i)? z,
+      bool Function(int i)? ambient,
+    }) {
+      var dt = DateTime(2024, 1, 1);
+      final out = <Map<String, dynamic>>[];
+      for (var i = 0; i < 40 + tail; i++) {
+        final w = noise[i % noise.length];
+        out.add({
+          'date': '${dt.year}-${dt.month.toString().padLeft(2, '0')}-'
+              '${dt.day.toString().padLeft(2, '0')}',
+          'rhr': 55.0 + w / 4,
+          'rmssd': 45.0 + w / 2,
+          'resp_rate': 14.0 + w / 20,
+          'skin_temp_z': z == null ? null : z(i),
+          'skin_temp_adc': i < 40 ? 3000 + w : tailTemp,
+          'skin_temp_family': 'gen4',
+          if (ambient != null && ambient(i)) 'skin_temp_illness_ok': false,
+        });
+        dt = dt.add(const Duration(days: 1));
+      }
+      return out;
+    }
+
+    double? tempDriver(List<Map<String, dynamic>> days) {
+      final a = buildCrossDayBundle(days, const {})['anomaly'] as Map?;
+      if (a == null) return null;
+      for (final d in a['drivers'] as List) {
+        if ((d as Map)['label'] == 'temp') {
+          return (d['contribution'] as num).toDouble();
+        }
+      }
+      return null;
+    }
+
+    test('a raw rise reaches the anomaly even when no z was stored', () {
+      final days = nights();
+      expect((buildCrossDayBundle(days, const {})['anomaly'] as Map)['date'],
+          days.last['date']);
+      final t = tempDriver(days);
+      expect(t, isNotNull);
+      expect(t!, greaterThan(2));
+    });
+
+    test('the temp term follows the raw rise, not a z that disagrees', () {
+      // A z claiming every night is ordinary while the raw mean has risen.
+      final days = nights(z: (i) => 0.0);
+      expect(tempDriver(days)!, greaterThan(2));
+    });
+
+    test('a night that tracked the ambient channel carries no temp term', () {
+      final days = nights(
+        tail: 1,
+        z: (i) => i < 40 ? noise[i % noise.length] / 8 : 4.0,
+        ambient: (i) => i == 40,
+      );
+      final a = buildCrossDayBundle(days, const {})['anomaly'] as Map;
+      expect(a['date'], days.last['date']);
+      expect(tempDriver(days), isNull);
+    });
+  });
+
   group('the breakdown ranks tonight against its own method family', () {
     const methods = {'gen4': 'hr_1hz', 'gen5': 'hr_1hz', 'oura': 'hr_5min'};
 

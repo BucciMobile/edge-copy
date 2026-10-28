@@ -111,6 +111,17 @@ Map<String, dynamic> buildCrossDayBundle(
   final unsettled = <bool>[for (final d in days) d['unsettled'] == true];
   T? settled<T>(int i, T? v) => unsettled[i] ? null : v;
 
+  // The skin-temp input both temperature-reading alerts take: the raw nightly
+  // mean in the newest family, minus any WHOOP 4 night whose skin temp moved
+  // with the band's ambient channel (`skin_temp_illness_ok`, see
+  // `skinTempIllnessEligible`) — a warm bedroom is not a fever. A record
+  // without the key (built by an older caller) keeps the old behaviour.
+  // Withholding `settled()` is applied at each use.
+  final tempAlertList = <double?>[
+    for (var i = 0; i < n; i++)
+      days[i]['skin_temp_illness_ok'] == false ? null : tempRawList[i],
+  ];
+
   // ── illness CUSUM (NightSignal) on nightly RHR ─────────────────────────────
   final illness = ana.illnessCusum(dates, [
     for (var i = 0; i < n; i++) settled(i, rhrList[i]),
@@ -120,12 +131,18 @@ Map<String, dynamic> buildCrossDayBundle(
   // Build one AnomalyFeatures per day (same length as dates). Days with all
   // features null still occupy a slot — the detector handles the nulls
   // internally (needs ≥2 present features tonight to compute a distance).
+  //
+  // temp is the raw nightly mean, not `skin_temp_z`, for the same reason as
+  // the temperature flag: the detector standardises every column itself, and
+  // the z had already been scored against a baseline holding the earlier fever
+  // nights, so the temp term shrank night over night and a sustained rise
+  // could fall out of the two-night persistence run.
   final feats = <ana.AnomalyFeatures>[
     for (var i = 0; i < n; i++)
       ana.AnomalyFeatures(
         rhr: settled(i, rhrList[i]),
         hrv: settled(i, rmssdList[i]),
-        temp: settled(i, tempList[i]),
+        temp: settled(i, tempAlertList[i]),
         resp: settled(i, respList[i]),
       ),
   ];
@@ -154,16 +171,8 @@ Map<String, dynamic> buildCrossDayBundle(
   // exception still fires, with the confound named. Suppressing a real illness
   // is worse than the false alarm.
   final luteal = _lutealFlags(dates, cycleStartDates);
-  //
-  // A WHOOP 4 night whose skin temp moved with the band's ambient channel is
-  // left out (`skin_temp_illness_ok`, see `skinTempIllnessEligible`): the
-  // illness watch should not fire on a warm bedroom. A record without the key
-  // (built by an older caller) keeps the old behaviour.
   final tempIllness = ana.tempIllnessFlag(dates, [
-    for (var i = 0; i < n; i++)
-      days[i]['skin_temp_illness_ok'] == false
-          ? null
-          : settled(i, tempRawList[i]),
+    for (var i = 0; i < n; i++) settled(i, tempAlertList[i]),
   ], luteal: luteal);
 
   // ── circadian: mid-sleep, free/work split, jetlag, chronotype, sleep debt ──
@@ -540,7 +549,8 @@ Map<String, dynamic> buildCrossDayBundle(
   // publishing it would hide a run that is still open. So each family
   // publishes the newest settled night that carried ITS inputs (illness: the
   // nightly RHR; anomaly: the ≥2 features it needs to score a night;
-  // temperature: the skin-temperature z). Outputs are parallel to `dates`.
+  // temperature: the raw skin-temperature mean it was allowed to read).
+  // Outputs are parallel to `dates`.
   // The entry carries its OWN `date`; consumers must date findings with it,
   // never with `recent.last`.
   int? newestScored(bool Function(int i) hasInput) {
@@ -555,18 +565,15 @@ Map<String, dynamic> buildCrossDayBundle(
   final latestAnomaly = at(
     anomaly,
     newestScored((i) =>
-        [rhrList[i], rmssdList[i], tempList[i], respList[i]]
+        [rhrList[i], rmssdList[i], tempAlertList[i], respList[i]]
             .where((v) => v != null)
             .length >=
         2),
   );
   // Same predicate that built the flag's input: an ambient-excluded night
   // still has a raw value, but the flag saw null and held it normal.
-  final latestTemp = at(
-    tempIllness,
-    newestScored((i) =>
-        days[i]['skin_temp_illness_ok'] != false && tempRawList[i] != null),
-  );
+  final latestTemp =
+      at(tempIllness, newestScored((i) => tempAlertList[i] != null));
 
   // per-day flags (for notifications / trends): asleep/illness/anomaly/temp,
   // plus the nightly RESTING HR the "your resting HR trend shifted" CUSUM
