@@ -83,15 +83,6 @@ class PhonePedometer {
     }
   }
 
-  /// Ask for access to the phone's step sensor. Safe to call repeatedly.
-  ///
-  /// THIS IS THE ONLY THING THAT MAKES THE PERMISSION EXIST. On iOS a
-  /// permission the app never asks for is not listed in Settings at all —
-  /// CoreMotion has no explicit request API, so the native side raises the
-  /// prompt by issuing a one-minute query. On Android this is the runtime
-  /// ACTIVITY_RECOGNITION request and it also arms the sensor listener. If this
-  /// method stops being reached, the feature looks broken with nothing for the
-  /// user to fix; `arming reaches the platform` in the tests pins that.
   /// The motion coprocessor's own step count between two instants, or null when
   /// the interval is not covered.
   ///
@@ -111,6 +102,15 @@ class PhonePedometer {
     }
   }
 
+  /// Ask for access to the phone's step sensor. Safe to call repeatedly.
+  ///
+  /// THIS IS THE ONLY THING THAT MAKES THE PERMISSION EXIST. On iOS a
+  /// permission the app never asks for is not listed in Settings at all —
+  /// CoreMotion has no explicit request API, so the native side raises the
+  /// prompt by issuing a one-minute query. On Android this is the runtime
+  /// ACTIVITY_RECOGNITION request and it also arms the sensor listener. If this
+  /// method stops being reached, the feature looks broken with nothing for the
+  /// user to fix; `arming reaches the platform` in the tests pins that.
   Future<bool> requestPermission() async {
     try {
       return await phoneStepsChannel.invokeMethod<bool>('requestPermission') ??
