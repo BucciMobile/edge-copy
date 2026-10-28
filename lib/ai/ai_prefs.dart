@@ -105,11 +105,13 @@ class AiPrefs {
   /// sleeper's bedtime (01:10, say) would put the slot at 00:10, which reads
   /// as "evening" from just after midnight, so the morning briefing never
   /// wins and the sweep runs off an empty day. A slot that would land in the
-  /// small hours is held at [eveningLatestMin] instead.
+  /// small hours is held at [eveningLatestMin] instead. So is a bedtime
+  /// between 00:31 and 00:59: its slot (23:31-23:59) is still "evening", but
+  /// it leaves the sweep minutes or less before the day label rolls over.
   int resolvedEveningMin({double? bedtimeMinOfDay}) {
     if (bedtimeMinOfDay != null && bedtimeMinOfDay >= 0) {
       final m = (bedtimeMinOfDay.round() - eveningBedtimeLeadMin) % 1440;
-      return m < 12 * 60 ? eveningLatestMin : m;
+      return (m < 12 * 60 || m > eveningLatestMin) ? eveningLatestMin : m;
     }
     return eveningMin % 1440;
   }
