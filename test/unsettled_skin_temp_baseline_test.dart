@@ -54,4 +54,19 @@ void main() {
     expect(s['skin_temp_adc'], isNotNull);
     expect(s['skin_temp_z'], isNotNull);
   });
+
+  test('a night that passes the gate banks its settled mean, not the raw one',
+      () {
+    // 15% of the night reads 250 counts low (warm-up after charging). That is
+    // over the 0.80 gate, so the night counts — but the cold samples must not
+    // be averaged into it: the raw mean is 962.5, ~10 SD below this baseline.
+    final temps = [
+      ...List<int>.filled(60, 750),
+      ...List<int>.filled(340, 1000),
+    ];
+    final s = scalars(temps, history);
+    expect(s['skin_temp_settled_frac'] as num, closeTo(0.85, 1e-6));
+    expect(s['skin_temp_adc'] as num, closeTo(1000, 1e-6));
+    expect(s['skin_temp_z'] as num, closeTo(0, 1e-6));
+  });
 }

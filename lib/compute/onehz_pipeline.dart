@@ -849,6 +849,14 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   // every number that leans on it below is served at half confidence and
   // marked provisional. Always false on a band, so its payload is unchanged.
   final tempProvisional = settledTemp.value?.provisional ?? false;
+  // The night's value is the mean of its SETTLED samples whenever the family
+  // has a settle band. The fraction gate below only refuses nights under 0.80;
+  // a night at 0.85 still carries 15% warm-up or off-body samples reading
+  // hundreds of counts low, and the raw mean folds them in — tens of counts
+  // cold against a ~6.5-count between-night SD, which readiness reads as a
+  // cool night and the baseline banks as an outlier. A family with no band
+  // (gen5) has no settled mean and keeps the raw one.
+  final double? skinTempNightly = settledTemp.value?.mean ?? skinTempAdc;
   // The nightly mean every LATER night is measured against. A night the strap
   // spent partly warming up (or half off the wrist) reads hundreds of counts
   // low; readiness already refuses it as tonight's input, but banking it as
@@ -860,8 +868,8 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
   final double? skinTempBanked = (skinTempSettledFrac != null &&
           skinTempSettledFrac < kMinSettledFraction)
       ? null
-      : skinTempAdc;
-  // STEP 2 — z-score today's RAW mean against the RAW-ADC baseline history (NOT
+      : skinTempNightly;
+  // STEP 2 — z-score today's nightly mean against the RAW-ADC baseline history (NOT
   // the previously-computed z-scores; that unit mismatch was the bug). Gated on
   // ≥3 prior raw means.
   double? skinTempZ;
@@ -910,12 +918,13 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
     // own oriented robust-z internally (consistent with the other inputs, which
     // pass raw values + their raw baselines).
     //
-    // The mean stays RAW — value and baseline have to be the same quantity, and
-    // the stored history is a series of raw nightly means. The settled fraction
-    // is the GATE on using it at all: below 0.80 the driver is refused for this
-    // night, by name, and readiness renormalises over the three that are left.
+    // Value and baseline have to be the same quantity: this is the same
+    // settled nightly mean that is banked as `skin_temp_adc`. The settled
+    // fraction is the GATE on using it at all: below 0.80 the driver is refused
+    // for this night, by name, and readiness renormalises over the three that
+    // are left.
     tempInput(
-      skinTempAdc,
+      skinTempNightly,
       d.skinTempAdcHistory,
       settledFraction: skinTempSettledFrac,
     ),
@@ -1790,7 +1799,8 @@ Map<String, dynamic> deriveDayBundle(Map<String, dynamic> inputJson) {
       'ln_rmssd': lnToday,
       'resp_rate': respToday,
       'skin_temp_z': skinTempZ,
-      // RAW nightly skin-temp ADC mean — the personal BASELINE series for
+      // Nightly skin-temp ADC mean (of the settled samples, where the family
+      // has a settle band) — the personal BASELINE series for
       // skin_temp_z. ALWAYS present when there's sleep+temp data (even while z is
       // still null in the ≤3-day bootstrap), so the series fills and z starts
       // computing from ~day 4. This is the series _attachHistory must feed back.
