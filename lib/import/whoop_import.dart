@@ -63,7 +63,9 @@ const String _kDeletedWorkoutsPref = 'whoop_import_deleted_workouts';
 
 class WhoopImporter {
   /// Every imported workout's session id starts with this, followed by its
-  /// start epoch — the same CSV row always lands on the same id.
+  /// start epoch — the same CSV row always lands on the same id. A row first
+  /// imported before the export's zone column was honoured keeps the id of
+  /// the instant it was read at then, after its window is corrected.
   static const String workoutIdPrefix = 'whoop_';
 
   /// Imported workout ids the user has DELETED here. The export still has
@@ -451,6 +453,38 @@ class WhoopImporter {
     // A deleted one stays deleted.
     if (deleted.contains(id) || await LocalDb.session(id) != null) {
       return false;
+    }
+    // Imports before the export's own zone was honoured read these times in
+    // the phone's zone, so a workout recorded elsewhere is already here under
+    // that wrong instant's id. Inserting at the corrected id would show it
+    // twice (and write it to Health twice); move the old row onto the right
+    // instant instead, under its old id so its edits, tombstone and child rows
+    // stay attached. Only when its window is still exactly what that import
+    // wrote — a row the user retimed, or one healed by an earlier re-import,
+    // is left alone.
+    final legacyStart =
+        parseExportTs(get(['workout start time', 'start time']));
+    if (legacyStart != null && legacyStart != start) {
+      final legacyId = '$workoutIdPrefix$legacyStart';
+      if (deleted.contains(legacyId)) return false;
+      final legacy = await LocalDb.session(legacyId);
+      if (legacy != null) {
+        final legacyEnd = parseExportTs(get(['workout end time', 'end time']));
+        final oldStart = (legacy['start_ts'] as num?)?.toInt();
+        final oldEnd = (legacy['end_ts'] as num?)?.toInt();
+        if (oldStart == legacyStart &&
+            oldEnd == legacyEnd &&
+            legacy['source'] == 'whoop' &&
+            await LocalDb.setSessionWindow(legacyId, start, end) > 0) {
+          unawaited(() async {
+            if (oldEnd != null) {
+              await HealthExporter.deleteWorkoutWindow(legacyStart, oldEnd);
+            }
+            await HealthExporter.exportWorkoutId(legacyId);
+          }());
+        }
+        return false;
+      }
     }
     await LocalDb.putSession({
       'id': id,

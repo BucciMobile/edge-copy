@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:openstrap_edge/data/db.dart';
 import 'package:openstrap_edge/import/whoop_import.dart';
@@ -118,6 +119,76 @@ void main() {
       expect(rows, hasLength(1));
       expect((rows.first['start_ts'] as num).toInt(), start);
       expect((rows.first['end_ts'] as num).toInt(), _utc(2024, 3, 10, 17, 45));
+    });
+
+    // An import made before the zone column was honoured stored this workout
+    // at its wall time read in the phone's zone, under that instant's id.
+    // +05:45 so the test host's own zone can't make the two readings agree.
+    const wallStart = '2024-04-02 06:00:00';
+    const wallEnd = '2024-04-02 07:10:00';
+    String workoutCsv(String name) => (File(p.join(tmp.path, name))
+      ..writeAsStringSync(
+        'Cycle start time,Cycle end time,Cycle timezone,Workout start time,'
+        'Workout end time,Activity name,Activity Strain\n'
+        '2024-04-02 04:00:00,2024-04-03 04:00:00,UTC+05:45,'
+        '$wallStart,$wallEnd,Running,9.4\n',
+      )).path;
+
+    Future<List<Map<String, dynamic>>> sessionsAround(int ts) async {
+      final db = await LocalDb.instance;
+      return db.query('sessions',
+          where: "id LIKE 'whoop%' AND start_ts BETWEEN ? AND ?",
+          whereArgs: [ts - 86400, ts + 86400]);
+    }
+
+    test('a re-import moves a phone-zone workout instead of duplicating it',
+        () async {
+      SharedPreferences.setMockInitialValues({});
+      final legacyStart = WhoopImporter.parseExportTs(wallStart)!;
+      final legacyEnd = WhoopImporter.parseExportTs(wallEnd)!;
+      final start = _utc(2024, 4, 2, 0, 15);
+      final end = _utc(2024, 4, 2, 1, 25);
+      if (legacyStart == start) return; // host is on +05:45 itself
+      final legacyId = 'whoop_$legacyStart';
+      await LocalDb.putSession({
+        'id': legacyId,
+        'start_ts': legacyStart,
+        'end_ts': legacyEnd,
+        'type': 'cycling', // the user's correction
+        'status': 'done',
+        'source': 'whoop',
+        'strain': 9.4,
+        'duration_min': 70,
+        'created_at': 0,
+      });
+      await LocalDb.setSessionPrivate(legacyId, true);
+
+      for (var i = 0; i < 2; i++) {
+        final res = await WhoopImporter.importFiles([workoutCsv('w$i.csv')]);
+        expect(res.workouts, 0);
+        final rows = await sessionsAround(start);
+        expect(rows, hasLength(1), reason: 'import ${i + 1}');
+        final r = rows.single;
+        expect(r['id'], legacyId);
+        expect((r['start_ts'] as num).toInt(), start);
+        expect((r['end_ts'] as num).toInt(), end);
+        expect(r['type'], 'cycling');
+        expect(r['private'], 1);
+      }
+      final db = await LocalDb.instance;
+      await db.delete('sessions', where: 'id = ?', whereArgs: [legacyId]);
+    });
+
+    test('a deleted phone-zone workout stays deleted on re-import', () async {
+      final legacyStart = WhoopImporter.parseExportTs(wallStart)!;
+      final start = _utc(2024, 4, 2, 0, 15);
+      if (legacyStart == start) return;
+      SharedPreferences.setMockInitialValues({
+        'whoop_import_deleted_workouts': ['whoop_$legacyStart'],
+      });
+      final res = await WhoopImporter.importFiles([workoutCsv('wd.csv')]);
+      expect(res.workouts, 0);
+      expect(await sessionsAround(start), isEmpty);
     });
   });
 }

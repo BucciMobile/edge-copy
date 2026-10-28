@@ -12418,6 +12418,26 @@ class LocalDb {
     });
   }
 
+  /// Move a session's window without touching any other column. Not
+  /// `putSession`: the row's type correction, RPE and private flag must
+  /// survive. Returns the number of rows changed.
+  static Future<int> setSessionWindow(String id, int startTs, int? endTs) async {
+    final db = await instance;
+    return db.transaction((tx) async {
+      final n = await tx.update(
+        'sessions',
+        {'start_ts': startTs, 'end_ts': endTs},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (n > 0) {
+        await ActivityStore.supersede(tx, ActivityKind.workout, startTs,
+            endTs ?? DateTime.now().millisecondsSinceEpoch ~/ 1000);
+      }
+      return n;
+    });
+  }
+
   /// Update ONLY a session's derived score columns.
   ///
   /// Deliberately not `putSession`: that is INSERT-OR-REPLACE over the whole
