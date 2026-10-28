@@ -35,6 +35,7 @@ Future<void> _clear() async {
     'med_dose',
     'med_def',
     'food_entry',
+    'step_calibration',
   ]) {
     await db.delete(t);
   }
@@ -75,6 +76,8 @@ void main() {
       'newer.db',
       'dose.db',
       'schedule.db',
+      'calib.db',
+      'calib_new.db',
     ]) {
       try {
         File(p.join(dir, f)).deleteSync();
@@ -213,5 +216,46 @@ void main() {
 
     expect((await db.query('med_def')).single['schedule_json'], '[540]');
     expect((await db.query('food_entry')).single['kcal'], 450.0);
+  });
+
+  test('an older backup does not roll back a refit step calibration',
+      () async {
+    await _clear();
+    final db = await LocalDb.instance;
+    Map<String, Object?> profile(double factor, int nDays, int ts) => {
+          'device_family': 'whoop5', 'wearing': 1, 'factor': factor,
+          'n_days': nDays, 'version': 1, 'updated_ts': ts,
+        };
+    await db.insert('step_calibration', profile(1.12, 10, 1000));
+    final backup = await _snapshot('calib.db');
+
+    // Since the backup: refit from more days.
+    await db.insert('step_calibration', profile(0.97, 24, 2000),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+
+    await LocalDb.importFromDbFile(backup);
+
+    final row = (await db.query('step_calibration')).single;
+    expect(row['factor'], 0.97);
+    expect(row['n_days'], 24);
+  });
+
+  test('a newer backup step calibration still replaces an older local one',
+      () async {
+    await _clear();
+    final db = await LocalDb.instance;
+    Map<String, Object?> profile(double factor, int nDays, int ts) => {
+          'device_family': 'whoop5', 'wearing': 1, 'factor': factor,
+          'n_days': nDays, 'version': 1, 'updated_ts': ts,
+        };
+    await db.insert('step_calibration', profile(0.97, 24, 2000));
+    final backup = await _snapshot('calib_new.db');
+    await db.insert('step_calibration', profile(1.12, 10, 1000),
+        conflictAlgorithm: ConflictAlgorithm.replace);
+
+    await LocalDb.importFromDbFile(backup);
+
+    final row = (await db.query('step_calibration')).single;
+    expect(row['factor'], 0.97);
   });
 }

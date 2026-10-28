@@ -10258,6 +10258,10 @@ class LocalDb {
     'med_def': (['key'], null),
     // Edited in place from the food log; `update` restamps `updated_at`.
     'food_entry': (['id'], 'updated_at'),
+    // Refit from every admissible finalized day, so an older backup's profile
+    // was fit from fewer days and would scale counter steps by a stale factor
+    // until the next refit.
+    'step_calibration': (['device_family', 'wearing'], 'updated_ts'),
     'cycle_log': (['date'], null),
     'sessions': (['id'], null),
     'strength_set': (['session_id'], null),
