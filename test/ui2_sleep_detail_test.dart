@@ -470,6 +470,18 @@ void main() {
     });
   });
 
+  group('sleepScrubTempDelta', () {
+    test('a relative sensor delta is signed and keeps its one decimal', () {
+      expect(sleepScrubTempDelta(-12.4), '−12.4');
+      expect(sleepScrubTempDelta(3.1), '+3.1');
+    });
+
+    test('zero carries no sign it does not have', () {
+      expect(sleepScrubTempDelta(0), '±0.0');
+      expect(sleepScrubTempDelta(-0.04), '±0.0');
+    });
+  });
+
   group('sleepStepperDay', () {
     test('stepping onto the newest night follows it rather than pinning it',
         () {

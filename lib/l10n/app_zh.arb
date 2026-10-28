@@ -1683,6 +1683,7 @@
   "sleepDetailHrv": "心率变异性",
   "sleepDetailBreathing": "呼吸",
   "sleepDetailTemp": "体温",
+  "sleepDetailTempRelative": "体温（相对）",
   "sleepDetailNotMeasuredCap": "未测量",
   "sleepDetailNoSignalAtMoment": "此刻没有记录到信号。",
   "sleepDetailStageAwake": "清醒",

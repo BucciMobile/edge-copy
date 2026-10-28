@@ -407,6 +407,18 @@ String? sleepDayAfterOverride(
         String? current, String edited, String? latestDay) =>
     current == edited ? sleepStepperDay(edited, latestDay) : current;
 
+/// The scrub card's skin-temperature reading. The timeline value is the
+/// sensor's raw count minus the day's median, already rounded to one decimal:
+/// there is no °C behind it. Printed bare as "-12.40" beside "52 bpm" it read
+/// as a twelve-degree drop, so it carries an explicit sign and no padding
+/// past the precision it actually has.
+@visibleForTesting
+String sleepScrubTempDelta(num v) {
+  final s = v.abs().toStringAsFixed(1);
+  if (s == '0.0') return '±0.0';
+  return v < 0 ? '−$s' : '+$s';
+}
+
 class SleepDetail extends StatefulWidget {
   final SleepData? data;
 
@@ -1498,7 +1510,8 @@ class _SleepDetailState extends State<SleepDetail> with RevisionReload {
         (l?.sleepDetailBreathing ?? 'Breathing',
             '${at('resp')!.toStringAsFixed(1)} br/min', C.teal),
       if (at('skin_temp') != null)
-        (l?.sleepDetailTemp ?? 'Temp', at('skin_temp')!.toStringAsFixed(2), C.orange),
+        (l?.sleepDetailTempRelative ?? 'Temp (rel.)',
+            sleepScrubTempDelta(at('skin_temp')!), C.orange),
     ];
 
     return Padding(

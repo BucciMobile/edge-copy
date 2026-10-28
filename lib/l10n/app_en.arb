@@ -8652,6 +8652,10 @@
   "@sleepDetailTemp": {
     "description": "Short label for skin temperature in the scrub readout card."
   },
+  "sleepDetailTempRelative": "Temp (rel.)",
+  "@sleepDetailTempRelative": {
+    "description": "Short label for the scrub readout card's skin-temperature value, which is a relative sensor deviation from that day's median, not degrees. Keep the 'relative' meaning."
+  },
   "sleepDetailNotMeasuredCap": "Not measured",
   "@sleepDetailNotMeasuredCap": {
     "description": "Capitalized, standalone label shown in place of a stage pill when the instant was not recorded."

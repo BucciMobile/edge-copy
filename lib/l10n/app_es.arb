@@ -1693,6 +1693,7 @@
   "sleepDetailHrv": "VFC",
   "sleepDetailBreathing": "Respiración",
   "sleepDetailTemp": "Temp.",
+  "sleepDetailTempRelative": "Temp. (rel.)",
   "sleepDetailNotMeasuredCap": "No medido",
   "sleepDetailNoSignalAtMoment": "No se registró ninguna señal en este momento.",
   "sleepDetailStageAwake": "Despierto",

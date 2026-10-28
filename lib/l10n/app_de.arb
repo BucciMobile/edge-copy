@@ -1733,6 +1733,7 @@
   "sleepDetailHrv": "HRV",
   "sleepDetailBreathing": "Atmung",
   "sleepDetailTemp": "Temp.",
+  "sleepDetailTempRelative": "Temp. (rel.)",
   "sleepDetailNotMeasuredCap": "Nicht gemessen",
   "sleepDetailNoSignalAtMoment": "Zu diesem Zeitpunkt wurde kein Signal aufgezeichnet.",
   "sleepDetailStageAwake": "Wach",
