@@ -1810,8 +1810,9 @@ import 'vendor_sleep.dart';
 // store `skin_temp_ambient_r` and the illness watch leaves out WHOOP 4 nights
 // whose skin temp tracks ambient (|r| >= 0.8, or unmeasured). One-shot,
 // raw-free: days derived before v106 drop naps overlapping the next night.
-// 113 → 114 (per-wearer step calibration, edge-only): the strap's live 100 Hz
-// pedometer banks through the wearer's own calibrated gain, per activity family
+// → 118 (per-wearer step calibration, edge-only; 114-117 are claimed by other
+// open changes, and this has to sort above all of them): the strap's live
+// 100 Hz pedometer banks through the wearer's own calibrated gain, per activity family
 // (slow / brisk / jog against the wearer's own counted walk; household against
 // the phone). NO CALIBRATION ⇒ EVERY NUMBER IS UNCHANGED TO THE DIGIT, since an
 // uncalibrated family resolves to `StepParams.gain` exactly as before.
@@ -1830,7 +1831,7 @@ import 'vendor_sleep.dart';
 //     gain on READ (the daily-sum layer `calcSteps` documents as the gain's
 //     home), which is a change to `live_coverage` and its readers, not to this
 //     feature.
-const int kAlgoVersion = 114;
+const int kAlgoVersion = 118;
 /// The sibling SHAs this version was derived against, asserted against
 /// pubspec.yaml in test/db_serve_version_and_reads_test.dart.
 ///
