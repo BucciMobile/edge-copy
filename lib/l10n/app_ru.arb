@@ -3363,6 +3363,14 @@
   "homeLoadFailedTitle": "Не удалось прочитать сегодняшний день",
   "homeLoadFailedBody": "Сохранённый день не загрузился. Ничего не удалено: это ошибка чтения, а не отсутствие данных.",
   "homeDayLoadFailedTitle": "Не удалось прочитать {day}",
+  "@homeDayLoadFailedTitle": {
+    "placeholders": {
+      "day": {
+        "type": "String",
+        "example": "Wednesday, 15 October"
+      }
+    }
+  },
   "wellnessLoadFailedTitle": "Не удалось прочитать",
   "wellnessLoadFailedBody": "Не удалось прочитать сохранённые данные. Ничего не удалено — это сбой чтения, а не отсутствие данных.",
   "homeTryAgain": "Повторить",
@@ -4019,6 +4027,13 @@
   "sleepDetailLowerThanUsual": "ниже обычного",
   "sleepDetailHigherThanUsual": "выше обычного",
   "sleepDetailPointsDelta": "на {n} п.п.",
+  "@sleepDetailPointsDelta": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  },
   "sleepDetailFellAsleep": "Засыпание",
   "sleepDetailEarlierThanUsual": "раньше обычного",
   "sleepDetailLaterThanUsual": "позже обычного",
@@ -7523,6 +7538,13 @@
   "reportDelete": "Удалить",
   "reportDeleteFailed": "Не удалось удалить. Попробуйте позже.",
   "reportDeleteConfirmTitle": "Удалить сообщение {id}?",
+  "@reportDeleteConfirmTitle": {
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
   "reportDeleteConfirmBody": "Оно сразу удаляется с сервера, и открыть его по ID больше не получится. Отменить нельзя.",
   "reportSaveFailedTitle": "Не удалось поделиться сообщением",
   "reportSaveFailedBody": "Не удалось собрать или передать файл. Тикет не создан.",
