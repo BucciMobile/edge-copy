@@ -1288,8 +1288,9 @@ class WorkoutController {
     // Push to the Live Activity at most ~every 4s (ActivityKit throttles; saves battery).
     // Skipped entirely while HR is absent: the widget's channel takes a
     // non-null int, so the only way to push "no reading" today would be to send
-    // 0 bpm, which is a fabricated measurement on the lock screen. Holding the
-    // last frame is the lesser wrong until `LiveActivity.update` takes `int?`.
+    // 0 bpm, which is a fabricated measurement on the lock screen. The last
+    // frame is held instead; the native bridge stamps each push with a stale
+    // date about a minute out, and the widget blanks HR and zone once it passes.
     if (hr != null && DateTime.now().difference(_lastLaPush).inSeconds >= 4) {
       _lastLaPush = DateTime.now();
       LiveActivity.update(
