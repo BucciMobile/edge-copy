@@ -292,6 +292,30 @@ void main() {
       }, timeout: const Timeout(Duration(seconds: 60)));
     }
   }
+
+  // A WITHHELD rollup (`getInsights` -> `{'stale': reason}`) after an update
+  // that changed how days are computed. Home says the insights are being
+  // rebuilt; this tab used to say there were not enough nights yet and that
+  // nothing recorded why tonight has no need.
+  testWidgets('withheld rollup: says it is being rebuilt, not cold start',
+      (t) async {
+    await _openRecovery(
+      t,
+      dark: false,
+      scale: 1.0,
+      repo: _Repo(insights: const {
+        'stale': {'kind': 'algo_version', 'algo_version': 1},
+      }),
+    );
+
+    expect(find.text('No breakdown to show'), findsOneWidget);
+    expect(find.text('Your cross-day insights are being rebuilt'),
+        findsOneWidget);
+    expect(find.text('No recovery breakdown yet'), findsNothing);
+    expect(find.text('No sleep need yet'), findsNothing);
+    expect(find.textContaining('enough nights'), findsNothing);
+    _expectCardPainted(t);
+  }, timeout: const Timeout(Duration(seconds: 60)));
 }
 
 /// TWO framework-internal assertions this harness causes and the screen does

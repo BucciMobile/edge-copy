@@ -34,7 +34,14 @@ import '../ui2.dart';
 import 'calm_breathing.dart';
 import 'driver_breakdown.dart';
 import 'cycle_screen.dart';
-import 'home_screen.dart' show envValue, metricOf, weekdayShortName;
+import 'home_screen.dart'
+    show
+        envValue,
+        metricOf,
+        staleInsightsCard,
+        staleReasonOf,
+        syncOf,
+        weekdayShortName;
 import 'journal_compose.dart';
 import 'start_card.dart';
 import 'metric_detail.dart' show detailScaffold;
@@ -496,6 +503,12 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
     final napMin = _reading(coachMap?['nap_credit_min']);
     final strainMin = _reading(coachMap?['strain_bonus_min']);
     final debtH = _nested(_insights, 'sleep_debt', 'debt_hours');
+    // A WITHHELD rollup (algo-version change, unstamped, or over a week old)
+    // arrives as `{'stale': reason}` with every key above missing. The
+    // cold-start copy below would then tell a user with months of nights that
+    // there are not enough of them yet, one tab over from Home saying the
+    // insights are being rebuilt.
+    final stale = staleReasonOf(_insights);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -526,7 +539,9 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
           // usual, no direction, no size, and no way to tell a move that
           // mattered from one inside the noise — all of which were already
           // being written on every derive and read by nothing.
-          _drivers.isEmpty
+          _drivers.isEmpty && stale != null
+              ? driverAbsenceCard(c, stale: stale, onSync: syncOf(c))
+              : _drivers.isEmpty
               ? StatusCard(
                   l?.wellnessNoDriversTitle ?? 'No recovery breakdown yet',
                   whyFromNote(metricOf(_stress['readiness']).note) ??
@@ -539,7 +554,9 @@ class _WellnessScreenState extends State<WellnessScreen> with RevisionReload {
         ),
         Section(
           l?.wellnessSleepNeedTonight ?? 'Sleep need tonight',
-          needSec == null
+          needSec == null && stale != null
+              ? staleInsightsCard(stale, syncOf(c), l)!
+              : needSec == null
               // The coach's own reason for the absent need — it names the
               // input that is actually missing. "Not enough of them yet" named
               // nothing, and was printed for every cause the estimator has.

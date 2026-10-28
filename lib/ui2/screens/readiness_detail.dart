@@ -19,6 +19,7 @@ import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart';
 import '../../models/payloads.dart' show todayHeadlineOf;
 import '../ui2.dart';
+import 'driver_breakdown.dart' show driverAbsenceCard;
 import 'home_screen.dart';
 import 'investigate.dart';
 import 'metric_detail.dart';
@@ -56,6 +57,11 @@ class ReadinessData {
   /// Home shows beside this number.
   final Map<String, dynamic> head;
 
+  /// Why `getInsights()` withheld the cross-day rollup, or null when it did
+  /// not (`staleReasonOf`). A withheld rollup is why the breakdown is empty,
+  /// and "takes about two weeks of nights" is the wrong reason to give then.
+  final Map<String, dynamic>? insightsStale;
+
   bool get provisional => head['recovery_state'] == 'provisional';
 
   /// The past day this was read for, or null for today. Set only by
@@ -71,6 +77,7 @@ class ReadinessData {
     this.heldOverNight,
     this.series = const [],
     this.absentDiag,
+    this.insightsStale,
   });
 
   /// A past day, as Home's day switcher shows it: the stored score for
@@ -124,6 +131,7 @@ class ReadinessData {
           if (e is Map) e.cast<String, dynamic>(),
       ],
       inputsUsed: (v['inputs_used'] as num?)?.toInt() ?? 0,
+      insightsStale: staleReasonOf(cd),
       heldOverNight: heldOverNightOf(today),
       series: denseDays(pointsOf(chart), 90),
       // Only read when there is nothing to explain away — a scored day has no
@@ -333,13 +341,16 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
         ] else if (v != null && d.day == null)
           Section(
             l?.readinessDetailWhatWentIntoIt ?? 'What went into it',
-            StatusCard(
-              l?.readinessDetailNoBreakdownTitle ?? 'No breakdown yet',
-              l?.readinessDetailNoBreakdownBody ??
-                  'Ranking each input against your own history takes about two '
-                      'weeks of nights.',
-              icon: LucideIcons.listTree,
-            ),
+            d.insightsStale != null
+                ? driverAbsenceCard(c,
+                    stale: d.insightsStale, onSync: syncOf(c))
+                : StatusCard(
+                    l?.readinessDetailNoBreakdownTitle ?? 'No breakdown yet',
+                    l?.readinessDetailNoBreakdownBody ??
+                        'Ranking each input against your own history takes '
+                            'about two weeks of nights.',
+                    icon: LucideIcons.listTree,
+                  ),
           ),
 
         // The header used to say "Last 90 days" over a chart of five points.
