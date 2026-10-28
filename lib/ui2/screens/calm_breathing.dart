@@ -264,12 +264,19 @@ class _CalmBreathingState extends State<CalmBreathing>
   Future<void> _close() async {
     if (_closing) return;
     setState(() => _closing = true);
-    if (_running) {
-      await _stop(abort: true);
-    } else if (_quiet != null) {
-      await _abortQuiet();
+    // The pop sits in `finally`: `_closing` is never cleared and `canPop` is
+    // false while it is set, so a throw from the teardown (the session insert,
+    // or the effect re-read) would otherwise leave the user on a screen with a
+    // dead X and a blocked back gesture. The error still propagates.
+    try {
+      if (_running) {
+        await _stop(abort: true);
+      } else if (_quiet != null) {
+        await _abortQuiet();
+      }
+    } finally {
+      if (mounted) Navigator.of(context).pop();
     }
-    if (mounted) Navigator.of(context).pop();
   }
 
   @override
