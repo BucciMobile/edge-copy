@@ -39,7 +39,9 @@ Future<void> _openSheet(WidgetTester t, Locale locale) async {
     ),
   ));
   await t.pumpAndSettle();
-  await t.tap(find.text('Talk it through with AI'));
+  // The entry link is localized, so tap it in the locale under test.
+  await t.tap(find.text(
+      lookupAppLocalizations(locale).journalComposeTalkItThroughWithAi));
   await t.pumpAndSettle();
 }
 
