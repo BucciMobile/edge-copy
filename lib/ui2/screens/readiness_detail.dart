@@ -356,7 +356,10 @@ class _ReadinessDetailState extends State<ReadinessDetail> {
               : Surface(child: _history(c, d)),
         ),
         const SizedBox(height: S.x5),
-        investigateRow(c, () => go(c, const Investigate('readiness'))),
+        // A past day opened from Home has to carry its day into Nerd stats;
+        // without it Investigate falls back to the newest derived day and its
+        // inputs stop matching the score above. d.day is null for today.
+        investigateRow(c, () => go(c, Investigate('readiness', day: d.day))),
       ],
     ]);
   }
