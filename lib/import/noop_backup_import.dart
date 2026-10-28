@@ -298,9 +298,11 @@ class NoopBackupImporter {
       final from = dayStart.millisecondsSinceEpoch ~/ 1000;
       final to = next.millisecondsSinceEpoch ~/ 1000;
 
-      // Order within a day does not matter — [NoopIngest] rebuilds the Substrate
-      // sorted by timestamp — but the DAYS must arrive in ascending order, since
-      // the high-water date is what closes out and derives the previous one.
+      // [NoopIngest] re-sorts by timestamp but keeps rows that share a second in
+      // arrival order, so beats within a second must come in detection order
+      // (the `ts, rowid` order above). The DAYS must also arrive in ascending
+      // order, since the high-water date is what closes out and derives the
+      // previous one.
       await _read(src, tables, columns, ordered, corrupt, 'hrSample', from, to,
           (r) async {
         final ts = _int(r['ts']), v = _int(r['bpm']);

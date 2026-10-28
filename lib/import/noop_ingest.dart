@@ -290,9 +290,7 @@ class NoopIngest {
       skinTemp[i] = fTemp;
     }
 
-    // RR beats sorted by time.
-    final order = List<int>.generate(rrMs.length, (i) => i)
-      ..sort((a, b) => rrTs[a].compareTo(rrTs[b]));
+    final order = rrOrder(rrTs);
     return Substrate(
       tsSec: tsSec,
       hr: hr,
@@ -307,6 +305,21 @@ class NoopIngest {
       skinContact: ax.map((_) => 0).toList(),
     );
   }
+
+  /// Indices of the buffered RR beats in time order.
+  ///
+  /// NOOP stamps beats with whole seconds, so several beats routinely share one
+  /// timestamp and the sort is mostly ties. Those beats already arrive in the
+  /// order the strap detected them, and that order is the interval series:
+  /// swapping two of them invents successive differences the heart never made
+  /// (RMSSD, pNN50, ectopic rejection, PRSA). `List.sort` is not stable past a
+  /// few dozen elements, so ties fall back to buffer position explicitly.
+  static List<int> rrOrder(List<double> rrTs) =>
+      List<int>.generate(rrTs.length, (i) => i)
+        ..sort((a, b) {
+          final c = rrTs[a].compareTo(rrTs[b]);
+          return c != 0 ? c : a.compareTo(b);
+        });
 
   /// Maximum gap (seconds) between consecutive step-counter samples that is
   /// still treated as one continuous run. Both sources sample every second but
