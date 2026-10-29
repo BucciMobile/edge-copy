@@ -1160,11 +1160,13 @@ class AppState extends ChangeNotifier {
     final staleAtMs = (user?[kWeighedAtMs] as num?)?.toInt();
     final reverted = await profileWithoutStaleWeighing(user);
     if (reset()) return;
-    if (reverted != null) await updateProfile(reverted);
+    if (reverted != null) {
+      await updateProfile(reverted, resetGeneration: resetGen);
+    }
     final w = await newestWeighing(near: user?['weight_kg'] as num?);
     final next = w == null ? null : profileWithWeighing(user, w);
     if (reset()) return;
-    if (next != null) await updateProfile(next);
+    if (next != null) await updateProfile(next, resetGeneration: resetGen);
     final fromMs = [
       if (reverted != null && staleAtMs != null) staleAtMs,
       if (next != null) w!.atMs,
@@ -1184,11 +1186,19 @@ class AppState extends ChangeNotifier {
 
   /// Merge + persist local profile fields. Returns the updated map. Replaces the
   /// old cloud PATCH /profile (no network).
+  ///
+  /// [resetGeneration] is [ResetGate.generation] when the caller's work
+  /// began; it defaults to now. A "delete everything" that runs while this
+  /// waits for the preferences store has cleared it, and the profile must
+  /// not be written back over that.
   Future<Map<String, dynamic>> updateProfile(
-    Map<String, dynamic> fields,
-  ) async {
+    Map<String, dynamic> fields, {
+    int? resetGeneration,
+  }) async {
+    final resetGen = resetGeneration ?? ResetGate.generation;
     user = {...?user, ...fields};
     final prefs = await SharedPreferences.getInstance();
+    if (ResetGate.changedSince(resetGen)) return {...?user};
     await prefs.setString(_kProfile, jsonEncode(user));
     notifyListeners();
     return user!;
