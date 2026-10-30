@@ -279,9 +279,13 @@ BandStatus bandStatusFor({
       'Reconnecting has been paused',
       'The band refused the pairing key $bondRefusals times in a row, so the '
           'app stopped retrying rather than pin the radio and drain both '
-          'batteries on a link that will not open. Nothing is reconnecting '
-          'until you act.',
-      fix: repairFix,
+          'batteries on a link that will not open. It will try again on its '
+          'own in about 30 minutes.',
+      // BondRefusalGiveUp re-arms after its cooldown, and a refusal streak is
+      // often a transient OEM stack condition, so re-pairing (and the key
+      // churn it causes) is only the fix if the pause trips again.
+      fix: 'If it pauses again, forget the band in the phone’s Bluetooth '
+          'settings, then pair it again here',
       bondRefusals: bondRefusals,
     );
   }
@@ -503,8 +507,9 @@ class RecordGate {
   /// (`ts < kMinPlausibleUnix`) rather than the future or session-window tests.
   /// The two have opposite prognoses: an unset or wandering RTC drifts back
   /// into range (or SET_CLOCK pulls it back), while a source whose time base is
-  /// not a wall-clock epoch at all never will. Counted, never acted on — the
-  /// gate's verdict is identical either way, and must stay so.
+  /// not a wall-clock epoch at all never will. The gate's verdict is identical
+  /// either way, and must stay so; only [TrimAckPolicy] reads the split, to let
+  /// an archived below-floor-only burst be trimmed instead of re-offered forever.
   int droppedBelowFloor = 0;
 
   RecordGate({this.frontierTs = 0});
@@ -513,11 +518,11 @@ class RecordGate {
   /// the absolute floor — the signature of a source that does not stamp
   /// wall-clock time (uptime-since-boot, a sequence number, milliseconds).
   ///
-  /// Worth reporting apart from a transient clock problem because the stall is
-  /// PERMANENT: no retry, reconnect or SET_CLOCK resolves it, and the visible
-  /// symptom (records seen, nothing banked, the chunk re-delivered forever) is
-  /// identical to the transient case. See the `kMinPlausibleUnix` assumption
-  /// block in `sync_policy.dart` for the upgrade path.
+  /// Worth reporting apart from a transient clock problem because no retry,
+  /// reconnect or SET_CLOCK makes those records plausible: they are archived
+  /// and trimmed, never decoded (see [TrimAckPolicy]). See the
+  /// `kMinPlausibleUnix` assumption block in `sync_policy.dart` for the
+  /// upgrade path.
   bool get timeBaseNotWallClock => dropped > 0 && dropped == droppedBelowFloor;
 
   /// Should this record be stored? Records with no decodable time ([tsEpoch]
@@ -697,6 +702,10 @@ class TrimAckPolicy {
   /// [droppedThisBurst] — RecordGate rejects during this burst. Combined with
   ///                     `!hadDurableRows`, refuses trim so gate-only bursts
   ///                     cannot delete flash we never stored.
+  /// [droppedBelowFloorThisBurst] — of [droppedThisBurst], the ones that failed
+  ///                     the ABSOLUTE floor (`kMinPlausibleUnix`).
+  /// [gateDropArchives] — plausibility drops buffered as raw archives for the
+  ///                     commit this verdict covers.
   /// [shortfallRetry]  — the caller has budget to spend one refusal
   ///                     on this token's positive shortfall. Pass `false` on
   ///                     the PRE-commit call: this refusal must happen only
@@ -708,6 +717,8 @@ class TrimAckPolicy {
     required bool commitDurable,
     bool hadDurableRows = true,
     int droppedThisBurst = 0,
+    int droppedBelowFloorThisBurst = 0,
+    int gateDropArchives = 0,
     bool shortfallRetry = false,
   }) {
     // Order is deliberate: a stale session must be refused before anything
@@ -717,7 +728,19 @@ class TrimAckPolicy {
     if (burstDiscarded) return TrimAckVerdict.blockedDiscardedBurst;
     if (!commitDurable) return TrimAckVerdict.blockedCommitFailed;
     if (!hadDurableRows && droppedThisBurst > 0) {
-      return TrimAckVerdict.blockedNoDurableProgress;
+      // Records under the absolute floor never become plausible: SET_CLOCK
+      // does not re-stamp what is already in flash, and a reconnect re-offers
+      // the same chunk. Refusing them wedged the drain on the oldest chunk
+      // forever (a band revived after years flat, or an RTC that reset and
+      // logged before the next SET_CLOCK), so nothing newer was ever offloaded.
+      // Once every one of them rides the commit as a raw archive (never
+      // pruned) the bytes are durable and the trim is safe. A future-dated or
+      // session-window drop keeps the refusal — a wandering clock can recover.
+      final floorOnly = droppedBelowFloorThisBurst == droppedThisBurst;
+      final allArchived = gateDropArchives >= droppedThisBurst;
+      if (!floorOnly || !allArchived) {
+        return TrimAckVerdict.blockedNoDurableProgress;
+      }
     }
     // Last: everything above is a reason the chunk must not be trimmed at all.
     // This one is a reason to ask for it AGAIN, and only once.
@@ -977,11 +1000,6 @@ class ChunkFailureLedger {
   }
 }
 
-/// Pure debounce/coalesce logic for the "new data stored → derive" trigger.
-///
-/// With continuous listening there is no discrete "sync done" signal, so we can't
-/// fire the DerivationEngine off a SyncReport anymore. Instead, every time records
-/// are persisted we mark them as dirty; once the inbound record stream goes quiet
 /// Whether band records are landing RIGHT NOW.
 ///
 /// Answers the TestFlight report "don't get to know if syncing is happening or
@@ -1009,62 +1027,11 @@ class SyncActivityWindow {
   int? expiresAtMs() => _lastMs > 0 ? _lastMs + windowMs : null;
 }
 
-/// Steps accrued since LOCAL MIDNIGHT, from a counter that counts since the BLE
-/// connection began.
+/// Pure debounce/coalesce logic for the "new data stored → derive" trigger.
 ///
-/// The Today tile shows `derived day total + live session steps`, and the live
-/// half is "since this connection started". This app deliberately holds ONE
-/// continuous connection — the whole engine is built around never dropping it —
-/// so that counter routinely spans midnight, and at 00:01 the tile showed
-/// yesterday's steps plus today's and kept climbing from there. Reported from
-/// TestFlight as "steps and calories are not resetting every day, it's
-/// accumulating".
-///
-/// Rebasing at the day boundary is the fix: steps taken before midnight belong
-/// to yesterday, and yesterday's derived total already contains them.
-///
-/// Pure so the boundary behaviour is testable without a clock or a band.
-class LiveStepDayWindow {
-  String? _day;
-  int _base = 0;
-
-  /// [sessionTotal] is the connection-lifetime count; [today] is the local day
-  /// label. Returns what belongs to [today].
-  int stepsToday(int rawSessionTotal, String today) {
-    // A counter cannot be negative. Letting one through would seat `_base`
-    // below zero, and the next ordinary reading would then report the
-    // difference as steps that were never taken.
-    final sessionTotal = rawSessionTotal > 0 ? rawSessionTotal : 0;
-    if (_day == null) {
-      // First observation. The session counter is per-connection and per-
-      // process, so whatever it holds now was walked during this session — on
-      // this day. Rebasing here instead would DISCARD a real walk, which is
-      // what the live-coverage tests caught.
-      _day = today;
-      _base = 0;
-    } else if (_day != today) {
-      // A day boundary crossed while this window was watching: everything the
-      // counter holds belongs to the day that just ended.
-      _day = today;
-      _base = sessionTotal;
-    }
-    // A reconnect zeroes the session counter. Without this the stale, larger
-    // base would make every subsequent reading negative — clamped to 0 below,
-    // so a walk after a reconnect on the same day would silently stop counting.
-    if (sessionTotal < _base) _base = sessionTotal;
-    final n = sessionTotal - _base;
-    return n > 0 ? n : 0;
-  }
-
-  /// The day this window is currently based on — null until first use.
-  ///
-  /// Kept current from the SAMPLE path, not just from the widget that displays
-  /// it: a phone parked on another tab across midnight would otherwise make its
-  /// first post-midnight read the first observation of any day, and count
-  /// yesterday's whole session as today's.
-  String? get day => _day;
-}
-
+/// With continuous listening there is no discrete "sync done" signal, so we can't
+/// fire the DerivationEngine off a SyncReport anymore. Instead, every time records
+/// are persisted we mark them as dirty; once the inbound record stream goes quiet
 /// for [quietPeriod] (or [maxWait] elapses since the first un-derived record so a
 /// never-quiet stream still derives periodically) a derive is scheduled, coalescing
 /// the burst into a single pass. Pure + deterministic so it's unit-testable without

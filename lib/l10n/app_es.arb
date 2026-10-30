@@ -40,7 +40,7 @@
   "pairingNotFoundAdviceFix": "Cierra la otra app por completo y vuelve a buscar",
   "pairingBondRefusedAdviceTitle": "Primero olvida la banda en los ajustes de Bluetooth",
   "pairingBondRefusedAdviceBody": "Abre los ajustes de Bluetooth del teléfono, olvida la banda y vuelve a buscar aquí. La clave rechazada es el registro de emparejamiento antiguo, y solo el sistema puede borrarlo.",
-  "pairingBondRefusedAdviceFix": "Abrir ajustes de Bluetooth",
+  "pairingBondRefusedAdviceFix": "Luego vuelve y toca Intentar de nuevo",
   "pairingFailedAdviceTitle": "Se encontró la banda pero la sesión no terminó",
   "pairingFailedAdviceBody": "Volver a buscar desde un metro de distancia suele funcionar.",
   "profileSetupTitle": "Sobre ti",
@@ -168,6 +168,10 @@
   "devicesOuraKeyRefused": "El anillo rechazó la clave. Vuelve a emparejarlo para instalar una clave que acepte.",
   "@devicesOuraKeyRefused": {
     "description": "Aviso: la sincronización de Oura falló — el anillo rechazó la clave de emparejamiento."
+  },
+  "devicesBandKeyRefused": "La pulsera rechazó la clave. Vuelve a emparejarla para instalar una clave que acepte.",
+  "@devicesBandKeyRefused": {
+    "description": "Aviso: la sincronización de la Mi Band falló — la pulsera rechazó la clave de emparejamiento."
   },
   "devicesOuraStorageFailed": "La sincronización no se pudo guardar por completo. Vuelve a sincronizar.",
   "@devicesOuraStorageFailed": {
@@ -2167,6 +2171,7 @@
   "settingsContribute": "Contribuir",
   "settingsResetTitle": "¿Eliminar todo?",
   "settingsResetBackupWarning": "Datos de la app eliminados. La limpieza de las copias de seguridad no se completó. Pueden quedar archivos o permisos de acceso a carpetas.",
+  "settingsResetPairingKeyWarning": "Datos de la app eliminados, pero no se pudo quitar una clave de vinculación de un sensor del almacenamiento seguro. Vuelve a eliminar todo para reintentarlo.",
   "settingsResetBody": "Esto elimina permanentemente los datos de esta app en este dispositivo:\n\n· cada día medido, sueño, entrenamiento y ruta\n· cada resultado de laboratorio, comida, dosis de medicación, hábito, sesión de respiración y serie registrada\n· tu diario, registro de ciclo y líneas base continuas\n· tu perfil, cada preferencia y cualquier clave de IA guardada\n· el widget de pantalla de inicio y cada recordatorio programado\n\nLas copias exportadas y los backups en carpetas anteriores o no disponibles pueden permanecer. Elimínalos por separado.\n\nEl band queda desvinculado, y no puede reenviar el historial que ya entregó. Exporta desde Tus datos primero si quieres una copia.",
   "settingsResetKeepData": "Conservar mis datos",
   "settingsResetDeleteEverything": "Eliminar todo",
@@ -2195,6 +2200,11 @@
   "settingsGroupAutomation": "Automatización",
   "settingsDoubleTapRowTitle": "Doble toque",
   "settingsDoubleTapRowSub": "Qué hace un doble toque en el band",
+  "settingsKeepAliveRowTitle": "Seguir sincronizando en segundo plano",
+  "settingsKeepAliveRowSub": "Para que el ahorro de batería no detenga la sincronización nocturna",
+  "settingsKeepAliveAllow": "Permitir",
+  "settingsAutostartRowTitle": "Permitir inicio automático",
+  "settingsAutostartRowSub": "El fabricante de este teléfono pide un ajuste más para que la app siga sincronizando de noche",
   "settingsTaskerShortcutsRowTitle": "Tasker y Atajos",
   "settingsTaskerShortcutsRowSub": "Solo Android para eventos salientes. iOS puede hacer vibrar el band pero no puede ser activado por él",
   "settingsGroupPrivacy": "Privacidad",
@@ -2300,9 +2310,10 @@
   "bandStatusBluetoothUnsupportedTitle": "Este teléfono no tiene radio Bluetooth de baja energía",
   "bandStatusBluetoothUnsupportedReason": "La banda solo se puede alcanzar por Bluetooth de baja energía (BLE). Los datos importados siguen funcionando; un enlace en vivo no.",
   "bandStatusReconnectPausedTitle": "La reconexión se ha pausado",
-  "bandStatusReconnectPausedReason": "{n, plural, one{La banda rechazó la clave de emparejamiento {n} vez seguida, así que la app dejó de reintentar en lugar de acaparar la radio y agotar ambas baterías con un enlace que no se abrirá. Nada se está reconectando hasta que actúes.} other{La banda rechazó la clave de emparejamiento {n} veces seguidas, así que la app dejó de reintentar en lugar de acaparar la radio y agotar ambas baterías con un enlace que no se abrirá. Nada se está reconectando hasta que actúes.}}",
+  "bandStatusReconnectPausedReason": "{n, plural, one{La banda rechazó la clave de emparejamiento {n} vez seguida, así que la app dejó de reintentar en lugar de acaparar la radio y agotar ambas baterías con un enlace que no se abrirá. Volverá a intentarlo por sí sola en unos 30 minutos.} other{La banda rechazó la clave de emparejamiento {n} veces seguidas, así que la app dejó de reintentar en lugar de acaparar la radio y agotar ambas baterías con un enlace que no se abrirá. Volverá a intentarlo por sí sola en unos 30 minutos.}}",
   "bandStatusRepairNeededTitle": "La banda necesita emparejarse de nuevo",
   "bandStatusRepairNeededReason": "El enlace se establece, pero la banda rechaza la clave de cifrado que tiene el teléfono, así que cada comando se descarta y no se mueve ningún dato. Tus registros están a salvo en la banda.",
+  "bandStatusReconnectPausedFix": "Si se vuelve a pausar, olvida la banda en los ajustes de Bluetooth del teléfono y luego empareja de nuevo aquí",
   "bandStatusRepairFix": "Olvida la banda en los ajustes de Bluetooth del teléfono y luego empareja de nuevo aquí",
   "bandStatusSyncStuckTitle": "Un lote de registros no terminará de transferirse",
   "bandStatusSyncStuckReason": "La banda sigue reenviando el mismo lote porque la app no logra hacerle llegar la confirmación. Todo lo que contiene ya está guardado aquí — no se pierde nada — pero la banda no puede continuar hasta que llegue la confirmación.",

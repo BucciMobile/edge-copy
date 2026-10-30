@@ -160,7 +160,7 @@
   "@pairingBondRefusedAdviceBody": {
     "description": "Advice card body: bond refused."
   },
-  "pairingBondRefusedAdviceFix": "Open Bluetooth settings",
+  "pairingBondRefusedAdviceFix": "Then come back and tap Try again",
   "@pairingBondRefusedAdviceFix": {
     "description": "Advice card fix: bond refused."
   },
@@ -771,6 +771,10 @@
   "devicesOuraKeyRefused": "The ring rejected the key. Re-pair it to install a key it accepts.",
   "@devicesOuraKeyRefused": {
     "description": "Snackbar: Oura sync failed — the ring explicitly refused the pairing key."
+  },
+  "devicesBandKeyRefused": "The band rejected the key. Re-pair it to install a key it accepts.",
+  "@devicesBandKeyRefused": {
+    "description": "Snackbar: Mi Band sync failed — the band explicitly refused the pairing key."
   },
   "devicesOuraStorageFailed": "The sync could not be saved completely. Please try syncing again.",
   "@devicesOuraStorageFailed": {
@@ -11248,6 +11252,10 @@
   "@settingsResetBackupWarning": {
     "description": "Warning after reset when backup files or folder access could not be removed"
   },
+  "settingsResetPairingKeyWarning": "App data deleted, but a sensor pairing key could not be removed from secure storage. Delete everything again to retry.",
+  "@settingsResetPairingKeyWarning": {
+    "description": "Warning after reset when a sensor pairing key could not be removed from secure storage"
+  },
   "settingsResetBody": "This permanently deletes this app's data on this device:\n\n· every measured day, sleep, workout and route\n· every lab result, meal, medication dose, habit, breathing session and logged set\n· your journal, cycle log and what the app has learned as your usual\n· your profile, every preference and any stored AI key\n· the home-screen widget and every scheduled reminder\n\nExported copies and backups in previous or unavailable folders may remain. Delete those separately.\n\nThe band is unpaired, and it cannot re-send history it has already handed over. Export from Your data first if you want a copy.",
   "@settingsResetBody": {
     "description": "Confirmation dialog body listing exactly what a full reset deletes"
@@ -11380,6 +11388,26 @@
   "settingsDoubleTapRowSub": "What a double-tap on the band does",
   "@settingsDoubleTapRowSub": {
     "description": "Settings row subtitle for the double-tap gesture entry"
+  },
+  "settingsKeepAliveRowTitle": "Keep syncing in the background",
+  "@settingsKeepAliveRowTitle": {
+    "description": "Android settings row title for the battery-optimization exemption"
+  },
+  "settingsKeepAliveRowSub": "So battery saving doesn’t stop the overnight sync",
+  "@settingsKeepAliveRowSub": {
+    "description": "Android settings row subtitle for the battery-optimization exemption"
+  },
+  "settingsKeepAliveAllow": "Allow",
+  "@settingsKeepAliveAllow": {
+    "description": "Value shown on the background-sync row while the exemption has not been granted; tapping asks for it"
+  },
+  "settingsAutostartRowTitle": "Allow auto-start",
+  "@settingsAutostartRowTitle": {
+    "description": "Android settings row title, shown only on phone makers with a separate autostart allowlist"
+  },
+  "settingsAutostartRowSub": "This phone’s maker needs one more setting before the app can keep syncing overnight",
+  "@settingsAutostartRowSub": {
+    "description": "Subtitle for the autostart row; tapping opens the phone maker's own settings screen"
   },
   "settingsTaskerShortcutsRowTitle": "Tasker and Shortcuts",
   "@settingsTaskerShortcutsRowTitle": {
@@ -11860,7 +11888,7 @@
   "@bandStatusReconnectPausedTitle": {
     "description": "BandStatus card title: auto-reconnect paused after repeated bond refusals"
   },
-  "bandStatusReconnectPausedReason": "The band refused the pairing key {n, plural, one{{n} time} other{{n} times}} in a row, so the app stopped retrying to save battery. Nothing reconnects until you act.",
+  "bandStatusReconnectPausedReason": "The band refused the pairing key {n, plural, one{{n} time} other{{n} times}} in a row, so the app stopped retrying to save battery. It will try again on its own in about 30 minutes.",
   "@bandStatusReconnectPausedReason": {
     "description": "BandStatus card body: auto-reconnect paused, with the refusal count",
     "placeholders": {
@@ -11876,6 +11904,10 @@
   "bandStatusRepairNeededReason": "The band rejects this phone’s encryption key, so no data moves. Your recordings are safe on the band; pair it again to continue.",
   "@bandStatusRepairNeededReason": {
     "description": "BandStatus card body: band needs re-pairing"
+  },
+  "bandStatusReconnectPausedFix": "If it pauses again, forget the band in the phone’s Bluetooth settings, then pair it again here",
+  "@bandStatusReconnectPausedFix": {
+    "description": "BandStatus fix action for the reconnect-paused state: re-pair only if the pause trips again after the automatic retry"
   },
   "bandStatusRepairFix": "Forget the band in the phone’s Bluetooth settings, then pair it again here",
   "@bandStatusRepairFix": {

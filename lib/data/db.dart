@@ -53,6 +53,7 @@ import '../compute/vendor_sleep.dart' show VendorEpoch, VendorNight;
 import 'journal_fields.dart';
 import 'live_coverage_policy.dart';
 import 'step_calibration.dart';
+import '../sync/reset_gate.dart';
 import 'med_store.dart';
 import 'models.dart';
 import 'nutrition_store.dart';
@@ -2393,11 +2394,40 @@ class LocalDb {
   /// of the device's that the new ones overlap, so the two never stack. With
   /// [wholeNights] (a band that only ever sends whole nights) the overlapped
   /// stored night goes entire, its epochs outside the new ones included.
+  ///
+  /// With [resetGeneration] (a sensor session's writes) this runs on the
+  /// commit gate and is refused there once a "delete everything" has started
+  /// since, exactly as [commitSyncBatch] is: [wipeAll] is on the same gate, so
+  /// nothing checked before the reset can land after the wipe.
   static Future<void> putVendorSleepEpochs(
     List<VendorEpoch> epochs, {
     required String deviceId,
     required String source,
     bool wholeNights = false,
+    int? resetGeneration,
+  }) {
+    if (resetGeneration == null) {
+      return _putVendorSleepEpochs(epochs,
+          deviceId: deviceId, source: source, wholeNights: wholeNights);
+    }
+    return _withCommitGate(() {
+      _refuseAfterReset(resetGeneration);
+      return _putVendorSleepEpochs(epochs,
+          deviceId: deviceId, source: source, wholeNights: wholeNights);
+    });
+  }
+
+  static void _refuseAfterReset(int resetGeneration) {
+    if (ResetGate.changedSince(resetGeneration)) {
+      throw StateError('data reset in progress');
+    }
+  }
+
+  static Future<void> _putVendorSleepEpochs(
+    List<VendorEpoch> epochs, {
+    required String deviceId,
+    required String source,
+    required bool wholeNights,
   }) async {
     if (epochs.isEmpty) return;
     final sorted = [...epochs]..sort((a, b) => a.startSec.compareTo(b.startSec));
@@ -2800,9 +2830,27 @@ class LocalDb {
   /// Forget one device. The MEASUREMENTS it wrote are untouched — "this
   /// removes the source, not the data", which is what the forget dialog
   /// promises and what `decoded_*` keeping its `device_id` makes possible.
+  ///
+  /// Its `signal_priority` rows go with it, in the same transaction. The
+  /// resolver's band-day filter drops a paired non-derivable device by its
+  /// adapter, and a forgotten id has no row to read an adapter from, so a
+  /// surviving user-set rank would make the forgotten device a candidate
+  /// again: it would own every window its `device_coverage` spans, masking
+  /// the band's HR/RR there while its own rows never load on a band day.
+  /// The primary slot keeps its rows — it is refilled by whichever band
+  /// pairs next and is always a candidate anyway.
   static Future<void> deleteDevice([String id = kPrimaryDeviceId]) async {
     final db = await instance;
-    await db.delete('device', where: 'id = ?', whereArgs: [id]);
+    await db.transaction((txn) async {
+      await txn.delete('device', where: 'id = ?', whereArgs: [id]);
+      if (id != kPrimaryDeviceId) {
+        await txn.delete(
+          'signal_priority',
+          where: 'device_id = ?',
+          whereArgs: [id],
+        );
+      }
+    });
   }
 
   // ── OBSERVATIONS (vendor-computed / typed-in / imported scalars) ───────────
@@ -2884,10 +2932,27 @@ class LocalDb {
   /// There is deliberately NO reader here yet. Nothing writes observations
   /// either: the adapter seam that will is phase 4, and wiring an existing
   /// importer into this table today would move numbers users already see.
+  ///
+  /// [resetGeneration]: as for [putVendorSleepEpochs], on the commit gate.
   static Future<int> putObservations(
     List<Observation> rows, {
     String deviceId = kPrimaryDeviceId,
     Map<String, String> cursors = const {},
+    int? resetGeneration,
+  }) {
+    if (resetGeneration == null) {
+      return _putObservations(rows, deviceId: deviceId, cursors: cursors);
+    }
+    return _withCommitGate(() {
+      _refuseAfterReset(resetGeneration);
+      return _putObservations(rows, deviceId: deviceId, cursors: cursors);
+    });
+  }
+
+  static Future<int> _putObservations(
+    List<Observation> rows, {
+    required String deviceId,
+    required Map<String, String> cursors,
   }) async {
     if (rows.isEmpty && cursors.isEmpty) return 0;
     final db = await instance;
@@ -3875,6 +3940,14 @@ class LocalDb {
     return v == null ? null : int.tryParse(v);
   }
 
+  /// The primary device's durable record frontier (`rec_ts_hw`), or null when
+  /// no record has been banked. Builds before the commit guard could persist
+  /// '0' from a record-less commit, so a non-positive value reads as unset.
+  static Future<int?> getRecordFrontier() async {
+    final v = await getCursorInt('rec_ts_hw');
+    return (v == null || v <= 0) ? null : v;
+  }
+
   /// Read a cursor int through a specific executor (used inside a transaction so
   /// the read shares the open txn instead of contending on the global handle).
   static Future<int?> _cursorIntVia(DatabaseExecutor ex, String name) async {
@@ -4135,6 +4208,12 @@ class LocalDb {
     // the host supplies it; a signal absent from the map defaults to
     // 2*kBucket (120s) inside [_extendCoverageVia].
     Map<String, int>? coverageToleranceSec,
+    // [ResetGate.generation] when the writing session began. Checked inside
+    // the commit gate, where it cannot be raced: a batch from a session that
+    // started before a "delete everything" is refused even once the reset has
+    // finished and the gate is down again. Null checks only that no reset is
+    // running right now.
+    int? resetGeneration,
   }) =>
       _withCommitGate(() => _commitSyncBatchLocked(
             raws,
@@ -4148,6 +4227,7 @@ class LocalDb {
             deviceFamily: deviceFamily,
             deviceId: deviceId,
             coverageToleranceSec: coverageToleranceSec,
+            resetGeneration: resetGeneration,
           ));
 
   static Future<void> _commitSyncBatchLocked(
@@ -4168,7 +4248,18 @@ class LocalDb {
     // WHICH PHYSICAL DEVICE these rows belong to (see [kPrimaryDeviceId]).
     String deviceId = kPrimaryDeviceId,
     Map<String, int>? coverageToleranceSec,
+    int? resetGeneration,
   }) async {
+    // A batch queued on the gate before "delete everything" started reaches
+    // here only after the wipe ([wipeAll] runs on the same gate). Every
+    // caller re-checks ResetGate before calling, but this one runs LATER than
+    // any of those checks, so it is the one that cannot be raced. Thrown, so
+    // the caller keeps its buffer and never ACKs.
+    if (resetGeneration == null
+        ? ResetGate.active
+        : ResetGate.changedSince(resetGeneration)) {
+      throw StateError('data reset in progress');
+    }
     // NEUTRAL ROWS BELONG TO A NON-PRIMARY DEVICE. "" is the primary band
     // permanently (see kPrimaryDeviceId); a neutral-sample writer is by
     // definition a band with no framed record, which the primary is not.
@@ -4384,8 +4475,16 @@ class LocalDb {
           toleranceSec: coverageToleranceSec,
           deviceFamily: deviceFamily,
         );
-        await setCursor(kCounter, '$maxCounter', txn: txn);
-        await setCursor(kRecTs, '$maxRecTs', txn: txn);
+        // Only a real record moves the frontier. A commit that banked none (a
+        // bare HISTORY_END token, gate-dropped archives) on an install with no
+        // cursor yet would otherwise persist '0', which every `?? fallback`
+        // reader takes as a real frontier at the 1970 epoch.
+        if (maxCounter > 0) {
+          await setCursor(kCounter, '$maxCounter', txn: txn);
+        }
+        if (maxRecTs > 0) {
+          await setCursor(kRecTs, '$maxRecTs', txn: txn);
+        }
         if (trimToken != null) {
           await setCursor(cursorKeyFor('strap_trim', deviceId), trimToken,
               txn: txn);
@@ -9710,7 +9809,13 @@ class LocalDb {
   /// run inside `openDatabase` on iOS's CPU watchdog — not somewhere to be on
   /// the tail of a destructive user action). Views are `type='view'` and are
   /// not matched; the sqlite/Android internal tables are skipped by name.
-  static Future<int> wipeAll() async {
+  ///
+  /// Runs on the sync-commit gate, so it cannot interleave with a band batch
+  /// that is mid-commit, and a batch queued behind it sees the reset and
+  /// refuses (see [_commitSyncBatchLocked]).
+  static Future<int> wipeAll() => _withCommitGate(_wipeAllLocked);
+
+  static Future<int> _wipeAllLocked() async {
     final db = await instance;
     final rows = await db.rawQuery(
       "SELECT name FROM sqlite_master WHERE type = 'table' "

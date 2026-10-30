@@ -3382,7 +3382,7 @@ class LocalRepositoryImpl extends LocalRepository {
       // band, so no `rec_ts_hw` cursor) still gets the skip rather than
       // re-scanning every session's window on every pass.
       final frontier =
-          await LocalDb.getCursorInt('rec_ts_hw') ??
+          await LocalDb.getRecordFrontier() ??
           await LocalDb.lastDecodedRecTs() ??
           0;
       final seen = <String>{};

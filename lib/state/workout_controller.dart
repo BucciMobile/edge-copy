@@ -53,6 +53,7 @@ import '../notify/notification_center.dart';
 import '../notify/notification_event.dart';
 import '../notify/tap_router.dart';
 import '../sync/edge_tracking.dart';
+import '../sync/reset_gate.dart';
 import '../widget/widget_service.dart';
 import '../ui2/activity/live.dart' show LiveDraft;
 import 'workout_idle.dart';
@@ -618,11 +619,20 @@ class WorkoutController {
       _notify();
       return;
     }
+    // A route recorded before a "delete everything" is never written after
+    // it: the tracker's last flush can run inside a stop the reset raced, and
+    // GPS points with no session row are the worst thing to leave behind.
+    final resetGen = ResetGate.generation;
     final tracker = RouteTracker(
-      sink: (batch) => LocalDb.appendRoutePoints(
-        id,
-        [for (final p in batch) p.toRow(id)],
-      ),
+      sink: (batch) async {
+        if (ResetGate.changedSince(resetGen)) {
+          throw StateError('data reset in progress');
+        }
+        await LocalDb.appendRoutePoints(
+          id,
+          [for (final p in batch) p.toRow(id)],
+        );
+      },
       zoneNow: () => _zoneFor(activeWorkout?.currentHr ?? 0),
     );
     _routeTracker = tracker;
@@ -847,7 +857,15 @@ class WorkoutController {
   }
 
   Future<void> stopWorkout() async {
-    if (activeWorkout == null) return;
+    final w = activeWorkout;
+    if (w == null) return;
+    // "Delete everything" can run while the teardown below is awaiting:
+    // [discardForReset] then drops this session, and a stop that carried on
+    // would either crash on the nulled session or save it into the wiped
+    // store. Checked after every await that a reset can land behind.
+    final resetGen = ResetGate.generation;
+    bool discarded() =>
+        !identical(activeWorkout, w) || ResetGate.changedSince(resetGen);
     // Step coverage is judged at the moment of stop: the teardown awaited
     // below can take long enough to look like an accel gap that never happened.
     final stopMs = DateTime.now().millisecondsSinceEpoch;
@@ -866,6 +884,7 @@ class WorkoutController {
       // Android: drop the FGS back to connectedDevice-only now the route ended.
       EdgeTracking.start(location: false);
     }
+    if (discarded()) return;
     // Release the display unconditionally — not inside the `rt != null` branch.
     // A session that never got a tracker (permission denied) still armed
     // nothing, but a session whose tracker was already cleared by another path
@@ -873,10 +892,14 @@ class WorkoutController {
     // AWAITED, like the route tail: an unflushed sensor races the finish screen
     // and the last buffered batch of sensor beats never reaches the database.
     // The sensors stay armed for the recovery tail ([_startStrapTail]).
-    await _startStrapTail(activeWorkout?.workoutId);
+    await _startStrapTail(w.workoutId);
+    if (discarded()) {
+      // A reset's disarm already ran; the tail just armed must not outlive it.
+      if (ResetGate.changedSince(resetGen)) await _disarmSensors();
+      return;
+    }
     ScreenWake.releaseOwner('workout');
     _setWorkoutActive(false);
-    final w = activeWorkout!;
     // Off the clock, not the last tick: a session finished while still paused
     // after a relaunch has never ticked, and its elapsed is still zero.
     w.elapsed =
@@ -905,6 +928,7 @@ class WorkoutController {
     // "unknown".
     final bandFamily = _linkDeviceFamily() ??
         ((await LocalDb.session(id))?['device_family'] as String?);
+    if (discarded()) return;
     final sessionRow = {
       'id': id,
       'start_ts': w.startTime.millisecondsSinceEpoch ~/ 1000,
@@ -962,6 +986,9 @@ class WorkoutController {
     // day_result/derive pass (which may not run at all if the band isn't
     // connected right now); write this workout to Apple Health/Health Connect
     // immediately. Best-effort, never throws, no-ops if sync is off.
+    // A reset that started while the save was landing has already discarded
+    // this session; exporting or re-syncing it would carry it past the wipe.
+    if (ResetGate.changedSince(resetGen)) return;
     if (_healthSyncEnabled()) {
       unawaited(_exportToHealth(sessionRow));
     }
@@ -1025,6 +1052,18 @@ class WorkoutController {
     _resetWorkoutStepState();
     _zoneAlert = null;
     LiveActivity.end();
+  }
+
+  /// "Delete everything": end a live workout without saving it and disarm
+  /// the workout sensors, including a stopped workout's recovery tail. An
+  /// armed strap otherwise keeps banking beats into the database the reset
+  /// is emptying, and the primary band's unpair does not reach it.
+  Future<void> discardForReset() async {
+    if (activeWorkout != null) {
+      await _cancelActiveWorkoutTeardown();
+    } else {
+      await _disarmSensors();
+    }
   }
 
   /// Delete a stored workout session and, if it happens to be the one

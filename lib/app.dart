@@ -287,7 +287,8 @@ class _Gate extends StatelessWidget {
           AppRoute.failed => const _InitFailed(),
           AppRoute.welcome => const WelcomeScreen(),
           AppRoute.pairing => DevicePickerScreen(
-              onSkip: () => OnboardingBypass.mark(OnboardingBypass.kPairing)),
+              onSkip: () => OnboardingBypass.mark(OnboardingBypass.kPairing),
+              onBack: () => context.read<AppState>().backToWelcome()),
           AppRoute.profile => ProfileSetupScreen(
               onDone: () => OnboardingBypass.mark(OnboardingBypass.kProfile)),
           AppRoute.shell => const _Shell(),

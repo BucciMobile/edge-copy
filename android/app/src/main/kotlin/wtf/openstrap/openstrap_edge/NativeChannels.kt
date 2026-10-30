@@ -87,6 +87,9 @@ object NativeChannels {
                         result.success(null)
                     }
                     "stop" -> {
+                        // Dart only sends this on unpair, so the watchdog has
+                        // nothing left to keep alive.
+                        KeepAliveWorker.cancel(app)
                         app.stopService(Intent(app, EdgeTrackingService::class.java))
                         result.success(null)
                     }
