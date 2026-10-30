@@ -1951,6 +1951,10 @@
   "@napsOverlap": {
     "description": "Validation error when a manually logged nap overlaps an existing one."
   },
+  "napsOverlapsSleep": "That overlaps your main sleep, which already counts that time. Log only the part after you got up, or correct the night instead.",
+  "@napsOverlapsSleep": {
+    "description": "Validation error when a manually logged nap overlaps the main sleep window."
+  },
   "napsNotReanalysed": "The day was not re-analysed — another analysis was already running. Your edit is saved and will apply next time.",
   "@napsNotReanalysed": {
     "description": "Fallback error when a nap edit saved but the day could not be re-derived because another analysis was already running."
@@ -8466,6 +8470,26 @@
     "description": "Help text on the time picker for when the user got up."
   },
   "sleepDetailReanalyseFailed": "The night wasn’t re-analysed; another run was busy or it failed. Your times are saved: open Your data and tap Re-analyze everything.",
+  "sleepDetailWindowUnrecorded": "Your times are saved, but the band wasn’t recording for most of those hours (off your wrist or charging), so there’s no night to score.",
+  "sleepDetailWindowNoSleep": "Your times are saved, but the band’s recordings for those hours show no sleep to score.",
+  "sleepDetailNightUnrecorded": "Your heart rate shows a night’s sleep, but the band recorded too little movement data for most of it, so there’s no night to score.",
+  "@sleepDetailNightUnrecorded": {
+    "description": "Shown on an automatically detected night with no sleep, when heart rate found a night but the band recorded too little movement data across it to stage one."
+  },
+  "@sleepDetailWindowUnrecorded": {
+    "description": "Shown after the user set their own sleep window (e.g. \"I was asleep\") and the band recorded too little of it to stage a night."
+  },
+  "@sleepDetailWindowNoSleep": {
+    "description": "Shown after the user set their own sleep window and the band recorded it, but staging found no sleep in it."
+  },
+  "sleepDetailCorrectionUnavailable": "This night’s detailed recordings are no longer on the phone, so its sleep can’t be corrected now.",
+  "sleepDetailCorrectionEveningPruned": "The evening before this night is no longer on the phone, so only a bedtime after midnight, or Not sleep, can be applied.",
+  "@sleepDetailCorrectionEveningPruned": {
+    "description": "Shown on the oldest night still kept, or after a correction there was refused: the evening part of the night has been pruned, so a bedtime before midnight, confirming the detected times, or reverting to automatic cannot be applied."
+  },
+  "@sleepDetailCorrectionUnavailable": {
+    "description": "Shown instead of the sleep correction buttons, or after one was refused, when the night's raw recordings have been pruned and it can no longer be re-analysed."
+  },
   "@sleepDetailReanalyseFailed": {
     "description": "Fallback error message when re-analysis after a window edit could not be confirmed."
   },
@@ -15639,7 +15663,7 @@
   "@reportDatabaseCovered": {
     "description": "Issue report: line under the 2-week switch while the full database switch is on."
   },
-  "reportStageSlice": "Preparing last 2 weeks\u2026",
+  "reportStageSlice": "Preparing last 2 weeks…",
   "@reportStageSlice": {
     "description": "Report screen: progress text inside the busy button while the 2-week database is built."
   },
@@ -15784,6 +15808,37 @@
     "description": "Snackbar after copying the ticket ID on the report screen.",
     "placeholders": {
       "id": {
+        "type": "String"
+      }
+    }
+  },
+  "dataReanalyzeFailed": "Re-analysis failed: {error}",
+  "@dataReanalyzeFailed": {
+    "description": "Re-analyze result: the pass itself failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 day could not be analyzed. If this keeps happening, please report it.} other{{n} days could not be analyzed. If this keeps happening, please report it.}}",
+  "@dataReanalyzeDaysFailed": {
+    "description": "Re-analyze result: N days could not be derived.",
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
+  "napsInFuture": "That nap hasn't finished yet. Log it once you're awake.",
+  "@napsInFuture": {
+    "description": "Validation error when a manually logged nap ends after the current time."
+  },
+  "profileImplausibleFields": "Check {fields}: out of range, so nothing was saved.",
+  "@profileImplausibleFields": {
+    "description": "Shown when a typed age, height or weight is outside the believable range.",
+    "placeholders": {
+      "fields": {
         "type": "String"
       }
     }

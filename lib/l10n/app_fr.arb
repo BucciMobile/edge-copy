@@ -393,6 +393,7 @@
   "napsWokeUpHelp": "QUAND VOUS VOUS ÊTES RÉVEILLÉ",
   "napsInvalidWindow": "Une sieste dure entre 5 minutes et 6 heures. Au-delà, il s'agit d'un sommeil, et cela appartient à la nuit, où les phases peuvent être lues.",
   "napsOverlap": "Cela chevauche une sieste déjà enregistrée ce jour-là. Supprimez d'abord celle-ci plutôt que de compter la même heure deux fois.",
+  "napsOverlapsSleep": "Cela chevauche votre sommeil principal, qui compte déjà ce temps. Enregistrez seulement la partie après votre lever, ou corrigez plutôt la nuit.",
   "napsNotReanalysed": "La journée n'a pas été réanalysée — une autre analyse était déjà en cours. Votre modification est enregistrée et s'appliquera la prochaine fois.",
   "napsTitle": "Siestes",
   "napsNoReadingTitle": "Aucune donnée de sieste pour cette journée",
@@ -1649,6 +1650,11 @@
   "sleepDetailBedTimeHelp": "HEURE DU COUCHER",
   "sleepDetailWakeTimeHelp": "HEURE DU LEVER",
   "sleepDetailReanalyseFailed": "La nuit n'a pas été réanalysée : une autre réanalyse était déjà en cours, ou elle a échoué. Les horaires que vous avez définis sont enregistrés ; « Tout réanalyser » dans Vos données les appliquera.",
+  "sleepDetailWindowUnrecorded": "Vos horaires sont enregistrés, mais le bracelet n'a pas enregistré pendant la majeure partie de ces heures (retiré du poignet ou en charge) : il n'y a donc pas de nuit à évaluer.",
+  "sleepDetailWindowNoSleep": "Vos horaires sont enregistrés, mais les enregistrements du bracelet pour ces heures ne montrent aucun sommeil à évaluer.",
+  "sleepDetailNightUnrecorded": "Votre fréquence cardiaque indique une nuit de sommeil, mais le bracelet a enregistré trop peu de données de mouvement pendant la majeure partie : il n'y a donc pas de nuit à évaluer.",
+  "sleepDetailCorrectionUnavailable": "Les enregistrements détaillés de cette nuit ne sont plus sur le téléphone, son sommeil ne peut donc plus être corrigé.",
+  "sleepDetailCorrectionEveningPruned": "La soirée précédant cette nuit n’est plus sur le téléphone : on peut seulement indiquer une heure de coucher après minuit, ou marquer la nuit comme n’étant pas du sommeil.",
   "sleepDetailNoHypnogramTitle": "Aucun hypnogramme pour cette nuit",
   "sleepDetailNoHypnogramBody": "L'analyse des phases nécessite le mouvement et le rythme cardiaque. L'un des deux manquait.",
   "sleepDetailThroughTheNight": "Au fil de la nuit",
@@ -2654,5 +2660,9 @@
   },
   "deviceUseSheetOff": "Vous pouvez le désactiver à tout moment. Ce qu'il a apporté sera alors retiré.",
   "deviceUseSheetConfirm": "L'utiliser",
-  "deviceUseSheetCancel": "Pas maintenant"
+  "deviceUseSheetCancel": "Pas maintenant",
+  "dataReanalyzeFailed": "La réanalyse a échoué : {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{{n} jour n’a pas pu être analysé. Si cela se reproduit, merci de le signaler.} other{{n} jours n’ont pas pu être analysés. Si cela se reproduit, merci de le signaler.}}",
+  "napsInFuture": "Cette sieste n'est pas encore terminée. Enregistrez-la une fois réveillé.",
+  "profileImplausibleFields": "Vérifiez {fields} : hors limites, rien n'a donc été enregistré."
 }

@@ -217,7 +217,17 @@ class _DataScreenState extends State<DataScreen> {
             r['date'] as String: (r['value'] as num).round(),
         };
     final before = await recovery();
-    final n = await app.reanalyzeAll();
+    final (days: n, failedDays: failedDays, error: error) =
+        await app.reanalyzeAll();
+    // The derive reports a failed pass as 0 days, the same as nothing to do;
+    // shown as an ordinary "0 days re-analyzed." it reads as "there is nothing
+    // here" on the very screens this button exists to repair.
+    if (error != null) {
+      return (
+        l?.dataReanalyzeFailed(error) ?? 'Re-analysis failed: $error',
+        true
+      );
+    }
     final after = await recovery();
     // Which days' recovery a re-analysis actually moved, newest first.
     // ponytail: first 5 only; the note is a heads-up, not an audit log.
@@ -230,13 +240,18 @@ class _DataScreenState extends State<DataScreen> {
       final label = d == null ? c.day : ml.formatShortMonthDay(d);
       return '$label ${c.from} → ${c.to}';
     }).join(', ');
-    final done =
+    var done =
         l?.dataDaysReanalyzed(n) ?? '$n day${n == 1 ? '' : 's'} re-analyzed.';
+    if (failedDays > 0) {
+      final notDone = l?.dataReanalyzeDaysFailed(failedDays) ??
+          '$failedDays day${failedDays == 1 ? '' : 's'} could not be analyzed.';
+      done = '$done $notDone';
+    }
     return (
       changed.isEmpty
           ? done
           : '$done ${l?.dataRecoveryChanged(changed) ?? 'Recovery changed: $changed'}',
-      false
+      failedDays > 0
     );
   }
 

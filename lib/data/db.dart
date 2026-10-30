@@ -8937,7 +8937,9 @@ class LocalDb {
 
   /// `compute_freshness` key marking the raw-free next-night nap cleanup
   /// (compute/nap_overlap_cleanup.dart) as applied. Cleared by an import.
-  static const String kNapNextNightCleanupKey = 'nap_next_night_cleanup_v1';
+  /// v2: the v1 pass skipped every day the readiness backfill had restamped
+  /// at v112+, so installs that already ran it run it once more.
+  static const String kNapNextNightCleanupKey = 'nap_next_night_cleanup_v2';
 
   /// `compute_freshness` key for [bumpUsageCounter]'s local counts.
   static const String kUsageCountersKey = 'usage_counters';
@@ -10704,8 +10706,11 @@ class LocalDb {
     // import. Rewind it.
     if ((counts['day_result'] ?? 0) > 0) {
       await putComputeFreshness(kReencodeCursorKey, jsonEncode({}));
-      // Same for the raw-free nap cleanup: imported old days may carry the
-      // next-night nap double count it removes, so it runs again.
+    }
+    // Same for the raw-free nap cleanup: imported old days, or legacy nap
+    // edits recomposed into kept days, may carry the next-night nap double
+    // count it removes, so it runs again.
+    if ((counts['day_result'] ?? 0) > 0 || (counts['sleep_nap'] ?? 0) > 0) {
       await deleteComputeFreshness(kNapNextNightCleanupKey);
     }
     // Last, so it can never be mistaken for a table row count by anything that
@@ -11608,7 +11613,14 @@ class LocalDb {
           nowSec: nowSec,
         )?.wire;
       }
+      final flags = decoded['flags'];
+      // 'Not sleep' is the user's own verdict on the night, so it needs no
+      // settling and is as final an overnight as a detected absence. Without
+      // this a rejected today was never the overnight day: Home held the
+      // previous night over as "still being worked out" for the rest of it.
+      final rejected = flags is List && flags.contains('SLEEP_REJECTED');
       if (dayId == today &&
+          !rejected &&
           !overnightSettled(
             sleepOffsetSec: wakeSec,
             dataEdgeSec: edgeSec,
@@ -11624,9 +11636,9 @@ class LocalDb {
       if (latestOvernightDay == null) {
         final sleep =
             ((decoded['sleep'] as Map?)?['accounting'] as Map?)?['value'];
-        final flags = decoded['flags'];
         final hasSleep = sleep is Map && sleep['tst_sec'] != null;
-        final noSleep = flags is List && flags.contains('NO_SLEEP_DETECTED');
+        final noSleep = rejected ||
+            (flags is List && flags.contains('NO_SLEEP_DETECTED'));
         if (hasSleep || noSleep) {
           latestOvernightDay = dayId;
           latestOvernightComputedAt = (row['computed_at'] as num?)?.toInt();
@@ -12150,6 +12162,15 @@ class LocalDb {
   }) async {
     final db = await instance;
     await db.transaction((tx) async {
+      // A logged nap is credited whole on top of the main night's TST (nap_min,
+      // total asleep, sleep-need credit), so one typed over the end of the
+      // night — the doze after the alarm — counts those minutes twice.
+      if (source == 'manual' &&
+          await ActivityStore.overlapsMainSleep(tx, startTs, endTs)) {
+        throw const ActivityReviewException(
+          'That overlaps your main sleep, which already counts that time.',
+        );
+      }
       String? snapshot;
       if (source == 'rejected') {
         // A pre-upgrade nap may still live only in its retained day result.
@@ -12217,6 +12238,22 @@ class LocalDb {
         await tx.delete('sleep_nap', where: 'day_id = ? AND start_ts = ?', whereArgs: [dayId, startTs]);
       }
     });
+  }
+
+  /// Whether [startTs, endTs) overlaps a main sleep already derived — the
+  /// check [putNapEdit] enforces for a logged nap, readable ahead of the write
+  /// so the entry screen can say why in the user's language.
+  static Future<bool> napOverlapsMainSleep(int startTs, int endTs) async =>
+      ActivityStore.overlapsMainSleep(await instance, startTs, endTs);
+
+  /// Drops [dayId]'s `legacy` nap edits overlapping [startSec, endSec). Logged,
+  /// confirmed and rejected edits are left alone.
+  static Future<int> deleteLegacyNapsOverlapping(
+      String dayId, int startSec, int endSec) async {
+    final db = await instance;
+    return db.delete('sleep_nap',
+        where: "day_id = ? AND source = 'legacy' AND start_ts < ? AND end_ts > ?",
+        whereArgs: [dayId, endSec, startSec]);
   }
 
   static Future<List<Map<String, dynamic>>> napEdits(String dayId) async {

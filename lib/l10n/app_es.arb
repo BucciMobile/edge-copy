@@ -393,6 +393,7 @@
   "napsWokeUpHelp": "CUÁNDO TE DESPERTASTE",
   "napsInvalidWindow": "Una siesta dura entre 5 minutos y 6 horas. Cualquier cosa más larga es un sueño nocturno y pertenece a la noche, donde se pueden leer las fases.",
   "napsOverlap": "Eso se superpone con una siesta ya registrada este día. Elimina esa primero, en lugar de contar la misma hora dos veces.",
+  "napsOverlapsSleep": "Eso se superpone con tu sueño principal, que ya cuenta ese tiempo. Registra solo la parte posterior a levantarte o corrige la noche.",
   "napsNotReanalysed": "El día no se ha vuelto a analizar: ya había otro análisis en curso. Tu edición está guardada y se aplicará la próxima vez.",
   "napsTitle": "Siestas",
   "napsNoReadingTitle": "Sin datos de siestas para este día",
@@ -1659,6 +1660,11 @@
   "sleepDetailBedTimeHelp": "CUÁNDO TE ACOSTASTE",
   "sleepDetailWakeTimeHelp": "CUÁNDO TE LEVANTASTE",
   "sleepDetailReanalyseFailed": "La noche no se ha vuelto a analizar: ya había otro reanálisis en curso, o falló. Las horas que estableciste están guardadas; \"Reanalizar todo\" en Tus datos las aplicará.",
+  "sleepDetailWindowUnrecorded": "Tus horas están guardadas, pero la pulsera no estuvo registrando durante la mayor parte de ese tiempo (no la llevabas puesta o se estaba cargando), así que no hay noche que puntuar.",
+  "sleepDetailWindowNoSleep": "Tus horas están guardadas, pero los registros de la pulsera de esas horas no muestran sueño que puntuar.",
+  "sleepDetailNightUnrecorded": "Tu frecuencia cardíaca indica una noche de sueño, pero la pulsera registró muy pocos datos de movimiento durante la mayor parte, así que no hay noche que puntuar.",
+  "sleepDetailCorrectionUnavailable": "Los registros detallados de esta noche ya no están en el teléfono, así que su sueño ya no se puede corregir.",
+  "sleepDetailCorrectionEveningPruned": "La tarde anterior a esta noche ya no está en el teléfono, así que solo se puede aplicar una hora de acostarse después de medianoche o «No es sueño».",
   "sleepDetailNoHypnogramTitle": "No hay hipnograma para esta noche",
   "sleepDetailNoHypnogramBody": "El cálculo de fases necesita movimiento y ritmo cardíaco. Faltaba uno de los dos.",
   "sleepDetailThroughTheNight": "Durante la noche",
@@ -2683,5 +2689,9 @@
   },
   "deviceUseSheetOff": "Puedes desactivarlo cuando quieras. Lo que haya aportado se quitará.",
   "deviceUseSheetConfirm": "Usarlo",
-  "deviceUseSheetCancel": "Ahora no"
+  "deviceUseSheetCancel": "Ahora no",
+  "dataReanalyzeFailed": "El reanálisis falló: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
+  "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
+  "profileImplausibleFields": "Revisa {fields}: fuera de rango, así que no se guardó nada."
 }

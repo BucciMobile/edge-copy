@@ -421,6 +421,7 @@
   "napsWokeUpHelp": "AUFGEWACHT UM",
   "napsInvalidWindow": "Ein Nickerchen dauert zwischen 5 Minuten und 6 Stunden. Alles Längere ist Schlaf und gehört zur Nacht, wo die Schlafphasen ausgewertet werden.",
   "napsOverlap": "Das überschneidet sich mit einem Nickerchen, das an diesem Tag schon eingetragen ist. Entferne zuerst das andere, damit dieselbe Zeit nicht doppelt zählt.",
+  "napsOverlapsSleep": "Das überschneidet sich mit deinem Hauptschlaf, der diese Zeit schon zählt. Trage nur den Teil nach dem Aufstehen ein oder korrigiere stattdessen die Nacht.",
   "napsNotReanalysed": "Der Tag wurde nicht neu ausgewertet, weil gerade schon eine andere Auswertung lief. Deine Änderung ist gespeichert und wird beim nächsten Mal berücksichtigt.",
   "napsTitle": "Nickerchen",
   "napsNoReadingTitle": "Keine Daten zu Nickerchen an diesem Tag",
@@ -1699,6 +1700,11 @@
   "sleepDetailBedTimeHelp": "INS BETT GEGANGEN UM",
   "sleepDetailWakeTimeHelp": "AUFGESTANDEN UM",
   "sleepDetailReanalyseFailed": "Die Nacht wurde nicht neu ausgewertet – entweder lief bereits eine andere Auswertung, oder sie ist fehlgeschlagen. Deine Zeiten sind gespeichert; „Alles neu analysieren“ unter „Deine Daten“ wendet sie an.",
+  "sleepDetailWindowUnrecorded": "Deine Zeiten sind gespeichert, aber das Band hat in diesen Stunden größtenteils nichts aufgezeichnet (nicht getragen oder beim Laden), daher gibt es keine Nacht zum Auswerten.",
+  "sleepDetailWindowNoSleep": "Deine Zeiten sind gespeichert, aber die Aufzeichnungen des Bands aus diesen Stunden zeigen keinen Schlaf zum Auswerten.",
+  "sleepDetailNightUnrecorded": "Deine Herzfrequenz deutet auf eine Nacht Schlaf hin, aber das Band hat dabei größtenteils zu wenige Bewegungsdaten aufgezeichnet, daher gibt es keine Nacht zum Auswerten.",
+  "sleepDetailCorrectionUnavailable": "Die detaillierten Aufzeichnungen dieser Nacht sind nicht mehr auf dem Telefon, daher lässt sich ihr Schlaf nicht mehr korrigieren.",
+  "sleepDetailCorrectionEveningPruned": "Der Abend vor dieser Nacht ist nicht mehr auf dem Telefon, daher lassen sich nur eine Schlafenszeit nach Mitternacht oder „Kein Schlaf“ übernehmen.",
   "sleepDetailNoHypnogramTitle": "Kein Hypnogramm für diese Nacht",
   "sleepDetailNoHypnogramBody": "Für die Schlafphasen werden Bewegung und Herzschlag-Abstände benötigt. Eines davon fehlte.",
   "sleepDetailThroughTheNight": "Im Verlauf der Nacht",
@@ -2779,5 +2785,9 @@
   },
   "deviceUseSheetOff": "Du kannst es jederzeit ausschalten. Was es beigetragen hat, wird dann wieder entfernt.",
   "deviceUseSheetConfirm": "Nutzen",
-  "deviceUseSheetCancel": "Nicht jetzt"
+  "deviceUseSheetCancel": "Nicht jetzt",
+  "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
+  "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
+  "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
+  "profileImplausibleFields": "Bitte {fields} prüfen: außerhalb des gültigen Bereichs, daher wurde nichts gespeichert."
 }

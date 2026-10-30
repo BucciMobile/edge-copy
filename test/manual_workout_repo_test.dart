@@ -657,4 +657,51 @@ void main() {
       expect(rows, hasLength(1));
     },
   );
+
+  test(
+    'retiming a scored session whose heart rate is gone refuses rather than '
+    'blanking its strain, calories, HR and trace',
+    () async {
+      // A WHOOP-import row: its strain and calories came from WHOOP, and no
+      // band substrate exists over it (the same state a band session is in
+      // once its day is past raw retention).
+      final start = sessionStart - 60 * 86400;
+      final banked = {
+        'id': 'w-banked',
+        'start_ts': start,
+        'end_ts': start + 3600,
+        'type': 'run',
+        'status': 'done',
+        'duration_min': 60,
+        'source': 'whoop',
+        'strain': 14.2,
+        'calories': 620.0,
+        'max_hr': 181,
+        'avg_hr': 152,
+        'zone_min_json': '[5,10,20,15,10]',
+        'trace_json': '[[0,150],[60,152]]',
+        'trace_samples': 2,
+        'created_at': start * 1000,
+      };
+      await LocalDb.putSession(banked);
+      addTearDown(() => LocalDb.deleteSession('w-banked'));
+
+      await expectLater(
+        repo.setWorkoutWindow('w-banked',
+            startTs: start, endTs: start + 3600 + 300),
+        throwsA(isA<ManualWindowException>().having((e) => e.error, 'error',
+            ManualWindowError.scoreNotRecomputable)),
+      );
+
+      final row = await LocalDb.session('w-banked');
+      expect(row!['end_ts'], start + 3600);
+      expect(row['strain'], 14.2);
+      expect(row['calories'], 620.0);
+      expect(row['max_hr'], 181);
+      expect(row['avg_hr'], 152);
+      expect(row['zone_min_json'], '[5,10,20,15,10]');
+      expect(row['trace_json'], isNotNull);
+      expect(row['source'], 'whoop');
+    },
+  );
 }

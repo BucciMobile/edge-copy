@@ -1031,12 +1031,20 @@ class LocalRepositoryImpl extends LocalRepository {
       // elsewhere. The periods ride along so the screen can show what it does
       // know instead of claiming nothing happened.
       final napPeriods = _periodsWithMainStages(b, const {});
+      // Why a window produced nothing, when the segmenter knows — a user-set
+      // window the band barely recorded is the case the Sleep screen explains.
+      final absence = _sub(b, 'sleep')?['absence_reason'] as String?;
       if (napPeriods.isEmpty) {
-        return {'has_sleep': false, 'sleep_source': sleepSource};
+        return {
+          'has_sleep': false,
+          'sleep_source': sleepSource,
+          'absence_reason': ?absence,
+        };
       }
       return {
         'has_sleep': false,
         'sleep_source': sleepSource,
+        'absence_reason': ?absence,
         'periods': napPeriods,
         'total_asleep_min': _totalAsleepMin(b, napPeriods),
       };
@@ -2967,6 +2975,16 @@ class LocalRepositoryImpl extends LocalRepository {
     if (existing['status'] == 'live') {
       throw StateError('setWorkoutWindow: session $id is still live');
     }
+    // The rescore reads only the 1 Hz substrate, which is pruned after
+    // `rawRetentionDays` and never existed for an imported session. With none
+    // over the new window the replace-write would land every banked figure as
+    // null — strain, calories, HR, zones, the frozen trace — and nothing could
+    // rebuild them. Refuse before touching the Health store or the row.
+    if (_hasBankedScore(existing) &&
+        (await LocalDb.hrSamplesInRange(startTs, endTs)).isEmpty) {
+      throw const ManualWindowException(
+          ManualWindowError.scoreNotRecomputable);
+    }
     // Clear the OLD Health window before the retimed row overwrites it — the
     // caller's subsequent exportWorkoutId only deletes inside the NEW window,
     // so a narrowed/moved retime would otherwise leave the previous sample
@@ -2986,6 +3004,13 @@ class LocalRepositoryImpl extends LocalRepository {
       validateAgainstId: id,
     );
   }
+
+  static bool _hasBankedScore(Map<String, dynamic> row) =>
+      row['strain'] != null ||
+      row['calories'] != null ||
+      row['max_hr'] != null ||
+      row['avg_hr'] != null ||
+      row['trace_json'] != null;
 
   /// Shared writer for both user-timed paths: score the window from the 1 Hz
   /// substrate, persist, and retire any auto-detect suggestion it covers.
@@ -4398,7 +4423,9 @@ class LocalRepositoryImpl extends LocalRepository {
     final age = _profileAge();
     final zonesNote = set != null
         ? null
-        : age == null
+        // A pre-validation age (a birth year, 0) has no ceiling estimate
+        // either; the fix is the age, not the strap.
+        : age == null || !plausibleAgeYears(age)
         ? needInputNote('age')
         : ana.unknownFamilyNote(family);
     // TS-05 — the 28-day distribution is ABSENT, not captioned, until BOTH zone
