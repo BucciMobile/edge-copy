@@ -1566,6 +1566,12 @@ class _EditProfileViewState extends State<EditProfileView> {
       TextEditingController(text: _u.weightField(widget.initial['weight_kg'] as num?));
   late String? _sex = (widget.initial['sex'] as String?)?.toLowerCase();
 
+  /// The metric values the height/weight fields were last filled from, so an
+  /// untouched field saves the value it came from (see
+  /// [UnitsController.weightToKgKeeping]).
+  late num? _shownHeightCm = widget.initial['height_cm'] as num?;
+  late num? _shownWeightKg = widget.initial['weight_kg'] as num?;
+
   /// When the store last gave us something. Null is "never", which is also
   /// what an unreadable preference reads as — the first-run word on the button
   /// is the safe one either way.
@@ -1603,8 +1609,10 @@ class _EditProfileViewState extends State<EditProfileView> {
       if (!mounted) return;
       if (fields != null) {
         _age.text = _s(fields['age']);
-        _height.text = _u.heightField(fields['height_cm'] as num?);
-        _weight.text = _u.weightField(fields['weight_kg'] as num?);
+        _shownHeightCm = fields['height_cm'] as num?;
+        _shownWeightKg = fields['weight_kg'] as num?;
+        _height.text = _u.heightField(_shownHeightCm);
+        _weight.text = _u.weightField(_shownWeightKg);
         _sex = (fields['sex'] as String?)?.toLowerCase() ?? _sex;
       }
       setState(() {
@@ -1655,9 +1663,13 @@ class _EditProfileViewState extends State<EditProfileView> {
       return;
     }
     final heightCm =
-        height.value == null ? null : _u.heightToCm(_height.text);
+        height.value == null
+            ? null
+            : _u.heightToCmKeeping(_height.text, _shownHeightCm);
     final weightKg =
-        weight.value == null ? null : _u.weightToKg(_weight.text);
+        weight.value == null
+            ? null
+            : _u.weightToKgKeeping(_weight.text, _shownWeightKg);
     final off = [
       if (age.value case final a? when !plausibleAgeYears(a))
         (l?.settingsAgeFieldLabel ?? 'Age'),

@@ -7597,7 +7597,7 @@
       }
     }
   },
-  "profileImplausibleFields": "Проверьте: {fields}. Значение вне допустимого диапазона, поэтому ничего не сохранено.",
+  "profileImplausibleFields": "Проверьте: {fields} — вне допустимого диапазона, поэтому ничего не сохранено.",
   "@profileImplausibleFields": {
     "placeholders": {
       "fields": {
