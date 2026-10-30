@@ -28,6 +28,7 @@ import '../ai/briefing.dart';
 import '../ai/briefing_engine.dart';
 import '../ai/nightly_sweep.dart';
 import '../coach/coach_config.dart';
+import '../coach/coach_engine.dart';
 import '../models/app_status.dart';
 import '../ble/accessory_setup.dart';
 import '../ble/adapters/_registry.dart' show kBleHrs, kPolarPmd, kWhoopGen4;
@@ -89,6 +90,7 @@ import 'prefs.dart';
 import '../ble/adapters/signals.dart' show InputSignal;
 import '../ui2/profile/devices.dart' show liveSources, rankSources;
 import '../data/db.dart';
+import '../data/export_retention.dart' show purgeSharedHealthCopies;
 import '../ecg/ble_ecg_transport.dart';
 import '../ecg/ecg_controller.dart';
 import '../ecg/ecg_guard_store.dart';
@@ -1395,8 +1397,13 @@ class AppState extends ChangeNotifier {
       await _stopSecondaryLinksForReset();
 
       // 2 · every row in every table (see LocalDb.wipeAll for why it is not a
-      // hand-written table list, and for the sync_cursor decision).
+      // hand-written table list, and for the sync_cursor decision). The reset
+      // holds the derive latch from before the gate went up, so no pass that
+      // read the substrate before the wipe can write its days back after it.
       await LocalDb.wipeAll();
+      // The copies already handed to share sheets (exports, CSVs, issue
+      // reports) are the same records in plaintext, sitting in the cache.
+      await purgeSharedHealthCopies();
 
       // Surfaces outside the database that were still showing it. Neither
       // may stop the reset short of [signOut]: the primary band is still
@@ -1416,6 +1423,13 @@ class AppState extends ChangeNotifier {
         await coachConfig?.save(apiKey: ''); // deletes the keychain entry
       } catch (e) {
         _log('[reset] keychain clear failed: $e');
+      }
+      // Coach chats are files, not rows, so wipeAll does not reach them.
+      try {
+        final left = await CoachEngine.deleteAllSavedSessions();
+        if (left > 0) _log('[reset] $left coach chat files not deleted');
+      } catch (e) {
+        _log('[reset] coach chat delete failed: $e');
       }
       // The ring's and Mi Band's 16-byte pairing keys. iOS keeps keychain
       // items across an uninstall, and a ring still holding the old key needs
@@ -2778,7 +2792,10 @@ class AppState extends ChangeNotifier {
       LocalDb.exportDaysDb(dayIds);
 
   Future<int> deleteDays(Set<String> dayIds) async {
-    final deleted = await LocalDb.deleteDays(dayIds);
+    // Same race as resetAllData: a pass in flight would write the deleted
+    // days back after the delete, with no substrate left to ever remove them.
+    final deleted =
+        await DerivationEngine.whileIdle(() => LocalDb.deleteDays(dayIds));
     await LocalDb.refreshComputeFreshness();
     lastSynced = await LocalDb.latestSample();
     // Deleting days is a durable write like any other, so the screens holding a
@@ -5512,13 +5529,15 @@ class AppState extends ChangeNotifier {
       final spec = kJournalFieldsByKey['water_ml']!;
       final date = todayLabel();
       // Inside the try: the READ can throw too, and a guard set before it would
-      // stay set forever. Spread into a fresh map — postJournalMetrics rewrites
-      // the whole day from what it is handed.
-      final fields = {...await r.getJournalMetrics(date)};
-      final now = fields['water_ml']?.value ?? 0;
-      fields['water_ml'] =
-          JournalMetricValue((now + spec.step).clamp(0, spec.max).toDouble());
-      await r.postJournalMetrics(date, fields);
+      // stay set forever. Through editJournalMetrics, not get-then-post: the
+      // tap can land while a screen or the coach is writing the same day, and
+      // whichever replaced the day second would erase the other's field.
+      await r.editJournalMetrics(date, (fields) {
+        final now = fields['water_ml']?.value ?? 0;
+        fields['water_ml'] = JournalMetricValue(
+          (now + spec.step).clamp(0, spec.max).toDouble(),
+        );
+      });
       _log('[gesture] water logged (+${spec.step.round()} ${spec.unit})');
       await HapticFeedback.mediumImpact();
     } catch (e) {

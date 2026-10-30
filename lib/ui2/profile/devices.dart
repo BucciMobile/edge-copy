@@ -1281,22 +1281,30 @@ final List<({BandEntry entry, String blurb, Future<String?> Function(BluetoothDe
 ///
 /// * [repairingId] — the row id the pair will write, when it is known before
 ///   the pair runs (`HrsLink.mintDeviceId`, keyed by the peripheral).
-/// * [adapterId] of a single-slot sensor (the ring: `pairOuraRing` reuses the
-///   one ring row it finds) — any existing row of that adapter is the row the
-///   pair rewrites.
+/// * [adapterId] of a single-slot sensor — any existing row of that adapter
+///   is the row the pair rewrites. The ring: `pairOuraRing` reuses the one
+///   ring row it finds. The Mi Band: `pairMiBand234` reuses the row of the
+///   same band, and a different band's successful pair forgets every other
+///   Mi Band row (one Mi Band syncs at a time), so it never nets a row.
 /// * [anyOfAdapter] — a SOFT check before a sensor's own screen opens or a
 ///   scan starts, when the peripheral is not known yet. An existing row of
 ///   [adapterId] lets the user through to that screen's forget / re-pair
 ///   section; the pair itself is checked again, exactly, before it runs.
 ///
-/// Anything else (a Mi Band pair mints a fresh random id every time) adds a
-/// row and is counted.
+/// Anything else (a heart-rate strap pair whose peripheral has no row yet)
+/// adds a row and is counted.
 bool sensorCapReached(Iterable<Map<String, Object?>> deviceRows,
     {String? repairingId, String? adapterId, bool anyOfAdapter = false}) {
-  final secondary =
-      deviceRows.where((r) => r['id'] != LocalDb.kPrimaryDeviceId).toList();
-  final sameAdapterRewrites =
-      adapterId != null && (anyOfAdapter || adapterId == kOura.id);
+  // A row with no `remote_id` holds no link — a backup restore brings a
+  // sensor's row across without the old phone's handle — so it cannot take
+  // a slot, and counting it would refuse the very re-pair that replaces it.
+  final secondary = deviceRows
+      .where((r) =>
+          r['id'] != LocalDb.kPrimaryDeviceId &&
+          ((r['remote_id'] as String?) ?? '').isNotEmpty)
+      .toList();
+  final sameAdapterRewrites = adapterId != null &&
+      (anyOfAdapter || adapterId == kOura.id || adapterId == kMiBand234.id);
   for (final r in secondary) {
     if (repairingId != null && r['id'] == repairingId) return false;
     if (sameAdapterRewrites && r['adapter_id'] == adapterId) return false;
@@ -1335,8 +1343,9 @@ Future<bool> refuseIfSensorCapReached(BuildContext c,
 
 /// Choose which kind of sensor to pair, then hand off to the pairing screen.
 Future<void> addSensor(BuildContext c) async {
-  if (await refuseIfSensorCapReached(c)) return;
-  if (!c.mounted) return;
+  // No cap check here: at the cap the picker still has to open, so a sensor
+  // that already has a row can reach its own screen to re-pair or replace
+  // it. Each sensor and each pair is checked inside.
   // `includeBand: false` — this phone already has its one primary band;
   // re-pairing it is `RePair`'s job, not a row beside a chest strap here.
   await goto(c, const DevicePickerScreen(includeBand: false));

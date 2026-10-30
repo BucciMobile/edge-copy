@@ -20,7 +20,7 @@ List<Map<String, Object?>> _rows(int secondaries,
     [
       if (band) {'id': LocalDb.kPrimaryDeviceId, 'adapter_id': null},
       for (var i = 0; i < secondaries; i++)
-        {'id': 'hrs:$i', 'adapter_id': adapter},
+        {'id': 'hrs:$i', 'adapter_id': adapter, 'remote_id': 'R-$i'},
     ];
 
 const _limitText = 'This phone will pair at most $kMaxConcurrentSecondaryLinks '
@@ -56,11 +56,32 @@ void main() {
     test('the ring has one row, so any ring pair rewrites it', () {
       final rows = [
         ..._rows(kMaxConcurrentSecondaryLinks - 1),
-        {'id': 'oura-1', 'adapter_id': kOura.id},
+        {'id': 'oura-1', 'adapter_id': kOura.id, 'remote_id': 'R-oura'},
       ];
       expect(sensorCapReached(rows, adapterId: kOura.id), isFalse);
       // A strap of the same kind is not single-slot: a new one is a new row.
       expect(sensorCapReached(rows, adapterId: 'ble_hrs'), isTrue);
+    });
+
+    test('a Mi Band pair replaces the Mi Band row, so it is not an addition',
+        () {
+      // The pick callback cannot name the row before the band is chosen, so
+      // the exact check runs with no repairingId. The pair either reuses the
+      // same band's row or forgets the other Mi Band rows once it succeeds.
+      final rows = [
+        ..._rows(kMaxConcurrentSecondaryLinks - 1),
+        {
+          'id': 'miband234-0a0b0c0d',
+          'adapter_id': kMiBand234.id,
+          'remote_id': 'R-mi'
+        },
+      ];
+      expect(sensorCapReached(rows, adapterId: kMiBand234.id), isFalse);
+      // With no Mi Band row yet, a first Mi Band is a new row and counts.
+      expect(
+          sensorCapReached(_rows(kMaxConcurrentSecondaryLinks),
+              adapterId: kMiBand234.id),
+          isTrue);
     });
 
     test('the soft check lets a paired kind through to its own screen', () {

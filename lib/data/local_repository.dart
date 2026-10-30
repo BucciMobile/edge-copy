@@ -321,6 +321,20 @@ abstract class LocalRepository {
     Map<String, JournalMetricValue> fields,
   ) => throw UnimplementedError('re-layer: postJournalMetrics');
 
+  /// Read one day's fields, let [edit] change that map in place, and write it
+  /// back as the whole day. Every caller that changes a field without owning
+  /// the whole day must come through here: a get followed by a separate post
+  /// is a read-modify-write, and two of them overlapping on one date lose the
+  /// first writer's field when the second replaces the day.
+  Future<void> editJournalMetrics(
+    String date,
+    void Function(Map<String, JournalMetricValue> day) edit,
+  ) async {
+    final day = {...await getJournalMetrics(date)};
+    edit(day);
+    await postJournalMetrics(date, day);
+  }
+
   /// Built-in fields followed by the user's own, in editor order.
   Future<List<JournalFieldSpec>> getJournalFields() =>
       throw UnimplementedError('re-layer: getJournalFields');
@@ -346,6 +360,8 @@ abstract class LocalRepository {
     List<String> symptoms, {
     String? note,
   }) => throw UnimplementedError('re-layer: postCycleSymptoms');
+  Future<List<String>> toggleCycleSymptom(String date, String symptom) =>
+      throw UnimplementedError('re-layer: toggleCycleSymptom');
   Future<Map<String, List<String>>> getCycleSymptoms() =>
       throw UnimplementedError('re-layer: getCycleSymptoms');
 

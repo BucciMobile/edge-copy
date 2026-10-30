@@ -804,7 +804,7 @@
   "nutritionLabelEaten": "摄入",
   "nutritionLabelBurned": "消耗",
   "nutritionLabelBalance": "平衡",
-  "nutritionEatenMeanNote": "摄入量是 {days} 个完整天的平均值。消耗量仅为今天的数值。",
+  "nutritionEatenMeanNote": "摄入量和消耗量都是同一组 {days} 个完整天的平均值。",
   "nutritionEnergyLoggedTitle": "已记录的热量",
   "nutritionPartialFootnote": "{n} 天记录不完整，已从下面的平均值中排除。",
   "nutritionNothingLoggedYet": "还没有任何记录",
@@ -2664,5 +2664,7 @@
   "dataReanalyzeFailed": "重新分析失败：{error}",
   "dataReanalyzeDaysFailed": "{n, plural, other{有 {n} 天无法分析。如果反复出现，请报告此问题。}}",
   "napsInFuture": "这次小睡还没有结束。醒来后再记录。",
+  "reportDeleteConfirmTitle": "删除报告 {id}？",
+  "reportDeleteConfirmBody": "它会立即从服务器上删除，之后无法再通过 ID 打开。此操作无法撤销。",
   "profileImplausibleFields": "请检查{fields}。数值超出范围，因此未保存任何内容。"
 }

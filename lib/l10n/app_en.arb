@@ -3996,9 +3996,9 @@
   "@nutritionLabelBalance": {
     "description": "Nutrition Week tab: all-caps inline metric label for the eaten-minus-burned balance"
   },
-  "nutritionEatenMeanNote": "Eaten is the mean of {days} complete days. Burned is today only.",
+  "nutritionEatenMeanNote": "Eaten and burned are both means over the same {days} complete days.",
   "@nutritionEatenMeanNote": {
-    "description": "Nutrition Week tab: footnote explaining the eaten mean is over N complete days while burned is today only",
+    "description": "Nutrition Week tab: footnote explaining eaten and burned are both means over the same N complete days",
     "placeholders": {
       "days": {
         "type": "int"
@@ -15740,6 +15740,19 @@
   "reportDeleteFailed": "Couldn't delete it. Try again later.",
   "@reportDeleteFailed": {
     "description": "Issue report: delete failed."
+  },
+  "reportDeleteConfirmTitle": "Delete report {id}?",
+  "@reportDeleteConfirmTitle": {
+    "description": "Issue report: confirm before deleting a sent report.",
+    "placeholders": {
+      "id": {
+        "type": "String"
+      }
+    }
+  },
+  "reportDeleteConfirmBody": "It will be removed from the server straight away, and its ID won't open it any more. There's no undo.",
+  "@reportDeleteConfirmBody": {
+    "description": "Issue report: what deleting a sent report does."
   },
   "reportSaveFailedTitle": "Couldn't share the report",
   "@reportSaveFailedTitle": {

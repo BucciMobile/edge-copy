@@ -833,7 +833,7 @@
   "nutritionLabelEaten": "GEGESSEN",
   "nutritionLabelBurned": "VERBRANNT",
   "nutritionLabelBalance": "BILANZ",
-  "nutritionEatenMeanNote": "„Gegessen“ ist der Durchschnitt aus {days} vollständigen Tagen. „Verbrannt“ gilt nur für heute.",
+  "nutritionEatenMeanNote": "„Gegessen“ und „Verbrannt“ sind beide Durchschnitte über dieselben {days} vollständigen Tage.",
   "nutritionEnergyLoggedTitle": "Eingetragene Energie",
   "nutritionPartialFootnote": "{n} unvollständig, in den Durchschnitten unten nicht enthalten.",
   "nutritionNothingLoggedYet": "Noch nichts eingetragen",
@@ -2789,5 +2789,7 @@
   "dataReanalyzeFailed": "Neuanalyse fehlgeschlagen: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{1 Tag konnte nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.} other{{n} Tage konnten nicht analysiert werden. Wenn das wiederholt passiert, melde es bitte.}}",
   "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
+  "reportDeleteConfirmTitle": "Bericht {id} löschen?",
+  "reportDeleteConfirmBody": "Er wird sofort vom Server entfernt und lässt sich danach nicht mehr über seine ID öffnen. Das lässt sich nicht rückgängig machen.",
   "profileImplausibleFields": "Bitte {fields} prüfen: außerhalb des gültigen Bereichs, daher wurde nichts gespeichert."
 }

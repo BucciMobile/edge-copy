@@ -3707,8 +3707,38 @@ class LocalRepositoryImpl extends LocalRepository {
   Future<Map<String, JournalMetricValue>> getJournalMetrics(String date) =>
       LocalDb.journalMetricsForDay(date);
 
+  /// Tail of the journal_metric write queue. Static because the store is one
+  /// process-wide database and more than one repository instance can be alive
+  /// (the strap gesture, the screens and the coach each hold one).
+  static Future<void> _journalMetricWrites = Future<void>.value();
+
+  /// Run [body] after every earlier journal_metric write has finished.
+  /// `putJournalMetrics` deletes the day and re-inserts what it is handed, so
+  /// a read-modify-write that interleaves with another one on the same date
+  /// silently drops the other writer's field.
+  static Future<T> _serialJournalMetrics<T>(Future<T> Function() body) {
+    final run = _journalMetricWrites.then((_) => body());
+    _journalMetricWrites = run.then<void>((_) {}, onError: (Object _) {});
+    return run;
+  }
+
   @override
   Future<void> postJournalMetrics(
+    String date,
+    Map<String, JournalMetricValue> fields,
+  ) => _serialJournalMetrics(() => _putJournalMetricsClamped(date, fields));
+
+  @override
+  Future<void> editJournalMetrics(
+    String date,
+    void Function(Map<String, JournalMetricValue> day) edit,
+  ) => _serialJournalMetrics(() async {
+    final day = {...await LocalDb.journalMetricsForDay(date)};
+    edit(day);
+    await _putJournalMetricsClamped(date, day);
+  });
+
+  Future<void> _putJournalMetricsClamped(
     String date,
     Map<String, JournalMetricValue> fields,
   ) async {
@@ -3826,12 +3856,21 @@ class LocalRepositoryImpl extends LocalRepository {
       maps[key] = m;
     }
 
-    // The union of journal dates (the days we can attribute behaviours on),
-    // sorted oldest-first — the shared index for journal + outcome arrays.
-    final dates = <String>{
+    // The days we can attribute behaviours on.
+    final journalDates = <String>{
       for (final j in journal)
         if (j['date'] is String) j['date'] as String,
-    }.toList()..sort();
+    };
+    // The outcome axis also needs each journal day's NEXT day: a lag-1 tag
+    // (alcohol, late meal) is paired with the night that follows it, and
+    // analytics looks that night up on this axis. Journal days alone would
+    // drop every tagged evening whose next day had no entry of its own — a
+    // user who journals only on the nights they drink would get no finding.
+    final dates = <String>{
+      ...journalDates,
+      for (final d in journalDates) ?ana.shiftDayLabel(d, 1),
+    }.toList()
+      ..sort();
 
     final numericInsights = await _numericJournalInsights(
       metricsByDay: metricsByDay,
@@ -3842,7 +3881,7 @@ class LocalRepositoryImpl extends LocalRepository {
     // The tag pass needs four tagged days before it says anything. The numeric
     // pass has its own, stricter floor and is already computed, so an early
     // return here must not take it down with it.
-    if (dates.length < 4) {
+    if (journalDates.length < 4) {
       return {'insights': const [], 'numeric_insights': numericInsights};
     }
 
@@ -3852,8 +3891,11 @@ class LocalRepositoryImpl extends LocalRepository {
       if (d == null) continue;
       (tagsByDate[d] ??= <String>{}).addAll(_decodeStrList(j['tags_json']));
     }
+    // The real rows only. A next-day padding date has no row and must stay
+    // unknown, not become an untagged day.
     final jdays = <ana.JournalDay>[
-      for (final d in dates) ana.JournalDay(d, tagsByDate[d] ?? const {}),
+      for (final d in journalDates)
+        ana.JournalDay(d, tagsByDate[d] ?? const {}),
     ];
     final outcomes = <String, List<double?>>{
       for (final od in outcomeDefs)
@@ -3926,9 +3968,18 @@ class LocalRepositoryImpl extends LocalRepository {
   }) async {
     if (metricsByDay.isEmpty) return const [];
 
-    final dates = metricsByDay.keys.toList()..sort();
+    final logged = metricsByDay.keys.toList()..sort();
+    // The outcome axis also needs each logged day's NEXT day: a behaviour field
+    // is paired with the night that follows it (MIND-02), and analytics looks
+    // that night up on this same axis. Logged days alone would drop every
+    // evening whose next day had no entry of its own.
+    final dates = <String>{
+      ...logged,
+      for (final d in logged) ?ana.shiftDayLabel(d, 1),
+    }.toList()
+      ..sort();
     final days = <ana.JournalNumericDay>[
-      for (final d in dates)
+      for (final d in logged)
         ana.JournalNumericDay(d, {
           for (final e in metricsByDay[d]!.entries) e.key: e.value.value,
           // MT-06 — the last cup, as a clock time, alongside the day's total.
@@ -3957,6 +4008,9 @@ class LocalRepositoryImpl extends LocalRepository {
       journal: days,
       dates: dates,
       outcomes: outcomes,
+      // Keyed by this app's field keys; analytics' own map uses generic names
+      // that match none of them, which paired every behaviour at lag 0.
+      fieldLagDays: kJournalFieldLagDays,
     );
 
     // Custom field definitions so a user-invented field reads by its own name
@@ -4236,17 +4290,22 @@ class LocalRepositoryImpl extends LocalRepository {
         if (DateTime.tryParse(s) case final d?) DateTime(d.year, d.month, d.day),
     ]..sort();
     final overlay = <Map<String, dynamic>>[];
-    final derived = await LocalDb.recentDayResults(120);
+    // Three scalars per day, read in SQL. Decoding 120 full bundles here ran on
+    // the UI isolate and repeated after every derive pass while this tab sat
+    // in the shell's IndexedStack.
+    final derived = await LocalDb.recentDayScalars(
+      120,
+      const ['rhr', 'rmssd', 'skin_temp_z'],
+    );
     if (derived.isNotEmpty) {
       // recentDerivedDays is newest-first; coverline wants oldest-first.
       final ordered = derived.reversed.toList();
       final dates = <String>[];
       final temps = <double?>[];
       for (final r in ordered) {
-        final b = _decode(r['payload_json']);
         final dt = r['date'] as String;
         dates.add(dt);
-        final z = _scalar(b, 'skin_temp_z')?.toDouble();
+        final z = (r['skin_temp_z'] as num?)?.toDouble();
         temps.add(z);
         // (cycle index, cycle day) for this row — see WH-02 above.
         int? cd, ci;
@@ -4263,8 +4322,8 @@ class LocalRepositoryImpl extends LocalRepository {
           'date': dt,
           'cycle_day': ?cd,
           'cycle_index': ?ci,
-          'resting_hr': _scalar(b, 'rhr')?.toDouble(),
-          'hrv_rmssd': _scalar(b, 'rmssd')?.toDouble(),
+          'resting_hr': (r['rhr'] as num?)?.toDouble(),
+          'hrv_rmssd': (r['rmssd'] as num?)?.toDouble(),
           'skin_temp_idx': z,
         });
       }
@@ -4312,6 +4371,10 @@ class LocalRepositoryImpl extends LocalRepository {
     List<String> symptoms, {
     String? note,
   }) async => LocalDb.putCycleSymptoms(date, symptoms, note: note);
+
+  @override
+  Future<List<String>> toggleCycleSymptom(String date, String symptom) async =>
+      LocalDb.toggleCycleSymptom(date, symptom);
 
   @override
   Future<Map<String, List<String>>> getCycleSymptoms() async {

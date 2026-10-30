@@ -804,7 +804,7 @@
   "nutritionLabelEaten": "COMIDO",
   "nutritionLabelBurned": "QUEMADO",
   "nutritionLabelBalance": "BALANCE",
-  "nutritionEatenMeanNote": "Lo comido es la media de {days} días completos. Lo quemado es solo de hoy.",
+  "nutritionEatenMeanNote": "Lo comido y lo quemado son medias de los mismos {days} días completos.",
   "nutritionEnergyLoggedTitle": "Energía registrada",
   "nutritionPartialFootnote": "{n} parciales, excluidos de las medias de abajo.",
   "nutritionNothingLoggedYet": "Nada registrado aún",
@@ -2693,5 +2693,7 @@
   "dataReanalyzeFailed": "El reanálisis falló: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
+  "reportDeleteConfirmTitle": "¿Eliminar el informe {id}?",
+  "reportDeleteConfirmBody": "Se borra del servidor ahora mismo y ya no se podrá abrir con su ID. No se puede deshacer.",
   "profileImplausibleFields": "Revisa {fields}: fuera de rango, así que no se guardó nada."
 }
