@@ -35,6 +35,7 @@ import 'db.dart';
 import 'activity_store.dart';
 import '../models/activity_suggestion.dart';
 import '../health/health_export.dart';
+import '../import/whoop_import.dart' show WhoopImporter;
 import 'journal_fields.dart';
 import '../ble/adapters/_registry.dart' show kBandRegistry;
 import 'local_repository.dart';
@@ -2833,7 +2834,15 @@ class LocalRepositoryImpl extends LocalRepository {
   int? _profileAge() => (getProfileMap()?['age'] as num?)?.round();
 
   @override
-  Future<void> deleteWorkout(String id) async => LocalDb.deleteSession(id);
+  Future<void> deleteWorkout(String id) async {
+    // Tombstone first: a failed delete then only leaves a row the importer
+    // already skips, while the other order's failure brings it back.
+    if (id.startsWith(WhoopImporter.workoutIdPrefix)) {
+      await WhoopImporter.rememberDeletedWorkout(id,
+          startTs: ((await LocalDb.session(id))?['start_ts'] as num?)?.toInt());
+    }
+    await LocalDb.deleteSession(id);
+  }
 
   @override
   Future<void> setWorkoutPrivate(String id, bool private) async {
@@ -2841,14 +2850,6 @@ class LocalRepositoryImpl extends LocalRepository {
     // The workout was already exported when it stopped, before this flag
     // landed. Re-export: a private row clears its window and writes nothing.
     unawaited(HealthExporter.exportWorkoutId(id));
-    // The day's active energy has exported workouts' calories taken off, so
-    // it changes too, and a day behind the export cursor is never rewritten.
-    final start = ((await LocalDb.session(id))?['start_ts'] as num?)?.toInt();
-    if (start != null) {
-      unawaited(HealthExporter.reexportFrom(
-        dayLabelOf(DateTime.fromMillisecondsSinceEpoch(start * 1000)),
-      ));
-    }
   }
 
   @override
@@ -2916,6 +2917,7 @@ class LocalRepositoryImpl extends LocalRepository {
     required int startTs,
     required int endTs,
     required String type,
+    String source = 'manual',
   }) async {
     // A manual row's id is derived from its start second, so re-logging the
     // IDENTICAL window is an update of that row, not a collision with it. A
@@ -2951,6 +2953,7 @@ class LocalRepositoryImpl extends LocalRepository {
       existing: same ? prior : null,
       sessionId:
           moved ? '$id:${DateTime.now().millisecondsSinceEpoch}' : null,
+      source: source,
       validateAgainstId: same
           ? prior['id'] as String
           : (prior == null && !moved ? id : null),

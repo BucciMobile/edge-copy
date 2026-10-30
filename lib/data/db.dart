@@ -3161,6 +3161,41 @@ class LocalDb {
     });
   }
 
+  /// Drop every imported workout that starts inside [[startSec], [endSec]]
+  /// but whose uuid is not in [present], AND its route, like
+  /// [deleteImportedWorkout]. Returns how many went.
+  ///
+  /// The window is the one the store was just read over: a uuid it no longer
+  /// returns there was deleted in the health app, and the upsert alone would
+  /// keep listing it (and counting it toward the week) forever. Rows outside
+  /// the window are left alone, since the read says nothing about them.
+  static Future<int> deleteImportedWorkoutsMissing(
+    int startSec,
+    int endSec,
+    Set<String> present,
+  ) async {
+    final db = await instance;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'imported_workout',
+        columns: ['uuid'],
+        where: 'start_ts >= ? AND start_ts <= ?',
+        whereArgs: [startSec, endSec],
+      );
+      final gone = [
+        for (final r in rows)
+          if (!present.contains(r['uuid'])) r['uuid'] as String,
+      ];
+      for (final u in gone) {
+        await txn.delete('imported_workout',
+            where: 'uuid = ?', whereArgs: [u]);
+        await txn.delete('workout_route',
+            where: 'session_id = ?', whereArgs: [u]);
+      }
+      return gone.length;
+    });
+  }
+
   // ── EXTERNAL HEART-RATE SENSOR (0x180D) ─────────────────────────────────────
   /// What a standard Bluetooth heart-rate sensor delivered during ONE workout.
   ///
@@ -3740,6 +3775,27 @@ class LocalDb {
       [day, kStepSourcePhone],
     );
     return (r.first['s'] as num?)?.toInt() ?? 0;
+  }
+
+  /// [day]'s banked phone windows, so a re-sync can keep the ones for an hour
+  /// the sensor no longer covers (see `PhonePedometer.syncDay`).
+  static Future<List<({int startTs, int endTs, int steps})>>
+      phoneCoverageForDay(String day) async {
+    final db = await instance;
+    final rows = await db.query(
+      'live_coverage',
+      columns: ['start_ts', 'end_ts', 'steps'],
+      where: 'day = ? AND source = ?',
+      whereArgs: [day, kStepSourcePhone],
+    );
+    return [
+      for (final r in rows)
+        (
+          startTs: (r['start_ts'] as num).toInt(),
+          endTs: (r['end_ts'] as num).toInt(),
+          steps: (r['steps'] as num).toInt(),
+        ),
+    ];
   }
 
   /// Drop every phone-sourced coverage row (the user turned phone steps off).
@@ -12446,6 +12502,35 @@ class LocalDb {
     });
   }
 
+  /// Move a session's window. Not `putSession`: the row's type correction,
+  /// RPE and private flag must survive. What was measured over the OLD window
+  /// (the frozen HR trace, average HR, zone minutes) belongs to other seconds,
+  /// so it goes; a re-score fills it again if the new window is still on
+  /// record. Returns the number of rows changed.
+  static Future<int> setSessionWindow(String id, int startTs, int? endTs) async {
+    final db = await instance;
+    return db.transaction((tx) async {
+      final n = await tx.update(
+        'sessions',
+        {
+          'start_ts': startTs,
+          'end_ts': endTs,
+          'trace_json': null,
+          'trace_samples': null,
+          'avg_hr': null,
+          'zone_min_json': null,
+        },
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      if (n > 0) {
+        await ActivityStore.supersede(tx, ActivityKind.workout, startTs,
+            endTs ?? DateTime.now().millisecondsSinceEpoch ~/ 1000);
+      }
+      return n;
+    });
+  }
+
   /// Update ONLY a session's derived score columns.
   ///
   /// Deliberately not `putSession`: that is INSERT-OR-REPLACE over the whole
@@ -12485,6 +12570,17 @@ class LocalDb {
       where: 'id = ?',
       whereArgs: [id],
     );
+  }
+
+  /// Whether a [source] session already starts at [startTs], under any id.
+  static Future<bool> hasSessionStartingAt(String source, int startTs) async {
+    final db = await instance;
+    final rows = await db.query('sessions',
+        columns: ['id'],
+        where: 'source = ? AND start_ts = ?',
+        whereArgs: [source, startTs],
+        limit: 1);
+    return rows.isNotEmpty;
   }
 
   static Future<Map<String, dynamic>?> session(String id) async {
