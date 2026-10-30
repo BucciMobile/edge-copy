@@ -2693,5 +2693,5 @@
   "dataReanalyzeFailed": "El reanálisis falló: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
-  "profileImplausibleFields": "Revisa {fields}. El valor está fuera de rango, así que no se guardó nada."
+  "profileImplausibleFields": "Revisa {fields}: fuera de rango, así que no se guardó nada."
 }
