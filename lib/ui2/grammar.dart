@@ -1846,7 +1846,7 @@ void sayImplausible(BuildContext c, List<String> fields) {
     SnackBar(
       content: Text(
         AppLocalizations.of(c)?.profileImplausibleFields(joined) ??
-            'Check $joined. That value is out of range, so nothing was saved.',
+            'Check $joined: out of range, so nothing was saved.',
       ),
     ),
   );

@@ -2664,5 +2664,5 @@
   "dataReanalyzeFailed": "La réanalyse a échoué : {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{{n} jour n’a pas pu être analysé. Si cela se reproduit, merci de le signaler.} other{{n} jours n’ont pas pu être analysés. Si cela se reproduit, merci de le signaler.}}",
   "napsInFuture": "Cette sieste n'est pas encore terminée. Enregistrez-la une fois réveillé.",
-  "profileImplausibleFields": "Vérifiez {fields}. La valeur est hors limites, rien n'a donc été enregistré."
+  "profileImplausibleFields": "Vérifiez {fields} : hors limites, rien n'a donc été enregistré."
 }
