@@ -2695,5 +2695,5 @@
   "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
   "reportDeleteConfirmTitle": "¿Eliminar el informe {id}?",
   "reportDeleteConfirmBody": "Se borra del servidor ahora mismo y ya no se podrá abrir con su ID. No se puede deshacer.",
-  "profileImplausibleFields": "Revisa {fields}. El valor está fuera de rango, así que no se guardó nada."
+  "profileImplausibleFields": "Revisa {fields}: fuera de rango, así que no se guardó nada."
 }

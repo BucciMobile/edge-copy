@@ -2666,5 +2666,5 @@
   "napsInFuture": "यह झपकी अभी खत्म नहीं हुई है। जागने के बाद इसे दर्ज करें।",
   "reportDeleteConfirmTitle": "रिपोर्ट {id} हटाएँ?",
   "reportDeleteConfirmBody": "यह अभी सर्वर से हट जाएगी और इसके ID से फिर नहीं खुलेगी। इसे वापस नहीं लाया जा सकता।",
-  "profileImplausibleFields": "{fields} जाँचें। मान सीमा से बाहर है, इसलिए कुछ भी सहेजा नहीं गया।"
+  "profileImplausibleFields": "{fields} जाँचें: सीमा से बाहर, इसलिए कुछ भी सहेजा नहीं गया।"
 }

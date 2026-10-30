@@ -2791,5 +2791,5 @@
   "napsInFuture": "Dieses Nickerchen ist noch nicht vorbei. Trage es ein, wenn du wach bist.",
   "reportDeleteConfirmTitle": "Bericht {id} löschen?",
   "reportDeleteConfirmBody": "Er wird sofort vom Server entfernt und lässt sich danach nicht mehr über seine ID öffnen. Das lässt sich nicht rückgängig machen.",
-  "profileImplausibleFields": "Bitte {fields} prüfen. Der Wert liegt außerhalb des gültigen Bereichs, daher wurde nichts gespeichert."
+  "profileImplausibleFields": "Bitte {fields} prüfen: außerhalb des gültigen Bereichs, daher wurde nichts gespeichert."
 }
