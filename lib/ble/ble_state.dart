@@ -1367,6 +1367,10 @@ class AlarmConfirmation {
   int? setAtMs; // wall-ms of the SET write (for the grace window)
   int? lastEventId; // most recent alarm event seen
   int? firedAt; // wall-ms of the last EXECUTED event
+  int? firedTsSec; // that event's own stamp (wall sec), null when unplaceable
+  // The strap's own stamp before the drift mapping. The mapping moves when the
+  // clock correlation does, so only this one names the same fire twice.
+  int? firedRawTsSec;
 
   /// Record a SET write (awaiting the strap's confirmation event).
   void set(int epoch, int nowMs) {
@@ -1399,6 +1403,35 @@ class AlarmConfirmation {
   /// is the ceiling).
   static const int replaySlackSec = 120;
 
+  /// How long after the band fired a 57 may arrive and still be announced as
+  /// "just fired". A phone out of range at wake time gets the event on the
+  /// next reconnect, hours later; the fire still has to be consumed (the slot
+  /// is spent) but a critical alert that bypasses quiet hours at that point is
+  /// noise about something the band already did.
+  static const int lateFireNoticeSec = 600;
+
+  /// How far ahead of the phone a drift-mapped fire stamp may sit and still
+  /// count as now: the mapping is only as good as the last clock read.
+  static const int futureFireSlackSec = 5;
+
+  /// Whether the last fire is recent enough at [nowMs] to notify about. An
+  /// unplaceable stamp can't be judged and is taken as current; one mapped
+  /// further into the future than the slack is a bad mapping, not news.
+  bool firedJustNow(int nowMs) {
+    if (firedTsSec == null) return true;
+    final age = nowMs ~/ 1000 - firedTsSec!;
+    return age >= -futureFireSlackSec && age <= lateFireNoticeSec;
+  }
+
+  /// Dedupe key for the fired notification. Keyed on the band's own stamp so
+  /// the same fire delivered twice collapses; receive time differs per
+  /// delivery and never would.
+  String get firedNoticeKey => 'alarm_fired:${firedRawTsSec != null
+      ? 'r${firedRawTsSec!}'
+      : firedTsSec != null
+          ? firedTsSec! * 1000
+          : (firedAt ?? 0)}';
+
   /// Feed a strap event. Returns the resulting [AlarmEffect] the caller acts on,
   /// or null when the event is unrelated to the alarm (or belongs to an
   /// earlier arm).
@@ -1409,7 +1442,10 @@ class AlarmConfirmation {
   /// 56 and 59 have to come after this arm's SET write, and a fire can't
   /// predate the wake time it fires for (or, with nothing armed, now). Null or an unset-RTC value can't be
   /// told apart and is taken as current.
-  AlarmEffect? onEvent(int id, int nowMs, {int? tsSec}) {
+  ///
+  /// [rawTsSec] is the strap's stamp before that mapping, used only to key
+  /// the fired notification.
+  AlarmEffect? onEvent(int id, int nowMs, {int? tsSec, int? rawTsSec}) {
     final known = tsSec != null && tsSec >= kMinPlausibleUnix;
     bool before(int? sec) =>
         known && sec != null && tsSec < sec - replaySlackSec;
@@ -1426,6 +1462,8 @@ class AlarmConfirmation {
         if (before(targetEpoch ?? nowMs ~/ 1000)) return null;
         lastEventId = id;
         firedAt = nowMs;
+        firedTsSec = known ? tsSec : null;
+        firedRawTsSec = known ? rawTsSec : null;
         return AlarmEffect.fired;
       case kEvtAppExecuted:
         // RUN_ALARM (smart wake early buzz, test buzz). The armed SET_ALARM

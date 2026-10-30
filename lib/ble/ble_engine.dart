@@ -8608,22 +8608,26 @@ class BleEngine {
   /// WHOOP 5: RUN_ALARM does not buzz on hardware we tested; use the same
   /// Maverick `0x13` short pulse as Find-band. Do NOT STOP_HAPTICS first —
   /// on gen5 that can race and swallow the buzz.
-  Future<void> runAlarm() async {
+  ///
+  /// Returns whether the write reached the band.
+  Future<bool> runAlarm() async {
     if (_session?.band.isGen5 ?? false) {
-      await _send(
+      return _send(
         Cmd.runHapticPatternMaverick,
         AlarmPayloads.gen5MaverickBuzz(),
       );
-      return;
     }
-    await _send(Cmd.runAlarm, AlarmPayloads.runNow);
+    return _send(Cmd.runAlarm, AlarmPayloads.runNow);
   }
 
   /// Cancel the on-device alarm (DISABLE_ALARM = 0x45). gen4 body `[0x01]`
   /// (the earlier `[0x00]` body was ACKed but did not clear the alarm); gen5
   /// needs revision 2 plus the alarm id, defaulting to "all slots" — see
   /// [AlarmPayloads.disableForBand].
-  Future<void> disableAlarm({int? id}) {
+  ///
+  /// Returns whether the write reached the band. Callers must not forget an
+  /// armed alarm on false: the strap still holds it and will buzz.
+  Future<bool> disableAlarm({int? id}) {
     final isGen5 = _session?.band.isGen5 ?? false;
     return _send(
       Cmd.disableAlarm,
@@ -8691,12 +8695,20 @@ class BleEngine {
   }
   Future<void> buzz() => buzzPattern(hapticShortPulse);
 
+  /// [buzz] that reports whether the command reached the strap. `_send` does
+  /// not throw on a failed or timed-out GATT write — it logs and returns
+  /// false — so a caller that tells someone "the band buzzed" (the iOS
+  /// Shortcut) needs this instead of treating "no exception" as delivered.
+  Future<bool> buzzDelivered() => _sendBuzz(hapticShortPulse);
+
   /// Play a haptic buzz. gen5 ("Maverick") has a DIFFERENT buzz opcode and
   /// payload shape than gen4 (`Cmd.runHapticPatternMaverick`, 12-byte body —
   /// see `cmdBuzzGen5Maverick` in protocol/commands.dart) — [pattern] is
   /// honoured only on gen4; a gen5 link always plays the strap's fixed
   /// `[47, 152]` waveform pair (the only Maverick buzz byte-verified so far).
-  Future<void> buzzPattern(int pattern) {
+  Future<void> buzzPattern(int pattern) => _sendBuzz(pattern);
+
+  Future<bool> _sendBuzz(int pattern) {
     if (_session?.band.isGen5 ?? false) {
       return _send(
         Cmd.runHapticPatternMaverick,

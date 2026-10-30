@@ -236,6 +236,18 @@ class WorkoutController {
 
   Timer? _workoutTimer;
 
+  // One App-Group read of the Live Activity's Finish flag at a time; the tick
+  // runs at 1 Hz and a read can outlast a second.
+  bool _finishFlagPollInFlight = false;
+
+  // The relaunch reconcile, while it runs. See [maybeFinishFromLiveActivity].
+  Future<void>? _reconciling;
+
+  /// Set by the app before start-up kicks the reconcile, cleared once it has
+  /// run. A resume can land before start-up reaches the reconcile at all, when
+  /// [_reconciling] is still null and there is nothing to wait for.
+  bool reconcilePending = false;
+
   // GPS route tracking for the active run/ride/walk (on-device only). Null when
   // no session is live or the type isn't route-eligible / permission denied.
   RouteTracker? _routeTracker;
@@ -660,14 +672,31 @@ class WorkoutController {
   }
 
   /// If the Live Activity's Finish button was tapped (App Intent set the flag),
-  /// stop the workout here too. Call on app resume.
+  /// stop the workout here too. Called on app resume and polled from the 1 Hz
+  /// workout tick.
   Future<void> maybeFinishFromLiveActivity() async {
+    // On a cold relaunch the first resume lands while the reconcile is still
+    // reading the live row back. Consuming then saw no workout, spent the tap,
+    // and the rehydrated session ran on with nothing left to end it.
+    final reconciling = _reconciling;
+    if (reconciling != null) await reconciling;
+    // Not reconciled yet: leave the flag latched. The rehydrated session's own
+    // tick, or the next resume, consumes it.
+    if (reconcilePending) return;
     // Consume FIRST. `&&` short-circuited the consume away whenever no session
     // was live, so a Finish tapped on a Live Activity that outlived the app
     // stayed latched on disk — and then ended the NEXT workout, days later, on
     // the first resume that happened to have one running.
     final asked = await WidgetService.consumeEndSessionFlag();
-    if (asked && activeWorkout != null) await stopWorkout();
+    if (!asked || activeWorkout == null) return;
+    try {
+      await stopWorkout();
+    } catch (_) {
+      // The consume already cleared the tap. A stop that failed keeps the
+      // session live, so put the tap back for the next resume to retry.
+      if (activeWorkout != null) await WidgetService.relatchEndSessionFlag();
+      rethrow;
+    }
   }
 
   /// Reconcile any session row still `status='live'` left over from a
@@ -691,7 +720,16 @@ class WorkoutController {
   ///   live" banner. duration_min/calories are left unset rather than guessed
   ///   (we don't know the real end time or effort).
   static const int _kMaxLiveWorkoutAgeMs = 6 * 60 * 60 * 1000; // 6h
-  Future<void> reconcileOrphanedLiveWorkout() async {
+  Future<void> reconcileOrphanedLiveWorkout() {
+    final f = _reconcileOrphanedLiveWorkout();
+    _reconciling = f;
+    return f.whenComplete(() {
+      if (identical(_reconciling, f)) _reconciling = null;
+      reconcilePending = false;
+    });
+  }
+
+  Future<void> _reconcileOrphanedLiveWorkout() async {
     try {
       // Called unawaited from _init(); a concurrent startWorkout() could in
       // principle already be running by the time this DB round-trip resolves
@@ -856,7 +894,30 @@ class WorkoutController {
     }
   }
 
-  Future<void> stopWorkout() async {
+  /// The stop in progress, handed to every caller that arrives before it
+  /// settles. A stop can be started from the Live Activity on resume, the live
+  /// screen's Finish, the mini-bar and the band double-tap, and it spends
+  /// seconds in sensor and GPS flushes before it clears [activeWorkout]. A
+  /// second stop that got past the entry check while the first was parked in
+  /// those flushes wrote the session twice, cancelled the first stop's
+  /// recovery tail, and, when the first finished under it, hit a null
+  /// `activeWorkout` — so a workout that was saved was reported as unsaved.
+  Future<void>? _stopping;
+
+  Future<void> stopWorkout() {
+    final inFlight = _stopping;
+    if (inFlight != null) return inFlight;
+    if (activeWorkout == null) return Future<void>.value();
+    final stop = _stopWorkoutOnce();
+    _stopping = stop;
+    // Cleared on failure too: a failed write keeps the session live, and the
+    // retry has to run a fresh stop rather than replay the error.
+    return stop.whenComplete(() {
+      if (identical(_stopping, stop)) _stopping = null;
+    });
+  }
+
+  Future<void> _stopWorkoutOnce() async {
     final w = activeWorkout;
     if (w == null) return;
     // "Delete everything" can run while the teardown below is awaiting:
@@ -1108,6 +1169,12 @@ class WorkoutController {
   Future<bool> exportWorkoutToHealth(String? sessionId) =>
       HealthExporter.exportWorkoutId(sessionId);
 
+  /// The idle nudge's body. localizedNotificationText parses this exact
+  /// wording back to translate it, so the two change together.
+  static String idleNudgeBody(int minutes) =>
+      'Nothing above resting effort has been recorded for $minutes minutes. '
+      'If the session is over, finish it from the Workout tab.';
+
   /// Ask about a session that has gone quiet — the [WorkoutIdleWatch] ask.
   ///
   /// Once per session EVER, belt and braces: the watch stops on
@@ -1128,9 +1195,7 @@ class WorkoutController {
           // movement and detected-workout prompts.
           priority: NotifPriority.normal,
           title: 'Still working out?',
-          body: 'Nothing above resting effort has been recorded for '
-              '${w.idleWatch.nudgeAfter.inMinutes} minutes. If the session '
-              'is over, finish it from the Workout tab.',
+          body: idleNudgeBody(w.idleWatch.nudgeAfter.inMinutes),
           date: todayLabel(),
           route: kRouteWorkoutIdle,
         ),
@@ -1157,6 +1222,23 @@ class WorkoutController {
   void _tickWorkout() {
     final w = activeWorkout;
     if (w == null) return;
+
+    // The lock-screen Finish button runs in the widget extension and does not
+    // bring the app forward. Checked only on resume, the session kept its
+    // timer, streams and GPS running until the app was next opened, and
+    // stopWorkout then stamped that later moment as the end: a run finished at
+    // 18:30 and opened at 22:00 banked three and a half hours. Checked before
+    // the pause return, since a paused session can be finished there too.
+    if (!_finishFlagPollInFlight) {
+      _finishFlagPollInFlight = true;
+      unawaited(
+        maybeFinishFromLiveActivity()
+            .catchError(
+              (Object e) => _log('[workout] lock-screen finish failed: $e'),
+            )
+            .whenComplete(() => _finishFlagPollInFlight = false),
+      );
+    }
 
     // Pause is held by the live screen's draft. While paused the clock and
     // every tally (zones, strain, calories, the idle watch) hold too, so the
@@ -1254,8 +1336,9 @@ class WorkoutController {
     // Push to the Live Activity at most ~every 4s (ActivityKit throttles; saves battery).
     // Skipped entirely while HR is absent: the widget's channel takes a
     // non-null int, so the only way to push "no reading" today would be to send
-    // 0 bpm, which is a fabricated measurement on the lock screen. Holding the
-    // last frame is the lesser wrong until `LiveActivity.update` takes `int?`.
+    // 0 bpm, which is a fabricated measurement on the lock screen. The last
+    // frame is held instead; the native bridge stamps each push with a stale
+    // date about a minute out, and the widget blanks HR and zone once it passes.
     if (hr != null && DateTime.now().difference(_lastLaPush).inSeconds >= 4) {
       _lastLaPush = DateTime.now();
       LiveActivity.update(

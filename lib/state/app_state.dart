@@ -24,9 +24,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/widgets.dart';
 
 import '../ai/ai_prefs.dart';
+import 'locale_controller.dart';
 import '../ai/briefing.dart';
 import '../ai/briefing_engine.dart';
 import '../ai/nightly_sweep.dart';
+import '../ai/reminder_plan.dart';
 import '../coach/coach_config.dart';
 import '../coach/coach_engine.dart';
 import '../models/app_status.dart';
@@ -1855,6 +1857,10 @@ class AppState extends ChangeNotifier {
     // Same wiring, second notify-class sensor: PMD readings otherwise never
     // reach liveHr/the live trace at all (arm/disarm alone don't feed it).
     PolarPmdLink.instance.reading.addListener(_onPmdReading);
+    _workoutController.reconcilePending = true;
+    // Cleared by the reconcile itself, not by start-up ending: `_init` catches
+    // its own failures, and one that stopped before the reconcile has
+    // reconciled nothing. [retryInit] reaches it again.
     _initDone = _init();
     // Notification taps → request a tab switch (the shell listens to navRequest).
     _tapSub = NotificationService.instance.taps.listen(_handleTapRoute);
@@ -1919,26 +1925,30 @@ class AppState extends ChangeNotifier {
     if (route != null) _handleTapRoute(route);
   }
 
-  /// EnableTomorrowAlarmIntent (Siri/Shortcuts) latches the weekday it wants
-  /// turned on — computed on the Swift side, at the moment Siri actually ran
-  /// it, not here (a request made just before local midnight must still mean
-  /// the day the user asked for, even if the app doesn't resume until after
-  /// midnight). The widget process has no BLE, so it cannot arm the band
-  /// itself; this is the actual write: flip that weekday's slot on at
-  /// whatever hour/minute it already has (same as tapping that slot's
+  /// EnableTomorrowAlarmIntent (Siri/Shortcuts) latches the instant it ran;
+  /// the weekday it means is resolved here against the schedule
+  /// ([siriTomorrowAlarmWeekday]) at that instant, not at this launch/resume,
+  /// which may be after midnight. The widget process has no BLE, so it cannot
+  /// arm the band itself; this is the actual write: flip that weekday's slot
+  /// on at whatever hour/minute it already has (same as tapping that slot's
   /// toggle on the Alarm screen — never invents a time), then
   /// [setScheduleDay] re-arms the band immediately when connected. On
   /// failure, re-latch the request rather than drop it — a transient
   /// DB/BLE error shouldn't silently eat a Siri command; it just retries on
   /// the next launch/resume.
   Future<void> _maybeEnableTomorrowAlarmFromSiri() async {
-    final weekday = await WidgetService.consumeEnableTomorrowAlarmWeekday();
-    if (weekday == null) return;
+    final request = await WidgetService.consumeEnableTomorrowAlarmRequest();
+    if (request == null) return;
+    final at = request.requestedAt;
+    final weekday = at != null
+        ? siriTomorrowAlarmWeekday(
+            _schedule, DateTime.fromMillisecondsSinceEpoch(at * 1000))
+        : request.weekday!;
     try {
       await setScheduleDay(weekday: weekday, enabled: true);
     } catch (e) {
       _log('[alarm] siri enable-tomorrow failed, will retry next resume: $e');
-      await WidgetService.relatchEnableTomorrowAlarm(weekday);
+      await WidgetService.relatchEnableTomorrowAlarm(request);
     }
   }
 
@@ -2071,6 +2081,12 @@ class AppState extends ChangeNotifier {
   @visibleForTesting
   Future<void> debugReconcileOrphanedLiveWorkout() =>
       _reconcileOrphanedLiveWorkout();
+
+  /// Mark the reconcile as not yet started, the way the app constructor does
+  /// before start-up reaches it. Tests only.
+  @visibleForTesting
+  void debugMarkReconcilePending() =>
+      _workoutController.reconcilePending = true;
 
   /// Run the cross-day anchor read (nightly RHR, quiet-waking level) that
   /// `_initSteps` awaits before the reconcile above. Tests only.
@@ -2297,6 +2313,15 @@ class AppState extends ChangeNotifier {
     unawaited(_ensureRemindersScheduled());
   }
 
+  /// Scheduled notifications carry their text in the language they were
+  /// armed in, so a language change re-arms them.
+  LocaleController? _locale;
+  void attachLocale(LocaleController l) {
+    if (identical(_locale, l)) return;
+    _locale = l;
+    l.addListener(() => unawaited(_ensureRemindersScheduled()));
+  }
+
   /// Re-assert the AI notification schedule (settings screens call this after
   /// a prefs change; also runs on every foreground via runCadenceChecks).
   Future<void> refreshAiReminders() => _ensureRemindersScheduled();
@@ -2334,7 +2359,7 @@ class AppState extends ChangeNotifier {
       );
       if (ai.eveningEnabled && minOfDay >= eveningMin) {
         want = BriefingPeriod.evening;
-      } else if (ai.morningEnabled && at.hour >= 5) {
+      } else if (ai.morningEnabled && minOfDay >= AiPrefs.morningFloorMin) {
         want = BriefingPeriod.morning;
       }
       if (want == null || BriefingStore.read(want) != null) return;
@@ -3025,8 +3050,15 @@ class AppState extends ChangeNotifier {
     if (_taskerBuzzCheckInFlight) return;
     _taskerBuzzCheckInFlight = true;
     try {
-      final pattern = await TaskerBridge.peekPendingBuzz();
-      if (pattern == null) return;
+      final pending = await TaskerBridge.peekPendingBuzz();
+      if (pending == null) return;
+      final pattern = pending.pattern;
+      if (!pending.isFresh(DateTime.now())) {
+        _log('[tasker] dropping stale pending buzz (pattern=$pattern, '
+            'requestedAtMs=${pending.requestedAtMs})');
+        await TaskerBridge.clearPendingBuzz();
+        return;
+      }
       // A Tasker BUZZ_STRAP can arrive while the app is fully dead; the
       // reconnect this _init() already kicked off may not have landed by the
       // time we get here. Wait (bounded) for a live link rather than firing
@@ -3035,8 +3067,8 @@ class AppState extends ChangeNotifier {
       // on a live connection. If this 20s wait still times out, the request
       // is NOT lost: _onEngineState calls back in here on every subsequent
       // "became connected" transition for the rest of this process's life,
-      // so a slower reconnect still eventually delivers it instead of
-      // requiring a full app restart.
+      // so a slower reconnect still delivers it — but only while it is
+      // younger than PendingTaskerBuzz.maxAge; older requests are dropped.
       final connected = await _waitUntil(
         () => engine.isConnected,
         const Duration(seconds: 20),
@@ -3044,6 +3076,12 @@ class AppState extends ChangeNotifier {
       if (!connected) {
         _log('[tasker] pending buzz (pattern=$pattern) still queued — '
             'no connection within 20s, will retry on the next reconnect');
+        return;
+      }
+      if (!pending.isFresh(DateTime.now())) {
+        _log('[tasker] pending buzz (pattern=$pattern) went stale waiting '
+            'for a connection — dropping it');
+        await TaskerBridge.clearPendingBuzz();
         return;
       }
       _log('[tasker] consuming pending buzz (pattern=$pattern) from headless intent');
@@ -3134,6 +3172,8 @@ class AppState extends ChangeNotifier {
         medDefs: meds.defs,
         medDosesToday: meds.doses,
         armedTonight: _alarmArmedTonight,
+        alarmExpectedTonight:
+            scheduleExpectsAlarmTonight(_schedule, DateTime.now()),
       );
       // The strap-buzz half of the medication reminder, off the SAME schedule
       // read the OS dose slots above were armed from — one read feeds both
@@ -3161,7 +3201,7 @@ class AppState extends ChangeNotifier {
       await NotificationCenter.instance.scheduleAiReminders(
         prefs,
         ai,
-        aiConfigured: coachConfig?.hasKey ?? false,
+        aiConfigured: aiRemindersConfigured(coachConfig),
         bedtimeMinOfDay: cd.bedtimeMin,
         journalDoneToday: BriefingStore.journalDoneToday(),
         sweepHeadline: await _sweepHeadlineNow(),
@@ -4597,7 +4637,14 @@ class AppState extends ChangeNotifier {
   /// Change one weekday's slot and re-arm immediately when connected —
   /// waiting for the next connect/sync would leave the band holding the OLD
   /// schedule while the screen already claims the new one.
-  Future<void> setScheduleDay({
+  ///
+  /// The row is saved either way. Returns false when the band does not hold
+  /// the new schedule yet (offline, or the arm write failed or was rejected)
+  /// so the alarm screen can say so instead of reporting it as sent; the
+  /// next connect/sync re-arms it. It does not throw for that: the Siri
+  /// enable-tomorrow path re-latches its request on a throw, and a saved row
+  /// needs no retry.
+  Future<bool> setScheduleDay({
     required int weekday,
     int? hour,
     int? minute,
@@ -4627,7 +4674,12 @@ class AppState extends ChangeNotifier {
     );
     await _loadAlarmSchedule();
     notifyListeners();
-    if (isConnected) await _armNextAlarmOccurrence();
+    // The 7pm "no alarm set for tonight" check keys off the schedule: a night
+    // just switched off must not still be warned about, and one just switched
+    // on must be.
+    unawaited(_ensureRemindersScheduled());
+    if (!isConnected) return false;
+    return _armNextAlarmOccurrence();
   }
 
   /// Compute + arm the next scheduled occurrence, skipping the write when it
@@ -4648,8 +4700,10 @@ class AppState extends ChangeNotifier {
     _alarm.confirmed = prefs.getBool('alarm_epoch_confirmed') ?? false;
   }
 
-  Future<void> _armNextAlarmOccurrence({int? firedEpoch}) async {
-    if (!isConnected) return;
+  /// True when the band now holds what the schedule says (armed, disabled,
+  /// or already matching); false when offline or a needed write failed.
+  Future<bool> _armNextAlarmOccurrence({int? firedEpoch}) async {
+    if (!isConnected) return false;
     try {
       // A headless re-arm (background_sync.dart) can have rewritten
       // `alarm_epoch`/`alarm_epoch_confirmed` under this same live process
@@ -4682,13 +4736,16 @@ class AppState extends ChangeNotifier {
         // give up its old alarm on its own (PR #329 review).
         _clearArmedAlarmState();
         notifyListeners();
-        return;
+        return true;
       }
+      if (result.failed) return false;
       final epoch = result.epoch;
-      if (epoch == null) return;
+      if (epoch == null) return true;
       await _onArmed(DateTime.fromMillisecondsSinceEpoch(epoch * 1000), epoch);
+      return true;
     } catch (e) {
       _log('[alarm] weekly-schedule arm failed: $e');
+      return false;
     }
   }
 
@@ -4957,7 +5014,9 @@ class AppState extends ChangeNotifier {
   /// confirm the band actually fires before trusting the scheduled wake.
   Future<void> testAlarmBuzz() async {
     if (!isConnected) throw Exception('Connect to your strap first');
-    await engine.runAlarm();
+    if (!await engine.runAlarm()) {
+      throw Exception('The band did not get the buzz command — try again');
+    }
   }
 
   Future<void> testBuzzPattern(int pattern) async {
@@ -4982,7 +5041,12 @@ class AppState extends ChangeNotifier {
   /// in `alarm_schedule` can silently re-arm this on the next connect/sync.
   Future<void> disableAlarm() async {
     if (!isConnected) throw Exception('Connect to your strap first');
-    await engine.disableAlarm();
+    // A timed-out or dropped write leaves the alarm armed on the strap. Keep
+    // the schedule and epoch so the app still shows it (and the next sync can
+    // retry) instead of reporting a cancel the band never received.
+    if (!await engine.disableAlarm()) {
+      throw Exception("Couldn't reach your strap, so the alarm is still set");
+    }
     _savedAlarm = null;
     device.alarmEpoch = null;
     _alarm.disable();
@@ -4993,6 +5057,9 @@ class AppState extends ChangeNotifier {
     await LocalDb.clearAlarmSchedule();
     _schedule = fillDefaultAlarmSchedule(const []);
     notifyListeners();
+    // Nothing is scheduled now, so the 7pm "no alarm set for tonight" check
+    // armed earlier today must go too.
+    unawaited(_ensureRemindersScheduled());
   }
 
   /// Retained name for the UI's "clear alarm" affordance — delegates to
@@ -5005,9 +5072,12 @@ class AppState extends ChangeNotifier {
   /// machine matches the raw ids so it stays dependency-free.
   void _handleAlarmEvent(int id, int ts) {
     // The strap stamps events on its own RTC; the alarm was armed at
-    // `when - driftSec` in that frame, so map back the same way.
+    // `when - driftSec` in that frame, so map back the same way. The fire time
+    // shown and persisted below must use this mapped value too, or a strap
+    // whose RTC never latched reports the alarm firing early/late by the drift.
+    final wallTs = ts + (engine.clockRef?.driftSec ?? 0);
     final effect = _alarm.onEvent(id, DateTime.now().millisecondsSinceEpoch,
-        tsSec: ts + (engine.clockRef?.driftSec ?? 0));
+        tsSec: wallTs, rawTsSec: ts);
     if (effect == null) return;
     switch (effect) {
       case AlarmEffect.confirmed:
@@ -5033,9 +5103,9 @@ class AppState extends ChangeNotifier {
         break;
       case AlarmEffect.fired:
         _log('[alarm] strap FIRED — EXECUTED (event $id) received.');
-        _alarmFiredAt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+        _alarmFiredAt = DateTime.fromMillisecondsSinceEpoch(wallTs * 1000);
         unawaited(SharedPreferences.getInstance()
-            .then((p) => p.setInt('alarm_fired_at', ts))
+            .then((p) => p.setInt('alarm_fired_at', wallTs))
             .catchError((Object e) {
           _log('[alarm] persisting the fire time failed: $e');
           return false;
@@ -5089,9 +5159,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _notifyAlarmFired() async {
+    if (!_alarm.firedJustNow(DateTime.now().millisecondsSinceEpoch)) {
+      _log('[alarm] fire delivered late (stamped ${_alarm.firedTsSec}), '
+          'not notifying.');
+      return;
+    }
     try {
       await NotificationCenter.instance.emit(NotificationEvent(
-        dedupeKey: 'alarm_fired:${_alarm.firedAt ?? 0}',
+        dedupeKey: _alarm.firedNoticeKey,
         category: NotifCategory.reminders,
         priority: NotifPriority.critical,
         title: 'Alarm',

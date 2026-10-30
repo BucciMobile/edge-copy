@@ -2693,7 +2693,19 @@
   "dataReanalyzeFailed": "El reanálisis falló: {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{No se pudo analizar 1 día. Si vuelve a pasar, por favor infórmalo.} other{No se pudieron analizar {n} días. Si vuelve a pasar, por favor infórmalo.}}",
   "napsInFuture": "Esa siesta todavía no ha terminado. Regístrala cuando te despiertes.",
+  "notifRecoveryReadyBody": "Recuperación {score}.",
+  "notifRecoveryReadySleptBody": "Recuperación {score}, dormiste {hours} h {minutes} min.",
+  "notifStepGoalBody": "Llegaste a unos {steps} pasos, al menos tu objetivo de {goal}.",
+  "notifLowBatteryBody": "Tu banda está al {percent} %. Cárgala pronto.",
   "reportDeleteConfirmTitle": "¿Eliminar el informe {id}?",
   "reportDeleteConfirmBody": "Se borra del servidor ahora mismo y ya no se podrá abrir con su ID. No se puede deshacer.",
-  "profileImplausibleFields": "Revisa {fields}: fuera de rango, así que no se guardó nada."
+  "profileImplausibleFields": "Revisa {fields}: fuera de rango, así que no se guardó nada.",
+  "supplementChargeYourStrapBeforeBedcb17aa": "Carga tu banda antes de dormir",
+  "supplementStillWorkingOut5f72c7": "¿Sigues entrenando?",
+  "supplementWindDown1d651a": "Hora de relajarse",
+  "notifBatteryForecastBeforeWakeBody": "A {rate} %/h se agota hacia las {time}, antes de que despiertes. Cárgala ahora para no perder el sueño de esta noche.",
+  "notifBatteryForecastReserveBody": "A {rate} %/h se agota hacia las {time}, poco después de tu hora habitual de despertar: te quedará alrededor del {left} % al levantarte. Cárgala ahora para no perder el sueño de esta noche.",
+  "notifBatteryForecastAfterWakeBody": "A {rate} %/h se agota hacia las {time}, después de tu hora habitual de despertar.",
+  "notifWindDownBody": "Te sueles acostar hacia las {time}. Empieza a bajar el ritmo.",
+  "notifWorkoutIdleBody": "No se ha registrado nada por encima del reposo en {minutes} minutos. Si la sesión terminó, finalízala desde la pestaña Entrenamiento."
 }

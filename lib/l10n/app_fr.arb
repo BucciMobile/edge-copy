@@ -2664,7 +2664,19 @@
   "dataReanalyzeFailed": "La réanalyse a échoué : {error}",
   "dataReanalyzeDaysFailed": "{n, plural, one{{n} jour n’a pas pu être analysé. Si cela se reproduit, merci de le signaler.} other{{n} jours n’ont pas pu être analysés. Si cela se reproduit, merci de le signaler.}}",
   "napsInFuture": "Cette sieste n'est pas encore terminée. Enregistrez-la une fois réveillé.",
+  "notifRecoveryReadyBody": "Récupération {score}.",
+  "notifRecoveryReadySleptBody": "Récupération {score}, sommeil {hours} h {minutes} min.",
+  "notifStepGoalBody": "Vous avez fait environ {steps} pas, au moins votre objectif de {goal}.",
+  "notifLowBatteryBody": "Votre bracelet est à {percent} %. Rechargez-le bientôt.",
   "reportDeleteConfirmTitle": "Supprimer le rapport {id} ?",
   "reportDeleteConfirmBody": "Il est retiré du serveur tout de suite et ne pourra plus être ouvert avec son identifiant. Impossible d'annuler.",
-  "profileImplausibleFields": "Vérifiez {fields} : hors limites, rien n'a donc été enregistré."
+  "profileImplausibleFields": "Vérifiez {fields} : hors limites, rien n'a donc été enregistré.",
+  "supplementChargeYourStrapBeforeBedcb17aa": "Rechargez votre bracelet avant de dormir",
+  "supplementStillWorkingOut5f72c7": "Toujours en séance ?",
+  "supplementWindDown1d651a": "Se détendre",
+  "notifBatteryForecastBeforeWakeBody": "À {rate} %/h, il sera vide vers {time}, avant votre réveil. Rechargez-le maintenant pour garder la nuit.",
+  "notifBatteryForecastReserveBody": "À {rate} %/h, il sera vide vers {time}, juste après votre heure de réveil habituelle : il restera environ {left} % au lever. Rechargez-le maintenant pour garder la nuit.",
+  "notifBatteryForecastAfterWakeBody": "À {rate} %/h, il sera vide vers {time}, après votre heure de réveil habituelle.",
+  "notifWindDownBody": "Vous vous couchez vers {time}. Commencez à ralentir.",
+  "notifWorkoutIdleBody": "Rien au-dessus du repos n'a été enregistré depuis {minutes} minutes. Si la séance est finie, terminez-la depuis l'onglet Entraînement."
 }

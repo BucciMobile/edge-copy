@@ -973,14 +973,34 @@ class NotificationSettings extends StatefulWidget {
   State<NotificationSettings> createState() => _NotificationSettingsState();
 }
 
-class _NotificationSettingsState extends State<NotificationSettings> {
+class _NotificationSettingsState extends State<NotificationSettings>
+    with WidgetsBindingObserver {
   NotificationPrefs? _prefs;
   bool _granted = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _load();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Back from OS Settings: re-read the real grant, or the "off at the system
+    // level" card stays up after the user has already fixed it.
+    if (state == AppLifecycleState.resumed) _recheck();
+  }
+
+  Future<void> _recheck() async {
+    final granted = await NotificationService.instance.hasPermission();
+    if (mounted && granted != _granted) setState(() => _granted = granted);
   }
 
   Future<void> _load() async {
@@ -1024,9 +1044,16 @@ class _NotificationSettingsState extends State<NotificationSettings> {
 
   /// The one contextual moment left where prompting is honest: the user is
   /// standing in the notifications screen, having just asked for one.
+  ///
+  /// Once the OS holds a denial the request is a silent no — the dialog never
+  /// shows again — so a refusal sends the user to the system page instead of
+  /// leaving the button doing nothing. The OS gives no way to tell a denial
+  /// from just now apart from one made at pairing, so both land there.
   Future<void> _requestPermission() async {
-    final ok = await NotificationService.instance.ensurePermission();
+    final svc = NotificationService.instance;
+    final ok = await svc.ensurePermission();
     if (mounted) setState(() => _granted = ok);
+    if (!ok && mounted) await svc.openSystemSettings();
   }
 
   @override

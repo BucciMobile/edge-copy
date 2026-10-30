@@ -22,6 +22,7 @@ import '../ble/adapters/_registry.dart' show kWhoopGen4;
 import '../ble/adapters/host.dart' show BandHost;
 import '../ble/adapters/whoop_gen4.dart' show WhoopFramedAdapter;
 import '../ble/ble_engine.dart';
+import '../ble/ble_state.dart' show AlarmConfirmation;
 import '../ble/colmi_link.dart';
 import '../ble/session_link.dart';
 import '../ble/coros_link.dart';
@@ -51,10 +52,24 @@ import 'sync_policy.dart';
 /// dedupe returns `epoch: null` and skips the re-arm/poll block entirely, so
 /// this is the only place headless ever sees a live confirmation). Extracted
 /// so the write can be unit-tested without the full drain harness.
+///
+/// [tsSec] is the event's own timestamp mapped to wall seconds. The strap
+/// re-sends already-delivered events after a reconnect, so a 56 from an
+/// earlier arm must not confirm the current one: the same replay floor as
+/// `AlarmConfirmation.onEvent` (this arm's `alarm_set_at_ms` minus
+/// `replaySlackSec`) applies. Null or an unset-RTC stamp can't be told apart
+/// and is taken as current, as in the foreground.
 @visibleForTesting
-Future<void> handleHeadlessAlarmEvent(int id) async {
+Future<void> handleHeadlessAlarmEvent(int id, {int? tsSec}) async {
   if (id != proto.EventId.strapDrivenAlarmSet) return;
   final prefs = await SharedPreferences.getInstance();
+  final setAtMs = prefs.getInt('alarm_set_at_ms');
+  if (tsSec != null &&
+      tsSec >= kMinPlausibleUnix &&
+      setAtMs != null &&
+      tsSec < setAtMs ~/ 1000 - AlarmConfirmation.replaySlackSec) {
+    return;
+  }
   await prefs.setBool('alarm_epoch_confirmed', true);
 }
 
@@ -116,7 +131,8 @@ BleEngine createHeadlessSyncEngine({
   // events and records into the store the reset just emptied.
   final resetGen = ResetGate.generation;
   bool stale() => ResetGate.changedSince(resetGen);
-  final engine = BleEngine(
+  late final BleEngine engine;
+  engine = BleEngine(
     onRecord: (sample, raw) async {
       if (stale()) return;
       await LocalDb.insertRecord(raw, sample);
@@ -128,7 +144,10 @@ BleEngine createHeadlessSyncEngine({
       if (stale()) return;
       await LocalDb.insertEvent(id, ts, hex,
           deviceId: LocalDb.kPrimaryDeviceId, profile: profile);
-      await handleHeadlessAlarmEvent(id);
+      // The strap stamps events on its own RTC; map to wall seconds the
+      // same way the foreground does before the replay check.
+      await handleHeadlessAlarmEvent(id,
+          tsSec: ts + (engine.clockRef?.driftSec ?? 0));
     },
     log: (l) => debugPrint('[bgsync] $l'),
     onRecordsBatch: (raws, samples) async {
