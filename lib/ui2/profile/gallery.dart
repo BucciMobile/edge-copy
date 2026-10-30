@@ -33,6 +33,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../coach/coach_config.dart';
+import '../../coach/coach_engine.dart' show CoachSessionMeta;
 import '../../data/day_label.dart';
 import '../../ecg/ecg_controller.dart';
 import '../../ecg/ecg_models.dart';
@@ -401,6 +402,24 @@ Map<String, Widget> _coachFigureCases() => {
     'Your **resting HR** sat 3 bpm under your usual this week.\n\n'
     '![chart](https://example.invalid/hr.png)\n\n'
     '- sleep held at 7 h 12 min\n- strain eased off midweek',
+  ),
+  // The past-chats list, open and while a reply is still coming in (locked:
+  // no open, no delete control).
+  'coach_chat_list': CoachChatList(
+    sessions: [
+      CoachSessionMeta('a', 'Why was my HRV low?', 0,
+          'Two short nights in a row pulled it under your usual.'),
+      CoachSessionMeta('b', '', 0, 'Plan a lighter week'),
+    ],
+    locked: false,
+    onOpen: (_) {},
+    onDelete: (_) async {},
+  ),
+  'coach_chat_list_locked': CoachChatList(
+    sessions: [CoachSessionMeta('a', 'Why was my HRV low?', 0, '')],
+    locked: true,
+    onOpen: (_) {},
+    onDelete: (_) async {},
   ),
 };
 
