@@ -329,6 +329,11 @@ class _CoachScreenState extends State<CoachScreen> {
     final engine = _engine;
     final p = P.of(context);
     final l = AppLocalizations.of(context);
+    // While a reply is coming in, the open chat stays put: the running send
+    // keeps writing into the engine's working chat, so starting, opening or
+    // deleting one under it would put the reply's tail in the wrong chat or
+    // save a deleted one back.
+    final locked = _busy;
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: p.card,
@@ -343,10 +348,12 @@ class _CoachScreenState extends State<CoachScreen> {
               _MenuRow(
                 LucideIcons.plus,
                 l?.coachNewChat ?? 'New chat',
-                onTap: () {
-                  Navigator.of(sheet).pop();
-                  _newChat();
-                },
+                onTap: locked
+                    ? null
+                    : () {
+                        Navigator.of(sheet).pop();
+                        _newChat();
+                      },
               ),
               // NO "AI settings" ROW. Choosing the model is a setting and
               // settings live in Profile — [CoachSetup] is pushed from there
@@ -387,25 +394,19 @@ class _CoachScreenState extends State<CoachScreen> {
                         style: F.cap.copyWith(color: p.ink3),
                       );
                     }
-                    return Column(
-                      children: [
-                        for (final s in list.take(20))
-                          _MenuRow(
-                            LucideIcons.messageSquare,
-                            s.title.isEmpty ? (l?.coachUntitledChat ?? 'Untitled chat') : s.title,
-                            sub: s.preview,
-                            onTap: () {
-                              Navigator.of(sheet).pop();
-                              _openSession(s.id);
-                            },
-                            onRemove: () async {
-                              final wasOpen = s.id == engine.sessionId;
-                              await engine.deleteSession(s.id);
-                              setSheet(() {});
-                              if (wasOpen && mounted) setState(_items.clear);
-                            },
-                          ),
-                      ],
+                    return CoachChatList(
+                      sessions: list.take(20).toList(),
+                      locked: locked,
+                      onOpen: (id) {
+                        Navigator.of(sheet).pop();
+                        _openSession(id);
+                      },
+                      onDelete: (id) async {
+                        final wasOpen = id == engine.sessionId;
+                        await engine.deleteSession(id);
+                        setSheet(() {});
+                        if (wasOpen && mounted) setState(_items.clear);
+                      },
                     );
                   },
                 ),
@@ -765,6 +766,40 @@ class CoachAnswerText extends StatelessWidget {
         size: 18,
         color: P.of(context).ink3,
       ),
+    );
+  }
+}
+
+/// The past-chats rows of the coach menu. [locked] while a reply is coming
+/// in: the running send writes into the open chat, so neither opening another
+/// one nor deleting one may happen under it.
+class CoachChatList extends StatelessWidget {
+  final List<CoachSessionMeta> sessions;
+  final bool locked;
+  final void Function(String id) onOpen;
+  final Future<void> Function(String id) onDelete;
+  const CoachChatList({
+    super.key,
+    required this.sessions,
+    required this.locked,
+    required this.onOpen,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext c) {
+    final l = AppLocalizations.of(c);
+    return Column(
+      children: [
+        for (final s in sessions)
+          _MenuRow(
+            LucideIcons.messageSquare,
+            s.title.isEmpty ? (l?.coachUntitledChat ?? 'Untitled chat') : s.title,
+            sub: s.preview,
+            onTap: locked ? null : () => onOpen(s.id),
+            onRemove: locked ? null : () => onDelete(s.id),
+          ),
+      ],
     );
   }
 }
