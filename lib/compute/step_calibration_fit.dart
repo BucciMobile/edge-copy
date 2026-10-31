@@ -856,6 +856,13 @@ class CalibrationSession {
     _phoneSteps = steps < 0 ? 0 : steps;
   }
 
+  /// Drop the phone reference: the routine's final read failed, and an
+  /// earlier read covers only part of it.
+  void clearPhoneSteps() {
+    if (_finished) return;
+    _phoneSteps = null;
+  }
+
   /// The live pedometer's own summary for the routine, when the caller has it.
   ///
   /// Stored, not judged: the fit does not read these. They are what lets the

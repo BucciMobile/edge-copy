@@ -116,6 +116,17 @@ class PhonePedometer {
     }
   }
 
+  /// The step sensor's own running total, where the platform exposes one
+  /// (Android); null elsewhere or when it is not counting. Only a difference
+  /// between two reads within one boot means anything.
+  Future<int?> rawCount() async {
+    try {
+      return await phoneStepsChannel.invokeMethod<int>('rawCount');
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Ask for access to the phone's step sensor. Safe to call repeatedly.
   ///
   /// THIS IS THE ONLY THING THAT MAKES THE PERMISSION EXIST. On iOS a

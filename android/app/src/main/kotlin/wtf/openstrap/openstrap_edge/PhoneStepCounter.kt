@@ -117,6 +117,13 @@ object PhoneStepCounter : SensorEventListener {
                         val sm = app.getSystemService(Context.SENSOR_SERVICE) as SensorManager
                         result.success(registered && sm.flush(this))
                     }
+                    // The sensor's own running total as last delivered — exact, unlike
+                    // a range query, which prorates 5-minute bins. Calibration reads it
+                    // at the start and end of a routine (after a flush) and differences.
+                    "rawCount" -> {
+                        val r = prefs(app).getFloat(KEY_LAST_RAW, -1f)
+                        result.success(if (registered && r >= 0f) r.toLong() else null)
+                    }
                     "stepsInInterval" -> {
                         val from = call.argument<Number>("fromMs")?.toLong()
                         val to = call.argument<Number>("toMs")?.toLong()

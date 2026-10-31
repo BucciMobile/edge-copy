@@ -388,6 +388,19 @@ void main() {
       expect(out.run, isNotNull); // the run exists; the REFERENCE does not
     });
 
+    test('a failed final phone read does not leave an earlier partial count',
+        () {
+      // A read part-way through banked 20; the read at the end failed. The
+      // routine must be refused, not fitted on 20 phone steps against the
+      // band's whole three minutes.
+      final s = CalibrationSession(category: StepCategory.everyday)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..setPhoneSteps(20)
+        ..observe(bandTotal: 400, nowMs: t0 + 180000)
+        ..clearPhoneSteps();
+      expect(s.finish().refusal, StepRunRejection.noReferenceSteps);
+    });
+
     test('everyday with a phone count fits low and positive', () {
       final s = CalibrationSession(category: StepCategory.everyday)
         ..start(bandBaseline: 0, nowMs: t0)

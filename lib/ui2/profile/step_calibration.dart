@@ -60,6 +60,10 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
   Timer? _ticker;
   DateTime? _routineStart;
 
+  /// The phone sensor's running total when the household routine began, on a
+  /// platform that has one. Read after a flush so earlier steps are excluded.
+  Future<int?>? _startRaw;
+
   /// What the last routine produced, in the wearer's words. Never set before a
   /// save has returned: a message is a claim, and an unclaimed one is the exact
   /// failure the previous calibration shipped.
@@ -90,6 +94,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     final app = context.read<AppState>();
     _ticker?.cancel();
     _routineStart = DateTime.now();
+    _startRaw = null;
     if (category.referenceIsPhone) {
       // Ask BEFORE the routine, not after. A three-minute household routine that
       // is then refused because the phone was never granted step access has
@@ -98,8 +103,10 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       // which is worse than none.
       unawaited(_ensurePhonePermission());
       // Deliver whatever the step sensor has batched, so steps taken before
-      // the routine land before its window opens.
-      unawaited(_pedometer.flushPending());
+      // the routine land before its window opens, then note the running total.
+      _startRaw = _pedometer
+          .flushPending(settle: true)
+          .then((_) => _pedometer.rawCount());
     }
     setState(() {
       _outcome = null;
@@ -176,6 +183,35 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     }
   }
 
+  /// The household routine's reference through its END, or false when it
+  /// cannot be had — in which case an earlier partial read must not stand in.
+  ///
+  /// Android: the sensor's running total at end minus at start, each after a
+  /// flush. Exact, where a range query prorates 5-minute bins. Elsewhere (iOS
+  /// has no running total, and its interval query is exact) one final query.
+  Future<bool> _finalPhoneRead(CalibrationSession s) async {
+    // A periodic read still in flight must not land on top of this one.
+    ++_phoneReadSeq;
+    final startRaw = await _startRaw;
+    await _pedometer.flushPending(settle: true);
+    if (startRaw != null) {
+      final endRaw = await _pedometer.rawCount();
+      if (endRaw == null || endRaw < startRaw) return false;
+      s.setPhoneSteps(endRaw - startRaw);
+      return true;
+    }
+    final start = _routineStart;
+    if (start == null) return false;
+    try {
+      final steps = await _pedometer.stepsBetween(start, DateTime.now());
+      if (steps == null || steps < 0) return false;
+      s.setPhoneSteps(steps);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   void _cancel() {
     _ticker?.cancel();
     setState(() {
@@ -238,8 +274,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     if (s.category.referenceIsPhone) {
       // Android delivers step counts in batches up to a minute late; without a
       // flush the last stretch of the routine is missing from its reference.
-      await _pedometer.flushPending(settle: true);
-      await _readPhone(s);
+      if (!await _finalPhoneRead(s)) s.clearPhoneSteps();
     }
     // §4.5: `context` may not be used after an await without this.
     if (!mounted) return;
