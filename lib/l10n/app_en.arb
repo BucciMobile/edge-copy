@@ -16147,6 +16147,7 @@
   "stepCalKeepMoving": "Nothing recorded yet — keep the phone on you and keep moving.",
   "stepCalNoSignal": "The band recorded nothing during that routine.",
   "stepCalNoPhoneAccess": "This routine needs your phone’s step counter, and access was not granted. That counter is the reference for household movement.",
+  "stepCalPhoneNotReady": "Your phone’s step counter did not answer. Try again in a moment.",
   "stepCalNoPhone": "Your phone counted no steps while you did that. Keep it in your pocket next time — it is the reference for household movement.",
   "stepCalBandQuiet": "The band saw almost no movement. It is worth checking the strap is worn snugly and streaming.",
   "stepCalTooShort": "That routine was too short to measure against. Walk the full count.",

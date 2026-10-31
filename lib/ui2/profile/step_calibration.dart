@@ -91,34 +91,49 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     if (mounted) setState(() {});
   }
 
-  void _start(StepCategory category) {
+  /// Starting is busy while the phone side is being prepared; a second tap
+  /// must not start a second routine on top of it.
+  bool _starting = false;
+
+  Future<void> _start(StepCategory category) async {
+    if (_starting) return;
     final app = context.read<AppState>();
     _ticker?.cancel();
-    _routineStart = DateTime.now();
-    _startRaw = null;
-    if (category.referenceIsPhone) {
-      // Ask BEFORE the routine, not after. A three-minute household routine that
-      // is then refused because the phone was never granted step access has
-      // wasted the wearer's time, and its refusal message would blame their
-      // pocket for a permission they were never asked for — a wrong reason,
-      // which is worse than none.
-      unawaited(_ensurePhonePermission());
-      // Deliver whatever the step sensor has batched, so steps taken before
-      // the routine land before its window opens, then note the running total.
-      _startRaw = _pedometer.flushedTotal();
-    }
     setState(() {
+      _starting = true;
       _outcome = null;
-      _session = CalibrationSession(category: category)
-        ..start(
-          // Everything the routine is credited with is measured from HERE, so a
-          // walk that happened before the wearer pressed start cannot land in
-          // their calibration.
-          bandBaseline: app.liveStrapRawSteps,
-          nowMs: DateTime.now().millisecondsSinceEpoch,
-        );
     });
-    _ticker = Timer.periodic(Motion.tick, (_) => _tick());
+    final begun = await beginCalibrationRoutine(
+      category: category,
+      // Ask BEFORE the routine, not after: a household routine refused at the
+      // end for a permission the wearer was never asked for blames the wrong
+      // thing.
+      ensurePhoneAccess: _ensurePhonePermission,
+      runningTotalPlatform: defaultTargetPlatform == TargetPlatform.android,
+      startTotal: _pedometer.flushedTotal,
+      bandTotalNow: () => app.liveStrapRawSteps,
+      nowMs: () => DateTime.now().millisecondsSinceEpoch,
+    );
+    if (!mounted) return;
+    final l = AppLocalizations.of(context);
+    setState(() {
+      _starting = false;
+      _session = begun.session;
+      _routineStart = begun.session == null ? null : DateTime.now();
+      _startRaw = Future.value(begun.startTotal);
+      _outcome = switch (begun.refusal) {
+        null => null,
+        RoutineStartRefusal.noPhoneAccess => l?.stepCalNoPhoneAccess ??
+            'This routine needs your phone\u2019s step counter, and access '
+                'was not granted. It is the reference for household movement.',
+        RoutineStartRefusal.phoneNotReady => l?.stepCalPhoneNotReady ??
+            'Your phone\u2019s step counter did not answer. Try again in a '
+                'moment.',
+      };
+    });
+    if (begun.session != null) {
+      _ticker = Timer.periodic(Motion.tick, (_) => _tick());
+    }
   }
 
   void _tick() {
@@ -136,28 +151,13 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     setState(() {});
   }
 
-  Future<void> _ensurePhonePermission() async {
-    var granted = false;
+  Future<bool> _ensurePhonePermission() async {
     try {
-      granted = await _pedometer.hasPermission() ||
+      return await _pedometer.hasPermission() ||
           await _pedometer.requestPermission();
     } catch (_) {
-      granted = false;
+      return false;
     }
-    if (!mounted || granted) return;
-    // STOP the routine rather than let it run to its refusal. Without access the
-    // phone reference can never arrive, so three minutes of tidying could only
-    // end in a refusal — and the wearer finds out now, standing there, instead of
-    // afterwards.
-    _ticker?.cancel();
-    final l = AppLocalizations.of(context);
-    setState(() {
-      _session = null;
-      _routineStart = null;
-      _outcome = l?.stepCalNoPhoneAccess ??
-          'This routine needs your phone\u2019s step counter, and access was '
-              'not granted. It is the reference for household movement.';
-    });
   }
 
   /// Sequence of phone reads started. Only the MOST RECENTLY STARTED read may
@@ -568,3 +568,40 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
                   'deliberately.',
       };
 }
+
+/// Why a calibration routine did not start.
+enum RoutineStartRefusal { noPhoneAccess, phoneNotReady }
+
+/// Start a routine in the order that keeps its two references aligned:
+/// phone access first, then (on Android, for a household routine) a starting
+/// phone total from a COMPLETED flush, and only then the band baseline and the
+/// routine's clock. Taking the band baseline first would let the phone's
+/// starting total settle after the routine had begun, so the two counts would
+/// cover different spans.
+@visibleForTesting
+Future<({CalibrationSession? session, int? startTotal, RoutineStartRefusal? refusal})>
+    beginCalibrationRoutine({
+  required StepCategory category,
+  required Future<bool> Function() ensurePhoneAccess,
+  required bool runningTotalPlatform,
+  required Future<int?> Function() startTotal,
+  required int Function() bandTotalNow,
+  required int Function() nowMs,
+}) async {
+  int? total;
+  if (category.referenceIsPhone) {
+    if (!await ensurePhoneAccess()) {
+      return (session: null, startTotal: null, refusal: RoutineStartRefusal.noPhoneAccess);
+    }
+    if (runningTotalPlatform) {
+      total = await startTotal();
+      if (total == null) {
+        return (session: null, startTotal: null, refusal: RoutineStartRefusal.phoneNotReady);
+      }
+    }
+  }
+  final session = CalibrationSession(category: category)
+    ..start(bandBaseline: bandTotalNow(), nowMs: nowMs());
+  return (session: session, startTotal: total, refusal: null);
+}
+
