@@ -7771,7 +7771,7 @@
     }
   },
   "stepCalNotCalibrated": "Ещё не откалибровано",
-  "stepCalBandSeen": "{count, plural, one{шаг зафиксировал браслет} few{шага зафиксировал браслет} many{шагов зафиксировал браслет} other{шага зафиксировал браслет}}",
+  "stepCalBandSeen": "{count, plural, one{шаг по данным браслета} few{шага по данным браслета} many{шагов по данным браслета} other{шага по данным браслета}}",
   "@stepCalBandSeen": {
     "placeholders": {
       "count": {

@@ -9,9 +9,9 @@ void main() {
   final ru = lookupAppLocalizations(const Locale('ru'));
 
   test('the band counter label agrees with its number', () {
-    expect(ru.stepCalBandSeen(1), startsWith('шаг '));
-    expect(ru.stepCalBandSeen(2), startsWith('шага '));
-    expect(ru.stepCalBandSeen(5), startsWith('шагов '));
+    expect(ru.stepCalBandSeen(1), 'шаг по данным браслета');
+    expect(ru.stepCalBandSeen(2), 'шага по данным браслета');
+    expect(ru.stepCalBandSeen(5), 'шагов по данным браслета');
   });
 
   test('the gait result inflects both counts and names no single gait', () {
