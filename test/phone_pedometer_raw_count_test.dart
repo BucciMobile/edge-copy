@@ -41,4 +41,69 @@ void main() {
     await PhonePedometer().flushPending();
     expect(calls, ['flush']);
   });
+
+  group('the routine reference', () {
+    Future<int?> never() async => fail('must not be read');
+
+    test('android uses the difference of two flushed totals', () async {
+      expect(
+          await routinePhoneReference(
+            runningTotalPlatform: true,
+            startTotal: 1000,
+            endTotal: () async => 1240,
+            interval: never,
+          ),
+          240);
+    });
+
+    test('android without a starting total refuses, never prorates', () async {
+      var prorated = false;
+      expect(
+          await routinePhoneReference(
+            runningTotalPlatform: true,
+            startTotal: null,
+            endTotal: () async => 1240,
+            interval: () async {
+              prorated = true;
+              return 99;
+            },
+          ),
+          isNull);
+      expect(prorated, isFalse);
+    });
+
+    test('android without an ending total refuses', () async {
+      expect(
+          await routinePhoneReference(
+            runningTotalPlatform: true,
+            startTotal: 1000,
+            endTotal: () async => null,
+            interval: never,
+          ),
+          isNull);
+    });
+
+    test('elsewhere the exact interval query is used', () async {
+      expect(
+          await routinePhoneReference(
+            runningTotalPlatform: false,
+            startTotal: null,
+            endTotal: never,
+            interval: () async => 57,
+          ),
+          57);
+    });
+  });
+
+  test('a refused flush is reported and not waited out', () async {
+    messenger.setMockMethodCallHandler(phoneStepsChannel, (c) async {
+      if (c.method == 'flush') return false;
+      if (c.method == 'rawCount') return 5000;
+      return null;
+    });
+    final sw = Stopwatch()..start();
+    expect(await PhonePedometer().flushPending(settle: true), isFalse);
+    expect(sw.elapsedMilliseconds, lessThan(1000));
+    expect(await PhonePedometer().flushedTotal(), isNull);
+  });
 }

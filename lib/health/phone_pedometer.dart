@@ -106,14 +106,30 @@ class PhonePedometer {
   /// for up to a minute before delivering them). A no-op where the platform
   /// has nothing to flush. With [settle], waits for the flushed batch to be
   /// delivered and banked before returning, so a read right after sees it.
-  Future<void> flushPending({bool settle = false}) async {
+  ///
+  /// True when the platform accepted the flush, false when it refused it, and
+  /// null on a platform with nothing to flush. Android cannot report when a
+  /// flush has COMPLETED without a listener callback, so the settle wait
+  /// stands in for that; a refused flush is reported, never waited out.
+  Future<bool?> flushPending({bool settle = false}) async {
     bool? flushed;
     try {
       flushed = await phoneStepsChannel.invokeMethod<bool>('flush');
-    } catch (_) {}
+    } on MissingPluginException {
+      return null;
+    } catch (_) {
+      return false;
+    }
     if (settle && flushed == true) {
       await Future<void>.delayed(const Duration(milliseconds: 1500));
     }
+    return flushed;
+  }
+
+  /// The running total after a flush the platform accepted, or null.
+  Future<int?> flushedTotal() async {
+    if (await flushPending(settle: true) != true) return null;
+    return rawCount();
   }
 
   /// The step sensor's own running total, where the platform exposes one
@@ -413,5 +429,33 @@ class PhonePedometer {
       }
     }
     return (daysRead: ok, totalSteps: total);
+  }
+}
+
+/// A timed calibration routine's phone reference through its end, or null when
+/// there is no honest one.
+///
+/// On a platform with a running total (Android) only the difference of two
+/// flushed totals is used: its range query prorates five-minute bins, so a
+/// three-minute routine read that way picks up steps from outside it. A
+/// missing total at either end means no reference, and the routine is refused.
+/// Elsewhere the platform's interval query is exact and is used directly.
+Future<int?> routinePhoneReference({
+  required bool runningTotalPlatform,
+  required int? startTotal,
+  required Future<int?> Function() endTotal,
+  required Future<int?> Function() interval,
+}) async {
+  if (runningTotalPlatform) {
+    if (startTotal == null) return null;
+    final end = await endTotal();
+    if (end == null || end < startTotal) return null;
+    return end - startTotal;
+  }
+  try {
+    final n = await interval();
+    return n == null || n < 0 ? null : n;
+  } catch (_) {
+    return null;
   }
 }

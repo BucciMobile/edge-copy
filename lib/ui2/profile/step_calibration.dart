@@ -30,6 +30,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -104,9 +105,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       unawaited(_ensurePhonePermission());
       // Deliver whatever the step sensor has batched, so steps taken before
       // the routine land before its window opens, then note the running total.
-      _startRaw = _pedometer
-          .flushPending(settle: true)
-          .then((_) => _pedometer.rawCount());
+      _startRaw = _pedometer.flushedTotal();
     }
     setState(() {
       _outcome = null;
@@ -192,24 +191,17 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
   Future<bool> _finalPhoneRead(CalibrationSession s) async {
     // A periodic read still in flight must not land on top of this one.
     ++_phoneReadSeq;
-    final startRaw = await _startRaw;
-    await _pedometer.flushPending(settle: true);
-    if (startRaw != null) {
-      final endRaw = await _pedometer.rawCount();
-      if (endRaw == null || endRaw < startRaw) return false;
-      s.setPhoneSteps(endRaw - startRaw);
-      return true;
-    }
     final start = _routineStart;
     if (start == null) return false;
-    try {
-      final steps = await _pedometer.stepsBetween(start, DateTime.now());
-      if (steps == null || steps < 0) return false;
-      s.setPhoneSteps(steps);
-      return true;
-    } catch (_) {
-      return false;
-    }
+    final steps = await routinePhoneReference(
+      runningTotalPlatform: defaultTargetPlatform == TargetPlatform.android,
+      startTotal: await _startRaw,
+      endTotal: _pedometer.flushedTotal,
+      interval: () => _pedometer.stepsBetween(start, DateTime.now()),
+    );
+    if (steps == null) return false;
+    s.setPhoneSteps(steps);
+    return true;
   }
 
   void _cancel() {
