@@ -165,6 +165,14 @@ class PhonePedometer {
     }
   }
 
+  /// Make sure the step sensor may be read before something depends on it.
+  ///
+  /// Always asks rather than checking first: [hasPermission] counts iOS's
+  /// `notDetermined` as yes, so a first-use iPhone would skip the request and
+  /// the prompt would only come up mid-routine. [requestPermission] is safe to
+  /// repeat and answers at once where access is already granted.
+  Future<bool> ensureAccess() => requestPermission();
+
   /// Whether the sensor is readable right now.
   ///
   /// Unlike the health plugin's `hasPermissions` — which returns null/false

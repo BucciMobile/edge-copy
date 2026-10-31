@@ -128,4 +128,15 @@ void main() {
     expect(await p.flushPending(), isFalse);
     expect(await p.flushedTotal(), isNull);
   });
+
+  test('access is requested even when the status reads as allowed', () async {
+    // iOS reports notDetermined as allowed; only a request raises the prompt.
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(phoneStepsChannel, (c) async {
+      calls.add(c.method);
+      return true;
+    });
+    expect(await PhonePedometer().ensureAccess(), isTrue);
+    expect(calls, contains('requestPermission'));
+  });
 }

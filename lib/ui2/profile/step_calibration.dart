@@ -108,7 +108,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       // Ask BEFORE the routine, not after: a household routine refused at the
       // end for a permission the wearer was never asked for blames the wrong
       // thing.
-      ensurePhoneAccess: _ensurePhonePermission,
+      ensurePhoneAccess: _pedometer.ensureAccess,
       runningTotalPlatform: defaultTargetPlatform == TargetPlatform.android,
       startTotal: _pedometer.flushedTotal,
       bandTotalNow: () => app.liveStrapRawSteps,
@@ -151,14 +151,6 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     setState(() {});
   }
 
-  Future<bool> _ensurePhonePermission() async {
-    try {
-      return await _pedometer.hasPermission() ||
-          await _pedometer.requestPermission();
-    } catch (_) {
-      return false;
-    }
-  }
 
   /// Sequence of phone reads started. Only the MOST RECENTLY STARTED read may
   /// write a value: on Android a query can outlive the next tick, and without
