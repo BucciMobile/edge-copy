@@ -311,6 +311,9 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       // The run is stored from here on. A failed reload of the rows below is
       // not a failed save: reporting it as one invites a retry that stores the
       // same routine twice.
+      // The bank's own result is the saved category's profile, so that row
+      // is current even if the reload of the others fails.
+      _profiles[out.run!.category] = profile;
       try {
         await _loadProfiles();
       } catch (_) {}
