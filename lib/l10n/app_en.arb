@@ -12829,6 +12829,15 @@
       }
     }
   },
+  "supplementClimbedExportFeet": "+{ft} ft elevation",
+  "@supplementClimbedExportFeet": {
+    "description": "Share poster caption: elevation gained, in feet for imperial units",
+    "placeholders": {
+      "ft": {
+        "type": "String"
+      }
+    }
+  },
   "supplementLapsExport": "{n} laps",
   "@supplementLapsExport": {
     "description": "Presentation-only text; interpolated values remain unchanged.",

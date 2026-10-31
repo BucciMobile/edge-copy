@@ -5893,6 +5893,7 @@
     }
   },
   "supplementClimbedExport": "+{m} м высоты",
+  "supplementClimbedExportFeet": "+{ft} фт высоты",
   "@supplementClimbedExport": {
     "placeholders": {
       "m": {
