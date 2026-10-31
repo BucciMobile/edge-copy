@@ -308,7 +308,12 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       // Only after the save returned: a walk already in progress would otherwise
       // bank with the previous gain.
       app.invalidateLiveStepCalibration();
-      await _loadProfiles();
+      // The run is stored from here on. A failed reload of the rows below is
+      // not a failed save: reporting it as one invites a retry that stores the
+      // same routine twice.
+      try {
+        await _loadProfiles();
+      } catch (_) {}
       if (!mounted) return;
       setState(() {
         _busy = false;
