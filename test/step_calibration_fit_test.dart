@@ -343,6 +343,18 @@ void main() {
       expect(fit.gain, isNot(closeTo(1.0, 0.001)));
     });
 
+    test('a wearer who stops early is fitted on what they counted', () {
+      // Done is live from the first band step. Stopping at 60 must not be
+      // fitted as if the wearer walked the full 100 (a 1.67 gain).
+      final s = CalibrationSession(category: StepCategory.brisk, targetSteps: 100)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..observe(bandTotal: 60, nowMs: t0 + 35000);
+      final out = s.finish(countedSteps: 60);
+      expect(out.run!.expectedSteps, 60);
+      final fit = fittedGain(StepCategory.brisk, [out.run!]);
+      expect(fit!.gain, closeTo(1.0, 1e-9));
+    });
+
     test('only the ROUTINE is measured, not the whole session', () {
       final s = CalibrationSession(category: StepCategory.brisk)
         ..start(bandBaseline: 500, nowMs: t0)

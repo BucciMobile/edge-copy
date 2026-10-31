@@ -30,7 +30,6 @@
 
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -239,10 +238,7 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     if (s.category.referenceIsPhone) {
       // Android delivers step counts in batches up to a minute late; without a
       // flush the last stretch of the routine is missing from its reference.
-      await _pedometer.flushPending();
-      if (defaultTargetPlatform == TargetPlatform.android) {
-        await Future<void>.delayed(const Duration(milliseconds: 1500));
-      }
+      await _pedometer.flushPending(settle: true);
       await _readPhone(s);
     }
     // §4.5: `context` may not be used after an await without this.

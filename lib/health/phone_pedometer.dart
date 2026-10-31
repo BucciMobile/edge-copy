@@ -104,11 +104,16 @@ class PhonePedometer {
 
   /// Asks the step sensor to deliver what it has batched (Android holds counts
   /// for up to a minute before delivering them). A no-op where the platform
-  /// has nothing to flush. Callers wait a moment afterwards before reading.
-  Future<void> flushPending() async {
+  /// has nothing to flush. With [settle], waits for the flushed batch to be
+  /// delivered and banked before returning, so a read right after sees it.
+  Future<void> flushPending({bool settle = false}) async {
+    bool? flushed;
     try {
-      await phoneStepsChannel.invokeMethod<bool>('flush');
+      flushed = await phoneStepsChannel.invokeMethod<bool>('flush');
     } catch (_) {}
+    if (settle && flushed == true) {
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+    }
   }
 
   /// Ask for access to the phone's step sensor. Safe to call repeatedly.
