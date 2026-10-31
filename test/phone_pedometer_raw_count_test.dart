@@ -2,6 +2,8 @@
 // running total, read at the start and end of a routine after a flush. These
 // pin the Dart side of that: the value passes through, a platform without it
 // (iOS) answers null, and the settle wait only happens when a flush was made.
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -26,10 +28,8 @@ void main() {
       throw MissingPluginException();
     });
     expect(await PhonePedometer().rawCount(), isNull);
-    // And flushing there neither throws nor waits.
-    final sw = Stopwatch()..start();
-    await PhonePedometer().flushPending(settle: true);
-    expect(sw.elapsedMilliseconds, lessThan(1000));
+    // And flushing there reports nothing to flush rather than throwing.
+    expect(await PhonePedometer().flushPending(), isNull);
   });
 
   test('flush is asked of the platform', () async {
@@ -95,15 +95,37 @@ void main() {
     });
   });
 
-  test('a refused flush is reported and not waited out', () async {
+  test('a refused flush gives no total', () async {
     messenger.setMockMethodCallHandler(phoneStepsChannel, (c) async {
       if (c.method == 'flush') return false;
       if (c.method == 'rawCount') return 5000;
       return null;
     });
-    final sw = Stopwatch()..start();
-    expect(await PhonePedometer().flushPending(settle: true), isFalse);
-    expect(sw.elapsedMilliseconds, lessThan(1000));
+    expect(await PhonePedometer().flushPending(), isFalse);
     expect(await PhonePedometer().flushedTotal(), isNull);
+  });
+
+  test('a flush that completes late is still accepted', () async {
+    messenger.setMockMethodCallHandler(phoneStepsChannel, (c) async {
+      if (c.method == 'flush') {
+        await Future<void>.delayed(const Duration(milliseconds: 1800));
+        return true;
+      }
+      if (c.method == 'rawCount') return 5000;
+      return null;
+    });
+    expect(await PhonePedometer().flushedTotal(), 5000);
+  });
+
+  test('a flush that never completes is refused', () async {
+    final never = Completer<Object?>();
+    messenger.setMockMethodCallHandler(phoneStepsChannel, (c) async {
+      if (c.method == 'flush') return never.future;
+      if (c.method == 'rawCount') return 5000;
+      return null;
+    });
+    final p = PhonePedometer(flushTimeout: const Duration(milliseconds: 200));
+    expect(await p.flushPending(), isFalse);
+    expect(await p.flushedTotal(), isNull);
   });
 }

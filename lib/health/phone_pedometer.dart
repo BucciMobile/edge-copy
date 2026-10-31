@@ -53,7 +53,14 @@ class PhonePedometer {
   /// [stepReader] exists so the hour walk is testable without a device sensor —
   /// the walk is where the DST and partial-read bugs live, so it needs coverage
   /// that does not touch a platform channel.
-  PhonePedometer({StepIntervalReader? stepReader}) : _stepReader = stepReader;
+  PhonePedometer({
+    StepIntervalReader? stepReader,
+    this.flushTimeout = const Duration(seconds: 6),
+  }) : _stepReader = stepReader;
+
+  /// How long to wait for a flush to complete. The native side gives up first,
+  /// at five seconds; this only guards against a call that never returns.
+  final Duration flushTimeout;
 
   final StepIntervalReader? _stepReader;
 
@@ -103,32 +110,28 @@ class PhonePedometer {
   }
 
   /// Asks the step sensor to deliver what it has batched (Android holds counts
-  /// for up to a minute before delivering them). A no-op where the platform
-  /// has nothing to flush. With [settle], waits for the flushed batch to be
-  /// delivered and banked before returning, so a read right after sees it.
+  /// for up to a minute before delivering them) and waits for it to finish.
   ///
-  /// True when the platform accepted the flush, false when it refused it, and
-  /// null on a platform with nothing to flush. Android cannot report when a
-  /// flush has COMPLETED without a listener callback, so the settle wait
-  /// stands in for that; a refused flush is reported, never waited out.
-  Future<bool?> flushPending({bool settle = false}) async {
-    bool? flushed;
+  /// True only when the platform reports the flush COMPLETED, i.e. every
+  /// batched count has been delivered and banked; false when it was refused,
+  /// did not complete within [flushTimeout], or failed; null on a platform with
+  /// nothing to flush.
+  Future<bool?> flushPending() async {
     try {
-      flushed = await phoneStepsChannel.invokeMethod<bool>('flush');
+      final done = await phoneStepsChannel
+          .invokeMethod<bool>('flush')
+          .timeout(flushTimeout, onTimeout: () => false);
+      return done == true;
     } on MissingPluginException {
       return null;
     } catch (_) {
       return false;
     }
-    if (settle && flushed == true) {
-      await Future<void>.delayed(const Duration(milliseconds: 1500));
-    }
-    return flushed;
   }
 
-  /// The running total after a flush the platform accepted, or null.
+  /// The running total after a completed flush, or null.
   Future<int?> flushedTotal() async {
-    if (await flushPending(settle: true) != true) return null;
+    if (await flushPending() != true) return null;
     return rawCount();
   }
 
