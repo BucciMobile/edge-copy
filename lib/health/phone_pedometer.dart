@@ -451,20 +451,31 @@ class PhonePedometer {
 /// three-minute routine read that way picks up steps from outside it. A
 /// missing total at either end means no reference, and the routine is refused.
 /// Elsewhere the platform's interval query is exact and is used directly.
+///
+/// [markEnd] is called at the instant the reference ends, so the caller can
+/// freeze the band's count there too: on Android once the final flush has
+/// completed, elsewhere at the end time handed to the interval query.
 Future<int?> routinePhoneReference({
   required bool runningTotalPlatform,
   required int? startTotal,
-  required Future<int?> Function() endTotal,
-  required Future<int?> Function() interval,
+  required Future<bool?> Function() flush,
+  required Future<int?> Function() total,
+  required Future<int?> Function(DateTime end) interval,
+  required DateTime Function() now,
+  required void Function(DateTime end) markEnd,
 }) async {
   if (runningTotalPlatform) {
     if (startTotal == null) return null;
-    final end = await endTotal();
+    if (await flush() != true) return null;
+    markEnd(now());
+    final end = await total();
     if (end == null || end < startTotal) return null;
     return end - startTotal;
   }
+  final end = now();
+  markEnd(end);
   try {
-    final n = await interval();
+    final n = await interval(end);
     return n == null || n < 0 ? null : n;
   } catch (_) {
     return null;

@@ -43,15 +43,19 @@ void main() {
   });
 
   group('the routine reference', () {
-    Future<int?> never() async => fail('must not be read');
+    final t = DateTime(2026, 10, 31, 12);
+    Future<int?> neverRead() async => fail('must not be read');
 
     test('android uses the difference of two flushed totals', () async {
       expect(
           await routinePhoneReference(
             runningTotalPlatform: true,
             startTotal: 1000,
-            endTotal: () async => 1240,
-            interval: never,
+            flush: () async => true,
+            total: () async => 1240,
+            interval: (_) => neverRead(),
+            now: () => t,
+            markEnd: (_) {},
           ),
           240);
     });
@@ -62,36 +66,84 @@ void main() {
           await routinePhoneReference(
             runningTotalPlatform: true,
             startTotal: null,
-            endTotal: () async => 1240,
-            interval: () async {
+            flush: () async => true,
+            total: () async => 1240,
+            interval: (_) async {
               prorated = true;
               return 99;
             },
+            now: () => t,
+            markEnd: (_) {},
           ),
           isNull);
       expect(prorated, isFalse);
     });
 
-    test('android without an ending total refuses', () async {
+    test('android without an ending total or a completed flush refuses',
+        () async {
       expect(
           await routinePhoneReference(
             runningTotalPlatform: true,
             startTotal: 1000,
-            endTotal: () async => null,
-            interval: never,
+            flush: () async => true,
+            total: () async => null,
+            interval: (_) => neverRead(),
+            now: () => t,
+            markEnd: (_) {},
+          ),
+          isNull);
+      expect(
+          await routinePhoneReference(
+            runningTotalPlatform: true,
+            startTotal: 1000,
+            flush: () async => false,
+            total: () async => 1240,
+            interval: (_) => neverRead(),
+            now: () => t,
+            markEnd: (_) {},
           ),
           isNull);
     });
 
-    test('elsewhere the exact interval query is used', () async {
+    test('android marks the end after the flush and before the total',
+        () async {
+      final order = <String>[];
+      await routinePhoneReference(
+        runningTotalPlatform: true,
+        startTotal: 1000,
+        flush: () async {
+          order.add('flushed');
+          return true;
+        },
+        total: () async {
+          order.add('total');
+          return 1240;
+        },
+        interval: (_) => neverRead(),
+        now: () => t,
+        markEnd: (_) => order.add('end'),
+      );
+      expect(order, ['flushed', 'end', 'total']);
+    });
+
+    test('elsewhere the query and the band end at the same instant', () async {
+      DateTime? marked, queried;
       expect(
           await routinePhoneReference(
             runningTotalPlatform: false,
             startTotal: null,
-            endTotal: never,
-            interval: () async => 57,
+            flush: () async => null,
+            total: neverRead,
+            interval: (end) async {
+              queried = end;
+              return 57;
+            },
+            now: () => t,
+            markEnd: (end) => marked = end,
           ),
           57);
+      expect(marked, t);
+      expect(queried, t);
     });
   });
 

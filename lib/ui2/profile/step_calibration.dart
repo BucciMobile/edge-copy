@@ -185,11 +185,19 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     ++_phoneReadSeq;
     final start = _routineStart;
     if (start == null) return false;
+    final app = context.read<AppState>();
     final steps = await routinePhoneReference(
       runningTotalPlatform: defaultTargetPlatform == TargetPlatform.android,
       startTotal: await _startRaw,
-      endTotal: _pedometer.flushedTotal,
-      interval: () => _pedometer.stepsBetween(start, DateTime.now()),
+      flush: _pedometer.flushPending,
+      total: _pedometer.rawCount,
+      interval: (end) => _pedometer.stepsBetween(start, end),
+      now: DateTime.now,
+      // The band's count stops where the phone's reference stops.
+      markEnd: (end) => s.hold(
+        bandTotal: app.liveStrapRawSteps,
+        nowMs: end.millisecondsSinceEpoch,
+      ),
     );
     if (steps == null) return false;
     s.setPhoneSteps(steps);
