@@ -7551,6 +7551,7 @@
     }
   },
   "stepCalElapsed": "Продолжайте — это упражнение на время.",
+  "stepCalHowManyCounted": "Сколько шагов вы насчитали?",
   "stepCalFinish": "Готово",
   "stepCalCancel": "Отмена",
   "stepCalKeepWalking": "Пока ничего не записано — начните идти, браслет плотно на руке.",

@@ -102,6 +102,15 @@ class PhonePedometer {
     }
   }
 
+  /// Asks the step sensor to deliver what it has batched (Android holds counts
+  /// for up to a minute before delivering them). A no-op where the platform
+  /// has nothing to flush. Callers wait a moment afterwards before reading.
+  Future<void> flushPending() async {
+    try {
+      await phoneStepsChannel.invokeMethod<bool>('flush');
+    } catch (_) {}
+  }
+
   /// Ask for access to the phone's step sensor. Safe to call repeatedly.
   ///
   /// THIS IS THE ONLY THING THAT MAKES THE PERMISSION EXIST. On iOS a

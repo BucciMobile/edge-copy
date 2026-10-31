@@ -882,8 +882,13 @@ class CalibrationSession {
   /// "nothing was recorded" is a different message from "the phone was not
   /// carried", and neither is a silent no-op that leaves them believing their
   /// walk taught the app something.
+  ///
+  /// [countedSteps] is what the wearer says they counted, for a gait routine.
+  /// The screen asks rather than assumes [targetSteps]: Done is live from the
+  /// first band step, and a wearer who stops at 60 would otherwise be fitted
+  /// as if they had walked 100 — a 1.67 gain that the clamps still accept.
   ({StepCalibrationRun? run, StepRunRejection? refusal, bool bandSilent})
-      finish() {
+      finish({int? countedSteps}) {
     _finished = true;
     if (!_started || bandSeconds <= 0 || bandRawSteps <= 0) {
       // No usable band signal at all. Not a [StepRunRejection] — that enum
@@ -908,7 +913,9 @@ class CalibrationSession {
       // EVERYDAY: the phone's count, and 0 when it was never read — which
       // [stepRunRejection] turns into `noReferenceSteps` rather than a fitted
       // 0.0 gain.
-      expectedSteps: category.referenceIsPhone ? (_phoneSteps ?? 0) : targetSteps,
+      expectedSteps: category.referenceIsPhone
+          ? (_phoneSteps ?? 0)
+          : (countedSteps ?? targetSteps),
       rawSteps: bandRawSteps,
       cadenceSpm: bandCadenceSpm,
       // Passed THROUGH, never defaulted: null here means the caller did not

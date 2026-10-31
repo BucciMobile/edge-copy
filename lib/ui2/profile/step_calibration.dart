@@ -30,6 +30,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -97,6 +98,9 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       // pocket for a permission they were never asked for — a wrong reason,
       // which is worse than none.
       unawaited(_ensurePhonePermission());
+      // Deliver whatever the step sensor has batched, so steps taken before
+      // the routine land before its window opens.
+      unawaited(_pedometer.flushPending());
     }
     setState(() {
       _outcome = null;
@@ -182,11 +186,49 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     });
   }
 
+  Future<int?> _askCounted(int target) async {
+    final l = AppLocalizations.of(context);
+    final ctrl = TextEditingController(text: '$target');
+    final out = await showDialog<int>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: Text(l?.stepCalHowManyCounted ?? 'How many steps did you count?'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(c).pop(),
+            child: Text(l?.stepCalCancel ?? 'Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              final n = int.tryParse(ctrl.text.trim());
+              if (n != null && n > 0) Navigator.of(c).pop(n);
+            },
+            child: Text(l?.stepCalFinish ?? 'Done'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return out;
+  }
+
   Future<void> _finish() async {
     final s = _session;
     // `_busy` guards re-entry: the awaited final read leaves the buttons live,
     // and a second tap would finish a session that is already finished.
     if (s == null || _busy) return;
+    // Gait: the wearer is the reference, so ask what they counted rather than
+    // assume they reached the target. Cancelling keeps the routine running.
+    int? counted;
+    if (!s.category.referenceIsPhone) {
+      counted = await _askCounted(s.targetSteps);
+      if (counted == null || !mounted) return;
+    }
     _ticker?.cancel();
     // Locked BEFORE the read, not after it.
     setState(() => _busy = true);
@@ -194,10 +236,18 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     // whatever the last tick happened to see — and so it is taken while the
     // wearer is still standing there, which is the difference between a measured
     // reference and a refused routine.
-    if (s.category.referenceIsPhone) await _readPhone(s);
+    if (s.category.referenceIsPhone) {
+      // Android delivers step counts in batches up to a minute late; without a
+      // flush the last stretch of the routine is missing from its reference.
+      await _pedometer.flushPending();
+      if (defaultTargetPlatform == TargetPlatform.android) {
+        await Future<void>.delayed(const Duration(milliseconds: 1500));
+      }
+      await _readPhone(s);
+    }
     // §4.5: `context` may not be used after an await without this.
     if (!mounted) return;
-    final out = s.finish();
+    final out = s.finish(countedSteps: counted);
     final l = AppLocalizations.of(context);
 
     if (out.bandSilent) {

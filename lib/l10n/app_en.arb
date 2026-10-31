@@ -15777,6 +15777,7 @@
   "stepCalBandSeen": "steps the band has seen",
   "stepCalCountYourself": "Count your own steps. Stop when you reach {target}.",
   "stepCalElapsed": "Keep going \u2014 this one is timed.",
+  "stepCalHowManyCounted": "How many steps did you count?",
   "stepCalFinish": "Done",
   "stepCalCancel": "Cancel",
   "stepCalKeepWalking": "Nothing recorded yet \u2014 start walking with the strap snug.",

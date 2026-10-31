@@ -111,6 +111,12 @@ object PhoneStepCounter : SensorEventListener {
                         stopAndForget(app)
                         result.success(null)
                     }
+                    // The listener batches for up to 60 s. A three-minute calibration
+                    // routine read without a flush misses up to a third of itself.
+                    "flush" -> {
+                        val sm = app.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+                        result.success(registered && sm.flush(this))
+                    }
                     "stepsInInterval" -> {
                         val from = call.argument<Number>("fromMs")?.toLong()
                         val to = call.argument<Number>("toMs")?.toLong()
