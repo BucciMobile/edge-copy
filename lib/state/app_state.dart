@@ -735,10 +735,12 @@ class AppState extends ChangeNotifier {
     // do not add it back here. Its inflate checks the gzip trailer, so a
     // truncated backup fails loudly; `gzip.decoder` returns partial output
     // without raising and would restore short while reporting success.
-    final counts = await LocalDb.importFromDbFile(path);
-    // Invalidated whether or not the refit below succeeds: the merged runs are
-    // already in the table, and the cache holds runs, not fitted profiles.
+    // Invalidated however the import ends: it commits page by page, so a later
+    // page that throws can still leave merged calibration runs behind, and the
+    // refit can fail after a clean import. The cache holds runs, not profiles.
+    final Map<String, int> counts;
     try {
+      counts = await LocalDb.importFromDbFile(path);
       await LocalDb.refitAllLiveStepGains();
     } finally {
       invalidateLiveStepCalibration();
