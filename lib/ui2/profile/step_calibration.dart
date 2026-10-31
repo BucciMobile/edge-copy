@@ -261,8 +261,17 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
     // assume they reached the target. Cancelling keeps the routine running.
     int? counted;
     if (!s.category.referenceIsPhone) {
+      // The walk ends at the tap, not when the question is answered.
+      s.hold(
+        bandTotal: context.read<AppState>().liveStrapRawSteps,
+        nowMs: DateTime.now().millisecondsSinceEpoch,
+      );
       counted = await _askCounted(s.targetSteps);
-      if (counted == null || !mounted) return;
+      if (!mounted) return;
+      if (counted == null) {
+        s.resume();
+        return;
+      }
     }
     _ticker?.cancel();
     // Locked BEFORE the read, not after it.

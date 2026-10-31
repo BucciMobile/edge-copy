@@ -355,6 +355,29 @@ void main() {
       expect(fit!.gain, closeTo(1.0, 1e-9));
     });
 
+    test('time spent answering the count question is not part of the walk', () {
+      // 100 steps in 92 s is 65 spm, a valid slow walk. Ten seconds with the
+      // dialog open would make it 58.8 spm and refuse it.
+      final s = CalibrationSession(category: StepCategory.slow)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..observe(bandTotal: 100, nowMs: t0 + 92000)
+        ..hold(bandTotal: 100, nowMs: t0 + 92000)
+        ..observe(bandTotal: 100, nowMs: t0 + 102000);
+      final out = s.finish(countedSteps: 100);
+      expect(out.refusal, isNull);
+      expect(out.run!.cadenceSpm, closeTo(100 * 60 / 92, 1e-9));
+    });
+
+    test('a cancelled question resumes the routine clock', () {
+      final s = CalibrationSession(category: StepCategory.brisk)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..hold(bandTotal: 40, nowMs: t0 + 20000)
+        ..resume()
+        ..observe(bandTotal: 100, nowMs: t0 + 55000);
+      expect(s.bandRawSteps, 100);
+      expect(s.bandSeconds, 55);
+    });
+
     test('only the ROUTINE is measured, not the whole session', () {
       final s = CalibrationSession(category: StepCategory.brisk)
         ..start(bandBaseline: 500, nowMs: t0)

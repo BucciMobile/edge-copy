@@ -844,10 +844,24 @@ class CalibrationSession {
   /// routine that spans a reconnect must not be credited with a negative
   /// correction.
   void observe({required int bandTotal, required int nowMs}) {
-    if (_finished || !_started) return;
+    if (_finished || !_started || _held) return;
     _bandTotal = bandTotal < _bandBaseline ? _bandBaseline : bandTotal;
     if (nowMs > _nowMs) _nowMs = nowMs;
   }
+
+  bool _held = false;
+
+  /// Freeze the routine at the wearer's Done tap: the count and clock as of
+  /// [nowMs], ignoring observations while the screen asks what they counted.
+  /// Without it a dialog left open for ten seconds is added to the walk, and a
+  /// slow but valid routine drops below the gait cadence range.
+  void hold({required int bandTotal, required int nowMs}) {
+    observe(bandTotal: bandTotal, nowMs: nowMs);
+    _held = true;
+  }
+
+  /// The wearer cancelled the question and is still walking.
+  void resume() => _held = false;
 
   /// The phone's count for this routine's window. Replaceable, because the
   /// screen re-reads it as the routine runs.
