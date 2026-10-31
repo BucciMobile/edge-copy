@@ -321,6 +321,10 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
           l?.stepCalRatioOutOfRange ??
               'Your count and the band\u2019s are too far apart to use. Repeat '
                   'the routine and walk the full count.',
+        StepRunRejection.cadenceOutsideGaitRange =>
+          l?.stepCalCadenceOutOfRange ??
+              'The band could not find a walking rhythm in that routine. Start '
+                  'walking right after you press start and keep a steady pace.',
         StepRunRejection.routineTooShort =>
           l?.stepCalRoutineTooShort ??
               'That routine ended before the timer finished. Keep going until '

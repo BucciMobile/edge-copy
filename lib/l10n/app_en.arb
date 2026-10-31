@@ -16147,6 +16147,7 @@
   "stepCalWrongSource": "That routine used the wrong reference.",
   "stepCalBadData": "That routine produced unreadable sensor data.",
   "stepCalRatioOutOfRange": "Your count and the band’s are too far apart to use. Repeat the routine and walk the full count.",
+  "stepCalCadenceOutOfRange": "The band could not find a walking rhythm in that routine. Start walking right after you press start and keep a steady pace.",
   "stepCalRoutineTooShort": "That routine ended before the timer finished. Keep going until it completes.",
   "stepCalSaveFailed": "Could not save that calibration.",
   "stepCalDoneGait": "Saved. You counted {count} steps and the band saw {band} steps. From now on this kind of walking is corrected by {pct}%.",

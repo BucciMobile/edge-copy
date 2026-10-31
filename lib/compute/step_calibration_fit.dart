@@ -246,6 +246,12 @@ enum StepRunRejection {
   /// and `stepRunRejection` cannot carry it, because a run does not know how
   /// long its routine was asked to be. [CalibrationSession.finish] raises it.
   routineTooShort,
+
+  /// A gait routine whose band cadence is outside the walking range
+  /// ([kGaitCadenceMinSpm]..[kGaitCadenceMaxSpm]). [categoryBand] ignores such
+  /// a run, so saving it would count toward the fit without ever giving the
+  /// family a band to own its walks.
+  cadenceOutsideGaitRange,
 }
 
 /// Null when the run may be used to fit; otherwise why it may not.
@@ -275,6 +281,9 @@ StepRunRejection? stepRunRejection(StepCalibrationRun r) {
     // no longer a measurement of the gain.
     if (r.rawSteps > (r.expectedSteps * kGaitGainMax).ceil()) {
       return StepRunRejection.rawExceedsExpectedByTooMuch;
+    }
+    if (r.cadenceSpm < kGaitCadenceMinSpm || r.cadenceSpm > kGaitCadenceMaxSpm) {
+      return StepRunRejection.cadenceOutsideGaitRange;
     }
     return _ratioAdmissible(r);
   }

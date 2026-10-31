@@ -470,13 +470,19 @@ void main() {
       expect(s.finish().refusal, StepRunRejection.nonFiniteFeature);
     });
 
-    test('a run that did not walk defines no gait band', () {
+    test('a run that did not walk is refused, not saved without a band', () {
       final fast = CalibrationSession(category: StepCategory.brisk)
         ..start(bandBaseline: 0, nowMs: t0)
         ..observe(bandTotal: 200, nowMs: t0 + 50000); // 240 spm
-      final r = fast.finish().run!;
-      expect(stepRunRejection(r), isNull);
-      expect(categoryBand(StepCategory.brisk, [r]), isNull);
+      final out = fast.finish(countedSteps: 200);
+      expect(out.refusal, StepRunRejection.cadenceOutsideGaitRange);
+      expect(categoryBand(StepCategory.brisk, [out.run!]), isNull);
+      // A slow start that drags the cadence under the walking range too.
+      final slow = CalibrationSession(category: StepCategory.slow)
+        ..start(bandBaseline: 0, nowMs: t0)
+        ..observe(bandTotal: 60, nowMs: t0 + 90000); // 40 spm
+      expect(slow.finish(countedSteps: 60).refusal,
+          StepRunRejection.cadenceOutsideGaitRange);
     });
   });
 }
