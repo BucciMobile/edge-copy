@@ -736,15 +736,20 @@ class AppState extends ChangeNotifier {
     // truncated backup fails loudly; `gzip.decoder` returns partial output
     // without raising and would restore short while reporting success.
     final counts = await LocalDb.importFromDbFile(path);
-    await LocalDb.refitAllLiveStepGains();
+    // Invalidated whether or not the refit below succeeds: the merged runs are
+    // already in the table, and the cache holds runs, not fitted profiles.
+    try {
+      await LocalDb.refitAllLiveStepGains();
+    } finally {
+      invalidateLiveStepCalibration();
+    }
     // An import can MERGE calibration rows (`live_step_calibration`) in from the
     // backup without this process knowing, and the cached fit is the only thing
     // `creditedStepsForRun` consults when a walk is banked. Without this, every
     // walk banked after a restore would use the pre-restore gain — including the
     // case where the backup is the reason the calibration exists at all (a new
     // phone). The docstring on [invalidateLiveStepCalibration] names this path;
-    // this line is what makes that true.
-    invalidateLiveStepCalibration();
+    // the `finally` above is what makes that true.
     lastImportArchiveSkipped = counts['_substrate_archive_skipped'] ?? 0;
     lastImportArchiveRestored = counts['substrate_archive'] ?? 0;
     if (lastImportArchiveSkipped > 0) {
