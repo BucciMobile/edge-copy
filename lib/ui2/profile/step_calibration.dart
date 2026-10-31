@@ -448,9 +448,9 @@ class _StepCalibrationScreenState extends State<StepCalibrationScreen> {
       const SizedBox(height: S.x2),
       Center(
         child: Text(
-          // No placeholder: this label names the counter, it does not read the
-          // target. It used to substitute a `{target}` the string never had.
-          l?.stepCalBandSeen ?? 'steps the band has seen',
+          // Counts the number shown above it, so languages that inflect the
+          // noun by count can agree with it.
+          l?.stepCalBandSeen(s.bandRawSteps) ?? 'steps the band has seen',
           style: F.cap.copyWith(color: p.ink2),
         ),
       ),

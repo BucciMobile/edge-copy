@@ -16130,7 +16130,14 @@
   "stepCalEverydayGuide": "Do ordinary things around the house — carry, lift, tidy — with your phone in your pocket. Three minutes. Do not pace deliberately.",
   "stepCalCalibrated": "Calibrated — counted {n} times",
   "stepCalNotCalibrated": "Not calibrated yet",
-  "stepCalBandSeen": "steps the band has seen",
+  "stepCalBandSeen": "{count, plural, one{step the band has seen} other{steps the band has seen}}",
+  "@stepCalBandSeen": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "stepCalCountYourself": "Count your own steps. Stop when you reach {target}.",
   "stepCalElapsed": "Keep going — this one is timed.",
   "stepCalHowManyCounted": "How many steps did you count?",

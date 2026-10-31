@@ -7762,7 +7762,7 @@
   "stepCalEverydayTitle": "Дома",
   "stepCalEverydaySub": "три минуты наводите порядок, телефон в кармане",
   "stepCalEverydayGuide": "Занимайтесь обычными домашними делами — носите, поднимайте, убирайте — с телефоном в кармане. Три минуты. Не ходите туда-сюда специально.",
-  "stepCalCalibrated": "Откалибровано — замеров: {n}",
+  "stepCalCalibrated": "Откалибровано — {n, plural, one{{n} замер} few{{n} замера} many{{n} замеров} other{{n} замера}}",
   "@stepCalCalibrated": {
     "placeholders": {
       "n": {
@@ -7771,7 +7771,14 @@
     }
   },
   "stepCalNotCalibrated": "Ещё не откалибровано",
-  "stepCalBandSeen": "шагов зафиксировал браслет",
+  "stepCalBandSeen": "{count, plural, one{шаг зафиксировал браслет} few{шага зафиксировал браслет} many{шагов зафиксировал браслет} other{шага зафиксировал браслет}}",
+  "@stepCalBandSeen": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "stepCalCountYourself": "Считайте шаги сами. Остановитесь на {target}.",
   "@stepCalCountYourself": {
     "placeholders": {
@@ -7798,7 +7805,7 @@
   "stepCalCadenceOutOfRange": "Браслет не распознал в этом упражнении ритм ходьбы. Начинайте идти сразу после старта и держите ровный темп.",
   "stepCalRoutineTooShort": "Упражнение закончилось раньше таймера. Продолжайте, пока он не истечёт.",
   "stepCalSaveFailed": "Не удалось сохранить калибровку.",
-  "stepCalDoneGait": "Сохранено. Вы насчитали {count} шагов, браслет — {band}. Теперь такая ходьба корректируется на {pct}%.",
+  "stepCalDoneGait": "Сохранено. Вы насчитали {count, plural, one{{count} шаг} few{{count} шага} many{{count} шагов} other{{count} шага}}, браслет — {band, plural, one{{band} шаг} few{{band} шага} many{{band} шагов} other{{band} шага}}. Теперь этот тип движения корректируется на {pct}%.",
   "@stepCalDoneGait": {
     "placeholders": {
       "count": {
@@ -7812,7 +7819,7 @@
       }
     }
   },
-  "stepCalDoneHousehold": "Сохранено. Телефон насчитал {count} шагов из {band}, которые зафиксировал браслет. Домашняя активность теперь масштабируется с коэффициентом {gain}.",
+  "stepCalDoneHousehold": "Сохранено. Телефон насчитал {count, plural, one{{count} шаг} few{{count} шага} many{{count} шагов} other{{count} шага}} из {band, plural, one{{band} шага} few{{band} шагов} many{{band} шагов} other{{band} шага}}, которые зафиксировал браслет. Домашняя активность теперь масштабируется с коэффициентом {gain}.",
   "@stepCalDoneHousehold": {
     "placeholders": {
       "count": {
