@@ -7473,7 +7473,7 @@
   "deviceUseSheetConfirm": "Использовать",
   "deviceUseSheetCancel": "Не сейчас",
   "settingsReportIssueRowTitle": "Сообщить о проблеме",
-  "settingsReportIssueRowSub": "Отправляет выбранное вами разработчикам в зашифрованном виде",
+  "settingsReportIssueRowSub": "Отправляет выбранное вами разработчикам; ваши данные шифруются, сведения о сообщении — нет",
   "reportNavTitle": "Сообщить о проблеме",
   "reportCategoryGroup": "О чём сообщение",
   "reportCategorySync": "Синхронизация",

@@ -146,7 +146,7 @@ String _pct(double v) => '${v.round()}%';
 /// glued in front of the localized lower/higher phrase, so an English unit
 /// here left every other locale reading a half-English verdict.
 String sleepEfficiencyDelta(AppLocalizations? l, double v) =>
-    l?.sleepDetailPointsDelta('${v.round()}') ?? '${v.round()} points';
+    l?.sleepDetailPointsDelta('${v.round()}') ?? '${v.round()} percentage points';
 
 /// A reading with its unit, in the display locale: metric detail prints the
 /// same number through [displayFixed] and a translated unit, so a raw
