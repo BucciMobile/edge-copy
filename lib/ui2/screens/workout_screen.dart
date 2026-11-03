@@ -45,6 +45,7 @@ import '../revision.dart';
 import '../theme.dart';
 import '../../data/day_label.dart' show calendarDaysBetween;
 import 'log_workout.dart';
+import 'hyrox_screen.dart';
 import 'metric_detail.dart' show MetricDetail, detailLinkRow;
 import 'nutrition_screen.dart';
 import 'start_card.dart';
@@ -594,6 +595,17 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
     );
   }
 
+  Widget _hyroxCard(BuildContext c) {
+    return StatusCard(
+      'HYROX race',
+      'Eight rounds, tap the band at each round change. Arm it here, watch '
+          'the rounds live, correct boundaries afterwards.',
+      fix: 'Open HYROX',
+      icon: LucideIcons.timer,
+      onFix: () => _push(c, const HyroxScreen()),
+    );
+  }
+
   List<Widget> _history(BuildContext c, _WorkoutData d) {
     final p = P.of(c);
     final loc = AppLocalizations.of(c);
@@ -609,11 +621,15 @@ class _WorkoutScreenState extends State<WorkoutScreen> with RevisionReload {
         ),
         const SizedBox(height: S.x5),
         _logPastCard(c),
+        const SizedBox(height: S.x3),
+        _hyroxCard(c),
       ];
     }
     final importedThisWeek = d.weekImported;
     return [
       ..._suggestionCards(c, d),
+      _hyroxCard(c),
+      const SizedBox(height: S.x3),
       Row(children: [
         Expanded(child: _sum(p, '${d.workoutsTracked ?? d.workouts.length}',
             loc?.workoutTrackedLabel ?? 'Tracked')),

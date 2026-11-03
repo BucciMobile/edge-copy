@@ -11,6 +11,10 @@ const String kRouteAiEvening = '/ai/evening';
 const String kRouteJournalCompose = '/journal/compose';
 const String kRouteBreathing = '/breathing';
 
+/// HYROX race screen (arm / live rounds / corrections), pushed from the
+/// Activity tab's history list.
+const String kRouteHyrox = '/hyrox';
+
 /// The hydration reminder. It lands on the one-tap water log rather than the
 /// Nutrition tab: the notification asks you to log a glass, and a destination
 /// that still needs a scroll to find the control is a different promise.
