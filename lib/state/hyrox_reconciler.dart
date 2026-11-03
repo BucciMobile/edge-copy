@@ -143,6 +143,36 @@ class HyroxReconciler {
   }
 }
 
+/// Best-effort hook for the sync path: after band data became durable (live
+/// persist, foreground sync burst, background/headless drain), rebuild the
+/// boundaries of the ONE active HYROX session from the stored taps.
+///
+/// This is the production caller the storage PR deferred. It is safe to call
+/// after EVERY persist: no active session is a no-op, a finalized/discarded
+/// session is never touched, and re-running is idempotent. It never throws —
+/// a sync hook must not break the sync; [log] gets the reason instead.
+Future<void> reconcileActiveSession(
+  Database db, {
+  String deviceId = '',
+  void Function(String line)? log,
+}) async {
+  try {
+    final session = await HyroxDb.activeSession(db);
+    if (session == null) return;
+    if (session.status != 'armed' && session.status != 'active') return;
+    final applied = await HyroxReconciler(db).reconcile(
+      session.id,
+      deviceId: deviceId,
+    );
+    if (applied.isNotEmpty) {
+      log?.call('[hyrox] reconciled ${applied.length} boundary(ies) '
+          'into ${session.id}');
+    }
+  } catch (e) {
+    log?.call('[hyrox] reconcile skipped: $e');
+  }
+}
+
 /// Pure: turns raw strap-tap times into the boundaries this race can accept.
 ///
 /// Kept Flutter- and database-free so the whole decision is unit-testable
