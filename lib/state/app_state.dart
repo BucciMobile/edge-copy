@@ -86,6 +86,7 @@ import 'alarm_schedule.dart';
 import 'derive_coordinator.dart';
 import 'gesture_controller.dart';
 import 'hyrox_reconciler.dart';
+import 'hyrox_live_taps.dart';
 import 'live_stream_controller.dart';
 import 'sync_controller.dart';
 import 'workout_controller.dart';
@@ -391,6 +392,12 @@ class AppState extends ChangeNotifier {
   /// Band-gesture → action mapping (double-tap, etc.). Exposed for the settings UI.
   final GestureSettings gestureSettings = GestureSettings();
   late final GestureController _gestureController;
+
+  /// Live double-tap -> HYROX round boundary, fed from [_onLiveEvent].
+  late final HyroxLiveTapHandler _hyroxLiveTaps = HyroxLiveTapHandler(
+    () => LocalDb.instance,
+    log: _log,
+  );
 
   /// Relay selected phone-app notifications to the strap as a buzz (Android only).
   /// Exposed for the settings UI; buzzes via the live BLE engine when connected.
@@ -2987,6 +2994,9 @@ class AppState extends ChangeNotifier {
     _handleAlarmEvent(id, ts,
         hex: hex, bodyVerified: profile == proto.BandProfile.gen4);
     _gestureController.onEvent(id, ts, hex);
+    // HYROX live taps: a double-tap burst closes the current round of the
+    // active race. Live path only — the headless drain never reaches here.
+    unawaited(_hyroxLiveTaps.onEvent(id, ts, deviceId));
   }
 
   /// Why start-up failed, or null if it did not. Drives [AppRoute.failed].
