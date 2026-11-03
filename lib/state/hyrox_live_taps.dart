@@ -22,6 +22,7 @@ import 'package:sqflite/sqflite.dart';
 import '../data/hyrox_store.dart';
 import 'hyrox_reconciler.dart'
     show kMinTaps, kTapWindowSec, kMinSegmentSec;
+import 'hyrox_workout_banker.dart';
 
 /// Double-tap event id, the only gesture the firmware emits today.
 const int kHyroxLiveDoubleTapEventId = 14;
@@ -120,5 +121,8 @@ class HyroxLiveTapHandler {
       log?.call('[hyrox] round ${cur.roundIndex ?? cur.idx + 1} closed at '
           '$at (${session.id})');
     }
+    // The closed round becomes a real workout row so zones, splits, analytics
+    // and the Health export see it. Idempotent — already-linked rounds skip.
+    await HyroxWorkoutBanker.bankClosedSegments(db, session.id, log: log);
   }
 }
