@@ -19,6 +19,7 @@
 
 import 'package:sqflite/sqflite.dart';
 
+import '../data/hyrox_plan.dart';
 import '../data/hyrox_store.dart';
 import 'hyrox_reconciler.dart'
     show kMinTaps, kTapWindowSec, kMinSegmentSec;
