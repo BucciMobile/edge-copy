@@ -26,9 +26,15 @@ class HyroxController extends ChangeNotifier {
   Future<void> refresh() async {
     try {
       final db = await _db();
-      session = await HyroxDb.activeSession(db) ??
-          (await HyroxDb.finalized(db, limit: 1)).firstOrNull;
-      _sessionId = session?.id;
+      // Active session first; else keep showing the one the user is looking
+      // at (a just-discarded race must stay visible as discarded); else the
+      // newest finalized race.
+      session = await HyroxDb.activeSession(db);
+      if (session == null && _sessionId != null) {
+        session = await HyroxDb.byId(db, _sessionId!);
+      }
+      session ??= (await HyroxDb.finalized(db, limit: 1)).firstOrNull;
+      _sessionId = session?.id ?? _sessionId;
       error = null;
     } catch (e) {
       error = e;

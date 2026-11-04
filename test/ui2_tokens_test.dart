@@ -224,6 +224,9 @@ const _notComponents = {
   // permission on tap — a gallery case would either mock all of that or
   // trigger a real health-store prompt from a screenshot sweep.
   'PhoneImport', 'AutomationSettings',
+  // A Scaffold route that reads/writes the HYROX session tables through
+  // HyroxController — a gallery case would need a live database.
+  'HyroxScreen',
   // The second-sensor pairing route. A Scaffold that owns a BLE scan, reads
   // the `device` table and asks CoreBluetooth whether AccessorySetupKit has
   // provisioned anything — a gallery case would be a photograph of a fixture,

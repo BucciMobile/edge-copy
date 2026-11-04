@@ -37,8 +37,8 @@ void main() {
     expect(c.session!.segments, hasLength(8));
     expect(c.isActive, isTrue);
 
-    for (var i = 0; i < 8; i++) {
-      await c.tap(); // start + 7 transitions + finish
+    for (var i = 0; i < 9; i++) {
+      await c.tap(); // start + 7 transitions + finish of the final round
     }
     expect(c.session!.status, 'finished');
     expect(c.session!.segments.every((s) => s.endTs != null), isTrue);
