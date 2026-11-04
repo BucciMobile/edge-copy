@@ -37,7 +37,7 @@ class HyroxWorkoutBanker {
       if (s.startTs == null || s.endTs == null || s.workoutId != null) {
         continue;
       }
-      final wid = '${sessionId}:r${s.idx}';
+      final wid = '${sessionId}:r$s.idx';
       try {
         await LocalDb.putSession({
           'id': wid,
