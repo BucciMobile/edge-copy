@@ -6,7 +6,6 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:openstrap_edge/state/hyrox_controller.dart';
 import 'package:openstrap_edge/data/db.dart';
-import 'package:openstrap_edge/data/hyrox_store.dart';
 
 void main() {
   setUpAll(() async {

@@ -11,7 +11,6 @@ import '../../data/db.dart';
 import '../../data/hyrox_plan.dart';
 import '../../data/hyrox_store.dart';
 import '../../state/hyrox_controller.dart';
-import '../theme.dart';
 import '../ui2.dart';
 
 class HyroxScreen extends StatelessWidget {
