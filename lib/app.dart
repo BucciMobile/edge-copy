@@ -449,7 +449,7 @@ ShellDomain domainForRoute(String route) => switch (routePath(route)) {
       // The forgotten-workout nudge. Activity is the destination itself — the
       // live session bar with its finish control is pinned to the shell there
       // — so screenForRoute stays null for it.
-      kRouteWorkoutIdle => ShellDomain.activity,
+      kRouteWorkoutIdle || kRouteHyrox => ShellDomain.activity,
       // Battery and band alerts. Profile is pushed over Today.
       kRouteProfile => ShellDomain.today,
       // The alarm safety notifications and the alarm-fired note: the alarm

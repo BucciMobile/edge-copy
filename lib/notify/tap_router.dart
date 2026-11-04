@@ -135,6 +135,9 @@ const Map<String, int> _tabRoutes = {
   // not `_screenRoutes`. (It keeps its own path because `classOf`'s sanction
   // is route-keyed — see kRouteWorkoutIdle above.)
   kRouteWorkoutIdle: 4,
+  // HYROX lands on the Workouts/Activity tab itself (the HYROX card lives
+  // there); screenForRoute in app.dart also knows kRouteHyrox for pushes.
+  kRouteHyrox: 4,
 };
 
 // Sub-screen routes → the shell tab they sit on top of. Most briefing/journal
@@ -161,7 +164,6 @@ const Map<String, int> _screenRoutes = {
   kRouteProfile: 0,
   kRouteRecap: 2, // Heart, i.e. Health — domainForRoute decides anyway
   kRouteAlarm: 0,
-  kRouteHyrox: 4, // Workouts/Activity tab
 };
 
 TapTarget resolveTapRoute(String route) {
