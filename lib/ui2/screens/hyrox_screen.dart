@@ -49,7 +49,7 @@ class _HyroxBody extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(bottom: S.x2),
                 child: FilledButton(
-                  onPressed: () => h.arm(p),
+                  onPressed: h.busy ? null : () => h.arm(p),
                   child: Text('Arm $p'),
                 ),
               ),
@@ -138,10 +138,25 @@ class _RoundList extends StatelessWidget {
                         await h.removeBoundary(seg.idx - 1);
                       }
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(value: 'move', child: Text('Move boundary −60 s')),
-                      PopupMenuItem(value: 'merge', child: Text('Merge with previous')),
-                    ],
+                    itemBuilder: (_) {
+                      // Merge (removeBoundary) only succeeds for an OPEN,
+                      // started successor — a closed successor is rejected by
+                      // the store. Offer it only in that state.
+                      final next = seg.idx + 1 < s.segments.length
+                          ? s.segments[seg.idx + 1]
+                          : null;
+                      final canMerge = next != null &&
+                          next.startTs != null &&
+                          next.endTs == null &&
+                          seg.idx > 0;
+                      return [
+                        const PopupMenuItem(
+                            value: 'move', child: Text('Move boundary −60 s')),
+                        if (canMerge)
+                          const PopupMenuItem(
+                              value: 'merge', child: Text('Merge with previous')),
+                      ];
+                    },
                   )
                 : null,
           ),

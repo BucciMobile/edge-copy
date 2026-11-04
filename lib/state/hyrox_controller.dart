@@ -42,41 +42,74 @@ class HyroxController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Arm a new race: discard nothing, create a fresh armed session.
+  bool _busy = false;
+  bool get busy => _busy;
+
+  /// Run a write, surfacing a rejection on the screen instead of leaking an
+  /// unhandled async error; the current session is left unchanged on failure.
+  Future<void> _write(Future<void> Function() op) async {
+    if (_busy) return;
+    _busy = true;
+    notifyListeners();
+    try {
+      await op();
+      error = null;
+    } catch (e) {
+      error = e;
+    } finally {
+      _busy = false;
+    }
+    await refresh();
+  }
+
+  /// Arm a new race. Refused while another unfinalized session exists, so two
+  /// quick taps cannot create overlapping races.
   Future<void> arm(String preset) async {
     final db = await _db();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final id = 'hyrox_${now.toRadixString(36)}';
-    final plan = HyroxPlan.race(preset);
-    await HyroxDb.create(db, HyroxSession(
-      id: id,
-      kind: 'race',
-      preset: preset,
-      status: 'armed',
-      plan: plan,
-      createdAt: now,
-      updatedAt: now,
-    ));
-    _sessionId = id;
-    await refresh();
+    if (await HyroxDb.activeSession(db) != null) {
+      error = StateError('an unfinalized HYROX session already exists');
+      notifyListeners();
+      return;
+    }
+    await _write(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final id = 'hyrox_${now.toRadixString(36)}';
+      final plan = HyroxPlan.race(preset);
+      await HyroxDb.create(db, HyroxSession(
+        id: id,
+        kind: 'race',
+        preset: preset,
+        status: 'armed',
+        plan: plan,
+        createdAt: now,
+        updatedAt: now,
+      ));
+      _sessionId = id;
+    });
   }
 
   /// Arm a free-form training session.
   Future<void> armTraining(List<HyroxSegmentPlan> segments) async {
     final db = await _db();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final id = 'hyrox_${now.toRadixString(36)}';
-    await HyroxDb.create(db, HyroxSession(
-      id: id,
-      kind: 'training',
-      preset: 'hyrox_training',
-      status: 'armed',
-      plan: HyroxPlan.training(segments),
-      createdAt: now,
-      updatedAt: now,
-    ));
-    _sessionId = id;
-    await refresh();
+    if (await HyroxDb.activeSession(db) != null) {
+      error = StateError('an unfinalized HYROX session already exists');
+      notifyListeners();
+      return;
+    }
+    await _write(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final id = 'hyrox_${now.toRadixString(36)}';
+      await HyroxDb.create(db, HyroxSession(
+        id: id,
+        kind: 'training',
+        preset: 'hyrox_training',
+        status: 'armed',
+        plan: HyroxPlan.training(segments),
+        createdAt: now,
+        updatedAt: now,
+      ));
+      _sessionId = id;
+    });
   }
 
   /// On-screen fallback for a band tap: same burst semantics are the band's
@@ -87,74 +120,82 @@ class HyroxController extends ChangeNotifier {
     if (s == null || _sessionId == null) return;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final segs = s.segments;
-    final open = segs.where((x) => x.isOpen).toList();
-    if (open.isEmpty) {
-      if (segs.any((x) => x.startTs != null)) return;
-      await HyroxDb.startSegment(
-          db: db, sessionId: _sessionId!, ts: now, boundarySource: 'phone');
-    } else if (open.length == 1) {
-      final cur = open.single;
-      if (cur.idx == segs.length - 1) {
-        await HyroxDb.finishSegment(
+    await _write(() async {
+      final open = segs.where((x) => x.isOpen).toList();
+      if (open.isEmpty) {
+        if (segs.any((x) => x.startTs != null)) return;
+        await HyroxDb.startSegment(
             db: db, sessionId: _sessionId!, ts: now, boundarySource: 'phone');
-      } else {
-        await HyroxDb.transitionSegment(
-          db: db, sessionId: _sessionId!, currentIdx: cur.idx,
-          transitionTs: now, boundarySource: 'phone');
+      } else if (open.length == 1) {
+        final cur = open.single;
+        if (cur.idx == segs.length - 1) {
+          await HyroxDb.finishSegment(
+              db: db, sessionId: _sessionId!, ts: now,
+              boundarySource: 'phone');
+        } else {
+          await HyroxDb.transitionSegment(
+            db: db, sessionId: _sessionId!, currentIdx: cur.idx,
+            transitionTs: now, boundarySource: 'phone');
+        }
       }
-    }
-    await refresh();
+    });
   }
 
   Future<void> adjustBoundary(int idx, int newTs) async {
     final db = await _db();
     if (_sessionId == null) return;
-    await HyroxDb.adjustBoundary(
-        db: db, sessionId: _sessionId!, idx: idx, newTs: newTs);
-    await refresh();
+    await _write(() async {
+      await HyroxDb.adjustBoundary(
+          db: db, sessionId: _sessionId!, idx: idx, newTs: newTs);
+    });
   }
 
   Future<void> adjustStart(int newTs) async {
     final db = await _db();
     if (_sessionId == null) return;
-    await HyroxDb.adjustStart(db: db, sessionId: _sessionId!, newTs: newTs);
-    await refresh();
+    await _write(() async {
+      await HyroxDb.adjustStart(db: db, sessionId: _sessionId!, newTs: newTs);
+    });
   }
 
   Future<void> removeBoundary(int idx) async {
     final db = await _db();
     if (_sessionId == null) return;
-    await HyroxDb.removeBoundary(db: db, sessionId: _sessionId!, idx: idx);
-    await refresh();
+    await _write(() async {
+      await HyroxDb.removeBoundary(db: db, sessionId: _sessionId!, idx: idx);
+    });
   }
 
   Future<void> markAbandoned() async {
     final db = await _db();
     final s = session;
     if (s == null || _sessionId == null) return;
-    await HyroxDb.updateSession(db, HyroxSession(
-      id: s.id, kind: s.kind, preset: s.preset, status: 'abandoned',
-      plan: s.plan, createdAt: s.createdAt, updatedAt: s.updatedAt,
-    ));
-    await refresh();
+    await _write(() async {
+      await HyroxDb.updateSession(db, HyroxSession(
+        id: s.id, kind: s.kind, preset: s.preset, status: 'abandoned',
+        plan: s.plan, createdAt: s.createdAt, updatedAt: s.updatedAt,
+      ));
+    });
   }
 
   Future<void> finalize() async {
     final db = await _db();
     if (_sessionId == null) return;
-    await HyroxDb.finalize(db, _sessionId!);
-    await refresh();
+    await _write(() async {
+      await HyroxDb.finalize(db, _sessionId!);
+    });
   }
 
   Future<void> discard() async {
     final db = await _db();
     final s = session;
     if (s == null || _sessionId == null) return;
-    await HyroxDb.updateSession(db, HyroxSession(
-      id: s.id, kind: s.kind, preset: s.preset, status: 'discarded',
-      plan: s.plan, createdAt: s.createdAt, updatedAt: s.updatedAt,
-    ));
-    await refresh();
+    await _write(() async {
+      await HyroxDb.updateSession(db, HyroxSession(
+        id: s.id, kind: s.kind, preset: s.preset, status: 'discarded',
+        plan: s.plan, createdAt: s.createdAt, updatedAt: s.updatedAt,
+      ));
+    });
   }
 
   Future<void> show(String id) async {
