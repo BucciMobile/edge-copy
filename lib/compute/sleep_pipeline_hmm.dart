@@ -16,6 +16,13 @@ import 'dart:math';
 
 enum SleepState { wake, nremLight, nremDeep, rem }
 
+// Plausibility window shared by the baseline and the emission scoring (and by
+// the caller in onehz_pipeline.dart): a value outside it is a measurement
+// fault, not physiology.
+const double kMinPlausibleHrBpm = 30.0;
+const double kMaxPlausibleHrBpm = 200.0;
+const double kMaxPlausibleRmssdMs = 500.0;
+
 // The transition table and the emission sigmoid centres/scales below are
 // hand-set ESTIMATES (per 30 s epoch), not fitted to or validated against PSG.
 class HMMConfig {
@@ -48,7 +55,8 @@ class HMMConfig {
     SleepState.rem: {
       SleepState.wake: log(0.05),
       SleepState.nremLight: log(0.10),
-      SleepState.nremDeep: log(0.00),
+      // REM -> deep never happens physiologically; forbid it explicitly.
+      SleepState.nremDeep: double.negativeInfinity,
       SleepState.rem: log(0.85)
     },
   };
@@ -62,8 +70,10 @@ class SleepStageAnalyzer {
   // which observations get scored. A value outside it (a 250 bpm spike, a NaN
   // from a dropped beat) is a measurement fault, not physiology, and scoring it
   // would push the decoder towards wake.
-  static bool _plausibleHr(double? h) => h != null && h.isFinite && h > 30.0 && h < 200.0;
-  static bool _plausibleRmssd(double? r) => r != null && r.isFinite && r > 0.0 && r < 500.0;
+  static bool _plausibleHr(double? h) =>
+      h != null && h.isFinite && h > kMinPlausibleHrBpm && h < kMaxPlausibleHrBpm;
+  static bool _plausibleRmssd(double? r) =>
+      r != null && r.isFinite && r > 0.0 && r < kMaxPlausibleRmssdMs;
 
   void computeBaseline(List<Map<String, dynamic>> first120minData) {
     if (first120minData.isEmpty) return;

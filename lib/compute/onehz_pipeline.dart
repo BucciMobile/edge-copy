@@ -550,10 +550,51 @@ class DayBundleInput {
     );
   }
 
+  /// Copy with only [sleepJson] / [hypnoStages] replaced — the single place
+  /// that re-lists every field, so [withHypnoStages] cannot drift out of sync.
+  DayBundleInput copyWith({Map<String, dynamic>? sleepJson, List<String>? hypnoStages}) {
+    return DayBundleInput(
+      date: date,
+      dayTsSec: dayTsSec,
+      dayHr: dayHr,
+      dayRrTsMs: dayRrTsMs,
+      dayRrMs: dayRrMs,
+      sleepTsSec: sleepTsSec,
+      sleepHr: sleepHr,
+      sleepRrTsMs: sleepRrTsMs,
+      sleepRrMs: sleepRrMs,
+      sleepSkinTemp: sleepSkinTemp,
+      sleepJson: sleepJson ?? this.sleepJson,
+      hypnoStages: hypnoStages ?? this.hypnoStages,
+      sleepOnsetSec: sleepOnsetSec,
+      sleepOffsetSec: sleepOffsetSec,
+      tonightSleepOnsetSec: tonightSleepOnsetSec,
+      profile: profile,
+      lnRmssdHistory: lnRmssdHistory,
+      lnRmssdDates: lnRmssdDates,
+      rhrHistory: rhrHistory,
+      respHistory: respHistory,
+      rmssdHistory: rmssdHistory,
+      skinTempAdcHistory: skinTempAdcHistory,
+      quietHrrHistory: quietHrrHistory,
+      readinessZHistory: readinessZHistory,
+      observedHrCeilingBpm: observedHrCeilingBpm,
+      dayConfidence: dayConfidence,
+      dayFlags: dayFlags,
+      stepSpans: stepSpans,
+      deviceFamily: deviceFamily,
+      sleepSource: sleepSource,
+      useHmmStages: useHmmStages,
+    );
+  }
+
   /// Copy with replaced per-second stage labels — used by the experimental
   /// HMM re-staging path in [deriveDayBundle]. The stage-second totals in
   /// [sleepJson] are recomputed from [stages] so the stored hypnogram and the
-  /// displayed totals always describe the same night.
+  /// displayed totals always describe the same night. `efficiency_pct` is
+  /// recomputed from the new TST over the OBSERVED in-bed time
+  /// (`in_bed_sec - unobserved_sec`), the same denominator the segmenter uses,
+  /// so the displayed efficiency and the `efficiency` trend scalar stay honest.
   DayBundleInput withHypnoStages(List<String> stages) {
     var light = 0, deep = 0, rem = 0, wake = 0;
     for (final s in stages) {
@@ -574,39 +615,13 @@ class DayBundleInput {
     if (json.containsKey('deep_sec')) json['deep_sec'] = deep;
     if (json.containsKey('rem_sec')) json['rem_sec'] = rem;
     if (json.containsKey('wake_sec')) json['wake_sec'] = wake;
-    return DayBundleInput(
-    date: date,
-    dayTsSec: dayTsSec,
-    dayHr: dayHr,
-    dayRrTsMs: dayRrTsMs,
-    dayRrMs: dayRrMs,
-    sleepTsSec: sleepTsSec,
-    sleepHr: sleepHr,
-    sleepRrTsMs: sleepRrTsMs,
-    sleepRrMs: sleepRrMs,
-    sleepSkinTemp: sleepSkinTemp,
-    sleepJson: json,
-    hypnoStages: stages,
-    sleepOnsetSec: sleepOnsetSec,
-    sleepOffsetSec: sleepOffsetSec,
-    tonightSleepOnsetSec: tonightSleepOnsetSec,
-    profile: profile,
-    lnRmssdHistory: lnRmssdHistory,
-    lnRmssdDates: lnRmssdDates,
-    rhrHistory: rhrHistory,
-    respHistory: respHistory,
-    rmssdHistory: rmssdHistory,
-    skinTempAdcHistory: skinTempAdcHistory,
-    quietHrrHistory: quietHrrHistory,
-    readinessZHistory: readinessZHistory,
-    observedHrCeilingBpm: observedHrCeilingBpm,
-    dayConfidence: dayConfidence,
-    dayFlags: dayFlags,
-    stepSpans: stepSpans,
-    deviceFamily: deviceFamily,
-    sleepSource: sleepSource,
-    useHmmStages: useHmmStages,
-  );
+    if (json.containsKey('efficiency_pct')) {
+      final inBed = (json['in_bed_sec'] as num?)?.toDouble();
+      final unobserved = (json['unobserved_sec'] as num?)?.toDouble() ?? 0.0;
+      final denom = inBed == null ? 0.0 : math.max(0.0, inBed - unobserved);
+      json['efficiency_pct'] = denom > 0 ? tst * 100.0 / denom : null;
+    }
+    return copyWith(sleepJson: json, hypnoStages: stages);
   }
 }
 
@@ -2514,14 +2529,28 @@ List<String>? _classifySleepStagesHMM(List<Map<String, dynamic>> epochData) {
       .where((e) => ((e['ts'] as num?)?.toDouble() ?? 0.0) - t0 <= 120 * 60)
       .toList();
   analyzer.computeBaseline(first120m);
+  // Without BOTH baselines every emission is neutral and Viterbi labels a
+  // measured night as wake (wake's self-transition wins ties). Keep the
+  // supplied labels instead. This happens e.g. when RR data begins more
+  // than 120 min into the night, so the baseline window holds no RMSSD.
+  if (analyzer.hrMinNight == null || analyzer.rmssdMeanNight == null) {
+    return null;
+  }
   // An unmeasured night must not decode as wake: with no usable observation
   // every state ties and wake's self-transition wins. Bail out instead.
+  // Gate on coverage of the ELAPSED window, not the retained-row count:
+  // epochData.length counts retained records and is not always clock seconds,
+  // so 30 rows can pass while most of a long window decodes as neutral wake.
   final usable = epochData.where((e) {
     final hr = (e['hr'] as num?)?.toDouble() ?? 0.0;
     final rmssd = (e['rmssd'] as num?)?.toDouble() ?? 0.0;
-    return hr > 30.0 && hr < 200.0 && rmssd > 0.0 && rmssd < 500.0;
+    return hr > kMinPlausibleHrBpm &&
+        hr < kMaxPlausibleHrBpm &&
+        rmssd > 0.0 &&
+        rmssd < kMaxPlausibleRmssdMs;
   }).length;
-  if (usable < 30) return null;
+  final spanSec = ((epochData.last['ts'] as num?)?.toDouble() ?? t0) - t0 + 1;
+  if (usable < 30 || usable < spanSec * 0.5) return null;
   // The transition table is per 30 s scoring epoch (AASM epoch length), so
   // decode 30 s epochs, not 1 Hz rows: per row, wake's 0.90 self-transition
   // would mean a ~10 s mean dwell. Each epoch averages its plausible HR and
@@ -2540,11 +2569,11 @@ List<String>? _classifySleepStagesHMM(List<Map<String, dynamic>> epochData) {
     final hr = (epochData[i]['hr'] as num?)?.toDouble() ?? 0.0;
     final rmssd = (epochData[i]['rmssd'] as num?)?.toDouble() ?? 0.0;
     final ep = epochs[k];
-    if (hr > 30.0 && hr < 200.0) {
+    if (hr > kMinPlausibleHrBpm && hr < kMaxPlausibleHrBpm) {
       ep['hr'] = (ep['hr'] as double) + hr;
       ep['nh'] = (ep['nh'] as int) + 1;
     }
-    if (rmssd > 0.0 && rmssd < 500.0) {
+    if (rmssd > 0.0 && rmssd < kMaxPlausibleRmssdMs) {
       ep['rmssd'] = (ep['rmssd'] as double) + rmssd;
       ep['nr'] = (ep['nr'] as int) + 1;
     }

@@ -797,10 +797,13 @@ class AppState extends ChangeNotifier {
   bool sleepHmmStagesEnabled = false;
 
   /// Toggle the experimental HMM sleep staging; applies from the next derive.
+  /// The displayed flag is only updated after the pref write SUCCEEDS, so the
+  /// UI can never show "off" while the engine still reads a stored "on".
   Future<void> setSleepHmmStages(bool on) async {
-    sleepHmmStagesEnabled = on;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(kSleepHmmStagesPref, on);
+    final saved = await prefs.setBool(kSleepHmmStagesPref, on);
+    if (!saved) return;
+    sleepHmmStagesEnabled = on;
     notifyListeners();
   }
 
