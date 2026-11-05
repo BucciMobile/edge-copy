@@ -33,6 +33,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../data/hyrox_plan.dart';
 import '../data/hyrox_store.dart';
+import 'hyrox_workout_banker.dart';
 
 /// Double-tap event id, the only gesture the firmware emits today.
 const int kHyroxDoubleTapEventId = 14;
@@ -190,6 +191,8 @@ Future<void> reconcileActiveSession(
     if (applied.isNotEmpty) {
       log?.call('[hyrox] reconciled ${applied.length} boundary(ies) '
           'into ${session.id}');
+      // Rounds closed by the reconciler become workout rows too.
+      await HyroxWorkoutBanker.bankClosedSegments(db, session.id, log: log);
     }
   } catch (e) {
     log?.call('[hyrox] reconcile skipped: $e');
