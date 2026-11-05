@@ -86,6 +86,7 @@ import '../data/auto_backup.dart' as backup
 import 'alarm_schedule.dart';
 import 'derive_coordinator.dart';
 import 'gesture_controller.dart';
+import 'hyrox_reconciler.dart';
 import 'live_stream_controller.dart';
 import 'sync_controller.dart';
 import 'workout_controller.dart';
@@ -2968,6 +2969,14 @@ class AppState extends ChangeNotifier {
       }
       notifyListeners();
       _deriveScheduler.markStoredData();
+      // HYROX: the moment band data is durable is the moment to rebuild an
+      // active race's boundaries from the stored taps. Best-effort and
+      // idempotent; never breaks the sync.
+      unawaited(reconcileActiveSession(
+        await LocalDb.instance,
+        deviceId: LocalDb.kPrimaryDeviceId,
+        log: _log,
+      ));
     }());
   }
 
