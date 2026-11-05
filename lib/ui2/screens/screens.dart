@@ -27,3 +27,4 @@ export 'sleep_detail.dart';
 export 'wellness_screen.dart';
 export 'what_changed.dart';
 export 'workout_screen.dart';
+export 'hyrox_screen.dart';

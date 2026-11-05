@@ -11,6 +11,10 @@ const String kRouteAiEvening = '/ai/evening';
 const String kRouteJournalCompose = '/journal/compose';
 const String kRouteBreathing = '/breathing';
 
+/// HYROX race screen (arm / live rounds / corrections), pushed from the
+/// Activity tab's history list.
+const String kRouteHyrox = '/hyrox';
+
 /// The hydration reminder. It lands on the one-tap water log rather than the
 /// Nutrition tab: the notification asks you to log a glass, and a destination
 /// that still needs a scroll to find the control is a different promise.
@@ -131,6 +135,9 @@ const Map<String, int> _tabRoutes = {
   // not `_screenRoutes`. (It keeps its own path because `classOf`'s sanction
   // is route-keyed — see kRouteWorkoutIdle above.)
   kRouteWorkoutIdle: 4,
+  // HYROX lands on the Workouts/Activity tab itself (the HYROX card lives
+  // there); screenForRoute in app.dart also knows kRouteHyrox for pushes.
+  kRouteHyrox: 4,
 };
 
 // Sub-screen routes → the shell tab they sit on top of. Most briefing/journal

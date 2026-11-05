@@ -39,6 +39,7 @@ import 'ui2/screens/nutrition_screen.dart';
 import 'ui2/screens/sleep_tab.dart';
 import 'ui2/screens/wellness_screen.dart';
 import 'ui2/screens/workout_screen.dart';
+import 'ui2/screens/hyrox_screen.dart';
 import 'ui2/ui2.dart';
 
 class OpenStrapApp extends StatefulWidget {
@@ -448,7 +449,7 @@ ShellDomain domainForRoute(String route) => switch (routePath(route)) {
       // The forgotten-workout nudge. Activity is the destination itself — the
       // live session bar with its finish control is pinned to the shell there
       // — so screenForRoute stays null for it.
-      kRouteWorkoutIdle => ShellDomain.activity,
+      kRouteWorkoutIdle || kRouteHyrox => ShellDomain.activity,
       // Battery and band alerts. Profile is pushed over Today.
       kRouteProfile => ShellDomain.today,
       // The alarm safety notifications and the alarm-fired note: the alarm
@@ -482,6 +483,7 @@ Widget? screenForRoute(String route) => switch (routePath(route)) {
         const AiBriefingScreen(period: BriefingPeriod.evening),
       kRouteJournalCompose => const JournalCompose(),
       kRouteBreathing => const CalmBreathing(),
+      kRouteHyrox => const HyroxScreen(),
       // The hydration reminder lands on the food log, where the water tile
       // carries its own − / + beside the food it belongs with. Nutrition is a
       // pushed page of Activity now, so it is pushed here too.
