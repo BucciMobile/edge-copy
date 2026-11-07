@@ -32,6 +32,7 @@ import '../../compute/nap_edits.dart';
 import '../../data/day_label.dart';
 import '../../data/db.dart';
 import '../../data/local_repository.dart';
+import '../../health/health_nap_export.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart' show whyFromNote;
 import '../../state/app_state.dart';
@@ -201,6 +202,9 @@ class _NapsScreenState extends State<NapsScreen> {
   }
 
   Future<void> _remove(String day, Map<String, dynamic> nap) => _edit(() async {
+        // DB edit + Health delete in one critical section, so a concurrently
+        // running per-day export cannot write this nap back after the delete.
+        await HealthNapExporter.shared.synchronized(() async {
         final start = nap['start'] as int, end = nap['end'] as int;
         // Their own entry is DELETED; the detector's is SUPPRESSED. Storing a
         // rejection for something the user typed would leave two rows fighting
@@ -212,10 +216,22 @@ class _NapsScreenState extends State<NapsScreen> {
           await LocalDb.putNapEdit(
               dayId: day, startTs: start, endTs: end, source: 'rejected');
         }
+        // The window is no longer a confirmed nap (deleted, or replaced by a
+        // rejection), so its Apple Health samples go too. Best-effort on
+        // purpose: a failed delete returns false and is only logged — the
+        // next per-day export re-writes the day's remaining naps, and a
+        // stale sample here is harmless (it is the app's own window).
+        await HealthNapExporter.deleteExportedNap(startTs: start, endTs: end);
+        });
       });
 
-  Future<void> _restore(String day, int start) =>
-      _edit(() => LocalDb.deleteNapEdit(day, start));
+  Future<void> _restore(String day, int start) => _edit(() async {
+        await HealthNapExporter.shared.synchronized(() async {
+          await LocalDb.deleteNapEdit(day, start);
+          // "Put it back" restores the row as 'confirmed' — re-export it.
+          await HealthNapExporter.exportNapRow(dayId: day, startTs: start);
+        });
+      });
 
   /// Two pickers on the day being shown. Deliberately not a duration: people
   /// remember when they lay down and when they got up, not how long it was.
@@ -250,7 +266,7 @@ class _NapsScreenState extends State<NapsScreen> {
     // Both refusals are the shared rules, not a second copy written here.
     if (!manualNapWindowIsValid(s, e)) {
       setState(() => _failed = l?.napsInvalidWindow ??
-          'A nap is between 5 minutes and 6 hours. '
+          'A nap is between 5 minutes and 3 hours. '
               'Anything longer is a sleep, and it belongs in the night where the '
               'stages can be read.');
       return;
@@ -275,8 +291,14 @@ class _NapsScreenState extends State<NapsScreen> {
       return;
     }
     if (!mounted) return;
-    await _edit(() => LocalDb.putNapEdit(
-        dayId: day, startTs: s, endTs: e, source: 'manual'));
+    await _edit(() async {
+      await HealthNapExporter.shared.synchronized(() async {
+        await LocalDb.putNapEdit(
+            dayId: day, startTs: s, endTs: e, source: 'manual');
+        await HealthNapExporter.exportConfirmedNap(
+            dayId: day, startTs: s, endTs: e);
+      });
+    });
   }
 
   @override

@@ -15,19 +15,126 @@ enum HealthKitSleepWriter {
   private static let channelName = "openstrap/healthkit_sleep"
   private static let store = HKHealthStore()
   private static let queue = DispatchQueue(label: "wtf.openstrap.healthkit.sleep")
+  // Nap calls carry a monotonic `seq` from Dart. A native call that outlives
+  // its Dart-side timeout can still land later; dropping any nap call whose
+  // seq is not newer than the last applied one keeps a late replaceNap from
+  // overwriting a newer deleteNapRange for the same window. Guarded by queue.
+  private static var lastNapSeq = 0
 
   static func register(messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: channelName, binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
-      guard call.method == "replaceSleepSession" else {
+      guard call.method == "replaceSleepSession"
+          || call.method == "replaceNap"
+          || call.method == "deleteNapRange" else {
         result(FlutterMethodNotImplemented)
         return
       }
       let args = call.arguments as? [String: Any] ?? [:]
       queue.async {
-        replace(args) { ok in
-          DispatchQueue.main.async { result(ok) }
+        switch call.method {
+        case "replaceNap":
+          replaceNap(args) { ok in
+            DispatchQueue.main.async { result(ok) }
+          }
+        case "deleteNapRange":
+          deleteRange(args) { ok in
+            DispatchQueue.main.async { result(ok) }
+          }
+        default:
+          replace(args) { ok in
+            DispatchQueue.main.async { result(ok) }
+          }
         }
+      }
+    }
+  }
+
+  // A confirmed nap: delete OUR overlapping sleepAnalysis samples in the nap
+  // window, then write one inBed envelope plus one asleep sample. HealthKit
+  // has no nap value (HKCategoryValueSleepAnalysis offers no nap case), so the
+  // nap appears in Apple Health as an ordinary daytime sleep segment — never
+  // labelled as a nap. No stage samples: a nap has no hypnogram, and writing
+  // asleepCore/Deep/REM would fabricate stages. The cleanup window is the nap
+  // window itself, NOT the noon-to-noon night window — it must never touch
+  // the exported main sleep.
+  private static func replaceNap(_ args: [String: Any], completion: @escaping (Bool) -> Void) {
+    if staleNapCallDropped(args, completion: completion) { return }
+    guard HKHealthStore.isHealthDataAvailable() else {
+      completion(true) // iPad / simulator: no store, not an export failure
+      return
+    }
+    guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis),
+          let start = dateMs(args["startTime"]),
+          let end = dateMs(args["endTime"]),
+          start < end else {
+      completion(false)
+      return
+    }
+    let asleepValue: HKCategoryValueSleepAnalysis
+    if #available(iOS 16.0, *) {
+      asleepValue = .asleepUnspecified
+    } else {
+      asleepValue = .asleep // deprecated pre-16 name for asleepUnspecified
+    }
+    let samples: [HKCategorySample] = [
+      HKCategorySample(type: sleepType, value: HKCategoryValueSleepAnalysis.inBed.rawValue, start: start, end: end),
+      HKCategorySample(type: sleepType, value: asleepValue.rawValue, start: start, end: end),
+    ]
+    deleteAndSave(samples: samples, type: sleepType, cleanupStart: start, cleanupEnd: end, completion: completion)
+  }
+
+  // A nap removed/rejected in Edge: delete OUR sleepAnalysis samples
+  // overlapping the window so the export does not outlive the decision.
+  private static func deleteRange(_ args: [String: Any], completion: @escaping (Bool) -> Void) {
+    if staleNapCallDropped(args, completion: completion) { return }
+    guard HKHealthStore.isHealthDataAvailable() else {
+      completion(true)
+      return
+    }
+    guard let sleepType = HKObjectType.categoryType(forIdentifier: .sleepAnalysis),
+          let start = dateMs(args["startTime"]),
+          let end = dateMs(args["endTime"]),
+          start < end else {
+      completion(false)
+      return
+    }
+    deleteAndSave(samples: [], type: sleepType, cleanupStart: start, cleanupEnd: end, completion: completion)
+  }
+
+  // Runs on `queue`. Returns true when the call is stale and was dropped
+  // (completed with false — a dropped call never claims success).
+  private static func staleNapCallDropped(_ args: [String: Any], completion: @escaping (Bool) -> Void) -> Bool {
+    let seq = (args["seq"] as? NSNumber)?.intValue ?? 0
+    if seq <= lastNapSeq {
+      completion(false)
+      return true
+    }
+    lastNapSeq = seq
+    return false
+  }
+
+  private static func deleteAndSave(
+    samples: [HKCategorySample],
+    type: HKCategoryType,
+    cleanupStart: Date,
+    cleanupEnd: Date,
+    completion: @escaping (Bool) -> Void
+  ) {
+    let datePred = HKQuery.predicateForSamples(withStart: cleanupStart, end: cleanupEnd, options: [])
+    let sourcePred = HKQuery.predicateForObjects(from: HKSource.default())
+    let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [datePred, sourcePred])
+    store.deleteObjects(of: type, predicate: pred) { _, _, error in
+      if error != nil {
+        completion(false)
+        return
+      }
+      guard !samples.isEmpty else {
+        completion(true)
+        return
+      }
+      store.save(samples) { success, error in
+        completion(success && error == nil)
       }
     }
   }
@@ -56,25 +163,13 @@ enum HealthKitSleepWriter {
       return
     }
 
-    let datePred = HKQuery.predicateForSamples(
-      withStart: cleanupStart, end: cleanupEnd, options: []
+    deleteAndSave(
+      samples: samples,
+      type: sleepType,
+      cleanupStart: cleanupStart,
+      cleanupEnd: cleanupEnd,
+      completion: completion
     )
-    let sourcePred = HKQuery.predicateForObjects(from: HKSource.default())
-    let pred = NSCompoundPredicate(andPredicateWithSubpredicates: [datePred, sourcePred])
-
-    store.deleteObjects(of: sleepType, predicate: pred) { _, _, error in
-      if error != nil {
-        completion(false)
-        return
-      }
-      guard !samples.isEmpty else {
-        completion(true)
-        return
-      }
-      store.save(samples) { success, error in
-        completion(success && error == nil)
-      }
-    }
   }
 
   private static func buildSamples(
