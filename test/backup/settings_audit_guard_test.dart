@@ -18,6 +18,9 @@ const _mustTravel = {
   'backup.cadence', 'gesture_double_tap', 'band.strap_name',
   'health_sync', 'phone_steps', 'cycle_tracking_enabled', 'update_checks_enabled',
   'nutrition.barcode_lookup', 'share.map_tiles', 'dev.mode',
+  // The user's opt-in, with when it was given. Restored imports are fenced by
+  // alert_after_ts, so a restored timestamp cannot log old naps.
+  'activity.nap_auto_log_since_sec',
   'coach_api', 'coach_model', 'coach_timeout_seconds',
   'coach_use_chatgpt',
   'ai_morning_enabled', 'ai_morning_min', 'ai_evening_enabled', 'ai_evening_min',
@@ -32,6 +35,7 @@ const _mustTravel = {
   'notif_relay_enabled', 'notif_relay_packages',
   'ui.shell_tab.v2', 'ui.recap_range', 'ui.workouts_range',
   'ui.wearable_show_estimates', 'ui.wearable_side_by_side',
+  'sleep_hmm_stages',
   'rough_night.ask', 'rough_night.dismissed',
   // Existing history/dedupe state travels to avoid repeated alerts/imports.
   'ai.journal_done_day', 'last_recovery_notif_day', 'last_stepgoal_day',
@@ -51,6 +55,10 @@ const _mustTravel = {
   // Serial-scoped ECG safety guards must survive so reconnect still cleans up
   // a possibly active publisher. These are separate from alarm arm receipts.
   'ecg.guard.MG123', 'ecg.wrist.MG123', 'ecg.maverick.MG123',
+  // Weighing export state: the Health store usually survives a restore, so
+  // the marks must too, or every weighing is written again as a duplicate.
+  'health_weight_exported:d1', 'health_weight_attempts:d1',
+  'health_weight_maybe_landed:d1', 'health_weight_trimmed:d1',
   'future.setting',
 };
 
@@ -63,8 +71,12 @@ const _mustStay = {
   'coach_chatgpt_host_id', 'coach_chatgpt_welcomed', 'coach_base_url', 'companion_url',
   'backup.folder', 'backup.last_run_ms', 'backup.last_error', 'health_upload_last_ts',
   'alarm_schedule_cleared', 'alarm_epoch', 'alarm_epoch_confirmed', 'alarm_set_at_ms',
+  'alarm_remote_id',
   'alarm_pending_until', 'alarm_latch_alert', 'alarm_probe_pending', 'alarm_fired_at',
+  'smart_wake_fired_epoch',
   'live.session_draft', 'live_session_checkpoint', 'telemetry_outbox',
+  // Permission and grant are per install.
+  'health_weight_perm_asked', 'health_weight_grant_seen',
 };
 
 // Interpolated keys, including ones hidden behind key-building helpers.
@@ -104,6 +116,7 @@ const _indirectKeys = <String, List<String>>{
     'health_import_profile_at', 'health_import_workouts_at'],
   'lib/notify/notification_prefs.dart:_kBatteryPct': ['notif_battery_pct'],
   'lib/state/app_state.dart:_kHealthSync': ['health_sync'],
+  'lib/state/app_state.dart:kSleepHmmStagesPref': ['sleep_hmm_stages'],
   'lib/sync/paired_device.dart:_kWornOn': ['paired_worn_on'],
   'lib/sync/paired_device.dart:key': [
     'paired_remote_id', 'paired_serial', 'paired_generation'],
@@ -111,6 +124,16 @@ const _indirectKeys = <String, List<String>>{
     'onboard.skipped_pairing', 'onboard.saw_profile_setup'],
   'lib/ui2/nudges.dart:_lastShownKey(a)': ['nudge.discord.last_shown_ms'],
   'lib/ui2/nudges.dart:_dismissedKey(a)': ['nudge.discord.dismissed'],
+  'lib/health/health_export.dart:kHealthWeightPermAskedPref': [
+    'health_weight_perm_asked'],
+  'lib/health/health_weight_export.dart:healthWeightExportedKey(id)': [
+    'health_weight_exported:d1'],
+  'lib/health/health_weight_export.dart:healthWeightAttemptsKey(id)': [
+    'health_weight_attempts:d1'],
+  'lib/health/health_weight_export.dart:healthWeightMaybeLandedKey(id)': [
+    'health_weight_maybe_landed:d1'],
+  'lib/health/health_weight_export.dart:healthWeightTrimmedKey(id)': [
+    'health_weight_trimmed:d1'],
 };
 
 Map<String, String> _constants(String text) => {

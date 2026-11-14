@@ -43,13 +43,20 @@ const Map<String, String> kPrefsNotBackedUp = {
   'alarm_schedule_cleared': 'records that Cancel-all ran on this phone, so an '
       'import cannot bring a cancelled alarm back',
   'alarm_epoch': 'arm belongs to the old band; the restored schedule must arm again',
+  'alarm_remote_id': 'identifies the band that received this phone’s alarm; restored schedules arm again',
   'alarm_epoch_confirmed': 'confirmation belongs to an arm on the old band',
   'alarm_set_at_ms': 'confirmation replay floor for the old band arm',
   'alarm_pending_until': 'pending confirmation window for the old band arm',
   'alarm_latch_alert': 'pending latch alert for the old band arm',
   'alarm_probe_pending': 'legacy pending hardware probe; never resume on another band',
   'alarm_fired_at': 'last fire event from the old band, not the chosen schedule',
+  'smart_wake_fired_epoch': 'records that the early buzz fired for one arm on the old band; '
+      'a restored latch would suppress the buzz on the next night\'s arm',
   'health_upload_last_ts': 'upload cursor for this installation',
+  'health_weight_perm_asked': 'WEIGHT write access is asked per install; '
+      'the new install has not asked yet',
+  'health_weight_grant_seen': 'the WEIGHT grant is per install; the new '
+      'install observes its own',
 };
 
 const Map<String, String> kSecretsNotBackedUp = {
@@ -89,6 +96,7 @@ class ImportSummary extends MapView<String, int> {
 /// backed-up key missing here is written as-is; the guard test keeps this
 /// table complete. Keys in [kPrefsNotBackedUp] need no entry.
 const Map<String, String> kPrefTypes = {
+  'activity.nap_auto_log_since_sec': 'int',
   'ai.journal_done_day': 'string',
   'ai_evening_enabled': 'bool',
   'ai_evening_min': 'int',
@@ -156,6 +164,7 @@ const Map<String, String> kPrefTypes = {
   'rough_night.ask': 'string',
   'rough_night.dismissed': 'string',
   'share.map_tiles': 'bool',
+  'sleep_hmm_stages': 'bool',
   'theme_choice': 'string',
   'ui.shell_tab': 'int',
   'ui.shell_tab.v2': 'int',
@@ -181,6 +190,12 @@ const List<(String, String, String)> kPrefTypeFamilies = [
   ('notif_osnext:', '', 'int'),
   ('nudge.', '.dismissed', 'bool'),
   ('nudge.', '.last_shown_ms', 'int'),
+  // Per-scale weighing export state. Travels: the Health store usually
+  // survives a restore, and re-sending every weighing would stack duplicates.
+  ('health_weight_exported:', '', 'string'),
+  ('health_weight_attempts:', '', 'string'),
+  ('health_weight_maybe_landed:', '', 'string'),
+  ('health_weight_trimmed:', '', 'string'),
 ];
 
 /// The stored type the app reads [key] with, or null when it is not known.

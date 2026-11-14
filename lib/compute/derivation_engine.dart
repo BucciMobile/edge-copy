@@ -22,6 +22,8 @@
 import '../data/activity_store.dart';
 import '../sync/reset_gate.dart';
 import '../models/activity_suggestion.dart';
+import '../state/prefs.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -2089,7 +2091,10 @@ const String kAnalyticsPin = '3a7ca34d30233ff11e6c2877083f319a907ccb31';
 // REPIN: protocol main @ b4fde6a (#81 Mi scale 7-byte history count, on top
 // of #82 decoder hardening). NO kAlgoVersion bump: decode runs at ingest, so a
 // bump re-derives nothing differently; WHOOP output unchanged (freeze goldens).
-const String kProtocolPin = 'b4fde6ab5589e53154b808f8b2bbb4d01d9c15b5';
+// REPIN: protocol main @ fbadb5b (#84 realtime packet decoder, #85 image
+// update payload builders). NO kAlgoVersion bump: neither is read by any
+// derivation; WHOOP output unchanged (freeze goldens).
+const String kProtocolPin = 'fbadb5bd055965d9400e266d6cf42748992ba950';
 
 // Fold idempotency, the minimum-nights warm-up, and legacy-payload handling
 // all live in SleepProfilePolicy (pure, unit-tested) — see
@@ -3100,9 +3105,26 @@ class CompactResult {
   int get freedBytes => beforeBytes > afterBytes ? beforeBytes - afterBytes : 0;
 }
 
+/// The experimental HMM sleep staging switch (Settings), default off.
+const kSleepHmmStagesPref = 'sleep_hmm_stages';
+
 class DerivationEngine {
   DerivationEngine({this.log, this.background = false, this.offloadActive});
   final void Function(String)? log;
+
+  /// EXPERIMENTAL, default off: re-stage the sleep window with the HMM
+  /// classifier inside [deriveDayBundle]. Read from the pref on every pass so
+  /// the foreground engine and every headless one agree, and a toggle takes
+  /// effect without a relaunch. Any failure reads as off.
+  static Future<bool> _hmmStagesOn() async {
+    try {
+      return (await SharedPreferences.getInstance())
+              .getBool(kSleepHmmStagesPref) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// True while a band offload is draining. The scheduler never STARTS a
   /// derive during one, but one can start mid-pass; the raw prune checks this
@@ -3128,6 +3150,18 @@ class DerivationEngine {
   /// are decided before the write transaction, so the slower one's PARTIAL row
   /// could land on top of the faster one's complete row.
   static bool _running = false;
+
+  static int _autoLoggedNaps = 0;
+
+  /// How many naps the opt-in auto-log confirmed since the last call. Logging
+  /// one queues a durable review job for its day; the day's nap credit only
+  /// lands once that job runs, so the caller kicks it off after the pass
+  /// instead of leaving it for the next app resume.
+  static int takeAutoLoggedNaps() {
+    final n = _autoLoggedNaps;
+    _autoLoggedNaps = 0;
+    return n;
+  }
   bool get running => _running;
 
   /// Hold or release the process-wide latch, as another pass would.
@@ -3363,6 +3397,7 @@ class DerivationEngine {
       ..sort();
     final head = [
       'v${debugFingerprintAlgoVersion ?? kAlgoVersion}',
+      if (await _hmmStagesOn()) 'hmm',
       dataNowSec,
       // The edges a day is aged against (band and wearable; see
       // [_agingEdgeFor]), from the pass's own memo.
@@ -5938,6 +5973,7 @@ class DerivationEngine {
       // guess — sleep-onset latency only means what people think it means on a
       // forced window.
       sleepSource: day.sleepSource,
+      useHmmStages: await _hmmStagesOn(),
     );
     final withHistory = _attachHistory(input, history);
 
@@ -6450,9 +6486,30 @@ class DerivationEngine {
         ...await activityStore.reconcile(ActivityKind.workout, blocks.suggestionsToPersist),
         ...await activityStore.reconcile(ActivityKind.nap, blocks.napSuggestions),
       ];
+      // Opt-in (#625): a clear, settled nap is logged without asking. Never
+      // on an import pass, which has no user at the other end of "just now".
+      // Inside its own try, like the prompts below: an optional convenience
+      // must not mark the day partial.
+      if (!forceFinalize) {
+        try {
+          final since = (await SharedPreferences.getInstance())
+              .getInt(Prefs.napAutoLogSinceSec);
+          _autoLoggedNaps += await activityStore.autoLogNaps(
+            // 0 is the switch turned back off.
+            sinceSec: (since ?? 0) > 0 ? since : null,
+            dataEdgeSec: dataNowSec,
+            settleSec: ana.napBridgeSec,
+            current: blocks.napSuggestions,
+          );
+        } catch (e) {
+          _log('nap auto-log failed for ${day.date}: $e');
+        }
+      }
       for (final suggestion in newSuggestions) {
         // The rows are already banked; a failed prompt must not mark the day partial.
         try {
+          // A nap logged just above is no longer pending, so [mayNotifyNew]
+          // already declines it. One that could not be logged yet still asks.
           if (forceFinalize || !await activityStore.mayNotifyNew(suggestion)) continue;
           final nap = suggestion.kind == ActivityKind.nap;
           await NotificationCenter.instance.emit(NotificationEvent(
@@ -6951,12 +7008,17 @@ class DerivationEngine {
     bool carrySleep = true,
   }) {
     var carried = false;
+    var wearCarried = false;
     for (final e in prev.entries) {
       if (e.key == 'scalars' || e.key == 'series') continue;
+      // Row metadata, not detail: the persist stamps the fresh edge, and the
+      // wear edge is stamped below only when wear itself came across.
+      if (e.key == 'data_edge_sec' || e.key == 'wear_edge_sec') continue;
       if (!carrySleep && kSleepOwnedDetailKeys.contains(e.key)) continue;
       if (next.containsKey(e.key) || e.value == null) continue;
       next[e.key] = e.value;
       carried = true;
+      if (e.key == 'wear') wearCarried = true;
     }
     // `scalars` and `series` are flat maps the second half patches INTO rather
     // than owning, so they merge per key instead of wholesale.
@@ -6986,6 +7048,17 @@ class DerivationEngine {
         carried = true;
       }
       if (merged != null) next[sub] = merged;
+    }
+    // #450. A carried wear block was computed against the PREVIOUS row's
+    // edge, not this one's, and a second half that keeps failing would
+    // otherwise pass that morning off as the current day. Stamped only when
+    // WEAR was carried: a second half can fail after writing fresh wear (a
+    // later step throws) while other detail is carried, and fresh wear must
+    // not be labelled old. A chain of failures keeps the oldest edge: that is
+    // when wear was last actually computed.
+    if (wearCarried) {
+      final edge = prev['wear_edge_sec'] ?? prev['data_edge_sec'];
+      if (edge is num) next['wear_edge_sec'] = edge.toInt();
     }
     return carried;
   }
