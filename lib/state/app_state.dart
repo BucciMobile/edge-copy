@@ -5489,6 +5489,15 @@ class AppState extends ChangeNotifier {
   /// a re-read instead of serving a stale profile.
   String? _smartWakeProfileDay;
 
+  /// A journal write for the cached profile's day makes that profile stale:
+  /// clear it so the next smart-wake check re-reads the journal.
+  void _invalidateSmartWakeProfile(String date) {
+    if (_smartWakeProfileDay == date) {
+      _smartWakeProfile = null;
+      _smartWakeProfileDay = null;
+    }
+  }
+
   /// Median HR over [samples] — the tertiary baseline fallback (shipped
   /// v1 behavior). Defined here rather than exported from smart_wake.dart
   /// because it operates on the same SmartWakeSample list but is only
@@ -5672,7 +5681,10 @@ class AppState extends ChangeNotifier {
         now: now,
       );
       if (!detected) return;
-      if (!stillCurrent()) return;
+      // Recheck the latch here, with no intervening await: BleEngine starts a
+      // new check on every 30 s tick without awaiting the previous one, so a
+      // slow check could otherwise pass the initial test twice and double-buzz.
+      if (!stillCurrent() || _smartWakeFiredForEpoch == epoch) return;
       _smartWakeFiredForEpoch = epoch; // set BEFORE the write — see below
       // Marked fired before the write goes out on purpose: a write that
       // throws must not retry every 30 s for the rest of the window (that
@@ -6676,6 +6688,7 @@ class AppState extends ChangeNotifier {
           (now + spec.step).clamp(0, spec.max).toDouble(),
         );
       });
+      _invalidateSmartWakeProfile(date);
       _log('[gesture] water logged (+${spec.step.round()} ${spec.unit})');
       await HapticFeedback.mediumImpact();
     } catch (e) {
@@ -6715,6 +6728,7 @@ class AppState extends ChangeNotifier {
       }
       tags.add('moment $hhmm');
       await r.postJournal(date, tags, note);
+      _invalidateSmartWakeProfile(date);
       _log('[gesture] moment marked at $hhmm');
       await HapticFeedback.mediumImpact();
     } catch (e) {
