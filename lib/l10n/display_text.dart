@@ -108,7 +108,7 @@ String localizedNotificationText(AppLocalizations? l, String text) {
   }
   // CheckInNotice (tier_engine.dart): the ask-first check-in's interpolated bodies.
   final checkIn = RegExp(
-    r'^Your values have deviated from your baseline for the last (\d+) nights\. Do you feel unusually tired or run down\?$',
+    r'^Your values have deviated from your usual for the last (\d+) nights\. Do you feel unusually tired or run down\?$',
   ).firstMatch(text);
   if (checkIn != null) {
     return l.notifCheckInBody(int.parse(checkIn[1]!));

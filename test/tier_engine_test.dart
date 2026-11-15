@@ -473,7 +473,7 @@ void main() {
       }
       final t2 = CheckInNotice(
           date: '2024-02-10', tier: 2, streak: 3, signals: const ['rhr']);
-      expect(t2.body, contains('baseline'), reason: 'names the mechanism');
+      expect(t2.body, contains('your usual'), reason: 'names the mechanism');
       expect(t2.body, contains('?'), reason: 'tier 2 ASKS (Saw 2016)');
       final t3 = CheckInNotice(
           date: '2024-02-10', tier: 3, streak: 3, signals: const ['rhr']);
@@ -570,12 +570,12 @@ void main() {
           },
       ];
       // spike the last two nights of the post-gap run
+      ds[36]['rhr'] = 62.0;
+      ds[36]['resp_rate'] = 17.0;
+      ds[36]['skin_temp_adc'] = 3048.0;
       ds[37]['rhr'] = 62.0;
       ds[37]['resp_rate'] = 17.0;
       ds[37]['skin_temp_adc'] = 3048.0;
-      ds[38]['rhr'] = 62.0;
-      ds[38]['resp_rate'] = 17.0;
-      ds[38]['skin_temp_adc'] = 3048.0;
       final b = buildCrossDayBundle(ds, const {});
       expect((b['calibration'] as Map)['stage'], 2);
       expect((b['tiers'] as Map)['tier'], 2,

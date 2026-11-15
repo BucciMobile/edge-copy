@@ -378,7 +378,7 @@ class CheckInNotice {
 
   String get body => tier >= 3
       ? 'Across skin temperature, breathing rate and resting heart rate, your values have been above your usual for the last $streak nights. Consider rest, and if this persists, consider checking with a healthcare professional.'
-      : 'Your values have deviated from your baseline for the last $streak nights. Do you feel unusually tired or run down?';
+      : 'Your values have deviated from your usual for the last $streak nights. Do you feel unusually tired or run down?';
 }
 
 /// The whole tier-2/3 decision the notification pass makes, minus the I/O.

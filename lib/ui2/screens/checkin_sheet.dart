@@ -62,7 +62,7 @@ class CheckInSheet extends StatelessWidget {
               const SizedBox(height: S.x2),
               Text(
                 l?.checkInSheetBody ??
-                    'Your values have deviated from your baseline for the last few nights.',
+                    'Your values have deviated from your usual for the last few nights.',
                 style: F.body.copyWith(color: p.ink2, height: 1.5),
               ),
               const SizedBox(height: S.x6),

@@ -76,9 +76,9 @@ Widget? tierCard(
   if (tier >= 1) {
     final names = [for (final s in signals) _signalName(l, s)].join(', ');
     return Observation(
-      l?.tierCardTitle ?? 'Off your usual baseline',
+      l?.tierCardTitle ?? 'Off your usual',
       (l?.tierCardBody(names, streak) ??
-          '$names deviated from your baseline for $streak nights. A pattern, not a cause.'),
+          '$names deviated from your usual for $streak nights. A pattern, not a cause.'),
       advice: tier >= 3
           ? (l?.tierCardAdviceTier3 ??
               'Consider rest, and if this persists, consider checking with a healthcare professional.')
@@ -88,9 +88,9 @@ Widget? tierCard(
   }
   if (showCalibration && stage < 3) {
     return Observation(
-      l?.tierCardCalibratingTitle ?? 'Learning your baseline',
+      l?.tierCardCalibratingTitle ?? 'Learning your usual',
       l?.tierCardCalibrating(valid) ??
-          'Learning your baseline — $valid of 30 nights so far.',
+          'Learning your usual — $valid of 30 nights so far.',
       advice: l?.tierCardCalibratingAdvice ??
           'The overnight watches stay quiet until they have enough of your nights.',
     );

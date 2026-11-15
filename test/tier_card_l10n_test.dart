@@ -64,12 +64,12 @@ void main() {
   testWidgets('deviation card shows today and yesterday, never older', (tester) async {
     await _pump(tester, const Locale('en'), _tiers(_today));
     await tester.pumpAndSettle();
-    expect(find.text('Off your usual baseline'), findsOneWidget);
+    expect(find.text('Off your usual'), findsOneWidget);
     expect(find.textContaining('3 nights'), findsOneWidget);
 
     await _pump(tester, const Locale('en'), _tiers('2024-02-09')); // yesterday
     await tester.pumpAndSettle();
-    expect(find.text('Off your usual baseline'), findsOneWidget);
+    expect(find.text('Off your usual'), findsOneWidget);
 
     await _pump(tester, const Locale('en'), _tiers('2024-02-07')); // 3 days old
     await tester.pumpAndSettle();
@@ -88,7 +88,7 @@ void main() {
     await _pump(tester, const Locale('en'), _tiers(_today, tier: 0, streak: 0, stage: 2, valid: 23),
         showCalibration: true);
     await tester.pumpAndSettle();
-    expect(find.text('Learning your baseline'), findsOneWidget);
+    expect(find.text('Learning your usual'), findsOneWidget);
     expect(find.textContaining('23 of 30 nights'), findsOneWidget);
 
     await _pump(tester, const Locale('en'), _tiers(_today, tier: 0, streak: 0, stage: 2, valid: 23),
@@ -103,7 +103,7 @@ void main() {
     await _pump(tester, const Locale('en'), _tiers(_today), illnessActive: true);
     await tester.pumpAndSettle();
     expect(find.text('Taking it easy'), findsOneWidget);
-    expect(find.text('Off your usual baseline'), findsNothing);
+    expect(find.text('Off your usual'), findsNothing);
   });
 
   testWidgets('a German user gets the German card', (tester) async {
@@ -111,7 +111,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Abseits deiner Baseline'), findsOneWidget);
     expect(find.textContaining('3 Nächte'), findsOneWidget);
-    expect(find.text('Off your usual baseline'), findsNothing);
+    expect(find.text('Off your usual'), findsNothing);
   });
 
   testWidgets('non-map tiers -> null, never a green card', (tester) async {
@@ -151,7 +151,7 @@ void main() {
     AppLocalizations l(String code) => lookupAppLocalizations(Locale(code));
 
     final tier2Body =
-        'Your values have deviated from your baseline for the last 3 nights. Do you feel unusually tired or run down?';
+        'Your values have deviated from your usual for the last 3 nights. Do you feel unusually tired or run down?';
     final tier3Body =
         'Across skin temperature, breathing rate and resting heart rate, your values have been above your usual for the last 3 nights. Consider rest, and if this persists, consider checking with a healthcare professional.';
 
