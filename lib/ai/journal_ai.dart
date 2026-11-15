@@ -14,7 +14,7 @@ import '../coach/coach_engine.dart';
 const List<String> kJournalPresetTags = <String>[
   'caffeine', 'alcohol', 'late meal', 'stress', 'poor sleep', 'travel',
   'screens late', 'meds', 'sick', 'sauna', 'cold plunge', 'social',
-  'workout', 'rest day',
+  'workout', 'rest day', 'vaccinated',
 ];
 
 /// One assistant turn: the conversational reply + the CUMULATIVE proposed log.

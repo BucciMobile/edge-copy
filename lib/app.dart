@@ -32,6 +32,7 @@ import 'ui2/profile/alarm.dart';
 import 'ui2/profile/profile.dart';
 import 'ui2/screens/ai_briefing.dart';
 import 'ui2/screens/calm_breathing.dart';
+import 'ui2/screens/checkin_sheet.dart';
 import 'ui2/screens/what_changed.dart';
 import 'ui2/screens/health_screen.dart';
 import 'ui2/screens/home_screen.dart';
@@ -489,6 +490,9 @@ ShellDomain domainForRoute(String route) => switch (routePath(route)) {
       // lives on the Sleep tab now.
       kRouteAlarm => ShellDomain.sleep,
       kRouteRecap => ShellDomain.health,
+      // The ask-first check-in sheet sits over Health, where the
+      // observations it is about live.
+      kRouteCheckIn => ShellDomain.health,
       _ => ShellDomain.today,
     };
 
@@ -539,6 +543,10 @@ Widget? screenForRoute(String route) => switch (routePath(route)) {
       // findings, which the app has been computing every night and delivering
       // only as a notification you could dismiss into nothing.
       kRouteRecap => const WhatChangedScreen(),
+      kRouteCheckIn => CheckInSheet(
+        date: routeQuery(route, 'date') ?? '',
+        tier: int.tryParse(routeQuery(route, 'tier') ?? '') ?? 2,
+      ),
       _ => null,
     };
 

@@ -54,6 +54,7 @@ void main() {
   });
 
   // Today is still settling; the newest settled night carries the verdict.
+  // A lone red illness flag with no residual consensus behind it.
   Future<void> seed({required String illnessDate}) => LocalDb.putBaseline(
         'crossday',
         jsonEncode({
@@ -64,19 +65,74 @@ void main() {
         }),
       );
 
-  test("yesterday's red night buzzes, dated and keyed by that night", () async {
-    await seed(illnessDate: yesterday);
+  // A tier-3 constellation over the last two settled nights (8 clean nights
+  // behind them, so the robust z has a baseline) plus the legacy red illness
+  // block on the newest one — the old aggregated notice must stand down in
+  // favour of the ask-first check-in.
+  Future<void> seedConsensus({required String spikeDate}) {
+    final rows = <Map<String, dynamic>>[
+      for (var i = 10; i >= 3; i--)
+        {
+          'date': dayLabelBefore(today, i)!,
+          'rhr_residual': 55.0 + (i % 3),
+          'hrv_residual': 45.0,
+          'resp_residual': 14.0,
+          'temp_residual': 3000.0,
+        },
+      {
+        'date': dayLabelBefore(today, 2)!,
+        'rhr_residual': 62.0,
+        'hrv_residual': 36.0,
+        'resp_residual': 17.0,
+        'temp_residual': 3048.0,
+      },
+      {
+        'date': spikeDate,
+        'rhr_residual': 62.0,
+        'hrv_residual': 36.0,
+        'resp_residual': 17.0,
+        'temp_residual': 3048.0,
+      },
+      {'date': today, 'unsettled': true},
+    ];
+    return LocalDb.putBaseline(
+      'crossday',
+      jsonEncode({
+        'illness': {'date': spikeDate, 'state': 'red'},
+        'calibration': {
+          'stage': 3,
+          'valid_nights': 40,
+          'signals': {'rhr': 40, 'hrv': 40, 'resp': 40, 'temp': 40},
+        },
+        'recent': rows,
+      }),
+    );
+  }
+
+  test("yesterday's two-night consensus earns one ask-first check-in, dated and keyed by that night",
+      () async {
+    await seedConsensus(spikeDate: yesterday);
     await runPass();
     expect(shown, hasLength(1));
     expect(shown.single.date, yesterday);
-    expect(shown.single.dedupeKey, '$yesterday:exception:medical');
+    expect(shown.single.dedupeKey, '$yesterday:checkin:medical');
+    expect(shown.single.route, '/checkin?date=$yesterday&tier=3');
   });
 
   test('the same night does not buzz twice', () async {
-    await seed(illnessDate: yesterday);
+    await seedConsensus(spikeDate: yesterday);
     await runPass();
     await runPass();
     expect(shown, hasLength(1));
+  });
+
+  test('a single red night without consensus no longer pushes (persistence rule)',
+      () async {
+    await seed(illnessDate: yesterday);
+    await runPass();
+    expect(shown, isEmpty,
+        reason:
+            'tier >= 2 needs >=2 signals for >=2 nights; a lone CUSUM red is card-only now');
   });
 
   test('a red night two days back is history', () async {
