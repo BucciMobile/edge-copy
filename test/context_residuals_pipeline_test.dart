@@ -255,8 +255,8 @@ void main() {
         d['skin_temp_z'] = null;
       }
       for (var i = 37; i <= 39; i++) {
-        days[i]['rhr'] = 62.0;
-        days[i]['rmssd'] = 36.0;
+        days[i]['rhr'] = 65.0; // +10 bpm — beyond the small load term
+        days[i]['rmssd'] = 30.0; // −33 %
       }
       final b = buildCrossDayBundle(days, const {});
       final recent = _recent(b);

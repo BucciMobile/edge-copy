@@ -157,7 +157,7 @@ void main() {
     });
 
     test("'travel' reduces sensitivity for the next 2 nights only", () {
-      final n = 40;
+      final n = 42;
       final dates = _dates(n);
       final c = _clean(n);
       final rhr = [...c.rhr]..[38] = 59.0;
