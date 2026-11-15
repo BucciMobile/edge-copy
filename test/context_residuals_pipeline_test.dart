@@ -161,8 +161,9 @@ void main() {
         () {
       final days = _days(41);
       for (var i = 14; i < days.length; i++) {
-        // +20 ADC on every second-half-of-cycle night (~+2.5 z).
-        days[i]['skin_temp_adc'] = (days[i]['skin_temp_adc'] as num) + 20.0;
+        // +32 ADC on every second-half-of-cycle night (~+2.7 z on the
+        // detector's scaled-MAD scale, above its 2.0 flag threshold).
+        days[i]['skin_temp_adc'] = (days[i]['skin_temp_adc'] as num) + 32.0;
       }
       const cycle = ['2023-12-04', '2024-01-01']; // 28-day cycles
       final b = buildCrossDayBundle(days, const {}, cycleStartDates: cycle);
@@ -233,7 +234,10 @@ void main() {
       }
       final b = buildCrossDayBundle(days, const {});
       final recent = _recent(b);
-      expect((recent[38] as Map)['illness'], isTrue);
+      // The CUSUM accumulates over the run: red lands within the 3 spike
+      // nights (the exact night depends on the scaled-MAD baseline).
+      expect(recent.sublist(37).any((r) => (r as Map)['illness'] == true),
+          isTrue);
       expect(recent.sublist(37).any((r) => (r as Map)['anomaly'] == true),
           isTrue);
       expect(recent.sublist(37).any((r) => (r as Map)['temp'] == true), isTrue);
@@ -257,7 +261,8 @@ void main() {
       final b = buildCrossDayBundle(days, const {});
       final recent = _recent(b);
       // RHR + HRV alone still flag the anomaly and the CUSUM…
-      expect((recent[38] as Map)['illness'], isTrue);
+      expect(recent.sublist(37).any((r) => (r as Map)['illness'] == true),
+          isTrue);
       expect(recent.sublist(37).any((r) => (r as Map)['anomaly'] == true),
           isTrue);
       // …the temperature family is honestly NULL, not "normal"…
