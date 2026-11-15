@@ -14601,6 +14601,7 @@
   "journalTagSocial": "สังสรรค์",
   "journalTagWorkout": "ออกกำลังกาย",
   "journalTagRestDay": "วันพัก",
+  "journalTagVaccinated": "ฉีดวัคซีนแล้ว",
   "liveHrShowingDeviceSemantics": "กำลังแสดง {label} แตะเพื่อเปลี่ยนอุปกรณ์",
   "@liveHrShowingDeviceSemantics": {
     "placeholders": {

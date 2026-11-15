@@ -3338,6 +3338,7 @@
   "journalTagSocial": "vida social",
   "journalTagWorkout": "entrenamiento",
   "journalTagRestDay": "día de descanso",
+  "journalTagVaccinated": "vacunado",
   "liveHrShowingDeviceSemantics": "Mostrando {label}. Toca para cambiar de dispositivo.",
   "devicesResetSourceSemantics": "Restablecer {signal} al orden predeterminado",
   "metricDetailStepsGoalValue": "{count, plural, one{{value} paso} other{{value} pasos}}",

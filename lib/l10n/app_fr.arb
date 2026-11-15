@@ -3214,6 +3214,7 @@
   "journalTagSocial": "sortie sociale",
   "journalTagWorkout": "séance",
   "journalTagRestDay": "jour de repos",
+  "journalTagVaccinated": "vacciné",
   "liveHrShowingDeviceSemantics": "Affichage de {label}. Touchez pour changer d’appareil.",
   "devicesResetSourceSemantics": "Remettre {signal} dans l’ordre par défaut",
   "metricDetailStepsGoalValue": "{count, plural, other{{value} pas}}",

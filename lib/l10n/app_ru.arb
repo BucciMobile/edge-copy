@@ -6880,6 +6880,7 @@
   "journalTagSocial": "Общение",
   "journalTagWorkout": "Тренировка",
   "journalTagRestDay": "День отдыха",
+  "journalTagVaccinated": "вакцинирован",
   "liveHrShowingDeviceSemantics": "Отображается {label}. Нажмите, чтобы сменить устройство.",
   "@liveHrShowingDeviceSemantics": {
     "placeholders": {
