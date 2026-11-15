@@ -48,6 +48,7 @@ import '../ble/adapters/signals.dart';
 import '../data/coverage_resolver.dart';
 import '../data/db.dart';
 import '../data/day_label.dart';
+import '../data/journal_fields.dart' show JournalMetricValue;
 import '../data/series_codec.dart';
 import '../notify/fired_keys.dart';
 import '../notify/notification_center.dart';
@@ -7355,6 +7356,14 @@ class DerivationEngine {
       // TS-11's grouping key. Read here (sqflite is main-isolate only) and
       // handed in as plain strings so the bundle stays pure.
       final sessionTypes = await _sessionTypesByDate(days);
+      // The user's own journal over the same window, for the context model:
+      // tags + numeric metrics per day, read here and handed in as plain
+      // data so buildCrossDayBundle stays pure/isolate-safe. The overnight
+      // detectors then run on residuals (actual − expected-from-context), so
+      // a journaled alcohol/vaccination/travel/sick day or a hard training
+      // day cannot trip them. Empty window ⇒ empty map ⇒ byte-for-byte the
+      // old behaviour.
+      final journalByDate = await _journalByDate(days);
       // Encode INSIDE the isolate too — a real ~3.5-4.7s main-isolate hang was
       // caught in production (Crashlytics jank_watchdog, correlated with a
       // heavy derive pass) coming from jsonEncode-ing this bundle back on the
@@ -7380,6 +7389,7 @@ class DerivationEngine {
                   cycleStartDates: cycleStarts,
                   sessionTypesByDate: sessionTypes,
                   methodFamilies: kMethodFamily,
+                  journalByDate: journalByDate,
                 )
                 ..['algo_version'] = kAlgoVersion
                 ..['built_for_day'] = builtForDay
@@ -7468,6 +7478,54 @@ class DerivationEngine {
             () => <String>[],
           )
           .add(type);
+    }
+    return out;
+  }
+
+  /// The journal (tags + numeric metrics) per day label over the cross-day
+  /// window, as plain isolate-safe data for the context model
+  /// (context_model.dart via buildCrossDayBundle). Read on the DB-owning
+  /// isolate; the bundle builder only ever sees strings and numbers. A day
+  /// with no journal row still gets an entry when it has metrics; a malformed
+  /// tags blob is an empty tag set, never a crash of the whole pass.
+  static Future<Map<String, Map<String, dynamic>>> _journalByDate(
+    List<Map<String, dynamic>> days,
+  ) async {
+    if (days.isEmpty) return const {};
+    final first = days.first['date'];
+    if (first is! String || first.isEmpty) return const {};
+    final rows = await LocalDb.journalRows(sinceDaysEpoch: first);
+    final metrics = await LocalDb.journalMetricsByDay(sinceDaysEpoch: first);
+    final out = <String, Map<String, dynamic>>{};
+    for (final r in rows) {
+      final d = r['date'];
+      if (d is! String || d.isEmpty) continue;
+      final tags = <String>[];
+      final tagsJson = r['tags_json'];
+      if (tagsJson is String) {
+        try {
+          final decoded = jsonDecode(tagsJson);
+          if (decoded is List) {
+            for (final t in decoded) {
+              if (t is String) tags.add(t);
+            }
+          }
+        } catch (_) {
+          // Malformed tags JSON -> empty tag set; the context model simply
+          // has no journal explanation for this night.
+        }
+      }
+      out[d] = {'tags': tags};
+    }
+    for (final e in metrics.entries) {
+      (out[e.key] ??= {'tags': <String>[]})['metrics'] =
+          <String, List<num?>>{
+        for (final fe in e.value.entries)
+          fe.key: [
+            fe.value.value,
+            if (fe.value.atMinuteOfDay != null) fe.value.atMinuteOfDay!,
+          ],
+      };
     }
     return out;
   }

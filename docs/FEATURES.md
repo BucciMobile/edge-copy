@@ -23,6 +23,23 @@ so a workout counts the same for a fit person with a low resting HR as for anyon
 It needs three days of your data before it shows a number. Nightly HRV is RMSSD from one
 estimator, and a night where the beat detector over-counts is refused rather than scored.
 
+### Deviations from your own baseline
+
+The overnight watches (resting-heart-rate trend, unusual-overnight-physiology, skin
+temperature) compare each night with **your own** rolling baseline over valid nights only —
+never against a population table, and never against a night that was not measured. The
+baseline unlocks in stages and says so while it is learning: below 7 valid nights the
+watches stay quiet ("learning your baseline"), and a wear gap longer than two weeks steps
+the stage back down. Each night is also checked against **context you already know about** —
+training load, accumulated sleep debt, journal entries (alcohol, late caffeine, a late
+meal, vaccination, travel, feeling unwell) and, when cycle tracking is on, the second half
+of the logged cycle — so an expected deviation (a hard workout, a couple of drinks, a
+vaccine) is not reported as an anomaly. What remains after that subtraction is what the
+watches report: a deviation from your baseline, stated as a pattern, never as a diagnosis.
+These are approximations based on published research (e.g. Mishra et al., *Nature
+Biomedical Engineering* 2020; Natarajan et al., *npj Digital Medicine* 2020) — not
+medical-grade, not validated against a lab, and not a diagnosis.
+
 ## Activity
 
 Auto-detected workouts, live workout tracking with GPS routes, heart-rate zones you can
