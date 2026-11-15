@@ -271,11 +271,11 @@ List<String> _tagsForNight(
   Map<String, List<String>> journalTagsByDate,
 ) {
   final prev = dayLabelBefore(date, 1);
-  final tags = <String>{
-    ...?(prev == null ? null : journalTagsByDate[prev]),
-    ...?journalTagsByDate[date], // retrospective entries describe this night
-  };
-  return tags.toList();
+  final tags = <String>[];
+  if (prev != null) tags.addAll(journalTagsByDate[prev] ?? const []);
+  // Retrospective entries describe this night itself.
+  tags.addAll(journalTagsByDate[date] ?? const []);
+  return tags;
 }
 
 List<num?>? _metricForNight(
@@ -337,12 +337,13 @@ ContextResiduals buildContextResiduals({
   int windowDays = kCalibrationWindowDays,
 }) {
   final n = dates.length;
-  double? at<T>(List<T?> xs, int i) => (i < 0 || i >= xs.length) ? null : xs[i];
+  double? at(List<double?> xs, int i) =>
+      (i < 0 || i >= xs.length) ? null : xs[i];
 
   // Trailing-window robust stats PER SIGNAL, evaluated strictly BEFORE the
   // night (a night must never be masked by its own deviation) and bounded by
   // [windowDays] of calendar days.
-  List<double> _window(int i, List<double?> series) {
+  List<double> windowBefore(int i, List<double?> series) {
     final d = _day(dates[i]);
     final out = <double>[];
     if (d == null) return out;
@@ -375,7 +376,7 @@ ContextResiduals buildContextResiduals({
   // Cycle-stratified offsets, computed PER NIGHT over the trailing window:
   // the empirical median difference between this user's luteal and non-luteal
   // nights, capped in z units via [scale]. Only with enough luteal nights.
-  double? _cycleOffset(int i, List<double?> series, double? scale) {
+  double? cycleOffset(int i, List<double?> series, double? scale) {
     if (!luteal[i] || cycleStartDates.isEmpty) return null;
     final d = _day(dates[i]);
     if (d == null) return null;
@@ -411,15 +412,15 @@ ContextResiduals buildContextResiduals({
     final active = <String>[];
 
     // ── trailing robust stats for the z→native conversions ──
-    final rhrWin = _window(i, rhr);
-    final lnWin = _window(i, lnRmssd);
-    final respWin = _window(i, resp);
-    final tempWin = _window(i, tempAlert);
+    final rhrWin = windowBefore(i, rhr);
+    final lnWin = windowBefore(i, lnRmssd);
+    final respWin = windowBefore(i, resp);
+    final tempWin = windowBefore(i, tempAlert);
     final rhrScale = _robustScale(rhrWin);
     final lnScale = _robustScale(lnWin);
     final respScale = _robustScale(respWin);
     final tempScale = _robustScale(tempWin);
-    final rmssdMed = _median(_window(i, rmssd));
+    final rmssdMed = _median(windowBefore(i, rmssd));
 
     // ── training load: yesterday's strain + 3/7-day rolling means ──
     // The night labeled D follows calendar day D−1, so the load that precedes
@@ -446,7 +447,7 @@ ContextResiduals buildContextResiduals({
     // ── cumulative sleep debt: the night itself + the two before it, vs the
     // personal need (trailing median TST). One short night is expected noise;
     // a run of them is context. ──
-    final needWin = _window(i, tstMin);
+    final needWin = windowBefore(i, tstMin);
     final need = needWin.length >= minNeedNights ? _median(needWin) : null;
     double? debt;
     if (need != null && d != null) {
@@ -510,7 +511,7 @@ ContextResiduals buildContextResiduals({
     if (travel && rhrScale != null) offRhr += kTravelRhrZ * rhrScale;
     if (sick && rhrScale != null) offRhr += kSickRhrZ * rhrScale;
     // Empirical luteal RHR offset (cycle-stratified baseline adjustment).
-    final lutRhr = _cycleOffset(i, rhr, rhrScale);
+    final lutRhr = cycleOffset(i, rhr, rhrScale);
     if (lutRhr != null) {
       offRhr += lutRhr;
       active.add('luteal');
@@ -532,7 +533,7 @@ ContextResiduals buildContextResiduals({
     if (vaccination && lnScale != null) offLn -= kVaccinationLnHrvZ * lnScale;
     if (travel && lnScale != null) offLn -= kTravelLnHrvZ * lnScale;
     if (sick && lnScale != null) offLn -= kSickLnHrvZ * lnScale;
-    final lutLn = _cycleOffset(i, lnRmssd, lnScale);
+    final lutLn = cycleOffset(i, lnRmssd, lnScale);
     if (lutLn != null) offLn += lutLn;
 
     var offRespZ = 0.0;
@@ -540,7 +541,7 @@ ContextResiduals buildContextResiduals({
     var offTempZ = 0.0;
     if (vaccination) offTempZ += kVaccinationTempZ;
     if (sick) offTempZ += kSickTempZ;
-    final lutTemp = _cycleOffset(i, tempAlert, tempScale);
+    final lutTemp = cycleOffset(i, tempAlert, tempScale);
     if (lutTemp != null && tempScale != null) {
       offTempZ += lutTemp / tempScale;
       if (!active.contains('luteal')) active.add('luteal');

@@ -48,7 +48,6 @@ import '../ble/adapters/signals.dart';
 import '../data/coverage_resolver.dart';
 import '../data/db.dart';
 import '../data/day_label.dart';
-import '../data/journal_fields.dart' show JournalMetricValue;
 import '../data/series_codec.dart';
 import '../notify/fired_keys.dart';
 import '../notify/notification_center.dart';

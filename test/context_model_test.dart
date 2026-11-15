@@ -248,7 +248,6 @@ void main() {
 
     test('a luteal-phase temp rise is subtracted as expected deviation', () {
       final n = 40;
-      final dates = _dates(n);
       final c = _clean(n);
       // +20 ADC on every luteal night (from 2024-01-15 on, with the cycle log).
       final temp = <double?>[
@@ -267,7 +266,6 @@ void main() {
 
     test('too few luteal nights -> no empirical offset, raw passes through', () {
       final n = 20;
-      final dates = _dates(n);
       final c = _clean(n);
       final temp = <double?>[
         for (var i = 0; i < n; i++) (c.temp[i] ?? 0) + (i >= 14 ? 20 : 0),
