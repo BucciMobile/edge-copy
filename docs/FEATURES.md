@@ -29,7 +29,7 @@ The overnight watches (resting-heart-rate trend, unusual-overnight-physiology, s
 temperature) compare each night with **your own** rolling baseline over valid nights only —
 never against a population table, and never against a night that was not measured. The
 baseline unlocks in stages and says so while it is learning: below 7 valid nights the
-watches stay quiet ("learning your baseline"), and a wear gap longer than two weeks steps
+watches stay quiet ("learning your usual"), and a wear gap longer than two weeks steps
 the stage back down. Each night is also checked against **context you already know about** —
 training load, accumulated sleep debt, journal entries (alcohol, late caffeine, a late
 meal, vaccination, travel, feeling unwell) and, when cycle tracking is on, the second half
