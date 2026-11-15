@@ -284,8 +284,10 @@ List<num?>? _metricForNight(
   Map<String, Map<String, List<num?>>> journalMetricsByDate,
 ) {
   final prev = dayLabelBefore(date, 1);
-  return (prev != null ? journalMetricsByDate[prev]?[field] : null) ??
-      journalMetricsByDate[date]?[field];
+  final prevMetrics = prev == null ? null : journalMetricsByDate[prev];
+  final cur = journalMetricsByDate[date];
+  return (prevMetrics != null ? prevMetrics[field] : null) ??
+      (cur != null ? cur[field] : null);
 }
 
 /// True when the journal day before [date] holds a 'vaccinated' entry and
@@ -333,7 +335,7 @@ ContextResiduals buildContextResiduals({
   required List<double?> tstMin,
   Map<String, List<String>> journalTagsByDate = const {},
   Map<String, Map<String, List<num?>>> journalMetricsByDate = const {},
-  List<String> cycleStartDates = const {},
+  List<String> cycleStartDates = const [],
   int windowDays = kCalibrationWindowDays,
 }) {
   final n = dates.length;
