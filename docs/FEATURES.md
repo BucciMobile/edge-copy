@@ -42,7 +42,7 @@ medical-grade, not validated against a lab, and not a diagnosis.
 
 The residuals are then aggregated into tiers. One signal off baseline is a card on Home and
 Health only; two or more signals off baseline for two or more nights earn one **ask-first
-check-in** notification in the morning ("your values have deviated from your baseline for
+check-in** notification in the morning ("your values have deviated from your usual for
 the last 3 nights — do you feel unusually tired or run down?"), because self-report beats
 objective wearable metrics for early detection (Saw et al., *BJSM* 2016 systematic review).
 No tier above 1 ever comes from a single night. A skin-temperature + breathing-rate +
