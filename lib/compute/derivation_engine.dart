@@ -7692,7 +7692,7 @@ class DerivationEngine {
       // deviations are then expected) or the 48 h damping after an "I feel
       // fine" reply holds. The illness state also auto-expires here: enough
       // clean nights back in baseline end it (persisted below).
-      final nowSec = DateTime.now().secondsSinceEpoch;
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final dampUntil =
           (await LocalDb.getCursorInt('checkin_damp_until')) ?? 0;
       final illnessRaw = await LocalDb.getCursor('illness_state');

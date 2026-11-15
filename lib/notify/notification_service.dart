@@ -496,9 +496,20 @@ class NotificationService {
           checkInActionId(CheckInReply.sick, date),
           action('Sick / symptoms', (l) => l.checkInActionSick)),
     ];
+    // Rebuilt from the category's channel rather than copyWith — the plugin's
+    // details class has no copyWith, and reading the fields back off `base`
+    // would pin us to its getter names.
+    final ch = _channelFor(e.category);
     return NotificationDetails(
-      android:
-          (base.android as AndroidNotificationDetails).copyWith(actions: actions),
+      android: AndroidNotificationDetails(
+        ch.id,
+        ch.name,
+        channelDescription: ch.description,
+        importance: _importanceFor(e.category),
+        priority: _priorityFor(e.category),
+        icon: '@mipmap/launcher_icon',
+        actions: actions,
+      ),
       iOS: base.iOS,
     );
   }

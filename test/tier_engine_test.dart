@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openstrap_edge/compute/crossday_pipeline.dart';
 import 'package:openstrap_edge/compute/findings.dart';
 import 'package:openstrap_edge/compute/tier_engine.dart';
+import 'package:openstrap_edge/notify/checkin.dart';
 
 String _d(int i) {
   final dt = DateTime(2024, 1, 1 + i);
@@ -17,7 +18,7 @@ String _d(int i) {
 /// / ±16 ADC (temp) so the MAD scale is small and a spike is a large z.
 List<String> _dates(int n) => [for (var i = 0; i < n; i++) _d(i)];
 
-List<double?> _flat(int n, double v) => [for (var i = 0; i < n; i++) v];
+List<double?> _flat(int n, double? v) => [for (var i = 0; i < n; i++) v];
 
 List<double?> _wobble(int n, double base, double amp) => [
       for (var i = 0; i < n; i++) base + ((i % 5) - 2) * amp,

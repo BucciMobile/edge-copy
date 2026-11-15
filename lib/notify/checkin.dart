@@ -89,7 +89,8 @@ Future<void> handleCheckInReply(CheckInReply reply, String date) async {
   // ── the reply's effect ──
   try {
     if (reply == CheckInReply.fine) {
-      final until = DateTime.now().secondsSinceEpoch + kDampSeconds;
+      final until =
+          DateTime.now().millisecondsSinceEpoch ~/ 1000 + kDampSeconds;
       await LocalDb.setCursor('checkin_damp_until', until.toString());
     } else if (reply == CheckInReply.sick) {
       final raw = await LocalDb.getCursor('illness_state');

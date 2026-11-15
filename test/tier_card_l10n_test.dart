@@ -178,7 +178,7 @@ void main() {
       expect(localizedText(en, 'Off your usual lately'), 'Off your usual lately');
     });
 
-    test('the notice's own copy feeds the same mapping', () {
+    test("the notice's own copy feeds the same mapping", () {
       final notice = CheckInNotice(
           date: '2024-02-10', tier: 2, streak: 3, signals: const ['rhr']);
       final de = l('de');

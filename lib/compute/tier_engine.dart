@@ -263,7 +263,7 @@ TierVerdict? tierVerdictOfBundle(Map<String, dynamic> cd) {
   final temp = <double?>[];
   for (final r in recent) {
     if (r is! Map || r['date'] is! String) continue;
-    num? nn(Object? v) => v is num ? v.toDouble() : null;
+    double? nn(Object? v) => v is num ? v.toDouble() : null;
     dates.add(r['date'] as String);
     unsettled.add(r['unsettled'] == true);
     rhr.add(nn(r['rhr_residual']));
