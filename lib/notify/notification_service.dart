@@ -38,6 +38,8 @@ import 'package:timezone/timezone.dart' as tz;
 import '../l10n/app_localizations.dart';
 import '../l10n/display_text.dart';
 import '../state/locale_controller.dart';
+import 'checkin.dart';
+import 'tap_router.dart' show kRouteCheckIn, routePath;
 import 'notification_event.dart';
 import 'notification_ids.dart';
 
@@ -93,6 +95,13 @@ class NotificationService {
   /// Deep-link routes from tapped notifications. AppState listens & navigates.
   final StreamController<String> _taps = StreamController<String>.broadcast();
   Stream<String> get taps => _taps.stream;
+
+  /// Notification ACTION button presses (Android inline quick-replies), as
+  /// raw actionIds — see lib/notify/checkin.dart for the grammar. iOS has no
+  /// push actions, so there the tap arrives on [taps] as the route instead.
+  final StreamController<String> _actions =
+      StreamController<String>.broadcast();
+  Stream<String> get actionTaps => _actions.stream;
 
   // ── Channels (one per category — keep them disjoint) ────────────────────────
   static const AndroidNotificationChannel _deviceChannel =
@@ -284,6 +293,13 @@ class NotificationService {
   }
 
   void _onTap(NotificationResponse r) {
+    // An action button press carries no payload route — it carries the
+    // actionId, which is what the reply handler wants.
+    final actionId = r.actionId;
+    if (actionId != null && actionId.isNotEmpty) {
+      _actions.add(actionId);
+      return;
+    }
     final route = r.payload;
     if (route != null && route.isNotEmpty) _taps.add(route);
   }
@@ -458,6 +474,35 @@ class NotificationService {
     }
   }
 
+  /// The check-in's details: on Android, three inline quick-reply action
+  /// buttons carrying `checkin:<reply>:<date>` ids (handled via [actionTaps]);
+  /// on iOS the same event just taps through to the in-app sheet (payload
+  /// route), because Darwin local notifications have no action buttons.
+  Future<NotificationDetails> _checkInDetails(NotificationEvent e) async {
+    final base = _details(e.category);
+    final date =
+        Uri.tryParse(e.route ?? '')?.queryParameters['date'] ?? '';
+    final l = await _osLocalizations();
+    String action(String fallback, String Function(AppLocalizations l) pick) =>
+        l == null ? fallback : pick(l);
+    final actions = <AndroidNotificationAction>[
+      AndroidNotificationAction(
+          checkInActionId(CheckInReply.fine, date),
+          action('I feel fine', (l) => l.checkInActionFine)),
+      AndroidNotificationAction(
+          checkInActionId(CheckInReply.runDown, date),
+          action('A bit run down', (l) => l.checkInActionRunDown)),
+      AndroidNotificationAction(
+          checkInActionId(CheckInReply.sick, date),
+          action('Sick / symptoms', (l) => l.checkInActionSick)),
+    ];
+    return NotificationDetails(
+      android:
+          (base.android as AndroidNotificationDetails).copyWith(actions: actions),
+      iOS: base.iOS,
+    );
+  }
+
   NotificationDetails _details(NotifCategory c) {
     final ch = _channelFor(c);
     return NotificationDetails(
@@ -508,7 +553,9 @@ class NotificationService {
         e.osId ?? await NotificationIds.instance.idFor(e),
         await osText(e.title),
         e.body.isEmpty ? null : await osText(e.body),
-        _details(e.category),
+        routePath(e.route ?? '') == kRouteCheckIn
+            ? await _checkInDetails(e)
+            : _details(e.category),
         payload: e.route,
       );
       return true;

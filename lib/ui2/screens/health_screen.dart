@@ -29,6 +29,7 @@ import '../ui2.dart';
 import 'advanced.dart';
 import 'ecg.dart' show EcgEntryCard, pairedIsMaverickOf;
 import 'findings_log.dart';
+import 'tier_card.dart';
 import 'slot_scrub.dart';
 import 'home_screen.dart';
 import 'investigate.dart';
@@ -94,6 +95,10 @@ class HealthData {
   /// trend cards draw for resting HR and HRV. Null when it could not be read.
   final Map<String, dynamic>? baselines;
 
+  /// Whether the explicit illness state is active (user answered
+  /// "Sick / symptoms", not yet expired) — see tier_card.dart.
+  final bool illnessActive;
+
   const HealthData({
     this.today = const {},
     this.insights = const {},
@@ -108,6 +113,7 @@ class HealthData {
     this.napDay = '',
     this.findings = const [],
     this.baselines,
+    this.illnessActive = false,
   });
 
   /// The stored points for [key].
@@ -236,6 +242,7 @@ class HealthData {
       baselines: heart['baselines'] is Map
           ? (heart['baselines'] as Map).cast<String, dynamic>()
           : null,
+      illnessActive: await illnessStateActive(),
     );
   }
 }
@@ -848,6 +855,19 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     final illnessDay = illness is Map ? illness['date']?.toString() : null;
     final illnessBehind = _behind(illnessDay, widget.now);
 
+    // The tier card (tier_engine.dart's verdict over the residual
+    // deviations) — same today/yesterday gate as the illness card, plus the
+    // calibration progress while the baseline is still learning. Tier 1 is
+    // card-only here by design; only tier ≥2 ever pushes (as the ask-first
+    // check-in).
+    final tierObservation = tierCard(
+      c,
+      d.insights['tiers'],
+      today: todayLabel(widget.now),
+      showCalibration: true,
+      illnessActive: d.illnessActive,
+    );
+
     // Hoisted out of the tree so the section that now wraps it does not push
     // its copy two levels deeper. The card itself is untouched.
     // Same freshness rule as the push and Home: only today's or yesterday's
@@ -927,11 +947,11 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       // and resting-HR findings, which fired for months and reached no screen
       // at all. NOT a feed — see findings_log.dart. Nothing here is unread,
       // badged or dismissible, and it does not appear on Home.
-      if (illnessCard != null || d.findings.isNotEmpty) ...[
+      if (illnessCard != null || tierObservation != null || d.findings.isNotEmpty) ...[
         const SizedBox(height: S.x4),
         Section(
           l?.healthObservationsTitle ?? 'Observations',
-          illnessCard ??
+          tierObservation ?? illnessCard ??
               // No live illness, but the log is not empty: the newest entry in
               // place and the rest one tap away. ONE row — a wall of findings
               // on the tab you land on is the feed this is not.

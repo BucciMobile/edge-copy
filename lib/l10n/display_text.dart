@@ -106,6 +106,19 @@ String localizedNotificationText(AppLocalizations? l, String text) {
   if (idle != null) {
     return l.notifWorkoutIdleBody(int.parse(idle[1]!));
   }
+  // CheckInNotice (tier_engine.dart): the ask-first check-in's interpolated bodies.
+  final checkIn = RegExp(
+    r'^Your values have deviated from your baseline for the last (\d+) nights\. Do you feel unusually tired or run down\?$',
+  ).firstMatch(text);
+  if (checkIn != null) {
+    return l.notifCheckInBody(int.parse(checkIn[1]!));
+  }
+  final checkIn3 = RegExp(
+    r'^Across skin temperature, breathing rate and resting heart rate, your values have been above your usual for the last (\d+) nights\. Consider rest, and if this persists, consider checking with a healthcare professional\.$',
+  ).firstMatch(text);
+  if (checkIn3 != null) {
+    return l.notifCheckInBodyTier3(int.parse(checkIn3[1]!));
+  }
   return localizedText(l, text);
 }
 
@@ -118,6 +131,8 @@ String localizedText(AppLocalizations? l, String text) {
     return l.findingLowReadinessScoredDetail(int.parse(lowScore[1]!));
   }
   return switch (text) {
+    "Off your usual lately" => l.notifCheckInTitleTier2,
+    "Values above your usual for several nights" => l.notifCheckInTitleTier3,
     "Resting heart rate has been raised" => l.findingIllnessTitle,
     "Recent nights put your resting heart rate above your usual, from one very high night or a few slightly raised ones. One signal: a pattern, not a cause." =>
       l.findingIllnessDetail,

@@ -20,6 +20,7 @@ import 'package:openstrap_analytics/onehz.dart' as ana;
 
 import '../data/day_label.dart';
 import 'context_model.dart';
+import 'tier_engine.dart';
 
 // Pure string helper only (the `need_input:name=…` note grammar) — no DB, no
 // IO, no Flutter binding, so importing it does not compromise this file's
@@ -196,6 +197,21 @@ Map<String, dynamic> buildCrossDayBundle(
   final hrvResid = ctx.hrvResidual;
   final respResid = ctx.respResidual;
   final tempResid = ctx.tempResidual;
+
+  // TIER ENGINE (Layer 3): aggregate the residuals into one tiered verdict
+  // for the newest settled night — published in the bundle so the push, the
+  // Home/Health cards and the log all read the same tier (see tier_engine.dart
+  // for the tier rules: persistence, consensus, calibration-stage cap).
+  final tierVerdict = computeTierVerdict(
+    dates: dates,
+    unsettled: unsettled,
+    rhrResid: rhrResid,
+    hrvResid: hrvResid,
+    respResid: respResid,
+    tempResid: tempResid,
+    stage: (ctx.calibration['stage'] as num?)?.toInt() ?? 0,
+    validNights: (ctx.calibration['valid_nights'] as num?)?.toInt() ?? 0,
+  );
 
   // illness CUSUM (NightSignal) on the nightly RHR RESIDUAL.
   final illness = ana.illnessCusum(dates, [
@@ -764,6 +780,18 @@ Map<String, dynamic> buildCrossDayBundle(
     // — 23 of 30 nights", and honestly quiet (stage 0) below 7 valid nights.
     'calibration': ctx.calibration,
     'context_model': {'version': 1},
+    'tiers': tierVerdict == null
+        ? null
+        : <String, dynamic>{
+            'date': tierVerdict.date,
+            'tier': tierVerdict.tier,
+            'signals': tierVerdict.signals,
+            'streak': tierVerdict.streak,
+            'constellation': tierVerdict.constellation,
+            'stage': tierVerdict.stage,
+            'valid_nights': tierVerdict.validNights,
+            'z': tierVerdict.z,
+          },
     'recent': recent,
   };
 }

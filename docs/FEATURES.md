@@ -40,6 +40,22 @@ These are approximations based on published research (e.g. Mishra et al., *Natur
 Biomedical Engineering* 2020; Natarajan et al., *npj Digital Medicine* 2020) — not
 medical-grade, not validated against a lab, and not a diagnosis.
 
+The residuals are then aggregated into tiers. One signal off baseline is a card on Home and
+Health only; two or more signals off baseline for two or more nights earn one **ask-first
+check-in** notification in the morning ("your values have deviated from your baseline for
+the last 3 nights — do you feel unusually tired or run down?"), because self-report beats
+objective wearable metrics for early detection (Saw et al., *BJSM* 2016 systematic review).
+No tier above 1 ever comes from a single night. A skin-temperature + breathing-rate +
+resting-heart-rate rise together for several nights raises the check-in's urgency, still
+without naming any condition: it recommends rest and, if it persists, checking with a
+healthcare professional. The quick replies are one tap: "I feel fine" quietens the same
+watch for 48 hours, "a bit run down" keeps watching, and "sick / symptoms" starts an
+explicit illness state — while it lasts, those deviations are expected, so the watches
+stand down instead of re-warning, and every reply is journaled automatically. The state
+ends after three nights back in your baseline or when you dismiss it. Missing signals
+(say the band's firmware withholds skin temperature) simply do not count — the card says
+which signals were unavailable rather than showing a green.
+
 ## Activity
 
 Auto-detected workouts, live workout tracking with GPS routes, heart-rate zones you can

@@ -56,6 +56,7 @@ import '../notify/tap_router.dart' show activitySuggestionRoute;
 import '../telemetry/firebase_bridge.dart';
 import '../telemetry/telemetry_service.dart';
 import 'crossday_pipeline.dart';
+import 'tier_engine.dart';
 import 'derive_pacing.dart';
 import 'inputs/canonical.dart';
 import 'inputs/garmin_inputs.dart'
@@ -7673,7 +7674,7 @@ class DerivationEngine {
       // Only a pin taken on the anchor day's own night (LocalDb.headlinePinFor).
       final pinValue =
           anchor == null ? null : await LocalDb.headlinePinFor(anchor.date);
-      final notices = planExceptionNotices(
+      var notices = planExceptionNotices(
         cd,
         today: today,
         irregularFlag: anchor == null
@@ -7684,6 +7685,45 @@ class DerivationEngine {
             ? null
             : await LocalDb.metricValueOn(anchor.date, 'readiness'),
       );
+
+      // TIER 2/3 ASK-FIRST CHECK-IN (tier_engine.dart). One push per night
+      // about a night whose residual deviations reach consensus +
+      // persistence, suppressed while the illness state is active (the
+      // deviations are then expected) or the 48 h damping after an "I feel
+      // fine" reply holds. The illness state also auto-expires here: enough
+      // clean nights back in baseline end it (persisted below).
+      final nowSec = DateTime.now().secondsSinceEpoch;
+      final dampUntil =
+          (await LocalDb.getCursorInt('checkin_damp_until')) ?? 0;
+      final illnessRaw = await LocalDb.getCursor('illness_state');
+      Object? illnessDecoded;
+      if (illnessRaw != null) {
+        try {
+          illnessDecoded = jsonDecode(illnessRaw);
+        } catch (_) {
+          illnessDecoded = null;
+        }
+      }
+      final illnessState = IllnessState.fromJson(illnessDecoded);
+      final verdict = tierVerdictOfBundle(cd);
+      final nextIllness =
+          illnessState.next(anySignal: verdict?.anySignal ?? false);
+      if (nextIllness != illnessState) {
+        await LocalDb.setCursor(
+            'illness_state', jsonEncode(nextIllness.toJson()));
+      }
+      final checkIn = planCheckIn(
+        cd,
+        today: today,
+        nowSec: nowSec,
+        illnessActive: illnessState.active,
+        dampUntilSec: dampUntil,
+      );
+      // The overnight deviation findings now push only as the check-in:
+      // gate them out of the aggregated notice, and when the check-in fired
+      // for a night the whole notice for that night stands down — one push
+      // per night either way.
+      notices = gateExceptionNotices(notices, checkInDate: checkIn?.date);
 
       // One notice per day the findings are ABOUT. The key's date is that
       // day, so a night fires at most once however many passes see it.
@@ -7720,6 +7760,22 @@ class DerivationEngine {
         if (notice.medical && fired) {
           await const FiredKeyStore().recordFired('${notice.date}:exception');
         }
+      }
+      if (checkIn != null) {
+        // The ask-first check-in: a question, never a diagnosis. Quick
+        // replies ride as Android action buttons (see NotificationService)
+        // or the tap-through sheet at [checkIn.route] on iOS.
+        await NotificationCenter.instance.emit(
+          NotificationEvent(
+            dedupeKey: checkIn.dedupeKey,
+            category: NotifCategory.health,
+            priority: NotifPriority.critical,
+            title: checkIn.title,
+            body: checkIn.body,
+            date: checkIn.date,
+            route: checkIn.route,
+          ),
+        );
       }
     } catch (e) {
       _log('notifications FAILED/skipped: $e');
