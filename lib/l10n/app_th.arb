@@ -17012,7 +17012,7 @@
   "@activityGoalSection": {"description": "Day Strain screen section for the weekly activity goal editor."},
   "activityGoalRow": "คะแนนความหนักต่อสัปดาห์",
   "@activityGoalRow": {"description": "Label of the weekly activity goal row (strain points per week)."},
-  "activityGoalHint": "การเผ้าดูการรรเคลื่อนไวจหมืว 7 วันที่ผ่ามา {strain7}สวหานต่บเป้ารายสัปดาห์ ค่่ด้มท่อนรัษเป้านปกติ ค่่ 45 เทียบเท่า่ากาป 150 นาที ของกาตมมนะดัวกางานใน่สากนาหนนนี่",
+  "activityGoalHint": "การเผ้าดูการรรเคลื่อนไวจหมืว 7 วันที่ผ่ามา สวหานต่บเป้ารายสัปดาห์ ค่่ด้มท่อนรัษเป้านปกติ ค่่ 45 เทียบเท่า่ากาป 150 นาที ของกาตมมนะดัวกางานใน่สากนาหนนนี่",
   "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
   "activityGoalInvalid": "เป้าาบัพดาห์ {min}–{max} คะแนนความหนักจึงเป้าเป้าคนจริง ไม่มีกรบันทึกไว่",
   "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}}

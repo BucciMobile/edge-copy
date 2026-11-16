@@ -867,6 +867,15 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       showCalibration: true,
       illnessActive: d.illnessActive,
     );
+    // PR 3 trend cards (inactivity watch, recovery trend — activity_watch.dart)
+    // sit under the same Observations title; informational only, never pushes.
+    final trendObservations = trendCards(
+      c,
+      today: todayLabel(widget.now),
+      inactivity: d.insights['inactivity'],
+      recoveryTrend: d.insights['recovery_trend'],
+      illnessActive: d.illnessActive,
+    );
 
     // Hoisted out of the tree so the section that now wraps it does not push
     // its copy two levels deeper. The card itself is untouched.
@@ -947,15 +956,6 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       // and resting-HR findings, which fired for months and reached no screen
       // at all. NOT a feed — see findings_log.dart. Nothing here is unread,
       // badged or dismissible, and it does not appear on Home.
-      // PR 3 trend cards (inactivity watch, recovery trend — activity_watch.dart)
-      // sit under the same Observations title; informational only, never pushes.
-      final trendObservations = trendCards(
-        c,
-        today: todayLabel(widget.now),
-        inactivity: d.insights['inactivity'],
-        recoveryTrend: d.insights['recovery_trend'],
-        illnessActive: d.illnessActive,
-      );
       if (illnessCard != null ||
           tierObservation != null ||
           trendObservations.isNotEmpty ||
