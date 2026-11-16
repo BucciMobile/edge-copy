@@ -8391,5 +8391,11 @@
   "activityGoalHint": "Часы бездействия сравнивают твою нагрузку за последние 7 дней с этой целью. Значение по умолчанию 45 — это около 150 минут умеренной активности в неделю в этой шкале.",
   "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
   "activityGoalInvalid": "Недельная цель в {min}–{max} очков нагрузки — реальная. Ничего не сохранено.",
-  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}}
+  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}},
+  "settingsSleepHmmRowTitle": "Экспериментальное определение стадий сна (HMM)",
+  "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
+  "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
+  "settingsSleepHmmRowSub": "Исследовательский алгоритм, не медицинское устройство. Выключено по умолчанию.",
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."}
 }

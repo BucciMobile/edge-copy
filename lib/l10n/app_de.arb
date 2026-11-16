@@ -3868,5 +3868,11 @@
   "activityGoalHint": "Die Inaktivitäts-Watch vergleicht deine letzten 7 Strain-Tage mit diesem Ziel. Der Standard 45 entspricht etwa 150 Minuten moderater Aktivität pro Woche auf dieser Skala.",
   "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
   "activityGoalInvalid": "Ein Wochenziel von {min}–{max} Strain-Punkten ist ein echtes. Es wurde nichts gespeichert.",
-  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}}
+  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}},
+  "settingsSleepHmmRowTitle": "Experimentelles Schlaf-Staging (HMM)",
+  "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
+  "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
+  "settingsSleepHmmRowSub": "Forschungsalgorithmus, kein Medizinprodukt. Standard aus.",
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."}
 }
