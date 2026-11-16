@@ -17,16 +17,20 @@ import '../../data/day_label.dart';
 import '../../data/db.dart';
 import '../../data/lab_catalogue.dart';
 import '../../data/local_repository.dart';
+import '../../health/bp_trend.dart' show BpTrendSummary, loadBpTrend;
+import '../../health/health_import_state.dart' show storeName;
 import '../../import/journal_csv_import.dart' show isValidDayLabel;
 import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart';
 import '../../models/payloads.dart' show todayHeadlineOf;
 import '../../state/app_state.dart';
+import '../profile/phone_import.dart' show PhoneImport;
 import '../profile/profile.dart' show ProfileAvatar;
 import '../profile/wearable_numbers.dart'
     show WearableCells, kHealthWearableRows;
 import '../ui2.dart';
 import 'advanced.dart';
+import 'bp_card.dart' show bpTrendSection;
 import 'ecg.dart' show EcgEntryCard, pairedIsMaverickOf;
 import 'findings_log.dart';
 import 'tier_card.dart';
@@ -552,6 +556,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
   @override
   void reload() {
     _load();
+    _loadBp();
     if (hasRead(#vitals)) _loadVitals(force: true);
     if (hasRead(#labs)) {
       _l = null;
@@ -575,6 +580,30 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       if (stillNewest(#day, t)) setState(() => (_d = d, _loading = false));
     } catch (_) {
       if (stillNewest(#day, t)) setState(() => _loading = false);
+    }
+    _loadBp();
+  }
+
+  /// The imported blood-pressure readings (a cuff's own numbers, shown with
+  /// the source app's name — display only, never a compute input). Loaded
+  /// beside the overview, not through it: the derivation pipeline must not
+  /// see `imported_measurement`, so this screen reads the table directly, the
+  /// same read the phone-import screen does.
+  BpTrendSummary? _bp;
+  bool _bpFailed = false;
+
+  Future<void> _loadBp() async {
+    final t = beginRead(#bp);
+    try {
+      final s = await loadBpTrend();
+      if (stillNewest(#bp, t)) {
+        setState(() {
+          _bp = s;
+          _bpFailed = false;
+        });
+      }
+    } catch (_) {
+      if (stillNewest(#bp, t)) setState(() => _bpFailed = true);
     }
   }
 
@@ -985,6 +1014,20 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
           onAction:
               d.findings.isEmpty ? null : () => go(c, FindingsLog(d.findings)),
         ),
+      ],
+
+      // IMPORTED BLOOD PRESSURE — a cuff's own readings, trend display only:
+      // medians next to guideline reference ranges, never a classification and
+      // never a push. Hidden entirely until at least one paired reading exists;
+      // a read that threw is the one failed-card state, not a silent gap.
+      if (_bpFailed || (_bp?.readings.isNotEmpty ?? false)) ...[
+        const SizedBox(height: S.x4),
+        if (_bpFailed)
+          _readFailed(
+              l?.bpCardTitle(storeName) ?? 'Blood pressure from $storeName',
+              _loadBp)
+        else if (_bp case final s)
+          bpTrendSection(c, s, onRead: () => go(c, const PhoneImport())),
       ],
 
       // Naps moved to the Sleep tab, beside the night (the Naps door there).

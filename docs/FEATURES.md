@@ -92,6 +92,15 @@ edit, and GPX export.
   resting HR, HRV, respiratory rate, active energy and workouts. Only things the device
   measures, never derived scores, which have no native type. Exports are idempotent, so
   re-deriving a day never duplicates samples.
+- Reads **blood pressure, blood glucose and body temperature** from Apple Health / Health
+  Connect (read-only) into `imported_measurement`, every row tagged with the app that
+  recorded it. On Health › Overview a card shows the latest reading and 30/90-day medians
+  beside the guideline reference ranges (about 130/80 mmHg ACC/AHA, 140/90 mmHg ESC), with a
+  note to discuss persistent readings with a healthcare professional. A window needs at
+  least 3 paired readings before any median is shown; below that the card says so. These
+  rows are display-only: never blended with this app's own measurements, never an input to
+  any derivation, baseline or alert. A median next to a reference range is a trend display,
+  not a classification.
 - Export the entire local SQLite database to a file whenever you like.
 - Scheduled local backups, which run when you open the app and one is due. On Android
   you can point them at a folder of your choice.

@@ -17055,4 +17055,24 @@
   "guideExpandAccordion": "ขยาย {title}",
   "@guideExpandAccordion": {"description": "Guide hop asking the wearer to open a collapsed section", "placeholders": {"title": {"type": "String"}}},
   "@guideExpandAccordion": {"description": "Guide hop asking the wearer to open a collapsed section", "placeholders": {"title": {"type": "String"}}}
+,
+  "bpCardTitle": "ความดันโลหิตจาก {store}"
+,
+  "bpCardLatest": "ค่าล่าสุด"
+,
+  "bpCardMedian30": "มัธยฐาน 30 วันที่ผ่านมา"
+,
+  "bpCardMedian90": "มัธยฐาน 90 วันที่ผ่านมา"
+,
+  "bpCardReadingsCount": "{n} ครั้ง"
+,
+  "bpCardSameTimeOfDay": "วัดช่วงเวลาใกล้เคียงกันของวัน"
+,
+  "bpCardNotEnoughTitle": "ยังไม่พอสำหรับแสดงแนวโน้ม"
+,
+  "bpCardNotEnoughBody": "แนวโน้ม 30 วันต้องมีอย่างน้อย 3 ค่า; ตอนนี้มี {n} ค่า"
+,
+  "bpCardReferenceRanges": "ช่วงอ้างอิงตามแนวทาง: ประมาณ 130/80 mmHg (ACC/AHA) และ 140/90 mmHg (ESC)"
+,
+  "bpCardReferenceNote": "สิ่งเหล่านี้คือจุดอ้างอิงของประชากร ไม่ใช่คำวินิจฉัยเกี่ยวกับคุณ หากค่าลักษณะนี้เกิดขึ้นกับคุณบ่อย ควรปรึกษาผู้เชี่ยวชาญด้านสุขภาพ"
 }

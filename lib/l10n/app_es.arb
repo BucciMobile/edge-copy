@@ -3933,4 +3933,24 @@
   "@guideMoveCardDown": {"description": "Screen-reader action on the guide's step card: move the card down the screen (the alternative to dragging it)."},
   "guideTapOneOf": "toca uno",
   "guideExpandAccordion": "Expandir {title}"
+,
+  "bpCardTitle": "Presión arterial desde {store}"
+,
+  "bpCardLatest": "Última medición"
+,
+  "bpCardMedian30": "Mediana de los últimos 30 días"
+,
+  "bpCardMedian90": "Mediana de los últimos 90 días"
+,
+  "bpCardReadingsCount": "{n, plural, one{1 medición} other{{n} mediciones}}"
+,
+  "bpCardSameTimeOfDay": "tomadas a una hora parecida del día"
+,
+  "bpCardNotEnoughTitle": "Aún no hay suficientes mediciones para una tendencia"
+,
+  "bpCardNotEnoughBody": "{n, plural, one{Una tendencia de 30 días necesita al menos 3 mediciones; de momento hay 1.} other{Una tendencia de 30 días necesita al menos 3 mediciones; de momento hay {n}.}}"
+,
+  "bpCardReferenceRanges": "Rangos de referencia de las guías: unos 130/80 mmHg (ACC/AHA) y 140/90 mmHg (ESC)."
+,
+  "bpCardReferenceNote": "Son puntos de referencia poblacionales, no un diagnóstico sobre ti. Si valores como estos son frecuentes en ti, coméntalos con un profesional sanitario."
 }

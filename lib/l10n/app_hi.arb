@@ -3933,4 +3933,24 @@
   "@guideMoveCardDown": {"description": "Screen-reader action on the guide's step card: move the card down the screen (the alternative to dragging it)."},
   "guideTapOneOf": "इनमें से एक टैप करें",
   "guideExpandAccordion": "{title} खोलें"
+,
+  "bpCardTitle": "रक्तचाप {store} से"
+,
+  "bpCardLatest": "नवीनतम माप"
+,
+  "bpCardMedian30": "पिछले 30 दिनों का केंद्रीय मान"
+,
+  "bpCardMedian90": "पिछले 90 दिनों का केंद्रीय मान"
+,
+  "bpCardReadingsCount": "{n, plural, one{1 माप} other{{n} मापें}}"
+,
+  "bpCardSameTimeOfDay": "दिन के समान समय पर"
+,
+  "bpCardNotEnoughTitle": "ट्रेड के लिए अभी पर्याप्त मापें नहीं हैं"
+,
+  "bpCardNotEnoughBody": "{n, plural, one{30 दिनों के ट्रेड के लिए कम से कम 3 मापें चाहिए; अभी तक 1 ही है।} other{30 दिनों के ट्रेड के लिए कम से कम 3 मापें चाहिए; अभी तक {n} हैं।}}"
+,
+  "bpCardReferenceRanges": "गाइडलाइन के संदर्भ मान: लगभग 130/80 mmHg (ACC/AHA) और 140/90 mmHg (ESC)।"
+,
+  "bpCardReferenceNote": "ये आबादी-स्तर के संदर्भ बिंदु हैं, आपके बारे में कोई फैसला नहीं हैं। अगर आपके लिए आाम मापें हैं, तो स्वास्थ्य विशेषज्ञ से बात करें।"
 }

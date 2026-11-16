@@ -8451,4 +8451,24 @@
   "@guideExpandAccordion": {"description": "Guide hop asking the wearer to open a collapsed section", "placeholders": {"title": {"type": "String"}}},
   "guideExpandAccordion": "Развернуть {title}",
   "@guideExpandAccordion": {"description": "Guide hop asking the wearer to open a collapsed section", "placeholders": {"title": {"type": "String"}}}
+,
+  "bpCardTitle": "Артериальное давление из {store}"
+,
+  "bpCardLatest": "Последнее измерение"
+,
+  "bpCardMedian30": "Медиана за последние 30 дней"
+,
+  "bpCardMedian90": "Медиана за последние 90 дней"
+,
+  "bpCardReadingsCount": "{n, plural, one{1 измерение} few{{n} измерения} many{{n} измерений} other{{n} измерения}}"
+,
+  "bpCardSameTimeOfDay": "измерено примерно в одно и то же время суток"
+,
+  "bpCardNotEnoughTitle": "Пока недостаточно измерений для тренда"
+,
+  "bpCardNotEnoughBody": "{n, plural, one{Для тренда за 30 дней нужно минимум 3 измерения; пока есть 1.} few{Для тренда за 30 дней нужно минимум 3 измерения; пока их {n}.} many{Для тренда за 30 дней нужно минимум 3 измерения; пока их {n}.} other{Для тренда за 30 дней нужно минимум 3 измерения; пока их {n}.}}"
+,
+  "bpCardReferenceRanges": "Референсные диапазоны руководств: около 130/80 мм рт. ст. (ACC/AHA) и 140/90 мм рт. ст. (ESC)."
+,
+  "bpCardReferenceNote": "Это популяционные ориентиры, а не оценка вашего состояния. Если такие значения для вас обычны, обсудите их с врачом."
 }

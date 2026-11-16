@@ -3933,4 +3933,24 @@
   "@guideMoveCardDown": {"description": "Screen-reader action on the guide's step card: move the card down the screen (the alternative to dragging it)."},
   "guideTapOneOf": "touchez l'un d'eux",
   "guideExpandAccordion": "Développer {title}"
+,
+  "bpCardTitle": "Tension artérielle depuis {store}"
+,
+  "bpCardLatest": "Dernière mesure"
+,
+  "bpCardMedian30": "Médiane des 30 derniers jours"
+,
+  "bpCardMedian90": "Médiane des 90 derniers jours"
+,
+  "bpCardReadingsCount": "{n, plural, one{1 mesure} other{{n} mesures}}"
+,
+  "bpCardSameTimeOfDay": "prises à une heure similaire de la journée"
+,
+  "bpCardNotEnoughTitle": "Pas encore assez de mesures pour une tendance"
+,
+  "bpCardNotEnoughBody": "{n, plural, one{Une tendance sur 30 jours demande au moins 3 mesures ; il y en a 1 pour l'instant.} other{Une tendance sur 30 jours demande au moins 3 mesures ; il y en a {n} pour l'instant.}}"
+,
+  "bpCardReferenceRanges": "Intervalles de référence des recommandations : environ 130/80 mmHg (ACC/AHA) et 140/90 mmHg (ESC)."
+,
+  "bpCardReferenceNote": "Ce sont des points de repère populationnels, pas un verdict sur vous. Si de telles valeurs sont fréquentes chez vous, discutez-en avec un professionnel de santé."
 }

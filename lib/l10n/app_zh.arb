@@ -3933,4 +3933,24 @@
   "@guideMoveCardDown": {"description": "Screen-reader action on the guide's step card: move the card down the screen (the alternative to dragging it)."},
   "guideTapOneOf": "点其中一个",
   "guideExpandAccordion": "展开{title}"
+,
+  "bpCardTitle": "来自{store}的血压"
+,
+  "bpCardLatest": "最新测量值"
+,
+  "bpCardMedian30": "近30天中位数"
+,
+  "bpCardMedian90": "近90天中位数"
+,
+  "bpCardReadingsCount": "{n} 次测量"
+,
+  "bpCardSameTimeOfDay": "在一天中相近的时间测量"
+,
+  "bpCardNotEnoughTitle": "测量次数还不足以形成趋势"
+,
+  "bpCardNotEnoughBody": "30天趋势至少需要3次测量；目前已有{n}次。"
+,
+  "bpCardReferenceRanges": "指南参考范围：约130/80 mmHg（ACC/AHA）和140/90 mmHg（ESC）。"
+,
+  "bpCardReferenceNote": "这些是群体参考点，并非对您的判断。如果您经常出现类似读数，请咨询医疗专业人士。"
 }

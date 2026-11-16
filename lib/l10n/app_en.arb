@@ -17376,4 +17376,27 @@
   "guideExpandAccordion": "Expand {title}",
   "@guideExpandAccordion": {"description": "Guide hop asking the wearer to open a collapsed section", "placeholders": {"title": {"type": "String"}}},
   "@guideExpandAccordion": {"description": "Guide hop asking the wearer to open a collapsed section", "placeholders": {"title": {"type": "String"}}}
+,
+  "bpCardTitle": "Blood pressure from {store}",
+  "@bpCardTitle": {"description": "Health screen section title for the imported blood-pressure trend.", "placeholders": {"store": {"type": "String"}}}
+,
+  "bpCardLatest": "Latest reading"
+,
+  "bpCardMedian30": "Median, last 30 days"
+,
+  "bpCardMedian90": "Median, last 90 days"
+,
+  "bpCardReadingsCount": "{n, plural, one{1 reading} other{{n} readings}}",
+  "@bpCardReadingsCount": {"description": "How many imported readings a median rests on.", "placeholders": {"n": {"type": "int"}}}
+,
+  "bpCardSameTimeOfDay": "taken at a similar time of day"
+,
+  "bpCardNotEnoughTitle": "Not enough readings for a trend yet"
+,
+  "bpCardNotEnoughBody": "{n, plural, one{A 30-day trend needs at least 3 readings; 1 is in so far.} other{A 30-day trend needs at least 3 readings; {n} are in so far.}}",
+  "@bpCardNotEnoughBody": {"description": "Honest quiet state below the pair gate.", "placeholders": {"n": {"type": "int"}}}
+,
+  "bpCardReferenceRanges": "Guideline reference ranges: about 130/80 mmHg (ACC/AHA) and 140/90 mmHg (ESC)."
+,
+  "bpCardReferenceNote": "Those are population reference points, not a verdict about you. If readings like these are common for you, discuss them with a healthcare professional."
 }

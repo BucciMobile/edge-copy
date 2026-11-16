@@ -3906,4 +3906,24 @@
   "@guideMoveCardDown": {"description": "Screen-reader action on the guide's step card: move the card down the screen (the alternative to dragging it)."},
   "guideTapOneOf": "eins antippen",
   "guideExpandAccordion": "{title} aufklappen"
+,
+  "bpCardTitle": "Blutdruck von {store}"
+,
+  "bpCardLatest": "Letzte Messung"
+,
+  "bpCardMedian30": "Median der letzten 30 Tage"
+,
+  "bpCardMedian90": "Median der letzten 90 Tage"
+,
+  "bpCardReadingsCount": "{n, plural, one{1 Messung} other{{n} Messungen}}"
+,
+  "bpCardSameTimeOfDay": "zur ähnlichen Tageszeit gemessen"
+,
+  "bpCardNotEnoughTitle": "Noch nicht genug Messungen für einen Trend"
+,
+  "bpCardNotEnoughBody": "{n, plural, one{Ein 30-Tage-Trend braucht mindestens 3 Messungen; bisher ist 1 da.} other{Ein 30-Tage-Trend braucht mindestens 3 Messungen; bisher sind es {n}.}}"
+,
+  "bpCardReferenceRanges": "Referenzbereiche der Leitlinien: etwa 130/80 mmHg (ACC/AHA) und 140/90 mmHg (ESC)."
+,
+  "bpCardReferenceNote": "Das sind bevölkerungsbezogene Referenzpunkte, kein Urteil über dich. Wenn solche Werte bei dir häufig vorkommen, besprich sie mit einer Ärztin oder einem Arzt."
 }
