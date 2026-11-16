@@ -22,7 +22,6 @@ import '../data/day_label.dart';
 import 'activity_watch.dart';
 import 'context_model.dart';
 import 'tier_engine.dart';
-import 'workout_signals.dart' show dailyWorkoutSignals;
 
 // Pure string helper only (the `need_input:name=…` note grammar) — no DB, no
 // IO, no Flutter binding, so importing it does not compromise this file's

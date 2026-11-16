@@ -422,9 +422,6 @@ ContextResiduals buildContextResiduals({
   final hrrSeries = <double?>[
     for (var i = 0; i < n; i++) workoutsByDate[dates[i]]?['hrr_bpm']
   ];
-  final volSeries = <double?>[
-    for (var i = 0; i < n; i++) workoutsByDate[dates[i]]?['volume_kg']
-  ];
 
   final rhrResidual = List<double?>.filled(n, null);
   final hrvResidual = List<double?>.filled(n, null);
