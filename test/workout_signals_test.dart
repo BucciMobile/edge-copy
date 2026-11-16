@@ -159,12 +159,23 @@ void main() {
       );
       final i = n - 1;
       expect(withW.masks[i], contains('workout recovery'));
-      // The HRV residual (a suppression) is smaller in magnitude with the mask.
-      expect(withW.hrvResidual[i]! - rmssd[i]!, lessThan(0));
+      // The expected-suppression offset is subtracted, so the residual moves
+      // TOWARD the raw value (up, here) — the mask absorbs part of the deviation.
       expect((withW.hrvResidual[i]! - rmssd[i]!),
           greaterThan(without.hrvResidual[i]! - rmssd[i]!));
       // And with no workout data at all the residuals are byte-identical.
-      expect(without.hrvResidual[i], without.hrvResidual[i]);
+      final noCtx = buildContextResiduals(
+        dates: dates,
+        unsettled: unsettled,
+        rhr: rhr,
+        rmssd: rmssd,
+        resp: resp,
+        tempAlert: temp,
+        strain: strain,
+        tstMin: tst,
+      );
+      expect(noCtx.hrvResidual[i], without.hrvResidual[i]);
+      expect(noCtx.masks[i], isNot(contains('workout recovery')));
     });
 
     test('strength volume adds a load-like mask', () {
