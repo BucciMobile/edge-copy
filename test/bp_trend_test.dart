@@ -94,14 +94,14 @@ void main() {
   });
 
   group('bpWindowTrend', () {
-    List<BpReading> _r(int ts, double s, double d) =>
+    List<BpReading> mk(int ts, double s, double d) =>
         [BpReading(tsSec: ts, systolic: s, diastolic: d, source: 'Cuff')];
 
     test('window boundaries are inclusive', () {
       final pairs = [
-        ..._r(_now - 30 * _day, 120, 80),
-        ..._r(_now - 15 * _day, 122, 81),
-        ..._r(_now, 124, 82),
+        ...mk(_now - 30 * _day, 120, 80),
+        ...mk(_now - 15 * _day, 122, 81),
+        ...mk(_now, 124, 82),
       ];
       final w = bpWindowTrend(pairs, nowSec: _now, windowDays: 30);
       expect(w, isNotNull);
@@ -110,10 +110,10 @@ void main() {
 
     test('readings older than the window are excluded', () {
       final pairs = [
-        ..._r(_now - 31 * _day, 200, 120), // outside 30d
-        ..._r(_now - 10 * _day, 120, 80),
-        ..._r(_now - 5 * _day, 122, 81),
-        ..._r(_now, 124, 82),
+        ...mk(_now - 31 * _day, 200, 120), // outside 30d
+        ...mk(_now - 10 * _day, 120, 80),
+        ...mk(_now - 5 * _day, 122, 81),
+        ...mk(_now, 124, 82),
       ];
       final w = bpWindowTrend(pairs, nowSec: _now, windowDays: 30);
       expect(w, isNotNull);
@@ -128,8 +128,8 @@ void main() {
 
     test('fewer than 3 pairs means null, never a median of one', () {
       final pairs = [
-        ..._r(_now - 2 * _day, 120, 80),
-        ..._r(_now, 122, 81),
+        ...mk(_now - 2 * _day, 120, 80),
+        ...mk(_now, 122, 81),
       ];
       expect(bpWindowTrend(pairs, nowSec: _now, windowDays: 30), isNull);
       expect(bpWindowTrend(const [], nowSec: _now, windowDays: 30), isNull);
@@ -137,10 +137,10 @@ void main() {
 
     test('median of an even count averages the two middle values', () {
       final pairs = [
-        ..._r(_now - 3 * _day, 110, 70),
-        ..._r(_now - 2 * _day, 120, 80),
-        ..._r(_now - 1 * _day, 130, 90),
-        ..._r(_now, 140, 100),
+        ...mk(_now - 3 * _day, 110, 70),
+        ...mk(_now - 2 * _day, 120, 80),
+        ...mk(_now - 1 * _day, 130, 90),
+        ...mk(_now, 140, 100),
       ];
       final w = bpWindowTrend(pairs, nowSec: _now, windowDays: 30);
       expect(w!.medianSystolic, 125);
@@ -154,11 +154,11 @@ void main() {
         return DateTime(d.year, d.month, d.day, hour, 0).millisecondsSinceEpoch ~/ 1000;
       }
       final pairs = [
-        ..._r(atHour(10, 8), 120, 80),
-        ..._r(atHour(5, 8), 122, 81),
-        ..._r(atHour(1, 8), 124, 82),
-        ..._r(atHour(3, 20), 150, 95),
-        ..._r(atHour(2, 20), 152, 96),
+        ...mk(atHour(10, 8), 120, 80),
+        ...mk(atHour(5, 8), 122, 81),
+        ...mk(atHour(1, 8), 124, 82),
+        ...mk(atHour(3, 20), 150, 95),
+        ...mk(atHour(2, 20), 152, 96),
       ];
       final w = bpWindowTrend(pairs, nowSec: _now, windowDays: 30);
       expect(w, isNotNull);
@@ -174,9 +174,9 @@ void main() {
         return DateTime(d.year, d.month, d.day, hour, 0).millisecondsSinceEpoch ~/ 1000;
       }
       final pairs = [
-        ..._r(atHour(9, 6), 120, 80),
-        ..._r(atHour(6, 12), 122, 81),
-        ..._r(atHour(3, 18), 124, 82),
+        ...mk(atHour(9, 6), 120, 80),
+        ...mk(atHour(6, 12), 122, 81),
+        ...mk(atHour(3, 18), 124, 82),
       ];
       final w = bpWindowTrend(pairs, nowSec: _now, windowDays: 30);
       expect(w, isNotNull);
@@ -232,7 +232,7 @@ void main() {
         r'stage [123]|diagnos\w+|hypotension|you (are|have) (high|ill|sick))\b',
         caseSensitive: false);
 
-    Map<String, String> _messages(String path) {
+    Map<String, String> messagesOf(String path) {
       final raw = jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
       return {
         for (final e in raw.entries)
@@ -241,10 +241,10 @@ void main() {
     }
 
     test('bp card copy contains no classification or diagnosis wording', () {
-      final en = _messages('lib/l10n/app_en.arb');
+      final en = messagesOf('lib/l10n/app_en.arb');
       final hits = [
         for (final e in en.entries)
-          if e.key.startsWith('bpCard') && banned.hasMatch(e.value) e.key,
+          if (e.key.startsWith('bpCard') && banned.hasMatch(e.value)) e.key,
       ];
       expect(hits, isEmpty);
     });

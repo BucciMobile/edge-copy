@@ -1026,7 +1026,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
           _readFailed(
               l?.bpCardTitle(storeName) ?? 'Blood pressure from $storeName',
               _loadBp)
-        else if (_bp case final s)
+        else if (_bp case final s?)
           bpTrendSection(c, s, onRead: () => go(c, const PhoneImport())),
       ],
 
