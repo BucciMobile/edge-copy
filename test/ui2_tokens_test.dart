@@ -293,6 +293,11 @@ const _notComponents = {
   'SleepDetail', 'SleepTab', 'CircadianDetail', 'DayStrainDetail',
   'DayStepsDetail',
   'ZonesDetail',
+  // The ask-first check-in's tap-through route (/checkin): a Scaffold that
+  // pops the Navigator on reply and writes the journal + cursors through
+  // handleCheckInReply — pumped with an injected onReply by
+  // tier_card_l10n_test.dart instead.
+  'CheckInSheet',
   // Reads the day bundle AND the raw beat store to draw one night's Poincaré
   // cloud — a gallery case would have to mock 27 000 beat intervals.
   'Beats',

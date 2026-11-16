@@ -111,6 +111,7 @@ import '../gps/screen_wake.dart';
 import '../data/local_repository_impl.dart';
 import '../data/series_codec.dart';
 import '../notify/battery_forecast.dart';
+import '../notify/checkin.dart';
 import '../notify/med_buzzer.dart';
 import '../notify/notification_center.dart';
 import '../notify/notification_event.dart';
@@ -572,6 +573,7 @@ class AppState extends ChangeNotifier {
     // truth for every network call — announcements, OTA, telemetry, import).
     healthSyncEnabled = prefs.getBool(_kHealthSync) ?? false;
     phoneStepsEnabled = prefs.getBool(_kPhoneSteps) ?? false;
+    sleepHmmStagesEnabled = prefs.getBool(kSleepHmmStagesPref) ?? false;
     // Pull early without delaying launch. syncPhoneSteps queues a fresh light
     // derive AFTER the sensor rows land, including when an earlier band pass
     // already finished. The screen must not wait for another BLE drain.
@@ -830,6 +832,41 @@ class AppState extends ChangeNotifier {
   // Shared with `HealthExporter.exportWorkoutId`, which has to honour this
   // switch from callers that never see this class.
   static const String _kHealthSync = kHealthSyncPref;
+
+  /// EXPERIMENTAL, default off: the derivation engine re-stages the sleep
+  /// window with the HMM classifier (it reads the pref itself on every pass).
+  bool sleepHmmStagesEnabled = false;
+
+  /// Toggle the experimental HMM sleep staging. The field moves only once the
+  /// pref write is accepted, since the engine reads the pref: a failed write
+  /// leaves the switch showing what the engine will actually use. Then every
+  /// day still on disk is re-derived, so the switch shows up on recent nights
+  /// rather than only on the next one.
+  Future<bool> setSleepHmmStages(bool on) async {
+    bool saved;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      saved = await prefs.setBool(kSleepHmmStagesPref, on);
+    } catch (e) {
+      _log('[settings] sleep HMM switch not saved: $e');
+      saved = false;
+    }
+    if (!saved) return false;
+    sleepHmmStagesEnabled = on;
+    notifyListeners();
+    // run(force: true) skips finalized nights; rederiveDays does not.
+    unawaited(() async {
+      try {
+        if (!await rederiveDays(await substrateDays())) {
+          _log('[settings] sleep HMM re-derive failed; finalized nights keep '
+              'their old stager until Re-analyze data');
+        }
+      } catch (e) {
+        _log('[settings] sleep HMM re-derive failed: $e');
+      }
+    }());
+    return true;
+  }
 
   /// "Apple Health" (iOS) or "Health Connect" (Android).
   String get healthStoreName => HealthExporter.storeName;
@@ -1552,6 +1589,7 @@ class AppState extends ChangeNotifier {
       telemetryConsent = false;
       healthShareConsent = false;
       consentChosen = false;
+      sleepHmmStagesEnabled = false;
       TelemetryService.instance.applyConsent(false);
       HealthUploader.instance.deviceId = null; // maybeUpload bails without one
       deviceId = '';
@@ -1902,10 +1940,20 @@ class AppState extends ChangeNotifier {
   ValueNotifier<int> get insightsRevision => _deriveCoordinator.insightsRevision;
   StreamSubscription<String>? _tapSub;
 
+  /// Android inline quick-reply presses from the ask-first check-in
+  /// notification (iOS taps arrive on [_tapSub] as the /checkin route).
+  StreamSubscription<String>? _actionSub;
+
   void _handleTapRoute(String route) {
     final t = resolveTapRoute(route); // pure — lib/notify/tap_router.dart
     if (t.screen != null) screenRequest.value = t.screen;
     navRequest.value = t.tab;
+  }
+
+  void _handleCheckInAction(String actionId) {
+    final parsed = parseCheckInActionId(actionId); // lib/notify/checkin.dart
+    if (parsed == null) return;
+    unawaited(handleCheckInReply(parsed.reply, parsed.date));
   }
 
   AppState() {
@@ -2053,6 +2101,8 @@ class AppState extends ChangeNotifier {
     _initDone = _init();
     // Notification taps → request a tab switch (the shell listens to navRequest).
     _tapSub = NotificationService.instance.taps.listen(_handleTapRoute);
+    _actionSub =
+        NotificationService.instance.actionTaps.listen(_handleCheckInAction);
     unawaited(NotificationService.instance.consumeLaunchRoute());
     unawaited(checkPendingSiriRoute());
   }
@@ -2189,6 +2239,7 @@ class AppState extends ChangeNotifier {
     // each of their callbacks ends in notifyListeners() on a disposed
     // ChangeNotifier (which throws in release).
     _tapSub?.cancel();
+    _actionSub?.cancel();
     _deviceRowSub?.cancel();
     _deviceRowSub = null;
     _sync.dispose();
@@ -2754,8 +2805,10 @@ class AppState extends ChangeNotifier {
 
   /// Force-derive [days] (a wearable was enabled, disabled or switched), then
   /// refresh. Waits out a pass already running rather than dropping the ask.
-  Future<void> rederiveDays(Set<String> days) async {
-    if (days.isEmpty) return;
+  /// False when the pass threw or any day failed (logged), so a caller that
+  /// owes the user more than a log line can tell.
+  Future<bool> rederiveDays(Set<String> days) async {
+    if (days.isEmpty) return true;
     while (_derive.running) {
       await Future<void>.delayed(const Duration(milliseconds: 250));
     }
@@ -2764,10 +2817,15 @@ class AppState extends ChangeNotifier {
     // between, so this call cannot hit runDays' "already running" return.
     try {
       await _derive.runDays(_profile, days, force: true);
+      // runDays swallows a failing day and counts it instead. Read the count
+      // before any further await: another pass resets it as it starts.
+      final failedDays = _derive.lastRunFailedDays;
       await LocalDb.refreshComputeFreshness();
       bumpInsights();
+      return failedDays == 0;
     } catch (e) {
       _log('[derive] wearable re-derive failed: $e');
+      return false;
     }
   }
 

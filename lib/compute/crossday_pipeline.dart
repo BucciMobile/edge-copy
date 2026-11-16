@@ -19,6 +19,9 @@ import 'dart:math' as math;
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
 import '../data/day_label.dart';
+import 'activity_watch.dart';
+import 'context_model.dart';
+import 'tier_engine.dart';
 
 // Pure string helper only (the `need_input:name=…` note grammar) — no DB, no
 // IO, no Flutter binding, so importing it does not compromise this file's
@@ -57,12 +60,26 @@ import 'onehz_pipeline.dart' show kSleepClockAnchorSec, needInputNote;
 /// engine's `kMethodFamily`). The breakdown's HRV, resting HR and breathing
 /// rate compare tonight only with prior nights of tonight's method family.
 /// Empty ⇒ nights compare by their raw device family.
+/// [journalByDate] maps a day label to `{'tags': [...], 'metrics': {field:
+/// [value, atMinuteOfDay?]}}` — the user's own journal, read on the DB isolate
+/// and handed in as plain data so this stays pure. It feeds the CONTEXT MODEL
+/// (context_model.dart): the illness CUSUM, the overnight anomaly and the
+/// skin-temp flag below run on RESIDUALS (actual − expected-from-context), so
+/// a training-load, sleep-debt, alcohol, vaccination, travel, cycle or
+/// self-reported-symptom explanation cannot trip them. Empty ⇒ every residual
+/// is exactly the raw value and the detectors behave byte-for-byte as before.
 Map<String, dynamic> buildCrossDayBundle(
   List<Map<String, dynamic>> daysOldestFirst,
   Map<String, dynamic> profile, {
   List<String> cycleStartDates = const [],
   Map<String, List<String>> sessionTypesByDate = const {},
   Map<String, String> methodFamilies = const {},
+  Map<String, Map<String, dynamic>> journalByDate = const {},
+  // PR 4: per-day workout-derived signals (workout_signals.dart) —
+  // date → {hrr_bpm, hr_drift_bpm, economy, volume_kg, ...}. Feeds the
+  // context model (masking only) and the recovery trend (performance
+  // decrement); never the illness tiers. Absent → no offset, as before.
+  Map<String, Map<String, dynamic>> workoutsByDate = const {},
 }) {
   final days = daysOldestFirst;
   final n = days.length;
@@ -138,9 +155,113 @@ Map<String, dynamic> buildCrossDayBundle(
       days[i]['skin_temp_illness_ok'] == false ? null : tempRawList[i],
   ];
 
-  // ── illness CUSUM (NightSignal) on nightly RHR ─────────────────────────────
+  // CONTEXT MODEL: expected deviation per night -> residuals.
+  // The three overnight detectors below run on the RESIDUAL series
+  // (actual - expected-from-context), not the raw ones. With no journal,
+  // cycle or load context the expected offset is exactly 0 and the residual
+  // equals the raw value, so those nights behave byte-for-byte as before. The
+  // per-night residuals, the masks that produced them and the Layer-1
+  // calibration block are all published in the returned bundle (recent[] +
+  // top level), so the Observations log can show WHY something did or did
+  // not fire.
+  final journalTags = <String, List<String>>{};
+  final journalMetrics = <String, Map<String, List<num?>>>{};
+  for (final e in journalByDate.entries) {
+    journalTags[e.key] = <String>[
+      for (final t in (e.value['tags'] as List? ?? const []))
+        if (t is String) t,
+    ];
+    final mm = e.value['metrics'];
+    final out = <String, List<num?>>{};
+    if (mm is Map) {
+      for (final fe in mm.entries) {
+        final v = fe.value;
+        if (fe.key is String && v is List && v.isNotEmpty && v[0] is num) {
+          out[fe.key as String] = [
+            v[0] as num,
+            if (v.length > 1 && v[1] is num) v[1] as num,
+          ];
+        }
+      }
+    }
+    journalMetrics[e.key] = out;
+  }
+  final strainSeries = <double?>[for (final d in days) _numOrNull(d['strain'])];
+  // PR 4: workout signals as plain numeric context (hrr_bpm / volume_kg) for
+  // the context model, plus the per-day economy series for the recovery trend.
+  final workoutCtx = <String, Map<String, double>>{
+    for (final e in workoutsByDate.entries)
+      if (e.value['hrr_bpm'] is num || e.value['volume_kg'] is num)
+        e.key: {
+          if (e.value['hrr_bpm'] is num)
+            'hrr_bpm': (e.value['hrr_bpm'] as num).toDouble(),
+          if (e.value['volume_kg'] is num)
+            'volume_kg': (e.value['volume_kg'] as num).toDouble(),
+        },
+  };
+  final economySeries = <double?>[
+    for (final d in days)
+      (workoutsByDate[d['date'] as String? ?? '']?['economy'] as num?)
+          ?.toDouble(),
+  ];
+  final ctx = buildContextResiduals(
+    dates: dates,
+    unsettled: unsettled,
+    rhr: rhrList,
+    rmssd: rmssdList,
+    resp: respList,
+    tempAlert: tempAlertList,
+    strain: strainSeries,
+    tstMin: <double?>[for (final d in days) _numOrNull(d['tst_min'])],
+    journalTagsByDate: journalTags,
+    journalMetricsByDate: journalMetrics,
+    cycleStartDates: cycleStartDates,
+    workoutsByDate: workoutCtx,
+  );
+  final rhrResid = ctx.rhrResidual;
+  final hrvResid = ctx.hrvResidual;
+  final respResid = ctx.respResidual;
+  final tempResid = ctx.tempResidual;
+
+  // TIER ENGINE (Layer 3): aggregate the residuals into one tiered verdict
+  // for the newest settled night — published in the bundle so the push, the
+  // Home/Health cards and the log all read the same tier (see tier_engine.dart
+  // for the tier rules: persistence, consensus, calibration-stage cap).
+  final tierVerdict = computeTierVerdict(
+    dates: dates,
+    unsettled: unsettled,
+    rhrResid: rhrResid,
+    hrvResid: hrvResid,
+    respResid: respResid,
+    tempResid: tempResid,
+    stage: (ctx.calibration['stage'] as num?)?.toInt() ?? 0,
+    validNights: (ctx.calibration['valid_nights'] as num?)?.toInt() ?? 0,
+  );
+
+  // PR 3 — the inactivity watch and the recovery trend (activity_watch.dart).
+  // Informational cards only; neither ever pushes. The goal is the user's own
+  // profile setting (`weekly_activity_goal`, strain-points/week), defaulting
+  // to the WHO-anchored constant.
+  final inactivity = computeInactivity(
+    dates: dates,
+    strain: strainSeries,
+    journalTagsByDate: journalTags,
+    weeklyGoal: (profile['weekly_activity_goal'] as num?)?.toDouble() ??
+        kDefaultWeeklyActivityGoal,
+  );
+  final recoveryTrend = computeRecoveryTrend(
+    dates: dates,
+    unsettled: unsettled,
+    rhrResid: rhrResid,
+    hrvResid: hrvResid,
+    strain: strainSeries,
+    stage: (ctx.calibration['stage'] as num?)?.toInt() ?? 0,
+    economy: economySeries,
+  );
+
+  // illness CUSUM (NightSignal) on the nightly RHR RESIDUAL.
   final illness = ana.illnessCusum(dates, [
-    for (var i = 0; i < n; i++) settled(i, rhrList[i]),
+    for (var i = 0; i < n; i++) settled(i, rhrResid[i]),
   ]);
 
   // ── multivariate anomaly {RHR↑,HRV↓,temp↑,resp↑} ───────────────────────────
@@ -156,10 +277,10 @@ Map<String, dynamic> buildCrossDayBundle(
   final feats = <ana.AnomalyFeatures>[
     for (var i = 0; i < n; i++)
       ana.AnomalyFeatures(
-        rhr: settled(i, rhrList[i]),
-        hrv: settled(i, rmssdList[i]),
-        temp: settled(i, tempAlertList[i]),
-        resp: settled(i, respList[i]),
+        rhr: settled(i, rhrResid[i]),
+        hrv: settled(i, hrvResid[i]),
+        temp: settled(i, tempResid[i]),
+        resp: settled(i, respResid[i]),
       ),
   ];
   final anomaly = ana.multivariateAnomaly(dates, feats);
@@ -186,9 +307,9 @@ Map<String, dynamic> buildCrossDayBundle(
   // most ordinary thing in the world. It ANNOTATES, never silences: the day
   // exception still fires, with the confound named. Suppressing a real illness
   // is worse than the false alarm.
-  final luteal = _lutealFlags(dates, cycleStartDates);
+  final luteal = lutealFlags(dates, cycleStartDates);
   final tempIllness = ana.tempIllnessFlag(dates, [
-    for (var i = 0; i < n; i++) settled(i, tempAlertList[i]),
+    for (var i = 0; i < n; i++) settled(i, tempResid[i]),
   ], luteal: luteal);
 
   // ── circadian: mid-sleep, free/work split, jetlag, chronotype, sleep debt ──
@@ -639,6 +760,14 @@ Map<String, dynamic> buildCrossDayBundle(
       'temp':
           i < tempIllness.length &&
           tempIllness[i].flag == ana.TempFlag.elevated,
+      // Context-model outputs, persisted so the Observations log can show
+      // why a night did or did not fire: the residual each detector saw and
+      // the context masks that were subtracted (empty when none applied).
+      'rhr_residual': rhrResid[i],
+      'hrv_residual': hrvResid[i],
+      'resp_residual': respResid[i],
+      'temp_residual': tempResid[i],
+      'masks': ctx.masks[i],
     });
   }
 
@@ -692,6 +821,30 @@ Map<String, dynamic> buildCrossDayBundle(
     },
     'strain_coach': strainTgt.toJson((v) => v.toJson()),
     'percentiles': percentiles,
+    // Layer-1 calibration: valid-night count, unlock stage, wear-gap rule and
+    // per-signal availability — surfaced to the UI as "learning your baseline
+    // — 23 of 30 nights", and honestly quiet (stage 0) below 7 valid nights.
+    'calibration': ctx.calibration,
+    'context_model': {'version': 1},
+    'tiers': tierVerdict == null
+        ? null
+        : <String, dynamic>{
+            'date': tierVerdict.date,
+            'tier': tierVerdict.tier,
+            'signals': tierVerdict.signals,
+            'streak': tierVerdict.streak,
+            'constellation': tierVerdict.constellation,
+            'stage': tierVerdict.stage,
+            'valid_nights': tierVerdict.validNights,
+            'z': tierVerdict.z,
+          },
+    // PR 3: inactivity watch + recovery trend (activity_watch.dart) —
+    // informational cards on Home/Health only, never notifications.
+    'inactivity': inactivity,
+    'recovery_trend': recoveryTrend,
+    // PR 4: per-day workout-derived signals (workout_signals.dart) — context
+    // masking + the recovery trend's performance-decrement path only.
+    'workout_signals': {'version': 1, 'per_day': workoutsByDate},
     'recent': recent,
   };
 }
@@ -896,58 +1049,11 @@ bool _isFreeDay(String? date) {
   return dt.weekday == DateTime.saturday || dt.weekday == DateTime.sunday;
 }
 
-/// Per-night "is this date in the SECOND HALF of the cycle it belongs to",
-/// parallel to [dates]. All-false when there is nothing to count from.
+/// Per-night "is this date in the SECOND HALF of the cycle it belongs to" now
+/// lives in context_model.dart as [lutealFlags] — one source for the cycle
+/// arithmetic, shared by the temp flag's annotation and the context model's
+/// cycle-stratified offsets.
 ///
-/// Each date walks back to its NEAREST PRECEDING logged start — NOT through
-/// `getCycle`, which counts from the LAST start only and therefore produces
-/// nonsense for every historical day. The cycle's length is the gap to the NEXT
-/// logged start; the still-open cycle uses the median of her own completed
-/// gaps, and with fewer than two completed cycles there is no length to use, so
-/// the open cycle contributes nothing rather than a guess.
-///
-/// A date more than 1.5 cycles past its start is a lapse in logging, not a
-/// four-week luteal phase — it stops counting.
-List<bool> _lutealFlags(List<String> dates, List<String> cycleStartDates) {
-  final out = List<bool>.filled(dates.length, false);
-  // Labels parsed as UTC midnight, as in [_isNextDay]: at local midnight a
-  // span holding the 23 h spring-forward day floors one day short in `inDays`,
-  // which shortens that cycle and moves its midpoint night.
-  DateTime? day(String s) => DateTime.tryParse('${s}T00:00:00Z');
-  final starts = <DateTime>[
-    for (final s in cycleStartDates) ?day(s),
-  ]..sort();
-  if (starts.isEmpty) return out;
-
-  final gaps = <double>[
-    for (var i = 1; i < starts.length; i++)
-      starts[i].difference(starts[i - 1]).inDays.toDouble(),
-  ].where((g) => g >= 15 && g <= 60).toList();
-  final medianGap = _median(gaps);
-
-  for (var i = 0; i < dates.length; i++) {
-    final d = day(dates[i]);
-    if (d == null) continue;
-    // Nearest PRECEDING start (inclusive: the start day is cycle day 1).
-    var si = -1;
-    for (var k = 0; k < starts.length; k++) {
-      if (starts[k].isAfter(d)) break;
-      si = k;
-    }
-    if (si < 0) continue; // before she ever logged — nothing to count from
-    final elapsed = d.difference(starts[si]).inDays;
-    // Closed cycle → its own measured length. Open cycle → her median, if she
-    // has one.
-    final len = si + 1 < starts.length
-        ? starts[si + 1].difference(starts[si]).inDays.toDouble()
-        : medianGap;
-    if (len == null || len < 15) continue;
-    if (elapsed > 1.5 * len) continue; // stale log, not a long luteal phase
-    if (elapsed >= len / 2) out[i] = true;
-  }
-  return out;
-}
-
 /// Guard on how far [_denseDailyTrimp] will densify. Past this the input is not
 /// a plausible recent-history window (a corrupt/absurd date), so we fall back to
 /// the raw per-row series rather than allocating an unbounded list.

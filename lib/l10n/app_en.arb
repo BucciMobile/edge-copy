@@ -32,6 +32,94 @@
   "@languageSystemDefault": {
     "description": "Option in the language picker that follows the OS locale."
   },
+  "alarmSavedNotOnBand": "Saved, but the band hasn't taken it yet — it's sent again on the next sync",
+  "@alarmSavedNotOnBand": {
+    "description": "Alarm screen: the alarm is saved but the band has not taken it yet."
+  },
+  "coachChatgptUsingPlanShort": "Using ChatGPT plan",
+  "@coachChatgptUsingPlanShort": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptSharingNotAllowed": "Signed in, but ChatGPT plan usage was not allowed. Continue with ChatGPT again and allow it to use your plan here.",
+  "@coachChatgptSharingNotAllowed": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptSignedOut": "Signed out of ChatGPT.",
+  "@coachChatgptSignedOut": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptSignOutUnconfirmed": "Signed out here, but ChatGPT did not confirm it. You can also disconnect OpenStrap in ChatGPT settings.",
+  "@coachChatgptSignOutUnconfirmed": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptWelcomeTitle": "You’re using your ChatGPT plan",
+  "@coachChatgptWelcomeTitle": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptWelcomeBody": "Eligible usage in this app uses your ChatGPT plan. Manage usage in your ChatGPT settings.",
+  "@coachChatgptWelcomeBody": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptGotIt": "Got it",
+  "@coachChatgptGotIt": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptUseTitle": "Use your ChatGPT plan",
+  "@coachChatgptUseTitle": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptUsingTitle": "Using your ChatGPT plan",
+  "@coachChatgptUsingTitle": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptNotAllowedTitle": "Plan usage not allowed",
+  "@coachChatgptNotAllowedTitle": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptBlurb": "Complete eligible AI requests in this app with usage included in your ChatGPT plan or credits balance. OpenStrap never charges for this.",
+  "@coachChatgptBlurb": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptCancelSignIn": "Cancel sign-in",
+  "@coachChatgptCancelSignIn": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptContinue": "Continue with ChatGPT",
+  "@coachChatgptContinue": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptManageUsage": "Manage usage",
+  "@coachChatgptManageUsage": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptSignOut": "Sign out of ChatGPT",
+  "@coachChatgptSignOut": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptPrivacy": "Your questions and the rows the coach reads are sent to OpenAI under your ChatGPT account, where your ChatGPT data controls, including model training, may apply. Check them in ChatGPT settings. See exactly what is sent on \"What was sent\".",
+  "@coachChatgptPrivacy": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptTermsTitle": "Before you sign in",
+  "@coachChatgptTermsTitle": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptTermsBody": "Signing in uses your own ChatGPT account and plan. Your use of it here is covered by OpenAI’s Terms of Use and Usage Policies, so please read them before you continue.",
+  "@coachChatgptTermsBody": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptTermsLink": "OpenAI Terms of Use",
+  "@coachChatgptTermsLink": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptPoliciesLink": "OpenAI Usage Policies",
+  "@coachChatgptPoliciesLink": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
+  "coachChatgptTermsAccept": "I’ve read them, continue",
+  "@coachChatgptTermsAccept": {
+    "description": "Coach, ChatGPT sign-in: shown while signing in or out with ChatGPT."
+  },
   "actionCancel": "Cancel",
   "@actionCancel": {
     "description": "Generic Cancel button."
@@ -5760,6 +5848,18 @@
         "type": "String"
       }
     }
+  },
+  "investigateMethodHrvRmssd": "The mean of RMSSD across every 5-minute window of the detected sleep session that holds at least 20 clean successive differences. Beats outside 300–2000 ms, and beats more than 20% from their local median, are dropped first. On a night whose beat timing looks noisy, only windows that pass the jitter check on their own, or that sit on a steady breathing line, count; a window, or a night, whose beats add up to more time than passed is left out. Older nights whose raw beats are gone keep the value an earlier version of this method gave them. Pulse-derived, so this is PRV: real and trendable, but not ECG HRV.",
+  "@investigateMethodHrvRmssd": {
+    "description": "Investigate: how the nightly HRV (RMSSD) figure is computed."
+  },
+  "investigateMethodRespRate": "Breathing rate recovered from respiratory sinus arrhythmia — the periodic modulation breathing imposes on beat timing. The spectral peak is found in overlapping five-minute stretches of clean beats (Lomb–Scargle on native beat times) and the night's rate is their median, reported only when most stretches agree. At a sleeping heart rate near or below 48 bpm the beats are too slow to resolve normal breathing, and the rate is withheld.",
+  "@investigateMethodRespRate": {
+    "description": "Investigate: how the nightly respiratory rate is computed."
+  },
+  "investigateMethodHrvStability": "Within one night: the standard deviation of the night's beat intervals after artifact correction (SDNN) as a percentage of their mean. The chart shows how that per-night figure moves across nights; it is not a night-to-night coefficient of variation.",
+  "@investigateMethodHrvStability": {
+    "description": "Investigate: how the within-night HRV stability figure (SDNN as % of mean NN) is computed."
   },
   "metricDetailSlotWithValue": "{day}, {value} {unit}",
   "@metricDetailSlotWithValue": {
@@ -14761,6 +14861,7 @@
   "journalTagSocial": "social",
   "journalTagWorkout": "workout",
   "journalTagRestDay": "rest day",
+  "journalTagVaccinated": "vaccinated",
   "liveHrShowingDeviceSemantics": "Showing {label}. Tap to switch device.",
   "@liveHrShowingDeviceSemantics": {
     "placeholders": {
@@ -17155,5 +17256,67 @@
         "type": "String"
       }
     }
-  }
+  },
+  "checkInActionFine": "I feel fine",
+  "@checkInActionFine": {"description": "Quick-reply action on the ask-first check-in notification and on the in-app check-in sheet: the user reports feeling fine."},
+  "checkInActionRunDown": "A bit run down",
+  "@checkInActionRunDown": {"description": "Quick-reply action on the check-in: the user reports feeling a bit run down."},
+  "checkInActionSick": "Sick / symptoms",
+  "@checkInActionSick": {"description": "Quick-reply action on the check-in: the user reports symptoms. Activates the explicit illness state; wording must stay a question/reply, never a diagnosis."},
+  "checkInSheetBody": "Your values have deviated from your usual for the last few nights.",
+  "@checkInSheetBody": {"description": "Body of the in-app check-in sheet that a check-in notification taps through to on iOS (no action buttons there)."},
+  "tierCardTitle": "Off your usual",
+  "@tierCardTitle": {"description": "Home/Health card title when one or more signals deviate from the personal baseline."},
+  "tierCardBody": "{signals} deviated from your usual for {streak} nights. A pattern, not a cause.",
+  "@tierCardBody": {"description": "Home/Health card body. signals is the comma-separated list of deviating signals, streak the number of consecutive nights.", "placeholders": {"signals": {"type": "String"}, "streak": {"type": "int"}}},
+  "tierCardAdvice": "Worth resting if it continues past a couple of days.",
+  "@tierCardAdvice": {"description": "Advice line under the deviation card (tiers 1-2)."},
+  "tierCardAdviceTier3": "Consider rest, and if this persists, consider checking with a healthcare professional.",
+  "@tierCardAdviceTier3": {"description": "Advice line under the tier-3 card (temperature + breathing + heart rate elevated together). No diagnosis wording."},
+  "tierCardIllnessActiveTitle": "Taking it easy",
+  "@tierCardIllnessActiveTitle": {"description": "Card title while the user's explicit illness state is active."},
+  "tierCardIllnessActive": "You told us you're not feeling well — the overnight watches are standing down while that lasts.",
+  "@tierCardIllnessActive": {"description": "Card body while the illness state is active: the overnight watches stand down because the deviation is now expected."},
+  "tierCardCalibratingTitle": "Learning your usual",
+  "@tierCardCalibratingTitle": {"description": "Health card title while the baseline is still being learned."},
+  "tierCardCalibrating": "Learning your usual — {valid} of 30 nights so far.",
+  "@tierCardCalibrating": {"description": "Health card body during calibration. valid is the count of valid nights so far, out of 30 needed for full sensitivity.", "placeholders": {"valid": {"type": "int"}}},
+  "tierCardCalibratingAdvice": "The overnight watches stay quiet until they have enough of your nights.",
+  "@tierCardCalibratingAdvice": {"description": "Advice line under the calibration card."},
+  "notifCheckInTitleTier2": "Off your usual lately",
+  "@notifCheckInTitleTier2": {"description": "OS notification title for the tier-2 ask-first check-in."},
+  "notifCheckInTitleTier3": "Values above your usual for several nights",
+  "@notifCheckInTitleTier3": {"description": "OS notification title for the tier-3 check-in (fever-like constellation)."},
+  "notifCheckInBody": "Your values have deviated from your usual for the last {streak} nights. Do you feel unusually tired or run down?",
+  "@notifCheckInBody": {"description": "OS notification body for the tier-2 ask-first check-in; asks a question, never states a condition. streak is the number of consecutive deviating nights.", "placeholders": {"streak": {"type": "int"}}},
+  "notifCheckInBodyTier3": "Across skin temperature, breathing rate and resting heart rate, your values have been above your usual for the last {streak} nights. Consider rest, and if this persists, consider checking with a healthcare professional.",
+  "@notifCheckInBodyTier3": {"description": "OS notification body for the tier-3 check-in. streak is the number of consecutive nights.", "placeholders": {"streak": {"type": "int"}}},
+  "inactivityCardTitle": "Well below your usual activity",
+  "@inactivityCardTitle": {"description": "Home/Health card title when the inactivity watch fires (7-day strain below the weekly goal and below the user's usual for several days). Informational only."},
+  "inactivityCardBody": "Your activity has been below your usual for {days} days — {strain7} strain in the last 7 days against your {goal} weekly goal.",
+  "@inactivityCardBody": {"description": "Inactivity card body. days = consecutive days below usual, strain7 = strain total over the last 7 days, goal = the configured weekly goal.", "placeholders": {"days": {"type": "int"}, "strain7": {"type": "int"}, "goal": {"type": "int"}}},
+  "inactivityCardAdvice": "Just a note — no action needed.",
+  "@inactivityCardAdvice": {"description": "Advice line under the inactivity card."},
+  "recoveryCardTitle": "Recovery trend below your usual",
+  "@recoveryCardTitle": {"description": "Home/Health card title when the recovery trend fires (HRV suppressed for several nights with rising resting HR despite normal training load)."},
+  "recoveryCardBody": "HRV has run below your usual for {days} nights and your resting heart rate has crept up, while your training load stayed normal.",
+  "@recoveryCardBody": {"description": "Recovery-trend card body. days = suppressed nights in the 7-night window.", "placeholders": {"days": {"type": "int"}}},
+  "recoveryCardAdvice": "Lighter days and earlier nights until it lifts.",
+  "@recoveryCardAdvice": {"description": "Advice line under the recovery-trend card."},
+  "activityGoalSection": "Weekly activity goal",
+  "@activityGoalSection": {"description": "Day Strain screen section for the weekly activity goal editor."},
+  "activityGoalRow": "Strain points per week",
+  "@activityGoalRow": {"description": "Label of the weekly activity goal row (strain points per week)."},
+  "activityGoalHint": "The inactivity watch compares your last 7 days of strain against this. The default 45 is about 150 minutes of moderate activity a week on this scale.",
+  "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
+  "activityGoalInvalid": "A weekly goal of {min}–{max} strain points is a real one. Nothing was saved.",
+  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}},
+  "settingsSleepHmmRowTitle": "Experimental sleep staging (HMM)",
+  "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
+  "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
+  "settingsSleepHmmRowSub": "Research algorithm, not a medical device. Off by default.",
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
+  "recoveryCardPerfBody": "Your pace per heartbeat has slipped about {pct}% over the last {days} days while your training load stayed normal — a pattern in your own data, not a verdict on you.",
+  "@recoveryCardPerfBody": {"description": "Recovery-trend card body on the PR-4 performance-decrement path (pace per heartbeat slipped vs the user's baseline at normal load). days = days with an economy reading, pct = decline percent. Pattern, not a verdict.", "placeholders": {"days": {"type": "int"}, "pct": {"type": "int"}}}
 }
