@@ -240,15 +240,15 @@ Future<Map<String, dynamic>> _snapshot(Profile profile) async {
     'sleep_nap': await rows(
         'SELECT * FROM sleep_nap WHERE day_id >= ? ORDER BY start_ts'),
     'crossday_input': crossDayDays,
-    // The context model's / tier engine's ADDITIVE keys (top-level
-    // calibration/context_model/tiers and the per-night residual/mask fields
-    // in recent[]) are stripped before the comparison: this golden pins the
+    // The pipeline's ADDITIVE keys (top-level calibration/context_model/tiers/
+    // inactivity/recovery_trend and the per-night residual/mask fields in
+    // recent[]) are stripped before the comparison: this golden pins the
     // stored WHOOP numbers and every pre-existing crossday verdict byte for
     // byte, while the new keys are pinned structurally by
-    // test/context_model_test.dart, test/context_residuals_pipeline_test.dart
-    // and test/tier_engine_test.dart. Anything else in the bundle — including
-    // the illness/anomaly/temp verdicts themselves — still has to match the
-    // golden exactly.
+    // test/context_model_test.dart, test/context_residuals_pipeline_test.dart,
+    // test/tier_engine_test.dart and test/activity_watch_test.dart. Anything
+    // else in the bundle — including the illness/anomaly/temp verdicts
+    // themselves — still has to match the golden exactly.
     'crossday': _withoutContextModelKeys(
         buildCrossDayBundle(crossDayDays, profile.toMap())),
   };
@@ -265,7 +265,11 @@ const List<String> _contextModelRecentKeys = <String>[
 Map<String, dynamic> _withoutContextModelKeys(Map<String, dynamic> bundle) {
   final out = <String, dynamic>{};
   for (final e in bundle.entries) {
-    if (e.key == 'calibration' || e.key == 'context_model' || e.key == 'tiers') {
+    if (e.key == 'calibration' ||
+        e.key == 'context_model' ||
+        e.key == 'tiers' ||
+        e.key == 'inactivity' ||
+        e.key == 'recovery_trend') {
       continue;
     }
     if (e.key == 'recent' && e.value is List) {
