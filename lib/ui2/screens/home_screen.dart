@@ -78,6 +78,7 @@ import 'coach.dart';
 import 'detected_activities.dart';
 import 'day_timeline.dart' show DayTimelineScreen;
 import 'metric_detail.dart';
+import 'tier_card.dart';
 import 'readiness_detail.dart';
 import 'sleep_detail.dart';
 
@@ -1725,6 +1726,20 @@ class HomeData {
   /// another night.
   final SleepStageMin? sleepStages;
 
+  /// The cross-day bundle's `tiers` block (tier_engine.dart): the tiered
+  /// verdict over the residual deviations, dated by the night it is about.
+  /// Null when the rollup is absent — the card then shows nothing.
+  final Map<String, dynamic>? tiers;
+
+  /// The cross-day bundle's `inactivity` / `recovery_trend` blocks
+  /// (activity_watch.dart, PR 3): informational cards only, never pushes.
+  final Map<String, dynamic>? inactivity;
+  final Map<String, dynamic>? recoveryTrend;
+
+  /// Whether the explicit illness state is active (the user answered
+  /// "Sick / symptoms" and it has not expired) — see tier_card.dart.
+  final bool illnessActive;
+
   const HomeData({
     this.name,
     this.dayId,
@@ -1743,6 +1758,10 @@ class HomeData {
     this.illnessState,
     this.illnessDay,
     this.illnessZ,
+    this.tiers,
+    this.inactivity,
+    this.recoveryTrend,
+    this.illnessActive = false,
     this.insightsStale,
     this.absentDiag,
     this.recoveryState,
@@ -1900,6 +1919,14 @@ class HomeData {
       illnessState: illness is Map ? illness['state']?.toString() : null,
       illnessDay: illness is Map ? illness['date']?.toString() : null,
       illnessZ: illness is Map ? (illness['z'] as num?)?.toDouble() : null,
+      tiers: cd['tiers'] is Map ? (cd['tiers'] as Map).cast<String, dynamic>() : null,
+      inactivity: cd['inactivity'] is Map
+          ? (cd['inactivity'] as Map).cast<String, dynamic>()
+          : null,
+      recoveryTrend: cd['recovery_trend'] is Map
+          ? (cd['recovery_trend'] as Map).cast<String, dynamic>()
+          : null,
+      illnessActive: await illnessStateActive(),
       readiness: readiness,
       absentDiag: absentDiag,
       recoveryState: recoveryState,
@@ -2621,8 +2648,25 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
   /// payload loaded yesterday and rebuilt today with no new sync has aged a
   /// day all the same.
   static List<Widget>? _bodyWatch(BuildContext c, HomeData d, String today) {
+    // The tier card rides the same freshness rule as the illness watch below:
+    // dated by the night it is about, today/yesterday only (tier_card.dart).
+    final tc = tierCard(c, d.tiers,
+        today: today, illnessActive: d.illnessActive);
+    // PR 3 trend cards (inactivity watch, recovery trend) ride the same
+    // freshness rule — informational only (trendCards, tier_card.dart).
+    final trends = trendCards(c,
+        today: today,
+        inactivity: d.inactivity,
+        recoveryTrend: d.recoveryTrend,
+        illnessActive: d.illnessActive);
+    final watch = <Widget>[
+      if (tc != null) ...[tc, const SizedBox(height: S.x3)],
+      for (final t in trends) ...[t, const SizedBox(height: S.x3)],
+    ];
     final state = d.illnessState;
-    if (state == null || state == 'green') return null;
+    if (state == null || state == 'green') {
+      return watch.isEmpty ? null : watch;
+    }
     // The watch publishes the newest SETTLED night, which after days off the
     // wrist is days old, and the red title carries no date. Same freshness
     // rule as the push: older verdicts live in Observations, not on Home.
@@ -2634,6 +2678,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
     final z = d.illnessZ;
 
     return [
+      if (tc != null) ...[tc, const SizedBox(height: S.x3)],
       Observation(
         state == 'red'
             ? (l?.homeIllnessRedTitle ?? 'Recent nights add up to a raised resting heart rate')
@@ -2653,6 +2698,7 @@ class _HomeScreenState extends State<HomeScreen> with RevisionReload {
         onTap: () => go(c, const MetricDetail('resting_hr')),
       ),
       const SizedBox(height: S.x3),
+      for (final t in trends) ...[t, const SizedBox(height: S.x3)],
     ];
   }
 

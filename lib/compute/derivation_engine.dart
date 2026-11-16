@@ -56,6 +56,7 @@ import '../notify/tap_router.dart' show activitySuggestionRoute;
 import '../telemetry/firebase_bridge.dart';
 import '../telemetry/telemetry_service.dart';
 import 'crossday_pipeline.dart';
+import 'tier_engine.dart';
 import 'derive_pacing.dart';
 import 'inputs/canonical.dart';
 import 'inputs/garmin_inputs.dart'
@@ -7355,6 +7356,14 @@ class DerivationEngine {
       // TS-11's grouping key. Read here (sqflite is main-isolate only) and
       // handed in as plain strings so the bundle stays pure.
       final sessionTypes = await _sessionTypesByDate(days);
+      // The user's own journal over the same window, for the context model:
+      // tags + numeric metrics per day, read here and handed in as plain
+      // data so buildCrossDayBundle stays pure/isolate-safe. The overnight
+      // detectors then run on residuals (actual − expected-from-context), so
+      // a journaled alcohol/vaccination/travel/sick day or a hard training
+      // day cannot trip them. Empty window ⇒ empty map ⇒ byte-for-byte the
+      // old behaviour.
+      final journalByDate = await _journalByDate(days);
       // Encode INSIDE the isolate too — a real ~3.5-4.7s main-isolate hang was
       // caught in production (Crashlytics jank_watchdog, correlated with a
       // heavy derive pass) coming from jsonEncode-ing this bundle back on the
@@ -7380,6 +7389,7 @@ class DerivationEngine {
                   cycleStartDates: cycleStarts,
                   sessionTypesByDate: sessionTypes,
                   methodFamilies: kMethodFamily,
+                  journalByDate: journalByDate,
                 )
                 ..['algo_version'] = kAlgoVersion
                 ..['built_for_day'] = builtForDay
@@ -7468,6 +7478,54 @@ class DerivationEngine {
             () => <String>[],
           )
           .add(type);
+    }
+    return out;
+  }
+
+  /// The journal (tags + numeric metrics) per day label over the cross-day
+  /// window, as plain isolate-safe data for the context model
+  /// (context_model.dart via buildCrossDayBundle). Read on the DB-owning
+  /// isolate; the bundle builder only ever sees strings and numbers. A day
+  /// with no journal row still gets an entry when it has metrics; a malformed
+  /// tags blob is an empty tag set, never a crash of the whole pass.
+  static Future<Map<String, Map<String, dynamic>>> _journalByDate(
+    List<Map<String, dynamic>> days,
+  ) async {
+    if (days.isEmpty) return const {};
+    final first = days.first['date'];
+    if (first is! String || first.isEmpty) return const {};
+    final rows = await LocalDb.journalRows(sinceDaysEpoch: first);
+    final metrics = await LocalDb.journalMetricsByDay(sinceDaysEpoch: first);
+    final out = <String, Map<String, dynamic>>{};
+    for (final r in rows) {
+      final d = r['date'];
+      if (d is! String || d.isEmpty) continue;
+      final tags = <String>[];
+      final tagsJson = r['tags_json'];
+      if (tagsJson is String) {
+        try {
+          final decoded = jsonDecode(tagsJson);
+          if (decoded is List) {
+            for (final t in decoded) {
+              if (t is String) tags.add(t);
+            }
+          }
+        } catch (_) {
+          // Malformed tags JSON -> empty tag set; the context model simply
+          // has no journal explanation for this night.
+        }
+      }
+      out[d] = {'tags': tags};
+    }
+    for (final e in metrics.entries) {
+      (out[e.key] ??= {'tags': <String>[]})['metrics'] =
+          <String, List<num?>>{
+        for (final fe in e.value.entries)
+          fe.key: [
+            fe.value.value,
+            if (fe.value.atMinuteOfDay != null) fe.value.atMinuteOfDay!,
+          ],
+      };
     }
     return out;
   }
@@ -7616,7 +7674,7 @@ class DerivationEngine {
       // Only a pin taken on the anchor day's own night (LocalDb.headlinePinFor).
       final pinValue =
           anchor == null ? null : await LocalDb.headlinePinFor(anchor.date);
-      final notices = planExceptionNotices(
+      var notices = planExceptionNotices(
         cd,
         today: today,
         irregularFlag: anchor == null
@@ -7627,6 +7685,45 @@ class DerivationEngine {
             ? null
             : await LocalDb.metricValueOn(anchor.date, 'readiness'),
       );
+
+      // TIER 2/3 ASK-FIRST CHECK-IN (tier_engine.dart). One push per night
+      // about a night whose residual deviations reach consensus +
+      // persistence, suppressed while the illness state is active (the
+      // deviations are then expected) or the 48 h damping after an "I feel
+      // fine" reply holds. The illness state also auto-expires here: enough
+      // clean nights back in baseline end it (persisted below).
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final dampUntil =
+          (await LocalDb.getCursorInt('checkin_damp_until')) ?? 0;
+      final illnessRaw = await LocalDb.getCursor('illness_state');
+      Object? illnessDecoded;
+      if (illnessRaw != null) {
+        try {
+          illnessDecoded = jsonDecode(illnessRaw);
+        } catch (_) {
+          illnessDecoded = null;
+        }
+      }
+      final illnessState = IllnessState.fromJson(illnessDecoded);
+      final verdict = tierVerdictOfBundle(cd);
+      final nextIllness =
+          illnessState.next(anySignal: verdict?.anySignal ?? false);
+      if (nextIllness != illnessState) {
+        await LocalDb.setCursor(
+            'illness_state', jsonEncode(nextIllness.toJson()));
+      }
+      final checkIn = planCheckIn(
+        cd,
+        today: today,
+        nowSec: nowSec,
+        illnessActive: illnessState.active,
+        dampUntilSec: dampUntil,
+      );
+      // The overnight deviation findings now push only as the check-in:
+      // gate them out of the aggregated notice, and when the check-in fired
+      // for a night the whole notice for that night stands down — one push
+      // per night either way.
+      notices = gateExceptionNotices(notices, checkInDate: checkIn?.date);
 
       // One notice per day the findings are ABOUT. The key's date is that
       // day, so a night fires at most once however many passes see it.
@@ -7663,6 +7760,22 @@ class DerivationEngine {
         if (notice.medical && fired) {
           await const FiredKeyStore().recordFired('${notice.date}:exception');
         }
+      }
+      if (checkIn != null) {
+        // The ask-first check-in: a question, never a diagnosis. Quick
+        // replies ride as Android action buttons (see NotificationService)
+        // or the tap-through sheet at [checkIn.route] on iOS.
+        await NotificationCenter.instance.emit(
+          NotificationEvent(
+            dedupeKey: checkIn.dedupeKey,
+            category: NotifCategory.health,
+            priority: NotifPriority.critical,
+            title: checkIn.title,
+            body: checkIn.body,
+            date: checkIn.date,
+            route: checkIn.route,
+          ),
+        );
       }
     } catch (e) {
       _log('notifications FAILED/skipped: $e');

@@ -240,8 +240,52 @@ Future<Map<String, dynamic>> _snapshot(Profile profile) async {
     'sleep_nap': await rows(
         'SELECT * FROM sleep_nap WHERE day_id >= ? ORDER BY start_ts'),
     'crossday_input': crossDayDays,
-    'crossday': buildCrossDayBundle(crossDayDays, profile.toMap()),
+    // The pipeline's ADDITIVE keys (top-level calibration/context_model/tiers/
+    // inactivity/recovery_trend and the per-night residual/mask fields in
+    // recent[]) are stripped before the comparison: this golden pins the
+    // stored WHOOP numbers and every pre-existing crossday verdict byte for
+    // byte, while the new keys are pinned structurally by
+    // test/context_model_test.dart, test/context_residuals_pipeline_test.dart,
+    // test/tier_engine_test.dart and test/activity_watch_test.dart. Anything
+    // else in the bundle — including the illness/anomaly/temp verdicts
+    // themselves — still has to match the golden exactly.
+    'crossday': _withoutContextModelKeys(
+        buildCrossDayBundle(crossDayDays, profile.toMap())),
   };
+}
+
+const List<String> _contextModelRecentKeys = <String>[
+  'rhr_residual',
+  'hrv_residual',
+  'resp_residual',
+  'temp_residual',
+  'masks',
+];
+
+Map<String, dynamic> _withoutContextModelKeys(Map<String, dynamic> bundle) {
+  final out = <String, dynamic>{};
+  for (final e in bundle.entries) {
+    if (e.key == 'calibration' ||
+        e.key == 'context_model' ||
+        e.key == 'tiers' ||
+        e.key == 'inactivity' ||
+        e.key == 'recovery_trend') {
+      continue;
+    }
+    if (e.key == 'recent' && e.value is List) {
+      out[e.key] = [
+        for (final r in e.value)
+          if (r is Map)
+            <String, dynamic>{
+              for (final re in r.entries)
+                if (!_contextModelRecentKeys.contains(re.key)) re.key: re.value,
+            },
+      ];
+      continue;
+    }
+    out[e.key] = e.value;
+  }
+  return out;
 }
 
 /// The goldens are generated on macOS, where they hold byte for byte. CI
