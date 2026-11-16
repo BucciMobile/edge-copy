@@ -19,6 +19,7 @@ import 'dart:math' as math;
 import 'package:openstrap_analytics/onehz.dart' as ana;
 
 import '../data/day_label.dart';
+import 'activity_watch.dart';
 import 'context_model.dart';
 import 'tier_engine.dart';
 
@@ -180,6 +181,7 @@ Map<String, dynamic> buildCrossDayBundle(
     }
     journalMetrics[e.key] = out;
   }
+  final strainSeries = <double?>[for (final d in days) _numOrNull(d['strain'])];
   final ctx = buildContextResiduals(
     dates: dates,
     unsettled: unsettled,
@@ -187,7 +189,7 @@ Map<String, dynamic> buildCrossDayBundle(
     rmssd: rmssdList,
     resp: respList,
     tempAlert: tempAlertList,
-    strain: <double?>[for (final d in days) _numOrNull(d['strain'])],
+    strain: strainSeries,
     tstMin: <double?>[for (final d in days) _numOrNull(d['tst_min'])],
     journalTagsByDate: journalTags,
     journalMetricsByDate: journalMetrics,
@@ -211,6 +213,26 @@ Map<String, dynamic> buildCrossDayBundle(
     tempResid: tempResid,
     stage: (ctx.calibration['stage'] as num?)?.toInt() ?? 0,
     validNights: (ctx.calibration['valid_nights'] as num?)?.toInt() ?? 0,
+  );
+
+  // PR 3 — the inactivity watch and the recovery trend (activity_watch.dart).
+  // Informational cards only; neither ever pushes. The goal is the user's own
+  // profile setting (`weekly_activity_goal`, strain-points/week), defaulting
+  // to the WHO-anchored constant.
+  final inactivity = computeInactivity(
+    dates: dates,
+    strain: strainSeries,
+    journalTagsByDate: journalTags,
+    weeklyGoal: (profile['weekly_activity_goal'] as num?)?.toDouble() ??
+        kDefaultWeeklyActivityGoal,
+  );
+  final recoveryTrend = computeRecoveryTrend(
+    dates: dates,
+    unsettled: unsettled,
+    rhrResid: rhrResid,
+    hrvResid: hrvResid,
+    strain: strainSeries,
+    stage: (ctx.calibration['stage'] as num?)?.toInt() ?? 0,
   );
 
   // illness CUSUM (NightSignal) on the nightly RHR RESIDUAL.
@@ -792,6 +814,10 @@ Map<String, dynamic> buildCrossDayBundle(
             'valid_nights': tierVerdict.validNights,
             'z': tierVerdict.z,
           },
+    // PR 3: inactivity watch + recovery trend (activity_watch.dart) —
+    // informational cards on Home/Health only, never notifications.
+    'inactivity': inactivity,
+    'recovery_trend': recoveryTrend,
     'recent': recent,
   };
 }

@@ -20,7 +20,13 @@
 
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
+import 'package:provider/provider.dart';
 
+import '../../compute/activity_watch.dart'
+    show
+        kDefaultWeeklyActivityGoal,
+        kWeeklyActivityGoalMax,
+        kWeeklyActivityGoalMin;
 import '../../data/day_label.dart';
 import '../../data/local_repository.dart';
 import '../../l10n/app_localizations.dart';
@@ -29,6 +35,7 @@ import '../../l10n/decimal_text.dart';
 import '../../models/metric.dart' show whyFromNote;
 import '../screens/home_screen.dart' show asOfText, repoOf;
 import '../screens/metric_detail.dart' show dayNavRow, detailScaffold;
+import '../../state/app_state.dart';
 import '../ui2.dart';
 import 'catalogue.dart' show zonesWhy;
 import 'zones.dart' show ZonesDetail;
@@ -312,6 +319,11 @@ class _DayStrainDetailState extends State<DayStrainDetail> {
         ] else ...[
           ..._trace(p, l, d),
           ..._zones(p, l, d),
+          // The weekly activity goal the inactivity watch compares the 7-day
+          // strain total against (activity_watch.dart). Lives here because this
+          // screen is where the 0–21 scale is explained.
+          Section(l?.activityGoalSection ?? 'Weekly activity goal',
+              const _WeeklyGoalRow()),
           Section(l?.dayStrainInputsSection ?? 'What this is made of',
               _inputs(p, l, d)),
         ],
@@ -484,6 +496,143 @@ class _DayStrainDetailState extends State<DayStrainDetail> {
         ].join(' '),
         style: F.cap.copyWith(color: p.ink3, height: 1.5),
       ),
+    );
+  }
+}
+
+/// The weekly activity goal row (PR 3): the inactivity watch compares the
+/// 7-day strain total against this goal. Tap to edit in place; the value is
+/// stored on the profile as `weekly_activity_goal` (strain-points/week) and
+/// read by the cross-day bundle through `profile`.
+class _WeeklyGoalRow extends StatefulWidget {
+  const _WeeklyGoalRow();
+
+  @override
+  State<_WeeklyGoalRow> createState() => _WeeklyGoalRowState();
+}
+
+class _WeeklyGoalRowState extends State<_WeeklyGoalRow> {
+  int _goal = kDefaultWeeklyActivityGoal.round();
+  bool _editing = false;
+  bool _loaded = false;
+  late final TextEditingController _ctrl = TextEditingController();
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_loaded) return;
+    _loaded = true;
+    final repo = repoOf(context);
+    if (repo == null) return;
+    repo.getProfile().then((p) {
+      if (!mounted) return;
+      setState(() {
+        _goal = ((p['weekly_activity_goal'] as num?)?.toDouble() ??
+                kDefaultWeeklyActivityGoal)
+            .round();
+        _ctrl.text = '$_goal';
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save(BuildContext c) async {
+    final l = AppLocalizations.of(c);
+    final t = Typed.of(_ctrl.text);
+    if (t.bad) {
+      sayUnreadable(c, [l?.activityGoalRow ?? 'Weekly goal']);
+      return;
+    }
+    final typed = t.value?.round();
+    if (typed == null) {
+      setState(() => _editing = false);
+      return;
+    }
+    if (typed < kWeeklyActivityGoalMin.round() ||
+        typed > kWeeklyActivityGoalMax.round()) {
+      ScaffoldMessenger.of(c).showSnackBar(
+        SnackBar(
+          content: Text(
+            l?.activityGoalInvalid(kWeeklyActivityGoalMin.round(),
+                    kWeeklyActivityGoalMax.round()) ??
+                'A weekly goal of ${kWeeklyActivityGoalMin.round()}–${kWeeklyActivityGoalMax.round()} strain points is a real one. Nothing was saved.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _editing = false;
+      _goal = typed;
+    });
+    await c.read<AppState>().updateProfile({'weekly_activity_goal': typed});
+  }
+
+  @override
+  Widget build(BuildContext c) {
+    final p = P.of(c);
+    final l = AppLocalizations.of(c);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Surface(
+          onTap: () => setState(() {
+            _editing = true;
+            _ctrl.text = '$_goal';
+          }),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  l?.activityGoalRow ?? 'Strain points per week',
+                  style: F.body.copyWith(color: p.ink),
+                ),
+              ),
+              if (_editing)
+                SizedBox(
+                  width: 90,
+                  child: TextField(
+                    controller: _ctrl,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    style: F.body.copyWith(color: p.ink),
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _save(c),
+                  ),
+                )
+              else
+                Text(
+                  '$_goal',
+                  style: F.body.copyWith(
+                      color: p.ink, fontWeight: FontWeight.w600),
+                ),
+              const SizedBox(width: S.x2),
+              GestureDetector(
+                onTap: _editing ? () => _save(c) : null,
+                child: Icon(
+                  _editing ? LucideIcons.check : LucideIcons.pencil,
+                  size: 16,
+                  color: p.ink2,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: S.x2),
+        Text(
+          l?.activityGoalHint ??
+              'The inactivity watch compares your last 7 days of strain against this. The default 45 is about 150 minutes of moderate activity a week on this scale.',
+          style: F.cap.copyWith(color: p.ink3, height: 1.5),
+        ),
+      ],
     );
   }
 }

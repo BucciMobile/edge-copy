@@ -97,3 +97,54 @@ Widget? tierCard(
   }
   return null;
 }
+
+/// The PR-3 informational cards (inactivity watch + recovery trend), read from
+/// the cross-day bundle's `inactivity` / `recovery_trend` blocks
+/// (activity_watch.dart). Both are card-only — neither ever pushes — and both
+/// ride the same today/yesterday freshness gate as the tier card. While the
+/// illness state is active the recovery trend stands down (the deviations are
+/// expected) and the inactivity watch stays quiet too. Nothing fires off a
+/// stale date, and a block that is not 'firing' shows nothing — never green.
+List<Widget> trendCards(
+  BuildContext c, {
+  required String today,
+  Object? inactivity,
+  Object? recoveryTrend,
+  bool illnessActive = false,
+}) {
+  final l = AppLocalizations.of(c);
+  final out = <Widget>[];
+
+  if (!illnessActive && inactivity is Map && inactivity['state'] == 'firing') {
+    final date = inactivity['date'];
+    if (date is String && isRecentFindingDate(date, today: today)) {
+      final days = (inactivity['days_below'] as num?)?.toInt() ?? 0;
+      final strain7 = (inactivity['strain7'] as num?)?.round() ?? 0;
+      final goal = (inactivity['goal'] as num?)?.round() ?? 0;
+      out.add(Observation(
+        l?.inactivityCardTitle ?? 'Well below your usual activity',
+        l?.inactivityCardBody(days, strain7, goal) ??
+            'Your activity has been below your usual for $days days — $strain7 strain in the last 7 days against your $goal weekly goal.',
+        advice: l?.inactivityCardAdvice ?? 'Just a note — no action needed.',
+      ));
+    }
+  }
+
+  if (!illnessActive &&
+      recoveryTrend is Map &&
+      recoveryTrend['state'] == 'firing') {
+    final date = recoveryTrend['date'];
+    if (date is String && isRecentFindingDate(date, today: today)) {
+      final days = (recoveryTrend['days_suppressed'] as num?)?.toInt() ?? 0;
+      out.add(Observation(
+        l?.recoveryCardTitle ?? 'Recovery trend below your usual',
+        l?.recoveryCardBody(days) ??
+            'HRV has run below your usual for $days nights and your resting heart rate has crept up, while your training load stayed normal.',
+        advice: l?.recoveryCardAdvice ??
+            'Lighter days and earlier nights until it lifts.',
+      ));
+    }
+  }
+
+  return out;
+}

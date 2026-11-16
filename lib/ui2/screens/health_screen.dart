@@ -947,18 +947,40 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       // and resting-HR findings, which fired for months and reached no screen
       // at all. NOT a feed — see findings_log.dart. Nothing here is unread,
       // badged or dismissible, and it does not appear on Home.
-      if (illnessCard != null || tierObservation != null || d.findings.isNotEmpty) ...[
+      // PR 3 trend cards (inactivity watch, recovery trend — activity_watch.dart)
+      // sit under the same Observations title; informational only, never pushes.
+      final trendObservations = trendCards(
+        c,
+        today: todayLabel(widget.now),
+        inactivity: d.insights['inactivity'],
+        recoveryTrend: d.insights['recovery_trend'],
+        illnessActive: d.illnessActive,
+      );
+      if (illnessCard != null ||
+          tierObservation != null ||
+          trendObservations.isNotEmpty ||
+          d.findings.isNotEmpty) ...[
         const SizedBox(height: S.x4),
         Section(
           l?.healthObservationsTitle ?? 'Observations',
-          tierObservation ?? illnessCard ??
-              // No live illness, but the log is not empty: the newest entry in
-              // place and the rest one tap away. ONE row — a wall of findings
-              // on the tab you land on is the feed this is not.
-              Surface(
-                onTap: () => go(c, FindingsLog(d.findings)),
-                child: FindingRow(d.findings.first),
-              ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              tierObservation ??
+                  illnessCard ??
+                  // No live illness, but the log is not empty: the newest entry in
+                  // place and the rest one tap away. ONE row — a wall of findings
+                  // on the tab you land on is the feed this is not.
+                  Surface(
+                    onTap: () => go(c, FindingsLog(d.findings)),
+                    child: FindingRow(d.findings.first),
+                  ),
+              for (final t in trendObservations) ...[
+                const SizedBox(height: S.x3),
+                t,
+              ],
+            ],
+          ),
           action: d.findings.isEmpty ? null : (l?.healthSeeAll ?? 'See all'),
           onAction:
               d.findings.isEmpty ? null : () => go(c, FindingsLog(d.findings)),

@@ -56,6 +56,19 @@ ends after three nights back in your baseline or when you dismiss it. Missing si
 (say the band's firmware withholds skin temperature) simply do not count — the card says
 which signals were unavailable rather than showing a green.
 
+Two quieter companions live on the same Home/Health cards, and neither ever sends a
+notification. The **inactivity watch** compares your last 7 days of day strain against a
+weekly goal you can set on the Day Strain screen (the default, 45 strain-points a week,
+is about the WHO guideline of 150 minutes of moderate activity a week on this scale) and
+against your own usual — it only speaks up when both say you have been well below your
+usual for a week or more, and it stays silent during a planned rest block (rest-day
+journal entries) or while you are marked as unwell. The **recovery trend** fires when HRV
+has run below your usual for most of the last 7 nights while your resting heart rate
+crept up — but only when your training load over the same days was normal or reduced, so
+a hard training block is never reported as under-recovery. Both are patterns in your own
+data, stated as such: nothing here is a diagnosis, and a day or week that was not measured
+is simply not talked about.
+
 ## Activity
 
 Auto-detected workouts, live workout tracking with GPS routes, heart-rate zones you can
