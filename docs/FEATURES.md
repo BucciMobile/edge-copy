@@ -69,6 +69,18 @@ a hard training block is never reported as under-recovery. Both are patterns in 
 data, stated as such: nothing here is a diagnosis, and a day or week that was not measured
 is simply not talked about.
 
+Workout-derived signals feed the same pipeline as context and as one more recovery
+pattern — never as illness evidence. Each finished session already carries its 60-second
+heart-rate recovery; alongside it the app derives HR drift during steady sessions (mean HR
+of the second half minus the first, only when per-kilometre pace is within 10% of the
+session's median) and a pace-per-heartbeat economy index from the stored GPS splits, plus
+daily strength volume (reps × load). A poor HRR after a hard session or a heavy lifting day
+is *expected* to suppress the next night's HRV, so the context model subtracts it before the
+overnight watches judge the night. And when the economy index slips 5% or more against your
+own baseline over a week while your training load stayed normal, the recovery-trend card says
+so — a performance-decrement pattern in your own data, not an overtraining claim and not a
+diagnosis.
+
 ## Activity
 
 Auto-detected workouts, live workout tracking with GPS routes, heart-rate zones you can

@@ -57,6 +57,7 @@ import '../telemetry/firebase_bridge.dart';
 import '../telemetry/telemetry_service.dart';
 import 'crossday_pipeline.dart';
 import 'tier_engine.dart';
+import 'workout_signals.dart' show dailyWorkoutSignals;
 import 'derive_pacing.dart';
 import 'inputs/canonical.dart';
 import 'inputs/garmin_inputs.dart'
@@ -7388,6 +7389,10 @@ class DerivationEngine {
       // day cannot trip them. Empty window ⇒ empty map ⇒ byte-for-byte the
       // old behaviour.
       final journalByDate = await _journalByDate(days);
+      // PR 4: per-day workout-derived signals (workout_signals.dart) — read
+      // here on the DB-owning isolate, handed in as plain data. Feeds the
+      // context model (masking) and the recovery trend; never the illness tiers.
+      final workoutsByDate = await _workoutsByDate(days);
       // Encode INSIDE the isolate too — a real ~3.5-4.7s main-isolate hang was
       // caught in production (Crashlytics jank_watchdog, correlated with a
       // heavy derive pass) coming from jsonEncode-ing this bundle back on the
@@ -7414,6 +7419,7 @@ class DerivationEngine {
                   sessionTypesByDate: sessionTypes,
                   methodFamilies: kMethodFamily,
                   journalByDate: journalByDate,
+                  workoutsByDate: workoutsByDate,
                 )
                 ..['algo_version'] = kAlgoVersion
                 ..['built_for_day'] = builtForDay
@@ -7482,6 +7488,52 @@ class DerivationEngine {
   /// began rather than the physiological day it ends inside. That costs at most
   /// the attribution of a 1 a.m. workout; the analytics drops multi-session
   /// days and refuses under ten mornings per type either way.
+  /// PR 4: per-day workout-derived signals — finished sessions in the window
+  /// with their per-km splits (HR drift, pace-vs-HR economy) and strength sets
+  /// (volume), aggregated per day by [dailyWorkoutSignals]. Read here (sqflite
+  /// is main-isolate only) and handed to the cross-day bundle as plain data.
+  static Future<Map<String, Map<String, dynamic>>> _workoutsByDate(
+    List<Map<String, dynamic>> days,
+  ) async {
+    if (days.isEmpty) return const {};
+    final first = days.first['date'];
+    if (first is! String || first.isEmpty) return const {};
+    final fromSec = _localDayLabelToSec(first);
+    final toSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final sessionsByDay = <String, List<Map<String, dynamic>>>{};
+    final splitsBySession = <String, List<Map<String, dynamic>>>{};
+    final setsByDay = <String, List<Map<String, dynamic>>>{};
+    for (final r in await LocalDb.sessionsInRange(fromSec, toSec)) {
+      if (r['status'] == 'live') continue;
+      final start = (r['start_ts'] as num?)?.toInt();
+      if (start == null) continue;
+      final date = dayLabelOf(DateTime.fromMillisecondsSinceEpoch(start * 1000));
+      final id = r['id']?.toString();
+      sessionsByDay.putIfAbsent(date, () => []).add(r);
+      if (id != null) {
+        splitsBySession[id] = await LocalDb.workoutSplits(id);
+        setsByDay
+            .putIfAbsent(date, () => [])
+            .addAll(await LocalDb.strengthSets(id).then(
+                  (rows) => rows
+                      .map((m) => m.map((k, v) => MapEntry(k, v)))
+                      .toList(),
+                ));
+      }
+    }
+    return {
+      for (final e in sessionsByDay.entries)
+        e.key: dailyWorkoutSignals(
+          sessions: e.value,
+          splitsBySession: {
+            for (final s in e.value)
+              if (s['id'] is String) s['id'] as String: splitsBySession[s['id']] ?? const [],
+          },
+          strengthSets: setsByDay[e.key] ?? const [],
+        ),
+    };
+  }
+
   static Future<Map<String, List<String>>> _sessionTypesByDate(
     List<Map<String, dynamic>> days,
   ) async {

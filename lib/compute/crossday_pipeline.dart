@@ -22,6 +22,7 @@ import '../data/day_label.dart';
 import 'activity_watch.dart';
 import 'context_model.dart';
 import 'tier_engine.dart';
+import 'workout_signals.dart' show dailyWorkoutSignals;
 
 // Pure string helper only (the `need_input:name=…` note grammar) — no DB, no
 // IO, no Flutter binding, so importing it does not compromise this file's
@@ -75,6 +76,11 @@ Map<String, dynamic> buildCrossDayBundle(
   Map<String, List<String>> sessionTypesByDate = const {},
   Map<String, String> methodFamilies = const {},
   Map<String, Map<String, dynamic>> journalByDate = const {},
+  // PR 4: per-day workout-derived signals (workout_signals.dart) —
+  // date → {hrr_bpm, hr_drift_bpm, economy, volume_kg, ...}. Feeds the
+  // context model (masking only) and the recovery trend (performance
+  // decrement); never the illness tiers. Absent → no offset, as before.
+  Map<String, Map<String, dynamic>> workoutsByDate = const {},
 }) {
   final days = daysOldestFirst;
   final n = days.length;
@@ -182,6 +188,23 @@ Map<String, dynamic> buildCrossDayBundle(
     journalMetrics[e.key] = out;
   }
   final strainSeries = <double?>[for (final d in days) _numOrNull(d['strain'])];
+  // PR 4: workout signals as plain numeric context (hrr_bpm / volume_kg) for
+  // the context model, plus the per-day economy series for the recovery trend.
+  final workoutCtx = <String, Map<String, double>>{
+    for (final e in workoutsByDate.entries)
+      if (e.value['hrr_bpm'] is num || e.value['volume_kg'] is num)
+        e.key: {
+          if (e.value['hrr_bpm'] is num)
+            'hrr_bpm': (e.value['hrr_bpm'] as num).toDouble(),
+          if (e.value['volume_kg'] is num)
+            'volume_kg': (e.value['volume_kg'] as num).toDouble(),
+        },
+  };
+  final economySeries = <double?>[
+    for (final d in days)
+      (workoutsByDate[d['date'] as String? ?? '']?['economy'] as num?)
+          ?.toDouble(),
+  ];
   final ctx = buildContextResiduals(
     dates: dates,
     unsettled: unsettled,
@@ -194,6 +217,7 @@ Map<String, dynamic> buildCrossDayBundle(
     journalTagsByDate: journalTags,
     journalMetricsByDate: journalMetrics,
     cycleStartDates: cycleStartDates,
+    workoutsByDate: workoutCtx,
   );
   final rhrResid = ctx.rhrResidual;
   final hrvResid = ctx.hrvResidual;
@@ -233,6 +257,7 @@ Map<String, dynamic> buildCrossDayBundle(
     hrvResid: hrvResid,
     strain: strainSeries,
     stage: (ctx.calibration['stage'] as num?)?.toInt() ?? 0,
+    economy: economySeries,
   );
 
   // illness CUSUM (NightSignal) on the nightly RHR RESIDUAL.
@@ -818,6 +843,9 @@ Map<String, dynamic> buildCrossDayBundle(
     // informational cards on Home/Health only, never notifications.
     'inactivity': inactivity,
     'recovery_trend': recoveryTrend,
+    // PR 4: per-day workout-derived signals (workout_signals.dart) — context
+    // masking + the recovery trend's performance-decrement path only.
+    'workout_signals': {'version': 1, 'per_day': workoutsByDate},
     'recent': recent,
   };
 }

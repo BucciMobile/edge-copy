@@ -20,6 +20,7 @@
 import 'dart:math' as math;
 
 import '../data/day_label.dart' show calendarDaysBetween;
+import 'workout_signals.dart' show kEconomyDeclinePct, kTrendMinEconomyDays;
 
 /// Days in the inactivity rolling window.
 const int kInactivityWindowDays = 7;
@@ -234,6 +235,9 @@ Map<String, dynamic>? computeRecoveryTrend({
   required List<double?> hrvResid,
   required List<double?> strain,
   required int stage,
+  // PR 4: per-day pace-vs-HR economy (workout_signals.dart), null on days
+  // without a steady session. An alternative trigger for the same card.
+  List<double?>? economy,
 }) {
   final n = dates.length;
   if (n == 0 || stage < kTrendMinStage) return null;
@@ -272,17 +276,21 @@ Map<String, dynamic>? computeRecoveryTrend({
   final baseHrv = [for (final i in baselineIdx) hrvResid[i]!];
   final baseRhr = [for (final i in baselineIdx) rhrResid[i]!];
   final hrvScale = _robustScale(baseHrv);
-  if (hrvScale == null || hrvScale <= 0) return null;
   final hrvMedian = _median(baseHrv)!;
   final rhrMedian = _median(baseRhr)!;
 
+  // A degenerate HRV baseline (no dispersion) cannot produce z-scores, so the
+  // HRV pattern simply does not fire — the performance path below may still.
   var suppressed = 0;
   var hrvZSum = 0.0;
   var rhrSum = 0.0;
+  final hrvZOk = hrvScale != null && hrvScale > 0;
   for (final i in window) {
-    final z = (hrvResid[i]! - hrvMedian) / hrvScale;
-    hrvZSum += z;
-    if (z <= kTrendHrvZ) suppressed++;
+    if (hrvZOk) {
+      final z = (hrvResid[i]! - hrvMedian) / hrvScale;
+      hrvZSum += z;
+      if (z <= kTrendHrvZ) suppressed++;
+    }
     rhrSum += rhrResid[i]!;
   }
   final rhrDelta = rhrSum / window.length - rhrMedian;
@@ -302,9 +310,35 @@ Map<String, dynamic>? computeRecoveryTrend({
   if (winLoad == null || baseLoad == null) return null;
   final loadNormalOrReduced = winLoad <= baseLoad + kTrendLoadTolerance;
 
-  final firing = suppressed >= kTrendMinSuppressedNights &&
-      rhrDelta >= kTrendRhrRiseBpm &&
-      loadNormalOrReduced;
+  // PR 4: performance decrement — pace-per-heartbeat economy over the window
+  // vs the baseline median. Declining economy at normal load is the honest
+  // performance-decrement pattern (never an overtraining claim).
+  var perfDecline = false;
+  double? ecoDeltaPct;
+  var ecoDays = 0;
+  if (economy != null && economy.length == n) {
+    final ecoWin = <double>[
+      for (final i in window)
+        if (economy[i] != null && economy[i]!.isFinite && economy[i]! > 0)
+          economy[i]!,
+    ];
+    ecoDays = ecoWin.length;
+    final ecoBaseVals = <double>[
+      for (final i in baselineIdx)
+        if (economy[i] != null && economy[i]!.isFinite && economy[i]! > 0)
+          economy[i]!,
+    ];
+    final ecoBase = ecoBaseVals.isEmpty ? null : _median(ecoBaseVals);
+    if (ecoBase != null && ecoBase > 0 && ecoWin.length >= kTrendMinEconomyDays) {
+      final ecoWinMean = ecoWin.reduce((a, b) => a + b) / ecoWin.length;
+      ecoDeltaPct = (ecoBase - ecoWinMean) / ecoBase;
+      perfDecline = ecoDeltaPct >= kEconomyDeclinePct;
+    }
+  }
+
+  final hrvPattern = suppressed >= kTrendMinSuppressedNights &&
+      rhrDelta >= kTrendRhrRiseBpm;
+  final firing = loadNormalOrReduced && (hrvPattern || perfDecline);
   return {
     'state': firing ? 'firing' : 'ok',
     'date': dates[window.last],
@@ -312,5 +346,8 @@ Map<String, dynamic>? computeRecoveryTrend({
     'hrv_z': hrvZSum / window.length,
     'rhr_delta_bpm': rhrDelta,
     'load_ratio': baseLoad > 0 ? winLoad / baseLoad : null,
+    'via': hrvPattern ? 'hrv' : (perfDecline ? 'performance' : null),
+    'economy_delta_pct': ecoDeltaPct,
+    'days_economy': ecoDays,
   };
 }

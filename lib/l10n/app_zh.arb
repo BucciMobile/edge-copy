@@ -3901,5 +3901,7 @@
   "activityGoalHint": "久坐提醒会将你最近 7 天的应力与此目标比较。默认值 45 大约相当于这一量表上每周 150 分钟中等强度活动。",
   "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
   "activityGoalInvalid": "每周 {min}–{max} 应力点才是合理目标。未保存任何内容。",
-  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}}
+  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}},
+  "recoveryCardPerfBody": "最近 {days} 天，你的每心跳配速下降了约 {pct}%，而训练负荷保持正常——这是你自身数据的模式，不是对你的评判。",
+  "@recoveryCardPerfBody": {"description": "Recovery-trend card body on the PR-4 performance-decrement path (pace per heartbeat slipped vs the user's baseline at normal load). days = days with an economy reading, pct = decline percent. Pattern, not a verdict.", "placeholders": {"days": {"type": "int"}, "pct": {"type": "int"}}}
 }

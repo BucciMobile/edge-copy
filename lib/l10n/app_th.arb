@@ -17021,5 +17021,7 @@
   "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
   "settingsSleepHmmRowSub": "อัลกอริทึมเพื่อการวิจัย ไม่ใช่อุปกรณ์การแพทย์ ปิดไว้โดยค่าเริ่มต้น",
   "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
-  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."}
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
+  "recoveryCardPerfBody": "ความเร็วต่อการเต้นของหัวใจของคุณลงนลดงงปประปาม {pct}% ในช่วง {days} วันที่ผ่ามมามา ขณะที่ ภาระกาทกรฝึกซมยังยังปกติ — เปนร่นในในข้อมาขดมขดขอขอฮขงอขควนในขดมาคุณคดัสินต่อสขคมก",
+  "@recoveryCardPerfBody": {"description": "Recovery-trend card body on the PR-4 performance-decrement path (pace per heartbeat slipped vs the user's baseline at normal load). days = days with an economy reading, pct = decline percent. Pattern, not a verdict.", "placeholders": {"days": {"type": "int"}, "pct": {"type": "int"}}}
 }

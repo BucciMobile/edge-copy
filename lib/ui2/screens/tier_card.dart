@@ -136,10 +136,25 @@ List<Widget> trendCards(
     final date = recoveryTrend['date'];
     if (date is String && isRecentFindingDate(date, today: today)) {
       final days = (recoveryTrend['days_suppressed'] as num?)?.toInt() ?? 0;
+      // PR 4: the trend can fire on the performance-decrement path (pace per
+      // heartbeat slipping at normal load) instead of the HRV/RHR path.
+      final via = recoveryTrend['via']?.toString();
+      final pct =
+          (((recoveryTrend['economy_delta_pct'] as num?)?.toDouble() ?? 0) *
+                  100)
+              .round();
+      // On the performance path the relevant day count is the days with an
+      // economy reading, not the HRV-suppressed nights.
+      final perfDays =
+          (recoveryTrend['days_economy'] as num?)?.toInt() ?? days;
+      final body = via == 'performance'
+          ? (l?.recoveryCardPerfBody(perfDays, pct) ??
+              'Your pace per heartbeat has slipped about $pct% over the last $perfDays days while your training load stayed normal — a pattern in your own data, not a verdict on you.')
+          : (l?.recoveryCardBody(days) ??
+              'HRV has run below your usual for $days nights and your resting heart rate has crept up, while your training load stayed normal.');
       out.add(Observation(
         l?.recoveryCardTitle ?? 'Recovery trend below your usual',
-        l?.recoveryCardBody(days) ??
-            'HRV has run below your usual for $days nights and your resting heart rate has crept up, while your training load stayed normal.',
+        body,
         advice: l?.recoveryCardAdvice ??
             'Lighter days and earlier nights until it lifts.',
       ));

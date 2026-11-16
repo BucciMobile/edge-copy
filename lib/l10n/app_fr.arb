@@ -3901,5 +3901,7 @@
   "activityGoalHint": "La veille d'inactivité compare tes 7 derniers jours d'effort à cet objectif. La valeur par défaut 45 correspond à environ 150 minutes d'activité modérée par semaine sur cette échelle.",
   "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
   "activityGoalInvalid": "Un objectif hebdomadaire de {min}–{max} points d'effort est un vrai objectif. Rien n'a été enregistré.",
-  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}}
+  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}},
+  "recoveryCardPerfBody": "Ton allure par battement a reculé d'environ {pct} % ces {days} derniers jours tandis que ta charge d'entraînement est restée normale — un schéma dans tes propres données, pas un jugement sur toi.",
+  "@recoveryCardPerfBody": {"description": "Recovery-trend card body on the PR-4 performance-decrement path (pace per heartbeat slipped vs the user's baseline at normal load). days = days with an economy reading, pct = decline percent. Pattern, not a verdict.", "placeholders": {"days": {"type": "int"}, "pct": {"type": "int"}}}
 }

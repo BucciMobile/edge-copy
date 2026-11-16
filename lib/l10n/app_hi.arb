@@ -3901,5 +3901,7 @@
   "activityGoalHint": "वॉच यह पिछले 7 दिनों का स्ट्रेन इस उद्देश्य से तुलना करता है। डिफ़ॉल्ट 45 इस स्केल पर प्रति सप्ताह 150 मिनट की मध्यम सीविता की सक्रियता का है।",
   "@activityGoalHint": {"description": "Hint under the weekly goal row: what the inactivity watch compares against, and what the default 45 means (WHO ~150 min moderate/week on this scale)."},
   "activityGoalInvalid": "एक {min}–{max} स्ट्रेन अंकों का सप्ताहिक उद्देश्य एक वास्तविक है। कुछ सहीदा गया गया।",
-  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}}
+  "@activityGoalInvalid": {"description": "Snackbar when the typed weekly goal is out of range. min/max are the allowed bounds.", "placeholders": {"min": {"type": "int"}, "max": {"type": "int"}}},
+  "recoveryCardPerfBody": "आपका पैस पर हृदयगति {days} दिनों में {pct}% कम हरा है, जबकि ट्रेनिंग लोड सामान्य रहा — आपके देन्ता का एक पैटर्न, ना आपको पर एक निर्धय।",
+  "@recoveryCardPerfBody": {"description": "Recovery-trend card body on the PR-4 performance-decrement path (pace per heartbeat slipped vs the user's baseline at normal load). days = days with an economy reading, pct = decline percent. Pattern, not a verdict.", "placeholders": {"days": {"type": "int"}, "pct": {"type": "int"}}}
 }

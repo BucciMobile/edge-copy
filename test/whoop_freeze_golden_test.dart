@@ -269,7 +269,8 @@ Map<String, dynamic> _withoutContextModelKeys(Map<String, dynamic> bundle) {
         e.key == 'context_model' ||
         e.key == 'tiers' ||
         e.key == 'inactivity' ||
-        e.key == 'recovery_trend') {
+        e.key == 'recovery_trend' ||
+        e.key == 'workout_signals') {
       continue;
     }
     if (e.key == 'recent' && e.value is List) {

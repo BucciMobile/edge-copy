@@ -3874,5 +3874,7 @@
   "@settingsSleepHmmRowTitle": {"description": "Title of the experimental HMM sleep staging toggle in Settings."},
   "settingsSleepHmmRowSub": "Forschungsalgorithmus, kein Medizinprodukt. Standard aus.",
   "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
-  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."}
+  "@settingsSleepHmmRowSub": {"description": "Subtitle of the experimental HMM sleep staging toggle in Settings."},
+  "recoveryCardPerfBody": "Dein Tempo pro Herzschlag ist in den letzten {days} Tagen um etwa {pct} % gesunken, während dein Trainingspensum normal blieb — ein Muster in deinen eigenen Daten, kein Urteil über dich.",
+  "@recoveryCardPerfBody": {"description": "Recovery-trend card body on the PR-4 performance-decrement path (pace per heartbeat slipped vs the user's baseline at normal load). days = days with an economy reading, pct = decline percent. Pattern, not a verdict.", "placeholders": {"days": {"type": "int"}, "pct": {"type": "int"}}}
 }

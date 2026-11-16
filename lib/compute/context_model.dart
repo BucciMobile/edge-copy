@@ -34,6 +34,17 @@
 import 'dart:math' as math;
 
 import '../data/day_label.dart' show calendarDaysBetween, dayLabelBefore;
+import 'workout_signals.dart'
+    show
+        kHrrLnCap,
+        kHrrPoorDeltaBpm,
+        kHrrRhrCapBpm,
+        kLnHrvPerHrrPoorBpm,
+        kLnHrvPerVolumeKg,
+        kRhrBpmPerHrrPoorBpm,
+        kRhrBpmPerVolumeKg,
+        kVolumeLnCap,
+        kVolumeRhrCapBpm;
 
 // ── tunable weights (ESTIMATE-tier; direction/magnitude from the literature) ──
 
@@ -336,6 +347,10 @@ ContextResiduals buildContextResiduals({
   Map<String, List<String>> journalTagsByDate = const {},
   Map<String, Map<String, List<num?>>> journalMetricsByDate = const {},
   List<String> cycleStartDates = const [],
+  // PR 4: per-day workout-derived signals (workout_signals.dart), keyed by
+  // day label with numeric keys 'hrr_bpm' / 'volume_kg'. Absent → no offset,
+  // byte-for-byte as before.
+  Map<String, Map<String, double>> workoutsByDate = const {},
   int windowDays = kCalibrationWindowDays,
 }) {
   final n = dates.length;
@@ -402,6 +417,14 @@ ContextResiduals buildContextResiduals({
 
   // date label → row index, for the sleep-debt walk-back.
   final rowOf = <String, int>{for (var i = 0; i < n; i++) dates[i]: i};
+
+  // PR 4: per-day workout signal series (null where no session happened).
+  final hrrSeries = <double?>[
+    for (var i = 0; i < n; i++) workoutsByDate[dates[i]]?['hrr_bpm']
+  ];
+  final volSeries = <double?>[
+    for (var i = 0; i < n; i++) workoutsByDate[dates[i]]?['volume_kg']
+  ];
 
   final rhrResidual = List<double?>.filled(n, null);
   final hrvResidual = List<double?>.filled(n, null);
@@ -537,6 +560,34 @@ ContextResiduals buildContextResiduals({
     if (sick && lnScale != null) offLn -= kSickLnHrvZ * lnScale;
     final lutLn = cycleOffset(i, lnRmssd, lnScale);
     if (lutLn != null) offLn += lutLn;
+
+    // ── workout-derived context (PR 4): YESTERDAY's session HRR and strength
+    // volume are expected to move tonight's HRV/RHR — a poor HRR after a hard
+    // session is recovery, not an illness signal. Absent inputs → offset 0.
+    double? hrrY, volY;
+    if (d != null) {
+      final prev = dayLabelBefore(date, 1);
+      final w = prev == null ? null : workoutsByDate[prev];
+      if (w != null) {
+        hrrY = w['hrr_bpm'];
+        volY = w['volume_kg'];
+      }
+    }
+    if (hrrY != null) {
+      final hrrWin = windowBefore(i, hrrSeries);
+      final hrrBase = hrrWin.length >= 7 ? _median(hrrWin) : null;
+      if (hrrBase != null && hrrY < hrrBase - kHrrPoorDeltaBpm) {
+        final short = hrrBase - hrrY;
+        offLn -= math.min(kHrrLnCap, kLnHrvPerHrrPoorBpm * short);
+        offRhr += math.min(kHrrRhrCapBpm, kRhrBpmPerHrrPoorBpm * short);
+        active.add('workout recovery');
+      }
+    }
+    if (volY != null && volY > 0) {
+      offLn -= math.min(kVolumeLnCap, kLnHrvPerVolumeKg * volY);
+      offRhr += math.min(kVolumeRhrCapBpm, kRhrBpmPerVolumeKg * volY);
+      active.add('volume');
+    }
 
     var offRespZ = 0.0;
     if (vaccination) offRespZ += kVaccinationRespZ;
