@@ -12,7 +12,7 @@
 // notification. The moment that changes, this file is the thing to delete.
 //
 // TREND DISPLAY ONLY, by design (see docs/FEATURES.md): no classification of
-// the user, no hypertension wording, no push. The card shows medians next to
+// the user, no blood-pressure verdict wording, no push. The card shows medians next to
 // published guideline reference ranges and says to discuss them with a
 // healthcare professional. Apple needed FDA clearance for hypertension
 // notifications; a median next to a reference range is not that claim.

@@ -3,7 +3,7 @@
 // guideline reference ranges.
 //
 // DISPLAY ONLY, and that is a hard line, not a style: no classification of the
-// user, no hypertension wording, no push, and the numbers never feed anything
+// user, no blood-pressure verdict wording, no push, and the numbers never feed anything
 // derived (the guard in health_measurement_import.dart holds — see
 // lib/health/bp_trend.dart). The card states what the cuff measured, how many
 // readings the median rests on, and where to discuss it. A window with fewer

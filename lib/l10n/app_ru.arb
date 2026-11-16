@@ -8471,4 +8471,8 @@
   "bpCardReferenceRanges": "Референсные диапазоны руководств: около 130/80 мм рт. ст. (ACC/AHA) и 140/90 мм рт. ст. (ESC)."
 ,
   "bpCardReferenceNote": "Это популяционные ориентиры, а не оценка вашего состояния. Если такие значения для вас обычны, обсудите их с врачом."
+,
+  "@bpCardTitle": {"description": "Health screen section title for the imported blood-pressure trend.", "placeholders": {"store": {"type": "String"}}},
+  "@bpCardReadingsCount": {"description": "How many imported readings a median rests on.", "placeholders": {"n": {"type": "int"}}},
+  "@bpCardNotEnoughBody": {"description": "Honest quiet state below the pair gate.", "placeholders": {"n": {"type": "int"}}}
 }

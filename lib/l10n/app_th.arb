@@ -17075,4 +17075,8 @@
   "bpCardReferenceRanges": "ช่วงอ้างอิงตามแนวทาง: ประมาณ 130/80 mmHg (ACC/AHA) และ 140/90 mmHg (ESC)"
 ,
   "bpCardReferenceNote": "สิ่งเหล่านี้คือจุดอ้างอิงของประชากร ไม่ใช่คำวินิจฉัยเกี่ยวกับคุณ หากค่าลักษณะนี้เกิดขึ้นกับคุณบ่อย ควรปรึกษาผู้เชี่ยวชาญด้านสุขภาพ"
+,
+  "@bpCardTitle": {"description": "Health screen section title for the imported blood-pressure trend.", "placeholders": {"store": {"type": "String"}}},
+  "@bpCardReadingsCount": {"description": "How many imported readings a median rests on.", "placeholders": {"n": {"type": "int"}}},
+  "@bpCardNotEnoughBody": {"description": "Honest quiet state below the pair gate.", "placeholders": {"n": {"type": "int"}}}
 }
