@@ -17,18 +17,23 @@ import '../../data/day_label.dart';
 import '../../data/db.dart';
 import '../../data/lab_catalogue.dart';
 import '../../data/local_repository.dart';
+import '../../health/bp_trend.dart' show BpTrendSummary, loadBpTrend;
+import '../../health/health_import_state.dart' show storeName;
 import '../../import/journal_csv_import.dart' show isValidDayLabel;
 import '../../l10n/app_localizations.dart';
 import '../../models/metric.dart';
 import '../../models/payloads.dart' show todayHeadlineOf;
 import '../../state/app_state.dart';
+import '../profile/phone_import.dart' show PhoneImport;
 import '../profile/profile.dart' show ProfileAvatar;
 import '../profile/wearable_numbers.dart'
     show WearableCells, kHealthWearableRows;
 import '../ui2.dart';
 import 'advanced.dart';
+import 'bp_card.dart' show bpTrendSection;
 import 'ecg.dart' show EcgEntryCard, pairedIsMaverickOf;
 import 'findings_log.dart';
+import 'tier_card.dart';
 import 'slot_scrub.dart';
 import 'home_screen.dart';
 import 'investigate.dart';
@@ -94,6 +99,10 @@ class HealthData {
   /// trend cards draw for resting HR and HRV. Null when it could not be read.
   final Map<String, dynamic>? baselines;
 
+  /// Whether the explicit illness state is active (user answered
+  /// "Sick / symptoms", not yet expired) — see tier_card.dart.
+  final bool illnessActive;
+
   const HealthData({
     this.today = const {},
     this.insights = const {},
@@ -108,6 +117,7 @@ class HealthData {
     this.napDay = '',
     this.findings = const [],
     this.baselines,
+    this.illnessActive = false,
   });
 
   /// The stored points for [key].
@@ -236,6 +246,7 @@ class HealthData {
       baselines: heart['baselines'] is Map
           ? (heart['baselines'] as Map).cast<String, dynamic>()
           : null,
+      illnessActive: await illnessStateActive(),
     );
   }
 }
@@ -545,6 +556,7 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
   @override
   void reload() {
     _load();
+    _loadBp();
     if (hasRead(#vitals)) _loadVitals(force: true);
     if (hasRead(#labs)) {
       _l = null;
@@ -568,6 +580,30 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       if (stillNewest(#day, t)) setState(() => (_d = d, _loading = false));
     } catch (_) {
       if (stillNewest(#day, t)) setState(() => _loading = false);
+    }
+    _loadBp();
+  }
+
+  /// The imported blood-pressure readings (a cuff's own numbers, shown with
+  /// the source app's name — display only, never a compute input). Loaded
+  /// beside the overview, not through it: the derivation pipeline must not
+  /// see `imported_measurement`, so this screen reads the table directly, the
+  /// same read the phone-import screen does.
+  BpTrendSummary? _bp;
+  bool _bpFailed = false;
+
+  Future<void> _loadBp() async {
+    final t = beginRead(#bp);
+    try {
+      final s = await loadBpTrend();
+      if (stillNewest(#bp, t)) {
+        setState(() {
+          _bp = s;
+          _bpFailed = false;
+        });
+      }
+    } catch (_) {
+      if (stillNewest(#bp, t)) setState(() => _bpFailed = true);
     }
   }
 
@@ -848,6 +884,28 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
     final illnessDay = illness is Map ? illness['date']?.toString() : null;
     final illnessBehind = _behind(illnessDay, widget.now);
 
+    // The tier card (tier_engine.dart's verdict over the residual
+    // deviations) — same today/yesterday gate as the illness card, plus the
+    // calibration progress while the baseline is still learning. Tier 1 is
+    // card-only here by design; only tier ≥2 ever pushes (as the ask-first
+    // check-in).
+    final tierObservation = tierCard(
+      c,
+      d.insights['tiers'],
+      today: todayLabel(widget.now),
+      showCalibration: true,
+      illnessActive: d.illnessActive,
+    );
+    // PR 3 trend cards (inactivity watch, recovery trend — activity_watch.dart)
+    // sit under the same Observations title; informational only, never pushes.
+    final trendObservations = trendCards(
+      c,
+      today: todayLabel(widget.now),
+      inactivity: d.insights['inactivity'],
+      recoveryTrend: d.insights['recovery_trend'],
+      illnessActive: d.illnessActive,
+    );
+
     // Hoisted out of the tree so the section that now wraps it does not push
     // its copy two levels deeper. The card itself is untouched.
     // Same freshness rule as the push and Home: only today's or yesterday's
@@ -927,22 +985,49 @@ class _HealthScreenState extends State<HealthScreen> with RevisionReload {
       // and resting-HR findings, which fired for months and reached no screen
       // at all. NOT a feed — see findings_log.dart. Nothing here is unread,
       // badged or dismissible, and it does not appear on Home.
-      if (illnessCard != null || d.findings.isNotEmpty) ...[
+      if (illnessCard != null ||
+          tierObservation != null ||
+          trendObservations.isNotEmpty ||
+          d.findings.isNotEmpty) ...[
         const SizedBox(height: S.x4),
         Section(
           l?.healthObservationsTitle ?? 'Observations',
-          illnessCard ??
-              // No live illness, but the log is not empty: the newest entry in
-              // place and the rest one tap away. ONE row — a wall of findings
-              // on the tab you land on is the feed this is not.
-              Surface(
-                onTap: () => go(c, FindingsLog(d.findings)),
-                child: FindingRow(d.findings.first),
-              ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              tierObservation ??
+                  illnessCard ??
+                  // No live illness, but the log is not empty: the newest entry in
+                  // place and the rest one tap away. ONE row — a wall of findings
+                  // on the tab you land on is the feed this is not.
+                  Surface(
+                    onTap: () => go(c, FindingsLog(d.findings)),
+                    child: FindingRow(d.findings.first),
+                  ),
+              for (final t in trendObservations) ...[
+                const SizedBox(height: S.x3),
+                t,
+              ],
+            ],
+          ),
           action: d.findings.isEmpty ? null : (l?.healthSeeAll ?? 'See all'),
           onAction:
               d.findings.isEmpty ? null : () => go(c, FindingsLog(d.findings)),
         ),
+      ],
+
+      // IMPORTED BLOOD PRESSURE — a cuff's own readings, trend display only:
+      // medians next to guideline reference ranges, never a classification and
+      // never a push. Hidden entirely until at least one paired reading exists;
+      // a read that threw is the one failed-card state, not a silent gap.
+      if (_bpFailed || (_bp?.readings.isNotEmpty ?? false)) ...[
+        const SizedBox(height: S.x4),
+        if (_bpFailed)
+          _readFailed(
+              l?.bpCardTitle(storeName) ?? 'Blood pressure from $storeName',
+              _loadBp)
+        else if (_bp case final s?)
+          bpTrendSection(c, s, onRead: () => go(c, const PhoneImport())),
       ],
 
       // Naps moved to the Sleep tab, beside the night (the Naps door there).

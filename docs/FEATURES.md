@@ -23,6 +23,64 @@ so a workout counts the same for a fit person with a low resting HR as for anyon
 It needs three days of your data before it shows a number. Nightly HRV is RMSSD from one
 estimator, and a night where the beat detector over-counts is refused rather than scored.
 
+### Deviations from your own baseline
+
+The overnight watches (resting-heart-rate trend, unusual-overnight-physiology, skin
+temperature) compare each night with **your own** rolling baseline over valid nights only —
+never against a population table, and never against a night that was not measured. The
+baseline unlocks in stages and says so while it is learning: below 7 valid nights the
+watches stay quiet ("learning your usual"), and a wear gap longer than two weeks steps
+the stage back down. Each night is also checked against **context you already know about** —
+training load, accumulated sleep debt, journal entries (alcohol, late caffeine, a late
+meal, vaccination, travel, feeling unwell) and, when cycle tracking is on, the second half
+of the logged cycle — so an expected deviation (a hard workout, a couple of drinks, a
+vaccine) is not reported as an anomaly. What remains after that subtraction is what the
+watches report: a deviation from your baseline, stated as a pattern, never as a diagnosis.
+These are approximations based on published research (e.g. Mishra et al., *Nature
+Biomedical Engineering* 2020; Natarajan et al., *npj Digital Medicine* 2020) — not
+medical-grade, not validated against a lab, and not a diagnosis.
+
+The residuals are then aggregated into tiers. One signal off baseline is a card on Home and
+Health only; two or more signals off baseline for two or more nights earn one **ask-first
+check-in** notification in the morning ("your values have deviated from your usual for
+the last 3 nights — do you feel unusually tired or run down?"), because self-report beats
+objective wearable metrics for early detection (Saw et al., *BJSM* 2016 systematic review).
+No tier above 1 ever comes from a single night. A skin-temperature + breathing-rate +
+resting-heart-rate rise together for several nights raises the check-in's urgency, still
+without naming any condition: it recommends rest and, if it persists, checking with a
+healthcare professional. The quick replies are one tap: "I feel fine" quietens the same
+watch for 48 hours, "a bit run down" keeps watching, and "sick / symptoms" starts an
+explicit illness state — while it lasts, those deviations are expected, so the watches
+stand down instead of re-warning, and every reply is journaled automatically. The state
+ends after three nights back in your baseline or when you dismiss it. Missing signals
+(say the band's firmware withholds skin temperature) simply do not count — the card says
+which signals were unavailable rather than showing a green.
+
+Two quieter companions live on the same Home/Health cards, and neither ever sends a
+notification. The **inactivity watch** compares your last 7 days of day strain against a
+weekly goal you can set on the Day Strain screen (the default, 45 strain-points a week,
+is about the WHO guideline of 150 minutes of moderate activity a week on this scale) and
+against your own usual — it only speaks up when both say you have been well below your
+usual for a week or more, and it stays silent during a planned rest block (rest-day
+journal entries) or while you are marked as unwell. The **recovery trend** fires when HRV
+has run below your usual for most of the last 7 nights while your resting heart rate
+crept up — but only when your training load over the same days was normal or reduced, so
+a hard training block is never reported as under-recovery. Both are patterns in your own
+data, stated as such: nothing here is a diagnosis, and a day or week that was not measured
+is simply not talked about.
+
+Workout-derived signals feed the same pipeline as context and as one more recovery
+pattern — never as illness evidence. Each finished session already carries its 60-second
+heart-rate recovery; alongside it the app derives HR drift during steady sessions (mean HR
+of the second half minus the first, only when per-kilometre pace is within 10% of the
+session's median) and a pace-per-heartbeat economy index from the stored GPS splits, plus
+daily strength volume (reps × load). A poor HRR after a hard session or a heavy lifting day
+is *expected* to suppress the next night's HRV, so the context model subtracts it before the
+overnight watches judge the night. And when the economy index slips 5% or more against your
+own baseline over a week while your training load stayed normal, the recovery-trend card says
+so — a performance-decrement pattern in your own data, not an overtraining claim and not a
+diagnosis.
+
 ## Activity
 
 Auto-detected workouts, live workout tracking with GPS routes, heart-rate zones you can
@@ -34,6 +92,15 @@ edit, and GPX export.
   resting HR, HRV, respiratory rate, active energy and workouts. Only things the device
   measures, never derived scores, which have no native type. Exports are idempotent, so
   re-deriving a day never duplicates samples.
+- Reads **blood pressure, blood glucose and body temperature** from Apple Health / Health
+  Connect (read-only) into `imported_measurement`, every row tagged with the app that
+  recorded it. On Health › Overview a card shows the latest reading and 30/90-day medians
+  beside the guideline reference ranges (about 130/80 mmHg ACC/AHA, 140/90 mmHg ESC), with a
+  note to discuss persistent readings with a healthcare professional. A window needs at
+  least 3 paired readings before any median is shown; below that the card says so. These
+  rows are display-only: never blended with this app's own measurements, never an input to
+  any derivation, baseline or alert. A median next to a reference range is a trend display,
+  not a classification.
 - Export the entire local SQLite database to a file whenever you like.
 - Scheduled local backups, which run when you open the app and one is due. On Android
   you can point them at a folder of your choice.

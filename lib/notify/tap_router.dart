@@ -109,6 +109,16 @@ const String kRouteRecap = '/recap';
 /// `screenForRoute` in app.dart.
 const String kRouteAlarm = '/alarm';
 
+/// The ask-first check-in sheet (tier-2/3 deviation push). Carries the night
+/// it is about as `?date=YYYY-MM-DD&tier=N`. On Android the replies also ride
+/// as inline action buttons (see notification_service._checkInDetails); on
+/// iOS — which has no push actions — the notification tap lands here.
+const String kRouteCheckIn = '/checkin';
+
+/// Query parameter of a route, or null.
+String? routeQuery(String route, String key) =>
+    Uri.tryParse(route)?.queryParameters[key];
+
 class TapTarget {
   /// Shell tab index to land on (always valid; unknown → 0 = Today).
   final int tab;
@@ -159,6 +169,7 @@ const Map<String, int> _screenRoutes = {
   kRouteProfile: 0,
   kRouteRecap: 2, // Heart, i.e. Health — domainForRoute decides anyway
   kRouteAlarm: 0,
+  kRouteCheckIn: 2, // the Health tab; domainForRoute confirms
 };
 
 TapTarget resolveTapRoute(String route) {
