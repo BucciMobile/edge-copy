@@ -164,10 +164,12 @@ void main() {
     test('only 3 suppressed nights -> no fire (persistence)', () {
       final n = 40;
       final rhr = _wobble(n, 55, 1);
-      final hrv = _wobble(n, 45, 1.5);
+      // Deterministic alternating baseline: median 45, MAD 0.5 -> the clean
+      // window nights sit at z ~ -0.68 (NOT suppressed); only the spike counts.
+      final hrv = [for (var i = 0; i < n; i++) i.isEven ? 45.5 : 44.5];
       final strain = _const(n, 7.0);
       for (var i = n - 3; i < n; i++) {
-        hrv[i] = 38.0;
+        hrv[i] = 36.0; // z ~ -12
         rhr[i] = 57.5;
       }
       final r = trend(rhr: rhr, hrv: hrv, strain: strain);

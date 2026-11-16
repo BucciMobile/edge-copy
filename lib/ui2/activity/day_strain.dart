@@ -18,6 +18,8 @@
 //     a line on a day screen whose subject is the curve. Naming the input in a
 //     sentence is enough.
 
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:provider/provider.dart';
@@ -522,9 +524,14 @@ class _WeeklyGoalRowState extends State<_WeeklyGoalRow> {
     super.didChangeDependencies();
     if (_loaded) return;
     _loaded = true;
+    unawaited(_loadGoal());
+  }
+
+  Future<void> _loadGoal() async {
     final repo = repoOf(context);
     if (repo == null) return;
-    repo.getProfile().then((p) {
+    try {
+      final p = await repo.getProfile();
       if (!mounted) return;
       setState(() {
         _goal = ((p['weekly_activity_goal'] as num?)?.toDouble() ??
@@ -532,7 +539,10 @@ class _WeeklyGoalRowState extends State<_WeeklyGoalRow> {
             .round();
         _ctrl.text = '$_goal';
       });
-    });
+    } catch (_) {
+      // A repo that cannot answer (e.g. a test double) keeps the default shown;
+      // the row still renders and editing still works.
+    }
   }
 
   @override
@@ -615,7 +625,7 @@ class _WeeklyGoalRowState extends State<_WeeklyGoalRow> {
                       color: p.ink, fontWeight: FontWeight.w600),
                 ),
               const SizedBox(width: S.x2),
-              GestureDetector(
+              Pressable(
                 onTap: _editing ? () => _save(c) : null,
                 child: Icon(
                   _editing ? LucideIcons.check : LucideIcons.pencil,
