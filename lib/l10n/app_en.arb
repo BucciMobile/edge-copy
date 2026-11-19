@@ -14861,6 +14861,7 @@
   "journalTagSocial": "social",
   "journalTagWorkout": "workout",
   "journalTagRestDay": "rest day",
+  "journalTagVaccinated": "vaccinated",
   "liveHrShowingDeviceSemantics": "Showing {label}. Tap to switch device.",
   "@liveHrShowingDeviceSemantics": {
     "placeholders": {

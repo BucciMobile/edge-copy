@@ -3371,6 +3371,7 @@
   "journalTagSocial": "社交",
   "journalTagWorkout": "训练",
   "journalTagRestDay": "休息日",
+  "journalTagVaccinated": "已接种疫苗",
   "liveHrShowingDeviceSemantics": "正在显示 {label}。点按以切换设备。",
   "devicesResetSourceSemantics": "将 {signal} 恢复为默认顺序",
   "metricDetailStepsGoalValue": "{count, plural, other{{value} 步}}",

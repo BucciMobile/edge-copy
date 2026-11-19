@@ -3373,6 +3373,7 @@
   "journalTagSocial": "मेल-जोल",
   "journalTagWorkout": "वर्कआउट",
   "journalTagRestDay": "आराम का दिन",
+  "journalTagVaccinated": "टीकाकृत",
   "liveHrShowingDeviceSemantics": "{label} दिखाया जा रहा है। डिवाइस बदलने के लिए टैप करें।",
   "devicesResetSourceSemantics": "{signal} को डिफ़ॉल्ट क्रम पर रीसेट करें",
   "metricDetailStepsGoalValue": "{count, plural, other{{value} कदम}}",

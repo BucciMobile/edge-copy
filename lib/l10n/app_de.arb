@@ -3153,6 +3153,7 @@
   "journalTagSocial": "Geselligkeit",
   "journalTagWorkout": "Training",
   "journalTagRestDay": "Ruhetag",
+  "journalTagVaccinated": "geimpft",
   "liveHrShowingDeviceSemantics": "{label} wird angezeigt. Tippe, um das Gerät zu wechseln.",
   "devicesResetSourceSemantics": "{signal} auf die Standardreihenfolge zurücksetzen",
   "metricDetailStepsGoalValue": "{count, plural, =1{{value} Schritt} other{{value} Schritte}}",
